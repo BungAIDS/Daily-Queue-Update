@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from typing import List, Dict, Any
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 from config import CBC_URL, CBC_QUEUE_URL, STORAGE_STATE_PATH
 
@@ -48,7 +48,13 @@ def scrape_queue(headless: bool = True) -> List[Dict[str, Any]]:
         target = CBC_QUEUE_URL or CBC_URL
         log.info("Loading queue with saved session: %s", target)
         page.goto(target, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_load_state("networkidle", timeout=30000)
+        # Best-effort: many internal apps long-poll or hold a websocket open, so
+        # "networkidle" may never settle. Don't let that fail the whole run — we
+        # rely on the explicit wait_for_selector("table tbody tr") below anyway.
+        try:
+            page.wait_for_load_state("networkidle", timeout=15000)
+        except PlaywrightTimeout:
+            log.info("networkidle didn't settle in 15s; proceeding to table wait")
 
         # If the saved session expired, we'll get bounced to a login page.
         if "login" in page.url.lower() or page.locator('input[type="password"]').count() > 0:

@@ -19,6 +19,7 @@ from datetime import date, timedelta
 
 from analyzer import analyze
 from compare import diff_queues, load_snapshot, save_snapshot
+from config import validate_runtime_config
 from emailer import send_alert, send_daily_briefing
 from excel_writer import build_workbook
 from scraper import scrape_queue
@@ -39,6 +40,7 @@ def main() -> int:
 
     try:
         log.info("=== Daily queue run: %s ===", today.isoformat())
+        validate_runtime_config()
 
         jobs = scrape_queue(headless=True)
         if not jobs:

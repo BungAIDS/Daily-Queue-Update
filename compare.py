@@ -41,14 +41,27 @@ def _index(jobs: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     return {j["job"]: j for j in jobs if j.get("job")}
 
 
-def _persistence_count(job_num: str, today: date, max_lookback: int = 14) -> int:
-    """How many consecutive days has this job been in the queue, including today?"""
-    count = 1
+def _load_lookback_jobsets(today: date, max_lookback: int = 14) -> List[set]:
+    """Sets of job numbers present on today-1, today-2, ... stopping at the
+    first day that has no snapshot (a missing day breaks the streak).
+
+    Loaded once per run so persistence is O(jobs) instead of re-reading and
+    re-parsing every snapshot file once per job.
+    """
+    day_sets: List[set] = []
     for delta in range(1, max_lookback):
         prev = load_snapshot(today - timedelta(days=delta))
         if prev is None:
             break
-        if any(j.get("job") == job_num for j in prev):
+        day_sets.append({j.get("job") for j in prev if j.get("job")})
+    return day_sets
+
+
+def _persistence_count(job_num: str, lookback: List[set]) -> int:
+    """Consecutive days (including today) this job has been in the queue."""
+    count = 1
+    for day_jobs in lookback:
+        if job_num in day_jobs:
             count += 1
         else:
             break
@@ -81,9 +94,10 @@ def diff_queues(
         if changes:
             changed.append({"job": jn, "customer": today_job.get("customer", ""), "changes": changes})
 
+    lookback = _load_lookback_jobsets(today)
     persistent: List[Dict[str, Any]] = []
     for jn, job in today_idx.items():
-        days = _persistence_count(jn, today)
+        days = _persistence_count(jn, lookback)
         if days >= 3:
             persistent.append({"job": jn, "customer": job.get("customer", ""), "days": days, "snapshot": job})
 

@@ -43,6 +43,8 @@ def analyze(diff: Dict[str, Any], today: date) -> Dict[str, Any]:
 
     Raises on API or parsing errors so the caller can send an alert email.
     """
+    if not ANTHROPIC_API_KEY:
+        raise RuntimeError("ANTHROPIC_API_KEY is not set (check your .env).")
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
     # Trim the payload so we don't blow tokens on huge fields
