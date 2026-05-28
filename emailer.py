@@ -1,32 +1,35 @@
-"""Plain-text email notifications via SMTP."""
+"""Daily briefing via the local Outlook desktop app — no password stored.
+
+Sends through your already-signed-in Outlook using COM automation, so the
+script never needs your email password. Windows + Outlook desktop only, and it
+must run in your logged-in desktop session (see README scheduling notes).
+"""
 from __future__ import annotations
 
 import logging
-import smtplib
-from email.message import EmailMessage
 from pathlib import Path
 from typing import Any, Dict
 
-from config import (
-    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD,
-    EMAIL_FROM, EMAIL_TO, EMAIL_ALERT_TO,
-)
+from config import EMAIL_TO, EMAIL_ALERT_TO
 
 log = logging.getLogger(__name__)
 
+_OL_MAIL_ITEM = 0  # olMailItem
 
-def _send(to_addr: str, subject: str, body: str) -> None:
-    msg = EmailMessage()
-    msg["From"] = EMAIL_FROM
-    msg["To"] = to_addr
-    msg["Subject"] = subject
-    msg.set_content(body)
 
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
-        s.starttls()
-        s.login(SMTP_USER, SMTP_PASSWORD)
-        s.send_message(msg)
-    log.info("Sent email to %s: %s", to_addr, subject)
+def _send(to_addr: str, subject: str, body: str, attachment: Path | None = None) -> None:
+    # Imported lazily so the module still imports on non-Windows machines.
+    import win32com.client
+
+    outlook = win32com.client.Dispatch("Outlook.Application")
+    mail = outlook.CreateItem(_OL_MAIL_ITEM)
+    mail.To = to_addr
+    mail.Subject = subject
+    mail.Body = body
+    if attachment is not None and attachment.exists():
+        mail.Attachments.Add(str(attachment.resolve()))
+    mail.Send()
+    log.info("Sent email via Outlook to %s: %s", to_addr, subject)
 
 
 def send_daily_briefing(
@@ -61,9 +64,9 @@ def send_daily_briefing(
             lines.append(f"  - {a}")
         lines.append("")
 
-    lines.append(f"Excel report saved to: {excel_path}")
+    lines.append(f"Excel report (also attached): {excel_path}")
 
-    _send(EMAIL_TO, f"Daily Queue Briefing — {today_str}", "\n".join(lines))
+    _send(EMAIL_TO, f"Daily Queue Briefing — {today_str}", "\n".join(lines), attachment=excel_path)
 
 
 def send_alert(subject_suffix: str, error_text: str) -> None:

@@ -1,6 +1,8 @@
 # Daily Queue Update
 
-Logs into cbcinsider.com every morning at 5 AM, scrapes the work queue, compares it to yesterday, asks Claude for a natural-language briefing + anomaly flags + ranked action items, builds an Excel report, and emails you a plain-text summary.
+Logs into cbcinsider.com every morning at 5 AM, scrapes the work queue, compares it to yesterday, asks Claude for a natural-language briefing + anomaly flags + ranked action items, builds an Excel report, and emails you a plain-text summary through your desktop Outlook.
+
+> **Platform:** Windows with the Outlook desktop app installed and signed in. Email is sent through Outlook (no password stored), which is Windows-only. See the Mac/Linux note under Scheduling if you're not on Windows.
 
 ## What it produces each run
 
@@ -8,24 +10,26 @@ Logs into cbcinsider.com every morning at 5 AM, scrapes the work queue, compares
   - **Changes** (first tab): AI briefing, anomalies, top action items, new orders, removed/completed orders, changed orders (with old → new values), persistent orders (3+ consecutive days in queue).
   - **Full Queue**: one row per job, AutoFilter enabled, red highlight for today/overdue End Dates, yellow for due within 3 days, summary row at the bottom with total job count and total dollar value.
 - `snapshots/queue_YYYY-MM-DD.json` — full structured snapshot used for tomorrow's diff.
-- A plain-text email with the briefing, counts, top action items, anomalies, and the Excel file path.
+- A plain-text email (via your desktop Outlook) with the briefing, counts, top action items, anomalies, and the Excel report attached.
 - An alert email if any step fails (login failure, site down, Claude API error, etc.).
 
 ## One-time setup
 
 ### 1. Install Python 3.11+ and dependencies
 
+You need the **Outlook desktop app installed and signed in** for email to work.
+
 ```bash
 cd Daily-Queue-Update
 python -m venv venv
 # Windows:
 venv\Scripts\activate
-# Mac/Linux:
-source venv/bin/activate
 
 pip install -r requirements.txt
 playwright install chromium
 ```
+
+`pip install` pulls in `pywin32` (the Outlook bridge) automatically on Windows.
 
 ### 2. Get an Anthropic API key
 
@@ -41,18 +45,14 @@ CBC_QUEUE_URL=                 # optional: paste your queue page URL
 STORAGE_STATE_PATH=./cbc_session.json
 OUTPUT_DIR=C:\Users\you\Documents\DailyQueue
 SNAPSHOT_DIR=C:\Users\you\Documents\DailyQueue\snapshots
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=you@gmail.com
-SMTP_PASSWORD=your_app_password
-EMAIL_FROM=you@gmail.com
-EMAIL_TO=you@gmail.com
-EMAIL_ALERT_TO=you@gmail.com
+EMAIL_TO=you@company.com
+EMAIL_ALERT_TO=you@company.com
 ```
 
-**No cbcinsider password is stored.** You log in by hand in step 4.
-**Gmail:** use an [App Password](https://myaccount.google.com/apppasswords) (not your real Gmail password). Requires 2FA on the account.
-**Outlook:** set `SMTP_HOST=smtp.office365.com`, `SMTP_PORT=587`, and use your Outlook password (or an app password if MFA is on).
+**No passwords are stored.** cbcinsider uses your saved session (step 4); email
+goes through your signed-in Outlook desktop app, so no email password is needed
+either. `EMAIL_TO` / `EMAIL_ALERT_TO` are just addresses — an address alone
+isn't sensitive.
 
 ### 4. Log in once (saves your session — no password stored)
 
@@ -92,11 +92,15 @@ cbcinsider's current layout — see Troubleshooting below.
    - **Add arguments:** `main.py`
    - **Start in:** the full path to the project folder, e.g. `C:\path\to\Daily-Queue-Update`
 4. Finish the wizard, then right-click the task → **Properties**:
-   - Under **General**: check "Run whether user is logged on or not" and "Run with highest privileges".
+   - Under **General**: select **"Run only when user is logged on"**. This is required — the Outlook desktop app can only be automated inside your interactive desktop session. ("Run whether user is logged on or not" will fail to send email.)
    - Under **Settings**: check "Run task as soon as possible after a scheduled start is missed" (covers reboots).
 5. Test it: right-click → **Run**. Check that the Excel file appears and the email arrives.
 
+> **Because email needs your logged-in session,** your computer must be **on and logged in** at 5 AM (it can be locked — locked is fine, logged-out is not). If your machine is usually off overnight, either leave it on, or schedule the task for a time you're logged in.
+
 ### Mac/Linux — cron
+
+> **Note:** the Outlook email step is Windows-only. On Mac/Linux the scrape, diff, Claude analysis, and Excel report all still work, but you'd need a different notification method (ask me to swap the emailer for a file-drop or another option). The cron mechanics below are otherwise correct.
 
 1. Make `main.py` runnable:
    ```bash
@@ -135,5 +139,5 @@ Daily-Queue-Update/
 - **Lands on the login page / "session expired":** Your saved session ran out. Run `python login.py` again to refresh it. Sessions expire periodically — this is expected.
 - **Scraper returns 0 jobs:** The table-row selector (`table tbody tr`) may not match. Run with `headless=False` (edit `main.py` to pass `headless=False` to `scrape_queue`) to watch what happens, and adjust selectors. Setting `CBC_QUEUE_URL` in `.env` to your exact queue page also helps.
 - **Claude returns invalid JSON:** Rare, but the analyzer raises and the script falls back to an empty briefing — you still get the Excel report and email. Check the alert email for the raw output.
-- **No email arrives but no alert either:** Check the SMTP credentials. Gmail app passwords expire if you change your account password.
+- **No email arrives but no alert either:** Make sure the Outlook desktop app is installed, signed in, and open. The script controls Outlook through your logged-in session, so the task must run while you're logged in (see scheduling note). If Outlook shows a security prompt the first time, allow it.
 - **Date highlighting wrong:** `excel_writer._parse_date` tries `MM/DD/YYYY`, `MM/DD/YY`, `YYYY-MM-DD`. If cbcinsider uses a different format, add it to that list.

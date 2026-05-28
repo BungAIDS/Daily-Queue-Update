@@ -26,10 +26,7 @@ SNAPSHOT_DIR = Path(os.environ.get("SNAPSHOT_DIR", OUTPUT_DIR / "snapshots"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
-SMTP_HOST = _required("SMTP_HOST")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
-SMTP_USER = _required("SMTP_USER")
-SMTP_PASSWORD = _required("SMTP_PASSWORD")
-EMAIL_FROM = os.environ.get("EMAIL_FROM", SMTP_USER)
+# Email is sent through your local Outlook desktop app — no password needed.
+# These are just the destination addresses (an address alone isn't sensitive).
 EMAIL_TO = _required("EMAIL_TO")
 EMAIL_ALERT_TO = os.environ.get("EMAIL_ALERT_TO", EMAIL_TO)
