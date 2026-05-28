@@ -21,10 +21,22 @@ HEADER_FONT = Font(color="FFFFFF", bold=True)
 SECTION_FONT = Font(bold=True, size=12)
 
 QUEUE_HEADERS = [
-    "Status", "Customer", "Ship With", "Job #", "Oper", "Item/Rep",
+    "Status", "Customer", "Primary Rep", "Ship With", "Job #", "Oper", "Item",
     "Assigned To", "Checker", "Start Date", "End Date", "Plan Hrs",
-    "FanNet Date", "Total Price",
+    "FanNet Date", "Total Price", "Note", "Flags",
 ]
+TOTAL_PRICE_COL = 14  # 1-based column index of Total Price in QUEUE_HEADERS
+
+
+def _flags_str(j: Dict[str, Any]) -> str:
+    flags = []
+    if j.get("unapproved"):
+        flags.append("UNAPPROVED")
+    if j.get("credit_hold"):
+        flags.append("CREDIT HOLD")
+    if j.get("has_notes"):
+        flags.append("NOTES")
+    return ", ".join(flags)
 
 
 def _parse_date(s: str) -> date | None:
@@ -192,17 +204,20 @@ def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any]) -> No
 def _write_job_row(ws, row: int, j: Dict[str, Any]) -> None:
     ws.cell(row=row, column=1, value=j.get("status", ""))
     ws.cell(row=row, column=2, value=j.get("customer", ""))
-    ws.cell(row=row, column=3, value=j.get("ship_with", ""))
-    ws.cell(row=row, column=4, value=j.get("job", ""))
-    ws.cell(row=row, column=5, value=j.get("oper", ""))
-    ws.cell(row=row, column=6, value=j.get("item_rep", ""))
-    ws.cell(row=row, column=7, value=j.get("assigned_to", ""))
-    ws.cell(row=row, column=8, value=j.get("checker", ""))
-    ws.cell(row=row, column=9, value=j.get("start_date", ""))
-    ws.cell(row=row, column=10, value=j.get("end_date", ""))
-    ws.cell(row=row, column=11, value=j.get("plan_hrs", ""))
-    ws.cell(row=row, column=12, value=j.get("fannet_date", ""))
-    _write_money_cell(ws, row, 13, j.get("total_price", ""))
+    ws.cell(row=row, column=3, value=j.get("primary_rep", ""))
+    ws.cell(row=row, column=4, value=j.get("ship_with", ""))
+    ws.cell(row=row, column=5, value=j.get("job", ""))
+    ws.cell(row=row, column=6, value=j.get("oper", ""))
+    ws.cell(row=row, column=7, value=j.get("item", ""))
+    ws.cell(row=row, column=8, value=j.get("assigned_to", ""))
+    ws.cell(row=row, column=9, value=j.get("checker", ""))
+    ws.cell(row=row, column=10, value=j.get("start_date", ""))
+    ws.cell(row=row, column=11, value=j.get("end_date", ""))
+    ws.cell(row=row, column=12, value=j.get("plan_hrs", ""))
+    ws.cell(row=row, column=13, value=j.get("fannet_date", ""))
+    _write_money_cell(ws, row, TOTAL_PRICE_COL, j.get("total_price", ""))
+    ws.cell(row=row, column=15, value=j.get("status_note", ""))
+    ws.cell(row=row, column=16, value=_flags_str(j))
 
 
 def _write_full_queue_tab(ws, jobs: List[Dict[str, Any]], today: date) -> None:
@@ -229,8 +244,8 @@ def _write_full_queue_tab(ws, jobs: List[Dict[str, Any]], today: date) -> None:
     # Summary footer
     footer = len(jobs) + 3
     ws.cell(row=footer, column=1, value=f"Total jobs: {len(jobs)}").font = SECTION_FONT
-    ws.cell(row=footer, column=12, value="Total $ in process:").font = SECTION_FONT
-    total_cell = ws.cell(row=footer, column=13, value=total_price_sum)
+    ws.cell(row=footer, column=TOTAL_PRICE_COL - 1, value="Total $ in process:").font = SECTION_FONT
+    total_cell = ws.cell(row=footer, column=TOTAL_PRICE_COL, value=total_price_sum)
     total_cell.number_format = MONEY_FMT
     total_cell.font = SECTION_FONT
 

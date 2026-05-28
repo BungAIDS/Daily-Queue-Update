@@ -29,7 +29,7 @@ You will receive a structured JSON snapshot of yesterday vs today's work queue, 
 Output STRICT JSON only, no prose outside the JSON, matching this schema:
 {
   "briefing": "3-5 sentence natural-language summary of the day's queue. Mention notable patterns, customers with multiple jobs, dollar totals, schedule slips. Conversational but specific.",
-  "anomalies": ["Short bullet strings flagging things worth investigating: unusually high $ values, jobs with no Assigned To, End Dates that seem unrealistic relative to Start, jobs lingering 5+ days, etc."],
+  "anomalies": ["Short bullet strings flagging things worth investigating: unusually high $ values, jobs with no Assigned To (the field reads 'NONE'), orders flagged unapproved or credit_hold (boolean fields), End Dates that seem unrealistic relative to Start, jobs lingering 5+ days, status_note hints like 'NEEDS CHECKING', etc."],
   "action_items": [
     {"rank": 1, "job": "######", "reason": "Why this needs attention today"},
     ...

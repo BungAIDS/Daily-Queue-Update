@@ -41,7 +41,8 @@ Copy `.env.example` to `.env` and fill in every field:
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
-CBC_QUEUE_URL=                 # optional: paste your queue page URL
+CBC_QUEUE_URL=                 # recommended: your dispatch.aspx page URL
+CBC_WORK_CENTER=              # optional: e.g. ENGGL (guards against wrong queue)
 STORAGE_STATE_PATH=./cbc_session.json
 OUTPUT_DIR=C:\Users\you\Documents\DailyQueue
 SNAPSHOT_DIR=C:\Users\you\Documents\DailyQueue\snapshots
@@ -78,8 +79,9 @@ python main.py
 Expected: console logs through scrape → diff → Claude → Excel → email, file appears in `OUTPUT_DIR`, email arrives.
 
 If it lands on the login page, your session expired — re-run `python login.py`.
-If it returns 0 jobs, the table selectors in `scraper.py` may need tweaking for
-cbcinsider's current layout — see Troubleshooting below.
+If it returns 0 jobs, set `CBC_QUEUE_URL` to your exact dispatch page URL (and
+check `scraper.py`'s selectors against cbcinsider's current layout) — see
+Troubleshooting below.
 
 ## Scheduling at 5 AM daily
 
@@ -123,7 +125,7 @@ cbcinsider's current layout — see Troubleshooting below.
 Daily-Queue-Update/
 ├── login.py            # Run once — log in by hand, save session (no password stored)
 ├── main.py             # Entrypoint — orchestrates the whole run
-├── scraper.py          # Reuses saved session + queue table parser (paired-row handling)
+├── scraper.py          # Reuses saved session + dispatch parser (per-order container, job+detail rows)
 ├── compare.py          # Diff today vs yesterday; persistence tracking
 ├── analyzer.py         # Claude API call — briefing + anomalies + action items
 ├── excel_writer.py     # Two-tab .xlsx report with AutoFilter and date highlights
@@ -137,7 +139,8 @@ Daily-Queue-Update/
 ## Troubleshooting
 
 - **Lands on the login page / "session expired":** Your saved session ran out. Run `python login.py` again to refresh it. Sessions expire periodically — this is expected.
-- **Scraper returns 0 jobs:** The table-row selector (`table tbody tr`) may not match. Run with `headless=False` (edit `main.py` to pass `headless=False` to `scrape_queue`) to watch what happens, and adjust selectors. Setting `CBC_QUEUE_URL` in `.env` to your exact queue page also helps.
+- **Scraper returns 0 jobs:** Most often `CBC_QUEUE_URL` isn't set to your exact dispatch page (the URL ending in `dispatch.aspx`) — set it in `.env`. The parser keys off the per-order containers (`div[id^="MainContent_rptDispatch_Container_"]`); if cbcinsider changes that markup, run with `headless=False` (edit `main.py` to pass `headless=False` to `scrape_queue`) to watch what happens and adjust the selectors in `scraper.py`. If the log warns "Page reports N results but parsed M", the row markup drifted.
+- **Scraping the wrong Work Center:** The dispatch page is filtered by Work Center and the site remembers your last pick. Set `CBC_WORK_CENTER` (e.g. `ENGGL`) in `.env` so the run aborts loudly instead of diffing the wrong queue.
 - **Claude returns invalid JSON:** Rare, but the analyzer raises and the script falls back to an empty briefing — you still get the Excel report and email. Check the alert email for the raw output.
 - **No email arrives but no alert either:** Make sure the Outlook desktop app is installed, signed in, and open. The script controls Outlook through your logged-in session, so the task must run while you're logged in (see scheduling note). If Outlook shows a security prompt the first time, allow it.
 - **Date highlighting wrong:** `excel_writer._parse_date` tries `MM/DD/YYYY`, `MM/DD/YY`, `YYYY-MM-DD`. If cbcinsider uses a different format, add it to that list.

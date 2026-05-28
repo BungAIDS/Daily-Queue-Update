@@ -7,6 +7,10 @@ load_dotenv()
 CBC_URL = os.environ.get("CBC_URL", "https://cbcinsider.com")
 # Optional: go straight to the queue page instead of clicking through from the landing page.
 CBC_QUEUE_URL = os.environ.get("CBC_QUEUE_URL", "")
+# Optional: the Work Center your queue is filtered to (e.g. "ENGGL"). If set,
+# the scraper refuses to run when the page is showing a different Work Center,
+# so you never silently diff the wrong queue.
+CBC_WORK_CENTER = os.environ.get("CBC_WORK_CENTER", "")
 # Saved browser session (cookies) from login.py — no password is ever stored.
 STORAGE_STATE_PATH = Path(os.environ.get("STORAGE_STATE_PATH", "./cbc_session.json"))
 

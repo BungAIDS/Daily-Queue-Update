@@ -11,12 +11,23 @@ from config import SNAPSHOT_DIR
 
 log = logging.getLogger(__name__)
 
-# Fields we compare for changes (per row). Skip status because it churns a lot.
+# Fields we compare for changes (per row). Skip status because it churns a lot,
+# and skip has_notes because a note appearing/disappearing is low signal.
 COMPARE_FIELDS = [
-    "oper", "item_rep", "assigned_to", "checker",
+    "oper", "item", "assigned_to", "checker",
     "start_date", "end_date", "plan_hrs", "fannet_date", "total_price",
-    "customer", "ship_with",
+    "customer", "primary_rep", "ship_with",
+    "status_note", "unapproved", "credit_hold",
 ]
+
+
+def _norm(v: Any) -> str:
+    """Normalize a field value to a comparable string (handles bools/None)."""
+    if v is None:
+        return ""
+    if isinstance(v, bool):
+        return "yes" if v else "no"
+    return str(v).strip()
 
 
 def snapshot_path(d: date) -> Path:
@@ -87,8 +98,8 @@ def diff_queues(
         prev = yesterday_idx[jn]
         changes: List[Tuple[str, str, str]] = []
         for field in COMPARE_FIELDS:
-            old = (prev.get(field) or "").strip()
-            new = (today_job.get(field) or "").strip()
+            old = _norm(prev.get(field))
+            new = _norm(today_job.get(field))
             if old != new:
                 changes.append((field, old, new))
         if changes:
