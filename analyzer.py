@@ -70,10 +70,16 @@ def analyze(diff: Dict[str, Any], today: date) -> Dict[str, Any]:
     log.info("Calling Claude (%s) with %d new, %d removed, %d changed, %d persistent jobs",
              CLAUDE_MODEL, len(diff["new"]), len(diff["removed"]), len(diff["changed"]), len(diff["persistent"]))
 
+    # claude-opus-4-7 only supports adaptive thinking. Thinking tokens count
+    # against max_tokens, and at the default "high" effort the model almost
+    # always thinks — so max_tokens must be generous or the JSON answer gets
+    # truncated mid-stream. "medium" effort keeps reasoning proportionate to
+    # this small task while leaving plenty of headroom for the output.
     response = client.messages.create(
         model=CLAUDE_MODEL,
-        max_tokens=2048,
+        max_tokens=8000,
         thinking={"type": "adaptive"},
+        output_config={"effort": "medium"},
         system=SYSTEM_PROMPT,
         messages=[{
             "role": "user",
@@ -81,7 +87,13 @@ def analyze(diff: Dict[str, Any], today: date) -> Dict[str, Any]:
         }],
     )
 
-    # Pull the text out — adaptive thinking puts ThinkingBlocks before the TextBlock
+    if getattr(response, "stop_reason", None) == "max_tokens":
+        raise RuntimeError(
+            "Claude hit the max_tokens limit before finishing — the JSON is "
+            "likely truncated. Increase max_tokens in analyzer.py."
+        )
+
+    # Pull the text out — adaptive mode returns thinking block(s) before the text
     text = next((b.text for b in response.content if b.type == "text"), "")
     if not text:
         raise RuntimeError("Claude returned no text content")
