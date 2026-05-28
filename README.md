@@ -36,9 +36,9 @@ Sign up at https://console.anthropic.com, add a payment method, and create an AP
 Copy `.env.example` to `.env` and fill in every field:
 
 ```
-CBC_USERNAME=your_cbc_login
-CBC_PASSWORD=your_cbc_password
 ANTHROPIC_API_KEY=sk-ant-...
+CBC_QUEUE_URL=                 # optional: paste your queue page URL
+STORAGE_STATE_PATH=./cbc_session.json
 OUTPUT_DIR=C:\Users\you\Documents\DailyQueue
 SNAPSHOT_DIR=C:\Users\you\Documents\DailyQueue\snapshots
 SMTP_HOST=smtp.gmail.com
@@ -50,10 +50,26 @@ EMAIL_TO=you@gmail.com
 EMAIL_ALERT_TO=you@gmail.com
 ```
 
+**No cbcinsider password is stored.** You log in by hand in step 4.
 **Gmail:** use an [App Password](https://myaccount.google.com/apppasswords) (not your real Gmail password). Requires 2FA on the account.
 **Outlook:** set `SMTP_HOST=smtp.office365.com`, `SMTP_PORT=587`, and use your Outlook password (or an app password if MFA is on).
 
-### 4. Test it manually
+### 4. Log in once (saves your session — no password stored)
+
+```bash
+python login.py
+```
+
+A browser window opens. Log into cbcinsider yourself (with your normal
+2FA/SSO), navigate to your work queue, then return to the terminal and press
+Enter. Your session is saved to `cbc_session.json` and reused every day.
+
+> **Important:** logged-in sessions eventually expire. When they do, the 5 AM
+> run fails and emails you an alert — just run `python login.py` again to
+> refresh it. (Tip: if cbcinsider has a "remember me" checkbox, tick it to
+> make the session last longer.)
+
+### 5. Test it manually
 
 ```bash
 python main.py
@@ -61,7 +77,9 @@ python main.py
 
 Expected: console logs through scrape → diff → Claude → Excel → email, file appears in `OUTPUT_DIR`, email arrives.
 
-If the scraper login fails, the CSS selectors in `scraper.py` may need tweaking for cbcinsider's current login page — open `scraper.py` and adjust the `page.fill(...)` / `page.click(...)` selectors.
+If it lands on the login page, your session expired — re-run `python login.py`.
+If it returns 0 jobs, the table selectors in `scraper.py` may need tweaking for
+cbcinsider's current layout — see Troubleshooting below.
 
 ## Scheduling at 5 AM daily
 
@@ -99,8 +117,9 @@ If the scraper login fails, the CSS selectors in `scraper.py` may need tweaking 
 
 ```
 Daily-Queue-Update/
+├── login.py            # Run once — log in by hand, save session (no password stored)
 ├── main.py             # Entrypoint — orchestrates the whole run
-├── scraper.py          # Playwright login + queue table parser (paired-row handling)
+├── scraper.py          # Reuses saved session + queue table parser (paired-row handling)
 ├── compare.py          # Diff today vs yesterday; persistence tracking
 ├── analyzer.py         # Claude API call — briefing + anomalies + action items
 ├── excel_writer.py     # Two-tab .xlsx report with AutoFilter and date highlights
@@ -113,8 +132,8 @@ Daily-Queue-Update/
 
 ## Troubleshooting
 
-- **Login fails:** Open `scraper.py` and look at the `page.fill(...)` selectors near the top of `scrape_queue()`. cbcinsider may use different input names — inspect the login form in a browser dev tools and update.
-- **Scraper returns 0 jobs:** The table-row selector (`table tbody tr`) may not match. Run with `headless=False` (edit `main.py` to pass `headless=False` to `scrape_queue`) to watch what happens, and adjust selectors.
+- **Lands on the login page / "session expired":** Your saved session ran out. Run `python login.py` again to refresh it. Sessions expire periodically — this is expected.
+- **Scraper returns 0 jobs:** The table-row selector (`table tbody tr`) may not match. Run with `headless=False` (edit `main.py` to pass `headless=False` to `scrape_queue`) to watch what happens, and adjust selectors. Setting `CBC_QUEUE_URL` in `.env` to your exact queue page also helps.
 - **Claude returns invalid JSON:** Rare, but the analyzer raises and the script falls back to an empty briefing — you still get the Excel report and email. Check the alert email for the raw output.
 - **No email arrives but no alert either:** Check the SMTP credentials. Gmail app passwords expire if you change your account password.
 - **Date highlighting wrong:** `excel_writer._parse_date` tries `MM/DD/YYYY`, `MM/DD/YY`, `YYYY-MM-DD`. If cbcinsider uses a different format, add it to that list.

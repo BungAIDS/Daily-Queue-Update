@@ -1,4 +1,9 @@
-"""Playwright-based scraper for the cbcinsider work queue.
+"""Playwright scraper for the cbcinsider work queue.
+
+Auth model: this does NOT store your password. You log in once manually with
+login.py, which saves your browser session (cookies) to cbc_session.json.
+This script reuses that saved session. When the session eventually expires,
+the run fails with a clear message and you re-run login.py.
 
 The queue table is rendered as paired rows per job:
   Row 1 (job row):    Status | Job# | Oper | Item/Rep | Assigned | Checker | Start | End | Plan Hrs | FanNet | Total Price
@@ -11,9 +16,9 @@ from __future__ import annotations
 import logging
 from typing import List, Dict, Any
 
-from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+from playwright.sync_api import sync_playwright
 
-from config import CBC_URL, CBC_USERNAME, CBC_PASSWORD
+from config import CBC_URL, CBC_QUEUE_URL, STORAGE_STATE_PATH
 
 log = logging.getLogger(__name__)
 
@@ -28,40 +33,41 @@ def _cell_text(cell) -> str:
 
 
 def scrape_queue(headless: bool = True) -> List[Dict[str, Any]]:
-    """Log in, navigate to the queue, and return one dict per job (paired rows merged)."""
+    """Reuse the saved session, navigate to the queue, and return one dict per job."""
+    if not STORAGE_STATE_PATH.exists():
+        raise RuntimeError(
+            f"No saved session found at {STORAGE_STATE_PATH}. "
+            "Run `python login.py` first to log in and save your session."
+        )
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
-        context = browser.new_context()
+        context = browser.new_context(storage_state=str(STORAGE_STATE_PATH))
         page = context.new_page()
 
-        log.info("Loading login page: %s", CBC_URL)
-        page.goto(CBC_URL, wait_until="domcontentloaded", timeout=30000)
-
-        # Fill login form — selectors are best-effort; adjust if the site changes.
-        try:
-            page.fill('input[name="username"], input[name="user"], input[type="email"]', CBC_USERNAME)
-            page.fill('input[name="password"], input[type="password"]', CBC_PASSWORD)
-            page.click('button[type="submit"], input[type="submit"]')
-        except PWTimeout as e:
-            browser.close()
-            raise RuntimeError(f"Login form not found or not interactive: {e}")
-
+        target = CBC_QUEUE_URL or CBC_URL
+        log.info("Loading queue with saved session: %s", target)
+        page.goto(target, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_load_state("networkidle", timeout=30000)
 
-        if "login" in page.url.lower() or page.locator("text=/invalid|incorrect/i").count() > 0:
+        # If the saved session expired, we'll get bounced to a login page.
+        if "login" in page.url.lower() or page.locator('input[type="password"]').count() > 0:
             browser.close()
-            raise RuntimeError("Login failed — check CBC_USERNAME / CBC_PASSWORD.")
+            raise RuntimeError(
+                "Saved session has expired (landed on the login page). "
+                "Run `python login.py` again to refresh it."
+            )
 
-        # The queue is usually on the landing page or under a "Queue" nav item.
-        try:
-            queue_link = page.locator("a:has-text('Queue'), a:has-text('Work Queue')").first
-            if queue_link.count() > 0:
-                queue_link.click()
-                page.wait_for_load_state("networkidle", timeout=30000)
-        except Exception:
-            pass  # already on the queue page
+        # If we didn't go straight to the queue, try clicking a Queue nav link.
+        if not CBC_QUEUE_URL:
+            try:
+                queue_link = page.locator("a:has-text('Queue'), a:has-text('Work Queue')").first
+                if queue_link.count() > 0:
+                    queue_link.click()
+                    page.wait_for_load_state("networkidle", timeout=30000)
+            except Exception:
+                pass  # may already be on the queue page
 
-        # Wait for the main table to render
         page.wait_for_selector("table tbody tr", timeout=30000)
 
         rows = page.locator("table tbody tr").all()
@@ -85,9 +91,7 @@ def scrape_queue(headless: bool = True) -> List[Dict[str, Any]]:
             if i + 1 < len(rows):
                 detail_cells = rows[i + 1].locator("td").all()
                 if detail_cells:
-                    # Customer is in col 0 (Status/Customer column)
                     customer = _cell_text(detail_cells[0])
-                    # "Ship With" note lives in the Plan Hrs column (index 8)
                     if len(detail_cells) > 8:
                         ship_with = _cell_text(detail_cells[8])
                     i += 2
@@ -99,7 +103,6 @@ def scrape_queue(headless: bool = True) -> List[Dict[str, Any]]:
             job["customer"] = customer
             job["ship_with"] = ship_with
 
-            # Only keep rows that look like real jobs (have a job number)
             if job.get("job"):
                 jobs.append(job)
 

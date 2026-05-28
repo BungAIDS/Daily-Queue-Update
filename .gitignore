@@ -1,0 +1,14 @@
+# Secrets and session — never commit these
+.env
+cbc_session.json
+
+# Output
+output/
+snapshots/
+*.xlsx
+cron.log
+
+# Python
+venv/
+__pycache__/
+*.pyc

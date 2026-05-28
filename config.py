@@ -13,8 +13,10 @@ def _required(key: str) -> str:
 
 
 CBC_URL = os.environ.get("CBC_URL", "https://cbcinsider.com")
-CBC_USERNAME = _required("CBC_USERNAME")
-CBC_PASSWORD = _required("CBC_PASSWORD")
+# Optional: go straight to the queue page instead of clicking through from the landing page.
+CBC_QUEUE_URL = os.environ.get("CBC_QUEUE_URL", "")
+# Saved browser session (cookies) from login.py — no password is ever stored.
+STORAGE_STATE_PATH = Path(os.environ.get("STORAGE_STATE_PATH", "./cbc_session.json"))
 
 ANTHROPIC_API_KEY = _required("ANTHROPIC_API_KEY")
 CLAUDE_MODEL = "claude-opus-4-7"
