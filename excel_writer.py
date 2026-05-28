@@ -43,6 +43,20 @@ def _parse_money(s: str) -> float:
         return 0.0
 
 
+MONEY_FMT = '"$"#,##0.00'
+
+
+def _write_money_cell(ws, row: int, col: int, raw: str):
+    """Write a price as a real number (so Excel can sum/sort it), formatted as
+    currency. Blank stays blank rather than showing $0.00."""
+    raw = (raw or "").strip()
+    if not raw:
+        return ws.cell(row=row, column=col, value="")
+    cell = ws.cell(row=row, column=col, value=_parse_money(raw))
+    cell.number_format = MONEY_FMT
+    return cell
+
+
 def _autosize(ws, num_cols: int) -> None:
     for col in range(1, num_cols + 1):
         letter = get_column_letter(col)
@@ -166,7 +180,7 @@ def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any]) -> No
             ws.cell(row=row, column=3, value=p["days"])
             ws.cell(row=row, column=4, value=snap.get("end_date", ""))
             ws.cell(row=row, column=5, value=snap.get("assigned_to", ""))
-            ws.cell(row=row, column=6, value=snap.get("total_price", ""))
+            _write_money_cell(ws, row, 6, snap.get("total_price", ""))
             row += 1
     else:
         ws.cell(row=row, column=1, value="(none)")
@@ -188,7 +202,7 @@ def _write_job_row(ws, row: int, j: Dict[str, Any]) -> None:
     ws.cell(row=row, column=10, value=j.get("end_date", ""))
     ws.cell(row=row, column=11, value=j.get("plan_hrs", ""))
     ws.cell(row=row, column=12, value=j.get("fannet_date", ""))
-    ws.cell(row=row, column=13, value=j.get("total_price", ""))
+    _write_money_cell(ws, row, 13, j.get("total_price", ""))
 
 
 def _write_full_queue_tab(ws, jobs: List[Dict[str, Any]], today: date) -> None:
@@ -215,7 +229,10 @@ def _write_full_queue_tab(ws, jobs: List[Dict[str, Any]], today: date) -> None:
     # Summary footer
     footer = len(jobs) + 3
     ws.cell(row=footer, column=1, value=f"Total jobs: {len(jobs)}").font = SECTION_FONT
-    ws.cell(row=footer, column=4, value=f"Total $ in process: ${total_price_sum:,.2f}").font = SECTION_FONT
+    ws.cell(row=footer, column=12, value="Total $ in process:").font = SECTION_FONT
+    total_cell = ws.cell(row=footer, column=13, value=total_price_sum)
+    total_cell.number_format = MONEY_FMT
+    total_cell.font = SECTION_FONT
 
     # AutoFilter across the data rows
     if jobs:
