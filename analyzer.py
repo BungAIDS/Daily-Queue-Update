@@ -43,9 +43,9 @@ Each day you receive:
   - full_queue_for_context: EVERY order currently on the board (same fields), provided so you can spot groupings — do not summarize the full queue itself.
 plus aggregate counts.
 
-Your briefing is ONLY about what is newly on the board today (new + returning). Do not editorialize about the rest of the queue. BUT use full_queue_for_context to judge whether each new order is part of something bigger: a new order may join an existing cluster of the same design or customer, or its ship-with partner may already be on the board even if that partner is not new. Call those connections out.
+Your briefing is ONLY about what is newly on the board today (new + returning). Do not editorialize about the rest of the queue. BUT use full_queue_for_context to judge whether each new order is part of something bigger: a new order may join an existing cluster of the same design, operation, or customer, or its ship-with partner may already be on the board even if that partner is not new. Call those connections out.
 
-For each order you may use ONLY these fields: job, status, customer, primary_rep (rep), item, design, oper (operation), start_date, fannet_date, plan_hrs (planned hours), ship_with.
+For each order you may use ONLY these fields: job, status, customer, primary_rep (rep), item, design, oper (operation — this is a first-class grouping signal), start_date, fannet_date, plan_hrs (planned hours), ship_with.
 
 You must IGNORE and never mention: total price / dollar values, End Date (use FanNet date as the only date/deadline), Assigned To, Checker, status notes, and any approval / credit-hold / notes flags. These fields are intentionally not provided.
 
@@ -53,10 +53,10 @@ Use FanNet date as the timing signal (e.g. which new orders have the soonest Fan
 
 Output STRICT JSON only, no prose outside the JSON, matching this schema:
 {
-  "briefing": "3-5 sentence summary of what is NEW on the board today: how many new/returning orders, which customers and reps, which designs, notable FanNet timing, and any ship-with groupings. When a new order joins an existing design/customer cluster on the board, note how many total there are now. Conversational but specific. If nothing is new, say so plainly rather than padding.",
-  "anomalies": ["Short bullets about the NEW/returning orders worth a look: soonest FanNet dates; a new order that joins an existing cluster of the same design or customer (say how many total are now on the board); a new order whose ship_with partner is already on the board; or possible duplicate new orders (same customer + design + FanNet). Use only the allowed fields."],
+  "briefing": "3-5 sentence summary of what is NEW on the board today: how many new/returning orders, which customers and reps, which designs and operations, notable FanNet timing, and any ship-with groupings. When a new order joins an existing design / operation / customer cluster on the board, note how many total there are now. Conversational but specific. If nothing is new, say so plainly rather than padding.",
+  "anomalies": ["Short bullets about the NEW/returning orders worth a look: soonest FanNet dates; a new order that joins an existing cluster of the same design, operation, or customer (say how many total are now on the board); a new order whose ship_with partner is already on the board; or possible duplicate new orders (same customer + design + oper + FanNet). Use only the allowed fields."],
   "action_items": [
-    {"rank": 1, "job": "######", "reason": "Why this new order needs attention, framed by FanNet timing / customer / design / ship-with (existing partners on the board are fair game as context)"},
+    {"rank": 1, "job": "######", "reason": "Why this new order needs attention, framed by FanNet timing / customer / design / operation / ship-with (existing partners on the board are fair game as context)"},
     ...
   ]
 }
