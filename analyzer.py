@@ -37,12 +37,13 @@ def _trim(job: Dict[str, Any]) -> Dict[str, Any]:
 
 SYSTEM_PROMPT = """You are an operations analyst preparing a daily briefing for an engineering team lead.
 
-Each day you receive the orders that have just appeared on the engineering work queue:
+Each day you receive:
   - new orders (never seen before)
   - returning orders (back after previously dropping off; "last_seen" = when they were last here)
-plus aggregate counts for context.
+  - full_queue_for_context: EVERY order currently on the board (same fields), provided so you can spot groupings — do not summarize the full queue itself.
+plus aggregate counts.
 
-Your briefing is ONLY about what is newly on the board today (new + returning). Do not editorialize about the rest of the queue.
+Your briefing is ONLY about what is newly on the board today (new + returning). Do not editorialize about the rest of the queue. BUT use full_queue_for_context to judge whether each new order is part of something bigger: a new order may join an existing cluster of the same design or customer, or its ship-with partner may already be on the board even if that partner is not new. Call those connections out.
 
 For each order you may use ONLY these fields: job, status, customer, primary_rep (rep), item, design, oper (operation), start_date, fannet_date, plan_hrs (planned hours), ship_with.
 
@@ -52,26 +53,29 @@ Use FanNet date as the timing signal (e.g. which new orders have the soonest Fan
 
 Output STRICT JSON only, no prose outside the JSON, matching this schema:
 {
-  "briefing": "3-5 sentence summary of what is NEW on the board today: how many new/returning orders, which customers and reps, which designs, notable FanNet timing, and any ship-with groupings. Conversational but specific. If nothing is new, say so plainly rather than padding.",
-  "anomalies": ["Short bullets about the NEW/returning orders worth a look: soonest FanNet dates, the same customer or design showing up on multiple new orders, ship-with links, or possible duplicate new orders (same customer + design + FanNet). Use only the allowed fields."],
+  "briefing": "3-5 sentence summary of what is NEW on the board today: how many new/returning orders, which customers and reps, which designs, notable FanNet timing, and any ship-with groupings. When a new order joins an existing design/customer cluster on the board, note how many total there are now. Conversational but specific. If nothing is new, say so plainly rather than padding.",
+  "anomalies": ["Short bullets about the NEW/returning orders worth a look: soonest FanNet dates; a new order that joins an existing cluster of the same design or customer (say how many total are now on the board); a new order whose ship_with partner is already on the board; or possible duplicate new orders (same customer + design + FanNet). Use only the allowed fields."],
   "action_items": [
-    {"rank": 1, "job": "######", "reason": "Why this new order needs attention, framed by FanNet timing / customer / design / ship-with"},
+    {"rank": 1, "job": "######", "reason": "Why this new order needs attention, framed by FanNet timing / customer / design / ship-with (existing partners on the board are fair game as context)"},
     ...
   ]
 }
 Give up to 5 action items drawn only from the new/returning orders, ranked by FanNet urgency. If there are no new orders, return an empty action_items list and say the board is quiet."""
 
 
-def analyze(diff: Dict[str, Any], today: date) -> Dict[str, Any]:
+def analyze(diff: Dict[str, Any], today: date, all_jobs: list | None = None) -> Dict[str, Any]:
     """Call Claude on the diff. Returns the parsed analysis dict.
 
-    Raises on API or parsing errors so the caller can send an alert email.
+    all_jobs is the full current queue, sent (trimmed) as grouping context so
+    the briefing can see when a new order joins an existing cluster or has a
+    ship-with partner already on the board. Raises on API/parse errors.
     """
     if not ANTHROPIC_API_KEY:
         raise RuntimeError("ANTHROPIC_API_KEY is not set (check your .env).")
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-    # Only the newly-appeared orders are sent, trimmed to the allowed fields.
+    # Only the newly-appeared orders are the subject, but the full board is sent
+    # as context. All of it is trimmed to the allowed fields.
     payload = {
         "date": today.isoformat(),
         "summary": {
@@ -81,10 +85,11 @@ def analyze(diff: Dict[str, Any], today: date) -> Dict[str, Any]:
         },
         "new_orders": [_trim(j) for j in diff["new"]],
         "returning_orders": [_trim(j) for j in diff.get("returning", [])],
+        "full_queue_for_context": [_trim(j) for j in (all_jobs or [])],
     }
 
-    log.info("Calling Claude (%s) with %d new, %d returning orders",
-             CLAUDE_MODEL, len(diff["new"]), len(diff.get("returning", [])))
+    log.info("Calling Claude (%s) with %d new, %d returning orders (%d on board for context)",
+             CLAUDE_MODEL, len(diff["new"]), len(diff.get("returning", [])), len(all_jobs or []))
 
     # claude-opus-4-7 only supports adaptive thinking. Thinking tokens count
     # against max_tokens, and at the default "high" effort the model almost

@@ -51,7 +51,7 @@ def main() -> int:
         save_snapshot(jobs, today)
 
         try:
-            briefing = analyze(diff, today)
+            briefing = analyze(diff, today, all_jobs=jobs)
         except Exception as e:
             log.exception("Claude analysis failed — continuing with empty briefing")
             send_alert("Claude API error", traceback.format_exc())
