@@ -15,7 +15,7 @@ from typing import Any, Dict
 import anthropic
 
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
-from operations import operations_glossary
+from operations import operations_glossary, route_owner, routing_glossary
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +33,9 @@ def _trim(job: Dict[str, Any]) -> Dict[str, Any]:
     out = {k: job.get(k, "") for k in AI_FIELDS}
     if job.get("_last_seen"):
         out["last_seen"] = job["_last_seen"]
+    handler = route_owner(job.get("design", ""), job.get("oper", ""))
+    if handler:
+        out["handler"] = handler
     return out
 
 
@@ -40,6 +43,8 @@ SYSTEM_PROMPT = """You are an operations analyst preparing a daily briefing for 
 
 DOMAIN CONTEXT
 __OPERATIONS_GLOSSARY__
+
+__ROUTING_GLOSSARY__
 
 When you reference an operation in the briefing, translate the number into its workflow step (e.g. "Op 200 (straight-to-shop drafting)"). Operation is a first-class grouping signal: spotting which operations are loaded heaviest, where bottlenecks may form on a workflow path, and which new orders enter which step are all valuable.
 
@@ -69,6 +74,7 @@ Output STRICT JSON only, no prose outside the JSON, matching this schema:
 Give up to 5 action items drawn only from the new/returning orders, ranked by FanNet urgency. If there are no new orders, return an empty action_items list and say the board is quiet."""
 
 SYSTEM_PROMPT = SYSTEM_PROMPT.replace("__OPERATIONS_GLOSSARY__", operations_glossary())
+SYSTEM_PROMPT = SYSTEM_PROMPT.replace("__ROUTING_GLOSSARY__", routing_glossary())
 
 
 def analyze(diff: Dict[str, Any], today: date, all_jobs: list | None = None) -> Dict[str, Any]:

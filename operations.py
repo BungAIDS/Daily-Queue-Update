@@ -80,6 +80,60 @@ OPERATIONS: Dict[str, Dict[str, str]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# ROUTING RULES — who should handle an order, by design / operation.
+#
+# These are BUSINESS rules (who the work belongs to), NOT the scraped
+# "Assigned To" field (which the AI ignores). Edit / add rules freely. The
+# first matching rule wins. route_owner() is evaluated in code so the answer
+# is deterministic — the AI just reports the result.
+# ---------------------------------------------------------------------------
+
+def _design_num(design: str):
+    """Designs are strings like '95' or 'EMSI'. Return the int, or None."""
+    try:
+        return int(str(design).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def route_owner(design: str, oper: str) -> str | None:
+    """Return the person who should handle this order, or None if no rule matches."""
+    d = _design_num(design)
+    o = str(oper).strip()
+
+    # Design 95 on Op 19 (custom manager prep) -> Michael.
+    if d == 95 and o == "19":
+        return "Michael"
+    # Design 55 or Design 58 (any operation) -> Michael.
+    if d in (55, 58):
+        return "Michael"
+
+    return None
+
+
+# Human-readable version of the same rules, for the AI prompt.
+ROUTING_RULES_TEXT = [
+    "Design 95 on Op 19 (custom manager prep) -> handled by Michael.",
+    "Design 55 or Design 58 (any operation) -> handled by Michael.",
+]
+
+
+def routing_glossary() -> str:
+    """Render the routing rules as plaintext for inclusion in the AI prompt."""
+    lines = [
+        "ROUTING RULES (who should handle an order, by design/operation — these are",
+        "business rules, separate from the scraped 'Assigned To' field which you ignore):",
+    ]
+    for r in ROUTING_RULES_TEXT:
+        lines.append(f"  - {r}")
+    lines.append(
+        "A new/returning order that matches a rule carries a \"handler\" field naming "
+        "the owner. Call out the handler when briefing those orders (e.g. \"Michael's\")."
+    )
+    return "\n".join(lines)
+
+
 def operations_glossary() -> str:
     """Render the glossary as plaintext for inclusion in the AI prompt."""
     lines = [
