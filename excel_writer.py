@@ -137,6 +137,26 @@ def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any]) -> No
         row += 1
     row += 1
 
+    # Returning orders (came back from history)
+    returning = diff.get("returning", [])
+    ws.cell(row=row, column=1, value=f"Returning orders — back from history ({len(returning)})").font = SECTION_FONT
+    row += 1
+    if returning:
+        headers = QUEUE_HEADERS + ["Last Seen"]
+        for c, h in enumerate(headers, start=1):
+            cell = ws.cell(row=row, column=c, value=h)
+            cell.font = HEADER_FONT
+            cell.fill = HEADER_FILL
+        row += 1
+        for j in returning:
+            _write_job_row(ws, row, j)
+            ws.cell(row=row, column=len(QUEUE_HEADERS) + 1, value=j.get("_last_seen", ""))
+            row += 1
+    else:
+        ws.cell(row=row, column=1, value="(none)")
+        row += 1
+    row += 1
+
     # Completed/Removed
     ws.cell(row=row, column=1, value=f"Completed / Removed ({len(diff['removed'])})").font = SECTION_FONT
     row += 1

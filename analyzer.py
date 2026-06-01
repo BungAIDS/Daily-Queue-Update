@@ -20,7 +20,8 @@ log = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are an operations analyst preparing a daily briefing for an engineering team lead.
 You will receive a structured JSON snapshot of yesterday vs today's work queue, with:
-  - new orders (in today, not yesterday)
+  - new orders (in today, not yesterday, and never seen before)
+  - returning orders (back today after previously dropping off — includes how long they were away)
   - removed orders (in yesterday, not today — likely completed)
   - changed orders (field-level diffs)
   - persistent orders (3+ consecutive days in the queue)
@@ -54,11 +55,13 @@ def analyze(diff: Dict[str, Any], today: date) -> Dict[str, Any]:
             "today_job_count": diff["today_count"],
             "yesterday_job_count": diff["yesterday_count"],
             "new_count": len(diff["new"]),
+            "returning_count": len(diff.get("returning", [])),
             "removed_count": len(diff["removed"]),
             "changed_count": len(diff["changed"]),
             "persistent_count": len(diff["persistent"]),
         },
         "new_orders": diff["new"],
+        "returning_orders": diff.get("returning", []),
         "removed_orders": diff["removed"],
         "changed_orders": diff["changed"],
         "persistent_orders": [

@@ -42,8 +42,9 @@ def send_daily_briefing(
     lines.append(briefing.get("briefing", "(no briefing available)"))
     lines.append("")
     lines.append(
-        f"Counts:  new={len(diff['new'])}  removed={len(diff['removed'])}  "
-        f"changed={len(diff['changed'])}  lingering(3+ days)={len(diff['persistent'])}"
+        f"Counts:  new={len(diff['new'])}  returning={len(diff.get('returning', []))}  "
+        f"removed={len(diff['removed'])}  changed={len(diff['changed'])}  "
+        f"lingering(3+ days)={len(diff['persistent'])}"
     )
     lines.append("")
 

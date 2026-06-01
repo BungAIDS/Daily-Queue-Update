@@ -1,4 +1,9 @@
-"""Diff today's queue against yesterday's JSON snapshot."""
+"""Diff today's queue against yesterday's JSON snapshot.
+
+Also keeps a long-term `history.json` of every job that has ever dropped off
+the queue, so a job reappearing later can be reported as "returning" instead
+of being mistakenly labeled "new".
+"""
 from __future__ import annotations
 
 import json
@@ -28,6 +33,25 @@ def _norm(v: Any) -> str:
     if isinstance(v, bool):
         return "yes" if v else "no"
     return str(v).strip()
+
+
+HISTORY_PATH = SNAPSHOT_DIR / "history.json"
+
+
+def load_history() -> Dict[str, Any]:
+    """Job# -> {last_seen: ISO date, snapshot: {...}}. Empty if no file yet."""
+    if not HISTORY_PATH.exists():
+        return {}
+    try:
+        return json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        log.warning("Could not read %s (%s); treating as empty", HISTORY_PATH, e)
+        return {}
+
+
+def save_history(history: Dict[str, Any]) -> None:
+    HISTORY_PATH.write_text(json.dumps(history, indent=2), encoding="utf-8")
+    log.info("Updated history (%d archived jobs)", len(history))
 
 
 def snapshot_path(d: date) -> Path:
@@ -84,12 +108,39 @@ def diff_queues(
     yesterday_jobs: List[Dict[str, Any]] | None,
     today: date,
 ) -> Dict[str, Any]:
-    """Return new / removed / changed / persistent jobs."""
+    """Return new / returning / removed / changed / persistent jobs.
+
+    Also updates the long-term history store as a side effect: jobs that left
+    the queue get archived to it, and jobs that come back get popped off.
+    """
     today_idx = _index(today_jobs)
     yesterday_idx = _index(yesterday_jobs or [])
 
-    new_jobs = [j for jn, j in today_idx.items() if jn not in yesterday_idx]
-    removed_jobs = [j for jn, j in yesterday_idx.items() if jn not in today_idx]
+    history = load_history()
+    yesterday_date = (today - timedelta(days=1)).isoformat()
+
+    # New today = in today, not in yesterday. Split by whether we've ever seen
+    # them before: anything in history is "returning"; otherwise truly new.
+    new_jobs: List[Dict[str, Any]] = []
+    returning_jobs: List[Dict[str, Any]] = []
+    for jn, j in today_idx.items():
+        if jn in yesterday_idx:
+            continue
+        prev = history.pop(jn, None)
+        if prev is not None:
+            entry = dict(j)
+            entry["_last_seen"] = prev.get("last_seen", "")
+            returning_jobs.append(entry)
+        else:
+            new_jobs.append(j)
+
+    # Removed today = in yesterday, not in today. Archive them so we can
+    # recognize them if they ever come back.
+    removed_jobs: List[Dict[str, Any]] = []
+    for jn, j in yesterday_idx.items():
+        if jn not in today_idx:
+            removed_jobs.append(j)
+            history[jn] = {"last_seen": yesterday_date, "snapshot": j}
 
     changed: List[Dict[str, Any]] = []
     for jn, today_job in today_idx.items():
@@ -112,8 +163,11 @@ def diff_queues(
         if days >= 3:
             persistent.append({"job": jn, "customer": job.get("customer", ""), "days": days, "snapshot": job})
 
+    save_history(history)
+
     return {
         "new": new_jobs,
+        "returning": returning_jobs,
         "removed": removed_jobs,
         "changed": changed,
         "persistent": persistent,
