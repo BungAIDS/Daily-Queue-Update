@@ -278,11 +278,38 @@ def _write_full_queue_tab(ws, jobs: List[Dict[str, Any]], today: date) -> None:
     _autosize(ws, num_cols=len(QUEUE_HEADERS))
 
 
+def _write_history_tab(ws, history: Dict[str, Any]) -> None:
+    """Archived jobs (left the queue, not yet returned), newest departure first."""
+    headers = QUEUE_HEADERS + ["Last Seen"]
+    for c, h in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=c, value=h)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+
+    if not history:
+        ws.cell(row=2, column=1,
+                value="(no archived orders yet — a job appears here after it drops off the queue)")
+        ws.freeze_panes = "A2"
+        _autosize(ws, num_cols=len(headers))
+        return
+
+    entries = sorted(history.values(), key=lambda e: e.get("last_seen", ""), reverse=True)
+    for i, entry in enumerate(entries, start=2):
+        _write_job_row(ws, i, entry.get("snapshot", {}))
+        ws.cell(row=i, column=len(QUEUE_HEADERS) + 1, value=entry.get("last_seen", ""))
+
+    last_col = get_column_letter(len(headers))
+    ws.auto_filter.ref = f"A1:{last_col}{len(entries) + 1}"
+    ws.freeze_panes = "A2"
+    _autosize(ws, num_cols=len(headers))
+
+
 def build_workbook(
     jobs: List[Dict[str, Any]],
     diff: Dict[str, Any],
     briefing: Dict[str, Any],
     today: date,
+    history: Dict[str, Any] | None = None,
 ) -> Path:
     wb = Workbook()
     changes_ws = wb.active
@@ -291,6 +318,9 @@ def build_workbook(
 
     full_ws = wb.create_sheet("Full Queue")
     _write_full_queue_tab(full_ws, jobs, today)
+
+    history_ws = wb.create_sheet("History")
+    _write_history_tab(history_ws, history or {})
 
     path = OUTPUT_DIR / f"queue_{today.isoformat()}.xlsx"
     try:

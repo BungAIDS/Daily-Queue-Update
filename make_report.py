@@ -17,7 +17,7 @@ import logging
 import sys
 from datetime import date, timedelta
 
-from compare import diff_queues, load_snapshot
+from compare import diff_queues, load_history, load_snapshot
 from excel_writer import build_workbook
 from scraper import scrape_queue
 
@@ -44,12 +44,12 @@ def main() -> int:
         "action_items": [],
     }
 
-    path = build_workbook(jobs, diff, briefing, today)
+    path = build_workbook(jobs, diff, briefing, today, history=load_history())
     print("\n" + "=" * 64)
     print("Excel report written to:")
     print(f"  {path}")
     print("=" * 64)
-    print("Open that file to see the Full Queue and Changes tabs.")
+    print("Open that file to see the Full Queue, Changes, and History tabs.")
     return 0
 
 

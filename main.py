@@ -18,7 +18,7 @@ import traceback
 from datetime import date, timedelta
 
 from analyzer import analyze
-from compare import diff_queues, load_snapshot, save_snapshot
+from compare import diff_queues, load_history, load_snapshot, save_snapshot
 from config import validate_runtime_config
 from emailer import send_alert, send_daily_briefing
 from excel_writer import build_workbook
@@ -61,7 +61,9 @@ def main() -> int:
                 "action_items": [],
             }
 
-        excel_path = build_workbook(jobs, diff, briefing, today)
+        # diff_queues has already updated history on disk; read it back so the
+        # report's History tab reflects today's archived/returned jobs.
+        excel_path = build_workbook(jobs, diff, briefing, today, history=load_history())
         send_daily_briefing(briefing, diff, excel_path, today.isoformat())
 
         log.info("=== Done ===")
