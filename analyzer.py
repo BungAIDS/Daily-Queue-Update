@@ -1,9 +1,9 @@
 """Claude API analysis of queue changes.
 
-Sends today's structured diff to Claude and asks for:
-  1) A natural-language briefing paragraph
-  2) Anomaly flags (high $, no assignee, unrealistic dates, lingering jobs)
-  3) Ranked top 3-5 action items
+The briefing is intentionally scoped: it talks ONLY about newly-appeared
+orders (new + returning), and reasons only over a whitelist of fields. Price,
+End Date, Assigned To, Checker, status notes, and approval/credit flags are
+deliberately withheld from the model — FanNet date is the only timing signal.
 """
 from __future__ import annotations
 
@@ -18,25 +18,48 @@ from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
 
 log = logging.getLogger(__name__)
 
+# The ONLY fields the AI is allowed to see. Everything else (total_price,
+# end_date, assigned_to, checker, status_note, unapproved, credit_hold,
+# has_notes) is withheld on purpose so the briefing can't reference it.
+AI_FIELDS = [
+    "job", "status", "customer", "primary_rep", "item", "design",
+    "oper", "start_date", "fannet_date", "plan_hrs", "ship_with",
+]
+
+
+def _trim(job: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep only the whitelisted fields the AI is allowed to reason about."""
+    out = {k: job.get(k, "") for k in AI_FIELDS}
+    if job.get("_last_seen"):
+        out["last_seen"] = job["_last_seen"]
+    return out
+
+
 SYSTEM_PROMPT = """You are an operations analyst preparing a daily briefing for an engineering team lead.
-You will receive a structured JSON snapshot of yesterday vs today's work queue, with:
-  - new orders (in today, not yesterday, and never seen before)
-  - returning orders (back today after previously dropping off — includes how long they were away)
-  - removed orders (in yesterday, not today — likely completed)
-  - changed orders (field-level diffs)
-  - persistent orders (3+ consecutive days in the queue)
-  - aggregate counts
+
+Each day you receive the orders that have just appeared on the engineering work queue:
+  - new orders (never seen before)
+  - returning orders (back after previously dropping off; "last_seen" = when they were last here)
+plus aggregate counts for context.
+
+Your briefing is ONLY about what is newly on the board today (new + returning). Do not editorialize about the rest of the queue.
+
+For each order you may use ONLY these fields: job, status, customer, primary_rep (rep), item, design, oper (operation), start_date, fannet_date, plan_hrs (planned hours), ship_with.
+
+You must IGNORE and never mention: total price / dollar values, End Date (use FanNet date as the only date/deadline), Assigned To, Checker, status notes, and any approval / credit-hold / notes flags. These fields are intentionally not provided.
+
+Use FanNet date as the timing signal (e.g. which new orders have the soonest FanNet dates).
 
 Output STRICT JSON only, no prose outside the JSON, matching this schema:
 {
-  "briefing": "3-5 sentence natural-language summary of the day's queue. Mention notable patterns, customers with multiple jobs, dollar totals, schedule slips. Conversational but specific.",
-  "anomalies": ["Short bullet strings flagging things worth investigating: unusually high $ values, jobs with no Assigned To (the field reads 'NONE'), orders flagged unapproved or credit_hold (boolean fields), End Dates that seem unrealistic relative to Start, jobs lingering 5+ days, status_note hints like 'NEEDS CHECKING', etc."],
+  "briefing": "3-5 sentence summary of what is NEW on the board today: how many new/returning orders, which customers and reps, which designs, notable FanNet timing, and any ship-with groupings. Conversational but specific. If nothing is new, say so plainly rather than padding.",
+  "anomalies": ["Short bullets about the NEW/returning orders worth a look: soonest FanNet dates, the same customer or design showing up on multiple new orders, ship-with links, or possible duplicate new orders (same customer + design + FanNet). Use only the allowed fields."],
   "action_items": [
-    {"rank": 1, "job": "######", "reason": "Why this needs attention today"},
+    {"rank": 1, "job": "######", "reason": "Why this new order needs attention, framed by FanNet timing / customer / design / ship-with"},
     ...
   ]
 }
-Give 3-5 action items, ranked by urgency. Be concrete. If the queue is quiet, say so honestly rather than padding."""
+Give up to 5 action items drawn only from the new/returning orders, ranked by FanNet urgency. If there are no new orders, return an empty action_items list and say the board is quiet."""
 
 
 def analyze(diff: Dict[str, Any], today: date) -> Dict[str, Any]:
@@ -48,32 +71,20 @@ def analyze(diff: Dict[str, Any], today: date) -> Dict[str, Any]:
         raise RuntimeError("ANTHROPIC_API_KEY is not set (check your .env).")
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-    # Trim the payload so we don't blow tokens on huge fields
+    # Only the newly-appeared orders are sent, trimmed to the allowed fields.
     payload = {
         "date": today.isoformat(),
         "summary": {
             "today_job_count": diff["today_count"],
-            "yesterday_job_count": diff["yesterday_count"],
             "new_count": len(diff["new"]),
             "returning_count": len(diff.get("returning", [])),
-            "removed_count": len(diff["removed"]),
-            "changed_count": len(diff["changed"]),
-            "persistent_count": len(diff["persistent"]),
         },
-        "new_orders": diff["new"],
-        "returning_orders": diff.get("returning", []),
-        "removed_orders": diff["removed"],
-        "changed_orders": diff["changed"],
-        "persistent_orders": [
-            {"job": p["job"], "customer": p["customer"], "days_in_queue": p["days"],
-             "end_date": p["snapshot"].get("end_date"), "assigned_to": p["snapshot"].get("assigned_to"),
-             "total_price": p["snapshot"].get("total_price")}
-            for p in diff["persistent"]
-        ],
+        "new_orders": [_trim(j) for j in diff["new"]],
+        "returning_orders": [_trim(j) for j in diff.get("returning", [])],
     }
 
-    log.info("Calling Claude (%s) with %d new, %d removed, %d changed, %d persistent jobs",
-             CLAUDE_MODEL, len(diff["new"]), len(diff["removed"]), len(diff["changed"]), len(diff["persistent"]))
+    log.info("Calling Claude (%s) with %d new, %d returning orders",
+             CLAUDE_MODEL, len(diff["new"]), len(diff.get("returning", [])))
 
     # claude-opus-4-7 only supports adaptive thinking. Thinking tokens count
     # against max_tokens, and at the default "high" effort the model almost
