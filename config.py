@@ -12,13 +12,21 @@ CBC_QUEUE_URL = os.environ.get("CBC_QUEUE_URL", "")
 # so you never silently diff the wrong queue.
 CBC_WORK_CENTER = os.environ.get("CBC_WORK_CENTER", "")
 # Saved browser session (cookies) from login.py — no password is ever stored.
-STORAGE_STATE_PATH = Path(os.environ.get("STORAGE_STATE_PATH", "./cbc_session.json"))
+STORAGE_STATE_PATH = Path(os.path.expandvars(os.path.expanduser(
+    os.environ.get("STORAGE_STATE_PATH", "./cbc_session.json")
+)))
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = "claude-opus-4-7"
 
-OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "./output"))
-SNAPSHOT_DIR = Path(os.environ.get("SNAPSHOT_DIR", OUTPUT_DIR / "snapshots"))
+
+def _expand_path(raw: str) -> Path:
+    """Expand ~ and Windows env vars like %USERPROFILE% in a configured path."""
+    return Path(os.path.expandvars(os.path.expanduser(raw)))
+
+
+OUTPUT_DIR = _expand_path(os.environ.get("OUTPUT_DIR", "./output"))
+SNAPSHOT_DIR = _expand_path(os.environ.get("SNAPSHOT_DIR") or str(OUTPUT_DIR / "snapshots"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
