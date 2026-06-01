@@ -293,6 +293,17 @@ def build_workbook(
     _write_full_queue_tab(full_ws, jobs, today)
 
     path = OUTPUT_DIR / f"queue_{today.isoformat()}.xlsx"
-    wb.save(path)
+    try:
+        wb.save(path)
+    except PermissionError:
+        # The file is almost always locked because it's open in Excel. Fall
+        # back to a timestamped name so the run still produces a report.
+        alt = OUTPUT_DIR / f"queue_{today.isoformat()}_{datetime.now():%H%M%S}.xlsx"
+        log.warning(
+            "Could not write %s (is it open in Excel?). Saving to %s instead.",
+            path.name, alt.name,
+        )
+        wb.save(alt)
+        path = alt
     log.info("Wrote Excel report: %s", path)
     return path
