@@ -107,11 +107,16 @@ def diff_queues(
     today_jobs: List[Dict[str, Any]],
     yesterday_jobs: List[Dict[str, Any]] | None,
     today: date,
+    persist_history: bool = True,
 ) -> Dict[str, Any]:
     """Return new / returning / removed / changed / persistent jobs.
 
     Also updates the long-term history store as a side effect: jobs that left
     the queue get archived to it, and jobs that come back get popped off.
+
+    Set persist_history=False for ad-hoc/manual reports (make_report.py) so the
+    official tracking state is only ever advanced by the once-a-day run. With
+    it False, history is still read to label returning orders, but not written.
     """
     today_idx = _index(today_jobs)
     yesterday_idx = _index(yesterday_jobs or [])
@@ -163,7 +168,8 @@ def diff_queues(
         if days >= 3:
             persistent.append({"job": jn, "customer": job.get("customer", ""), "days": days, "snapshot": job})
 
-    save_history(history)
+    if persist_history:
+        save_history(history)
 
     return {
         "new": new_jobs,

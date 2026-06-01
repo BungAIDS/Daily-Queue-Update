@@ -6,6 +6,10 @@ one-off manual report.
 
 Produces the same two-tab workbook the daily run does (Full Queue + Changes),
 just with the AI-briefing section left as a placeholder.
+
+This is READ-ONLY: it does not save today's snapshot or modify history, so you
+can run it as many times as you like without disturbing the official once-a-day
+tracking state (that's owned solely by main.py).
 """
 from __future__ import annotations
 
@@ -13,7 +17,7 @@ import logging
 import sys
 from datetime import date, timedelta
 
-from compare import diff_queues, load_snapshot, save_snapshot
+from compare import diff_queues, load_snapshot
 from excel_writer import build_workbook
 from scraper import scrape_queue
 
@@ -29,8 +33,8 @@ def main() -> int:
         return 1
 
     yesterday = load_snapshot(today - timedelta(days=1))
-    diff = diff_queues(jobs, yesterday, today)
-    save_snapshot(jobs, today)
+    # Read-only: classify returning orders from history but don't write state.
+    diff = diff_queues(jobs, yesterday, today, persist_history=False)
 
     briefing = {
         "briefing": "(AI briefing skipped. Run main.py with an Anthropic API key "
