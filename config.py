@@ -25,8 +25,18 @@ def _expand_path(raw: str) -> Path:
     return Path(os.path.expandvars(os.path.expanduser(raw)))
 
 
-OUTPUT_DIR = _expand_path(os.environ.get("OUTPUT_DIR", "./output"))
-SNAPSHOT_DIR = _expand_path(os.environ.get("SNAPSHOT_DIR") or str(OUTPUT_DIR / "snapshots"))
+def _output_path(env_key: str, default: str) -> Path:
+    raw = (os.environ.get(env_key) or "").strip()
+    # Treat the legacy ".env.example" placeholder ("C:\Users\you\...") as unset,
+    # so anyone who copies the template verbatim doesn't blow up on first run.
+    if not raw or "\\you\\" in raw or "/you/" in raw:
+        raw = default
+    return _expand_path(raw)
+
+
+_DEFAULT_OUTPUT = r"%USERPROFILE%\Documents\DailyQueue"
+OUTPUT_DIR = _output_path("OUTPUT_DIR", _DEFAULT_OUTPUT)
+SNAPSHOT_DIR = _output_path("SNAPSHOT_DIR", str(OUTPUT_DIR / "snapshots"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
