@@ -44,6 +44,25 @@ def _cell_text(cell) -> str:
     return (cell.inner_text() or "").strip()
 
 
+def _design_from_item(item: str) -> str:
+    """Pull the design number out of the Item field.
+
+    Items are typically "DD-x-xxxx" where DD is the design (e.g. "47-0-0000" =
+    Design 47). Some are spelled out as "DESIGN 36". A few are codes like
+    "EMSI" with no design number — keep those as-is for the column.
+    """
+    s = (item or "").strip()
+    if not s:
+        return ""
+    if s.upper().startswith("DESIGN "):
+        return s.split(None, 1)[1].strip()
+    if "-" in s:
+        head = s.split("-", 1)[0].strip()
+        if head:
+            return head
+    return s
+
+
 def _expected_count(page) -> int | None:
     """The page prints 'Results: N' — use it as a sanity check on our parse."""
     try:
@@ -69,6 +88,7 @@ def _parse_container(container) -> Dict[str, Any] | None:
         "job": _cell_text(jc[1]),
         "oper": _cell_text(jc[2]),
         "item": _cell_text(jc[3]),
+        "design": _design_from_item(_cell_text(jc[3])),
         "assigned_to": _cell_text(jc[4]),
         "checker": _cell_text(jc[5]),
         "start_date": _cell_text(jc[6]),

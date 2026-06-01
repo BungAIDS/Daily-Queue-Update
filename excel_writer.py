@@ -22,10 +22,10 @@ SECTION_FONT = Font(bold=True, size=12)
 
 QUEUE_HEADERS = [
     "Status", "Customer", "Primary Rep", "Ship With", "Job #", "Oper", "Item",
-    "Assigned To", "Checker", "Start Date", "End Date", "Plan Hrs",
+    "Design", "Assigned To", "Checker", "Start Date", "End Date", "Plan Hrs",
     "FanNet Date", "Total Price", "Note", "Flags",
 ]
-TOTAL_PRICE_COL = 14  # 1-based column index of Total Price in QUEUE_HEADERS
+TOTAL_PRICE_COL = 15  # 1-based column index of Total Price in QUEUE_HEADERS
 
 
 def _flags_str(j: Dict[str, Any]) -> str:
@@ -229,15 +229,16 @@ def _write_job_row(ws, row: int, j: Dict[str, Any]) -> None:
     ws.cell(row=row, column=5, value=j.get("job", ""))
     ws.cell(row=row, column=6, value=j.get("oper", ""))
     ws.cell(row=row, column=7, value=j.get("item", ""))
-    ws.cell(row=row, column=8, value=j.get("assigned_to", ""))
-    ws.cell(row=row, column=9, value=j.get("checker", ""))
-    ws.cell(row=row, column=10, value=j.get("start_date", ""))
-    ws.cell(row=row, column=11, value=j.get("end_date", ""))
-    ws.cell(row=row, column=12, value=j.get("plan_hrs", ""))
-    ws.cell(row=row, column=13, value=j.get("fannet_date", ""))
+    ws.cell(row=row, column=8, value=j.get("design", ""))
+    ws.cell(row=row, column=9, value=j.get("assigned_to", ""))
+    ws.cell(row=row, column=10, value=j.get("checker", ""))
+    ws.cell(row=row, column=11, value=j.get("start_date", ""))
+    ws.cell(row=row, column=12, value=j.get("end_date", ""))
+    ws.cell(row=row, column=13, value=j.get("plan_hrs", ""))
+    ws.cell(row=row, column=14, value=j.get("fannet_date", ""))
     _write_money_cell(ws, row, TOTAL_PRICE_COL, j.get("total_price", ""))
-    ws.cell(row=row, column=15, value=j.get("status_note", ""))
-    ws.cell(row=row, column=16, value=_flags_str(j))
+    ws.cell(row=row, column=16, value=j.get("status_note", ""))
+    ws.cell(row=row, column=17, value=_flags_str(j))
 
 
 def _write_full_queue_tab(ws, jobs: List[Dict[str, Any]], today: date) -> None:
