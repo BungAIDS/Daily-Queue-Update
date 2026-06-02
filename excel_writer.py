@@ -19,7 +19,8 @@ YELLOW_FILL = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="s
 HEADER_FILL = PatternFill(start_color="305496", end_color="305496", fill_type="solid")
 HEADER_FONT = Font(color="FFFFFF", bold=True)
 SECTION_FONT = Font(bold=True, size=12)
-RED_FONT = Font(color="C00000", bold=True)  # past-End-Date rows
+RED_FONT = Font(color="C00000", bold=True)  # past-End-Date rows (currently unused; fill is preferred)
+NEW_FONT = Font(color="006100", bold=True)  # dark green: new/returning today on Full Queue
 
 QUEUE_HEADERS = [
     "Status", "Customer", "Primary Rep", "Ship With", "Job #", "Oper", "Item",
@@ -242,7 +243,13 @@ def _write_job_row(ws, row: int, j: Dict[str, Any]) -> None:
     ws.cell(row=row, column=17, value=_flags_str(j))
 
 
-def _write_full_queue_tab(ws, jobs: List[Dict[str, Any]], today: date) -> None:
+def _write_full_queue_tab(
+    ws,
+    jobs: List[Dict[str, Any]],
+    today: date,
+    new_job_ids: set | None = None,
+) -> None:
+    new_job_ids = new_job_ids or set()
     for c, h in enumerate(QUEUE_HEADERS, start=1):
         cell = ws.cell(row=1, column=c, value=h)
         cell.font = HEADER_FONT
@@ -253,16 +260,19 @@ def _write_full_queue_tab(ws, jobs: List[Dict[str, Any]], today: date) -> None:
 
     for i, j in enumerate(jobs, start=2):
         _write_job_row(ws, i, j)
+        # Fill = End Date urgency. Font color is reserved for "new today" below
+        # so the two signals stack visually on rows that are both new and due/late.
         end = _parse_date(j.get("end_date", ""))
         if end is not None:
             if end < today:
-                # Past the End Date: red fill across the whole row.
                 for c in range(1, len(QUEUE_HEADERS) + 1):
                     ws.cell(row=i, column=c).fill = RED_FILL
             elif end <= soon_threshold:
-                # Due today or within 3 days: amber fill.
                 for c in range(1, len(QUEUE_HEADERS) + 1):
                     ws.cell(row=i, column=c).fill = YELLOW_FILL
+        if j.get("job") in new_job_ids:
+            for c in range(1, len(QUEUE_HEADERS) + 1):
+                ws.cell(row=i, column=c).font = NEW_FONT
         total_price_sum += _parse_money(j.get("total_price", ""))
 
     # Summary footer
@@ -321,7 +331,10 @@ def build_workbook(
     _write_changes_tab(changes_ws, briefing, diff)
 
     full_ws = wb.create_sheet("Full Queue")
-    _write_full_queue_tab(full_ws, jobs, today)
+    # Mark new + returning orders so they pop on the Full Queue tab too.
+    new_ids = {j.get("job") for j in diff.get("new", []) if j.get("job")} | \
+              {j.get("job") for j in diff.get("returning", []) if j.get("job")}
+    _write_full_queue_tab(full_ws, jobs, today, new_job_ids=new_ids)
 
     history_ws = wb.create_sheet("History")
     _write_history_tab(history_ws, history or {})
