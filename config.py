@@ -16,7 +16,12 @@ STORAGE_STATE_PATH = Path(os.path.expandvars(os.path.expanduser(
     os.environ.get("STORAGE_STATE_PATH", "./cbc_session.json")
 )))
 
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+_raw_anthropic = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+# Treat the literal placeholder from .env.example as unset, so a fresh
+# install (key not yet added) doesn't try the call and trigger a daily alert.
+if _raw_anthropic in ("", "sk-ant-...", "sk-ant-..."):
+    _raw_anthropic = ""
+ANTHROPIC_API_KEY = _raw_anthropic
 CLAUDE_MODEL = "claude-opus-4-7"
 
 
