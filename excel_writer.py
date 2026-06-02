@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from config import OUTPUT_DIR
@@ -19,8 +19,9 @@ YELLOW_FILL = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="s
 HEADER_FILL = PatternFill(start_color="305496", end_color="305496", fill_type="solid")
 HEADER_FONT = Font(color="FFFFFF", bold=True)
 SECTION_FONT = Font(bold=True, size=12)
-RED_FONT = Font(color="C00000", bold=True)  # past-End-Date rows (currently unused; fill is preferred)
-NEW_FONT = Font(color="006100", bold=True)  # dark green: new/returning today on Full Queue
+RED_FONT = Font(color="C00000", bold=True)  # past-End-Date rows (unused; fill is preferred)
+# Thick dark-green outline drawn around rows that are new or returning today.
+NEW_ROW_SIDE = Side(style="thick", color="006100")
 
 QUEUE_HEADERS = [
     "Status", "Customer", "Primary Rep", "Ship With", "Job #", "Oper", "Item",
@@ -271,8 +272,16 @@ def _write_full_queue_tab(
                 for c in range(1, len(QUEUE_HEADERS) + 1):
                     ws.cell(row=i, column=c).fill = YELLOW_FILL
         if j.get("job") in new_job_ids:
-            for c in range(1, len(QUEUE_HEADERS) + 1):
-                ws.cell(row=i, column=c).font = NEW_FONT
+            # Draw a thick outline around the whole row by setting top + bottom
+            # on every cell, and left/right only on the row's end caps.
+            last = len(QUEUE_HEADERS)
+            for c in range(1, last + 1):
+                ws.cell(row=i, column=c).border = Border(
+                    top=NEW_ROW_SIDE,
+                    bottom=NEW_ROW_SIDE,
+                    left=NEW_ROW_SIDE if c == 1 else None,
+                    right=NEW_ROW_SIDE if c == last else None,
+                )
         total_price_sum += _parse_money(j.get("total_price", ""))
 
     # Summary footer
