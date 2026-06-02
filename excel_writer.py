@@ -256,11 +256,11 @@ def _write_full_queue_tab(ws, jobs: List[Dict[str, Any]], today: date) -> None:
         end = _parse_date(j.get("end_date", ""))
         if end is not None:
             if end < today:
-                # Past the End Date: red text across the whole row.
+                # Past the End Date: red fill across the whole row.
                 for c in range(1, len(QUEUE_HEADERS) + 1):
-                    ws.cell(row=i, column=c).font = RED_FONT
+                    ws.cell(row=i, column=c).fill = RED_FILL
             elif end <= soon_threshold:
-                # Due today or within 3 days: amber fill (still a heads-up).
+                # Due today or within 3 days: amber fill.
                 for c in range(1, len(QUEUE_HEADERS) + 1):
                     ws.cell(row=i, column=c).fill = YELLOW_FILL
         total_price_sum += _parse_money(j.get("total_price", ""))
