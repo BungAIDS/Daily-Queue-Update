@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from config import OUTPUT_DIR
@@ -16,12 +16,14 @@ log = logging.getLogger(__name__)
 
 RED_FILL = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
 YELLOW_FILL = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+# One step darker than each base fill, used when a row is also new today.
+RED_FILL_NEW    = PatternFill(start_color="F4A5A8", end_color="F4A5A8", fill_type="solid")
+YELLOW_FILL_NEW = PatternFill(start_color="F5D750", end_color="F5D750", fill_type="solid")
+NEW_FILL        = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
 HEADER_FILL = PatternFill(start_color="305496", end_color="305496", fill_type="solid")
 HEADER_FONT = Font(color="FFFFFF", bold=True)
 SECTION_FONT = Font(bold=True, size=12)
 RED_FONT = Font(color="C00000", bold=True)  # past-End-Date rows (unused; fill is preferred)
-# Thick dark-green outline drawn around rows that are new or returning today.
-NEW_ROW_SIDE = Side(style="thick", color="006100")
 
 QUEUE_HEADERS = [
     "Status", "Customer", "Primary Rep", "Ship With", "Job #", "Oper", "Item",
@@ -261,27 +263,22 @@ def _write_full_queue_tab(
 
     for i, j in enumerate(jobs, start=2):
         _write_job_row(ws, i, j)
-        # Fill = End Date urgency. Font color is reserved for "new today" below
-        # so the two signals stack visually on rows that are both new and due/late.
+        # Pick a row fill based on End Date urgency; if the order is also new
+        # today, step the chosen color one shade darker (or to light gray if
+        # there's no urgency fill yet).
+        is_new = j.get("job") in new_job_ids
         end = _parse_date(j.get("end_date", ""))
-        if end is not None:
-            if end < today:
-                for c in range(1, len(QUEUE_HEADERS) + 1):
-                    ws.cell(row=i, column=c).fill = RED_FILL
-            elif end <= soon_threshold:
-                for c in range(1, len(QUEUE_HEADERS) + 1):
-                    ws.cell(row=i, column=c).fill = YELLOW_FILL
-        if j.get("job") in new_job_ids:
-            # Draw a thick outline around the whole row by setting top + bottom
-            # on every cell, and left/right only on the row's end caps.
-            last = len(QUEUE_HEADERS)
-            for c in range(1, last + 1):
-                ws.cell(row=i, column=c).border = Border(
-                    top=NEW_ROW_SIDE,
-                    bottom=NEW_ROW_SIDE,
-                    left=NEW_ROW_SIDE if c == 1 else None,
-                    right=NEW_ROW_SIDE if c == last else None,
-                )
+        if end is not None and end < today:
+            fill = RED_FILL_NEW if is_new else RED_FILL
+        elif end is not None and end <= soon_threshold:
+            fill = YELLOW_FILL_NEW if is_new else YELLOW_FILL
+        elif is_new:
+            fill = NEW_FILL
+        else:
+            fill = None
+        if fill is not None:
+            for c in range(1, len(QUEUE_HEADERS) + 1):
+                ws.cell(row=i, column=c).fill = fill
         total_price_sum += _parse_money(j.get("total_price", ""))
 
     # Summary footer
