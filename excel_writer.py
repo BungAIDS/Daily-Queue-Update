@@ -19,6 +19,7 @@ YELLOW_FILL = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="s
 HEADER_FILL = PatternFill(start_color="305496", end_color="305496", fill_type="solid")
 HEADER_FONT = Font(color="FFFFFF", bold=True)
 SECTION_FONT = Font(bold=True, size=12)
+RED_FONT = Font(color="C00000", bold=True)  # past-End-Date rows
 
 QUEUE_HEADERS = [
     "Status", "Customer", "Primary Rep", "Ship With", "Job #", "Oper", "Item",
@@ -254,10 +255,12 @@ def _write_full_queue_tab(ws, jobs: List[Dict[str, Any]], today: date) -> None:
         _write_job_row(ws, i, j)
         end = _parse_date(j.get("end_date", ""))
         if end is not None:
-            if end <= today:
+            if end < today:
+                # Past the End Date: red text across the whole row.
                 for c in range(1, len(QUEUE_HEADERS) + 1):
-                    ws.cell(row=i, column=c).fill = RED_FILL
+                    ws.cell(row=i, column=c).font = RED_FONT
             elif end <= soon_threshold:
+                # Due today or within 3 days: amber fill (still a heads-up).
                 for c in range(1, len(QUEUE_HEADERS) + 1):
                     ws.cell(row=i, column=c).fill = YELLOW_FILL
         total_price_sum += _parse_money(j.get("total_price", ""))
