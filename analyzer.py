@@ -108,21 +108,31 @@ def analyze(diff: Dict[str, Any], today: date, all_jobs: list | None = None) -> 
     log.info("Calling Claude (%s) with %d new, %d returning orders (%d on board for context)",
              CLAUDE_MODEL, len(diff["new"]), len(diff.get("returning", [])), len(all_jobs or []))
 
-    # claude-opus-4-7 only supports adaptive thinking. Thinking tokens count
-    # against max_tokens, and at the default "high" effort the model almost
-    # always thinks — so max_tokens must be generous or the JSON answer gets
-    # truncated mid-stream. "medium" effort keeps reasoning proportionate to
-    # this small task while leaving plenty of headroom for the output.
+    # Pick a thinking mode by model. Opus 4.x only supports adaptive thinking
+    # (manual/disabled get rejected), and on this small structured-JSON task
+    # the extra reasoning earns its keep. Sonnet doesn't need thinking here —
+    # adaptive on Sonnet inflated cost to ~$0.15/run when disabled would have
+    # been ~$0.02. Pick automatically based on CLAUDE_MODEL.
+    if CLAUDE_MODEL.startswith("claude-opus-4"):
+        kwargs = dict(
+            max_tokens=8000,
+            thinking={"type": "adaptive"},
+            output_config={"effort": "medium"},
+        )
+    else:
+        kwargs = dict(
+            max_tokens=4000,
+            thinking={"type": "disabled"},
+        )
+
     response = client.messages.create(
         model=CLAUDE_MODEL,
-        max_tokens=8000,
-        thinking={"type": "adaptive"},
-        output_config={"effort": "medium"},
         system=SYSTEM_PROMPT,
         messages=[{
             "role": "user",
             "content": f"Here is today's queue diff. Produce the briefing JSON.\n\n{json.dumps(payload, indent=2)}",
         }],
+        **kwargs,
     )
 
     if getattr(response, "stop_reason", None) == "max_tokens":
