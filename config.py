@@ -22,7 +22,9 @@ _raw_anthropic = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
 if _raw_anthropic in ("", "sk-ant-...", "sk-ant-..."):
     _raw_anthropic = ""
 ANTHROPIC_API_KEY = _raw_anthropic
-CLAUDE_MODEL = "claude-opus-4-7"
+# Swap to "claude-opus-4-7" if you want the bigger model — costs ~3-5x more
+# per run but is barely better on this small structured-output task.
+CLAUDE_MODEL = "claude-sonnet-4-6"
 
 
 def _expand_path(raw: str) -> Path:
