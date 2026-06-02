@@ -49,14 +49,15 @@ EMAIL_ALERT_TO = os.environ.get("EMAIL_ALERT_TO") or EMAIL_TO
 def validate_runtime_config() -> None:
     """Fail fast for the daily run if required settings are missing.
 
-    Kept out of module import on purpose: helper scripts like login.py import
-    this module only for CBC_URL / STORAGE_STATE_PATH and shouldn't need an
-    Anthropic key or email address just to save a browser session.
+    Only EMAIL_TO is hard-required so the run can email its results. The
+    Anthropic API key is optional: if it's empty the daily run still scrapes,
+    diffs, builds the Excel, and emails it — just without the AI briefing.
+    Helper scripts (login.py, check_access.py, make_report.py) don't call
+    this at all.
     """
-    missing = [k for k in ("ANTHROPIC_API_KEY", "EMAIL_TO") if not os.environ.get(k)]
-    if missing:
+    if not os.environ.get("EMAIL_TO"):
         raise RuntimeError(
-            "Missing required environment variable(s): "
-            + ", ".join(missing)
-            + ". Copy .env.example to .env and fill them in."
+            "Missing required environment variable EMAIL_TO. "
+            "Open .env in Notepad and set EMAIL_TO to the address that should "
+            "receive the daily briefing, then try again."
         )
