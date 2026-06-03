@@ -19,6 +19,7 @@ from datetime import date, timedelta
 
 from compare import diff_queues, load_history, load_snapshot
 from excel_writer import build_workbook
+from sales_orders import enrich_with_sales_orders
 from scraper import scrape_queue
 
 
@@ -31,6 +32,13 @@ def main() -> int:
     if not jobs:
         print("No jobs scraped — run check_access.py for troubleshooting tips.")
         return 1
+
+    # Enrich with sales orders (CO#, fan size/arrangement, folder links). This
+    # is the slow step (opens each order's detail in parallel); skip-friendly.
+    try:
+        enrich_with_sales_orders(jobs)
+    except Exception as e:  # noqa: BLE001
+        print(f"(Sales-order enrichment skipped: {e})")
 
     yesterday = load_snapshot(today - timedelta(days=1))
     # Read-only: classify returning orders from history but don't write state.

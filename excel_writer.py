@@ -23,14 +23,17 @@ NEW_FILL        = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_typ
 HEADER_FILL = PatternFill(start_color="305496", end_color="305496", fill_type="solid")
 HEADER_FONT = Font(color="FFFFFF", bold=True)
 SECTION_FONT = Font(bold=True, size=12)
-RED_FONT = Font(color="C00000", bold=True)  # past-End-Date rows (unused; fill is preferred)
+RED_FONT = Font(color="C00000", bold=True)  # rows whose change order landed this run
+LINK_FONT = Font(color="0563C1", underline="single")  # job-folder hyperlinks
 
 QUEUE_HEADERS = [
     "Status", "Customer", "Primary Rep", "Ship With", "Job #", "Oper", "Item",
-    "Design", "Assigned To", "Checker", "Start Date", "End Date", "Plan Hrs",
-    "FanNet Date", "Total Price", "Note", "Flags",
+    "Design", "Size", "Arrangement", "CO#", "Assigned To", "Checker",
+    "Start Date", "End Date", "Plan Hrs", "FanNet Date", "Total Price",
+    "Note", "Flags", "Folder",
 ]
-TOTAL_PRICE_COL = 15  # 1-based column index of Total Price in QUEUE_HEADERS
+TOTAL_PRICE_COL = 18  # 1-based column index of Total Price in QUEUE_HEADERS
+FOLDER_COL = 21       # 1-based column index of the Folder hyperlink
 
 
 def _flags_str(j: Dict[str, Any]) -> str:
@@ -84,7 +87,9 @@ def _autosize(ws, num_cols: int) -> None:
         ws.column_dimensions[letter].width = min(max(max_len + 2, 10), 60)
 
 
-def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any]) -> None:
+def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any],
+                       co_changed_ids: set | None = None) -> None:
+    co_changed_ids = co_changed_ids or set()
     row = 1
 
     # AI Briefing block
@@ -135,7 +140,7 @@ def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any]) -> No
             cell.fill = HEADER_FILL
         row += 1
         for j in diff["new"]:
-            _write_job_row(ws, row, j)
+            _write_job_row(ws, row, j, co_changed=j.get("job") in co_changed_ids)
             row += 1
     else:
         ws.cell(row=row, column=1, value="(none)")
@@ -154,7 +159,7 @@ def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any]) -> No
             cell.fill = HEADER_FILL
         row += 1
         for j in returning:
-            _write_job_row(ws, row, j)
+            _write_job_row(ws, row, j, co_changed=j.get("job") in co_changed_ids)
             ws.cell(row=row, column=len(QUEUE_HEADERS) + 1, value=j.get("_last_seen", ""))
             row += 1
     else:
@@ -201,6 +206,38 @@ def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any]) -> No
         row += 1
     row += 1
 
+    # Change orders that landed this run (CO# rose since yesterday, including
+    # jobs that came back at a higher CO#).
+    co_changed = list(diff.get("co_changed", []))
+    for j in diff.get("returning", []):
+        cr = j.get("_co_returned")
+        if cr:
+            co_changed.append({"job": j.get("job"), "customer": j.get("customer", ""),
+                               "old_co": cr["old_co"], "new_co": cr["new_co"],
+                               "co_history": j.get("co_history", []), "_returned": True})
+    ws.cell(row=row, column=1, value=f"Change orders this run ({len(co_changed)})").font = SECTION_FONT
+    row += 1
+    if co_changed:
+        for c, h in enumerate(["Job #", "Customer", "Change", "Latest change-order note"], start=1):
+            cell = ws.cell(row=row, column=c, value=h)
+            cell.font = HEADER_FONT
+            cell.fill = HEADER_FILL
+        row += 1
+        for c in co_changed:
+            arrow = f"CO#{c['old_co']} -> CO#{c['new_co']}"
+            if c.get("_returned"):
+                arrow += " (returned)"
+            note = c["co_history"][0] if c.get("co_history") else ""
+            ws.cell(row=row, column=1, value=c["job"]).font = RED_FONT
+            ws.cell(row=row, column=2, value=c["customer"]).font = RED_FONT
+            ws.cell(row=row, column=3, value=arrow).font = RED_FONT
+            ws.cell(row=row, column=4, value=note).font = RED_FONT
+            row += 1
+    else:
+        ws.cell(row=row, column=1, value="(none)")
+        row += 1
+    row += 1
+
     # Persistent (3+ days)
     ws.cell(row=row, column=1, value=f"Persistent orders — 3+ days in queue ({len(diff['persistent'])})").font = SECTION_FONT
     row += 1
@@ -226,7 +263,12 @@ def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any]) -> No
     _autosize(ws, num_cols=len(QUEUE_HEADERS))
 
 
-def _write_job_row(ws, row: int, j: Dict[str, Any]) -> None:
+def _co_label(j: Dict[str, Any]) -> str:
+    co = j.get("co_number") or 0
+    return f"CO#{co}" if co else ""
+
+
+def _write_job_row(ws, row: int, j: Dict[str, Any], co_changed: bool = False) -> None:
     ws.cell(row=row, column=1, value=j.get("status", ""))
     ws.cell(row=row, column=2, value=j.get("customer", ""))
     ws.cell(row=row, column=3, value=j.get("primary_rep", ""))
@@ -235,15 +277,30 @@ def _write_job_row(ws, row: int, j: Dict[str, Any]) -> None:
     ws.cell(row=row, column=6, value=j.get("oper", ""))
     ws.cell(row=row, column=7, value=j.get("item", ""))
     ws.cell(row=row, column=8, value=j.get("design", ""))
-    ws.cell(row=row, column=9, value=j.get("assigned_to", ""))
-    ws.cell(row=row, column=10, value=j.get("checker", ""))
-    ws.cell(row=row, column=11, value=j.get("start_date", ""))
-    ws.cell(row=row, column=12, value=j.get("end_date", ""))
-    ws.cell(row=row, column=13, value=j.get("plan_hrs", ""))
-    ws.cell(row=row, column=14, value=j.get("fannet_date", ""))
+    ws.cell(row=row, column=9, value=j.get("so_size", ""))
+    ws.cell(row=row, column=10, value=j.get("so_arrangement", ""))
+    ws.cell(row=row, column=11, value=_co_label(j))
+    ws.cell(row=row, column=12, value=j.get("assigned_to", ""))
+    ws.cell(row=row, column=13, value=j.get("checker", ""))
+    ws.cell(row=row, column=14, value=j.get("start_date", ""))
+    ws.cell(row=row, column=15, value=j.get("end_date", ""))
+    ws.cell(row=row, column=16, value=j.get("plan_hrs", ""))
+    ws.cell(row=row, column=17, value=j.get("fannet_date", ""))
     _write_money_cell(ws, row, TOTAL_PRICE_COL, j.get("total_price", ""))
-    ws.cell(row=row, column=16, value=j.get("status_note", ""))
-    ws.cell(row=row, column=17, value=_flags_str(j))
+    ws.cell(row=row, column=19, value=j.get("status_note", ""))
+    ws.cell(row=row, column=20, value=_flags_str(j))
+
+    # Folder hyperlink (AutoCAD job folder, or the SO archive folder as fallback).
+    folder = (j.get("job_folder") or "").strip()
+    fcell = ws.cell(row=row, column=FOLDER_COL, value=(j.get("job_type") or "Open") if folder else "")
+    if folder:
+        fcell.hyperlink = folder
+        fcell.font = LINK_FONT
+
+    # A change order that landed this run -> the whole row's text goes red.
+    if co_changed:
+        for c in range(1, FOLDER_COL):  # leave the hyperlink cell its link style
+            ws.cell(row=row, column=c).font = RED_FONT
 
 
 def _write_full_queue_tab(
@@ -251,8 +308,10 @@ def _write_full_queue_tab(
     jobs: List[Dict[str, Any]],
     today: date,
     new_job_ids: set | None = None,
+    co_changed_ids: set | None = None,
 ) -> None:
     new_job_ids = new_job_ids or set()
+    co_changed_ids = co_changed_ids or set()
     for c, h in enumerate(QUEUE_HEADERS, start=1):
         cell = ws.cell(row=1, column=c, value=h)
         cell.font = HEADER_FONT
@@ -262,7 +321,7 @@ def _write_full_queue_tab(
     soon_threshold = today + timedelta(days=3)
 
     for i, j in enumerate(jobs, start=2):
-        _write_job_row(ws, i, j)
+        _write_job_row(ws, i, j, co_changed=j.get("job") in co_changed_ids)
         # Pick a row fill based on End Date urgency; if the order is also new
         # today, step the chosen color one shade darker (or to light gray if
         # there's no urgency fill yet).
@@ -331,16 +390,20 @@ def build_workbook(
     today: date,
     history: Dict[str, Any] | None = None,
 ) -> Path:
+    # Jobs whose change order landed this run (CO# rose, or returned higher).
+    co_changed_ids = {c.get("job") for c in diff.get("co_changed", [])}
+    co_changed_ids |= {j.get("job") for j in diff.get("returning", []) if j.get("_co_returned")}
+
     wb = Workbook()
     changes_ws = wb.active
     changes_ws.title = "Changes"
-    _write_changes_tab(changes_ws, briefing, diff)
+    _write_changes_tab(changes_ws, briefing, diff, co_changed_ids=co_changed_ids)
 
     full_ws = wb.create_sheet("Full Queue")
     # Mark new + returning orders so they pop on the Full Queue tab too.
     new_ids = {j.get("job") for j in diff.get("new", []) if j.get("job")} | \
               {j.get("job") for j in diff.get("returning", []) if j.get("job")}
-    _write_full_queue_tab(full_ws, jobs, today, new_job_ids=new_ids)
+    _write_full_queue_tab(full_ws, jobs, today, new_job_ids=new_ids, co_changed_ids=co_changed_ids)
 
     history_ws = wb.create_sheet("History")
     _write_history_tab(history_ws, history or {})

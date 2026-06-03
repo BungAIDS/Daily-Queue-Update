@@ -44,13 +44,26 @@ def _trim_context(job: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _trim(job: Dict[str, Any]) -> Dict[str, Any]:
-    """Keep only the whitelisted fields the AI is allowed to reason about."""
+    """Keep only the whitelisted fields the AI is allowed to reason about, plus
+    the sales-order enrichment (CO history, fan type/size/arrangement)."""
     out = {k: job.get(k, "") for k in AI_FIELDS}
     if job.get("_last_seen"):
         out["last_seen"] = job["_last_seen"]
     handler = route_owner(job.get("design", ""), job.get("oper", ""))
     if handler:
         out["handler"] = handler
+    if job.get("co_number"):
+        out["co_number"] = job["co_number"]
+    if job.get("co_history"):
+        out["change_orders"] = job["co_history"]
+    if job.get("so_size"):
+        out["size"] = job["so_size"]
+    if job.get("so_arrangement"):
+        out["arrangement"] = job["so_arrangement"]
+    if job.get("so_design_desc"):
+        out["fan_type"] = job["so_design_desc"]
+    if job.get("_co_returned"):
+        out["returned_due_to_change_order"] = job["_co_returned"]
     return out
 
 
@@ -65,9 +78,12 @@ When you reference an operation in the briefing, translate the number into its w
 
 Each day you receive:
   - new orders (never seen before)
-  - returning orders (back after previously dropping off; "last_seen" = when they were last here)
+  - returning orders (back after previously dropping off; "last_seen" = when they were last here). Some carry "returned_due_to_change_order" — these came back specifically because the sales order was revised.
+  - change_orders_today: orders already on the board whose sales order picked up a NEW change order since yesterday (CO# rose). Each lists old/new CO# and the change-order notes describing what changed.
   - full_queue_for_context: EVERY order currently on the board (same fields), provided so you can spot groupings — do not summarize the full queue itself.
 plus aggregate counts.
+
+CHANGE ORDERS are a priority signal. Orders carry "co_number" (how many change orders the sales order has had) and "change_orders" (the actual notes — what each CO changed, who, when). When an order is new/returning with change orders, or appears in change_orders_today, call it out and summarize WHAT changed in plain language (from the notes). Some orders also carry "fan_type", "size", and "arrangement" from the sales order — weave those in when describing an order.
 
 Your briefing is ONLY about what is newly on the board today (new + returning). Do not editorialize about the rest of the queue. BUT use full_queue_for_context to judge whether each new order is part of something bigger: a new order may join an existing cluster of the same design, operation, or customer, or its ship-with partner may already be on the board even if that partner is not new. Call those connections out.
 
@@ -82,7 +98,7 @@ TIMING — two dates matter, weigh them together:
 
 Output STRICT JSON only, no prose outside the JSON, matching this schema:
 {
-  "briefing": "3-5 sentence summary of what is NEW on the board today: how many new/returning orders, which customers and reps, which designs and operations, notable End Date / FanNet timing (and any orders already past their End Date), and any ship-with groupings. When a new order joins an existing design / operation / customer cluster on the board, note how many total there are now. Conversational but specific. If nothing is new, say so plainly rather than padding.",
+  "briefing": "3-5 sentence summary of what is NEW on the board today: how many new/returning orders, which customers and reps, which designs and operations, notable End Date / FanNet timing (and any orders already past their End Date), and any ship-with groupings. When a new order joins an existing design / operation / customer cluster on the board, note how many total there are now. ALSO summarize any change orders that landed today (from change_orders_today, and returning orders flagged returned_due_to_change_order) — name the job and what changed in plain language. Conversational but specific. If nothing is new, say so plainly rather than padding.",
   "anomalies": ["Short bullets about the NEW/returning orders worth a look: orders at or past their End Date (note how far out their FanNet date is); soonest deadlines; a new order that joins an existing cluster of the same design, operation, or customer (say how many total are now on the board); a new order whose ship_with partner is already on the board; or possible duplicate new orders (same customer + design + oper + FanNet). Use only the allowed fields."],
   "action_items": [
     {"rank": 1, "job": "######", "reason": "Why this new order needs attention, framed by End Date vs FanNet urgency / customer / design / operation / ship-with (existing partners on the board are fair game as context)"},
@@ -117,11 +133,17 @@ def analyze(diff: Dict[str, Any], today: date, all_jobs: list | None = None) -> 
         },
         "new_orders": [_trim(j) for j in diff["new"]],
         "returning_orders": [_trim(j) for j in diff.get("returning", [])],
+        "change_orders_today": [
+            {"job": c["job"], "customer": c.get("customer", ""),
+             "old_co": c["old_co"], "new_co": c["new_co"], "change_orders": c.get("co_history", [])}
+            for c in diff.get("co_changed", [])
+        ],
         "full_queue_for_context": [_trim_context(j) for j in (all_jobs or [])],
     }
 
-    log.info("Calling Claude (%s) with %d new, %d returning orders (%d on board for context)",
-             CLAUDE_MODEL, len(diff["new"]), len(diff.get("returning", [])), len(all_jobs or []))
+    log.info("Calling Claude (%s) with %d new, %d returning, %d change-orders-today (%d on board for context)",
+             CLAUDE_MODEL, len(diff["new"]), len(diff.get("returning", [])),
+             len(diff.get("co_changed", [])), len(all_jobs or []))
 
     # Pick a thinking mode by model. Opus 4.x only supports adaptive thinking
     # (manual/disabled get rejected), and on this small structured-JSON task

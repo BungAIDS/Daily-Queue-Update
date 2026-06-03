@@ -135,6 +135,14 @@ def diff_queues(
         if prev is not None:
             entry = dict(j)
             entry["_last_seen"] = prev.get("last_seen", "")
+            # If it came back at a higher CO# than when it left, flag *why* it
+            # returned: a change order. Only compare when the archived snapshot
+            # actually carried a co_number (older snapshots predate the field).
+            snap = prev.get("snapshot") or {}
+            if "co_number" in snap:
+                old_co, new_co = int(snap.get("co_number") or 0), int(j.get("co_number") or 0)
+                if new_co > old_co:
+                    entry["_co_returned"] = {"old_co": old_co, "new_co": new_co}
             returning_jobs.append(entry)
         else:
             new_jobs.append(j)
@@ -161,6 +169,24 @@ def diff_queues(
         if changes:
             changed.append({"job": jn, "customer": today_job.get("customer", ""), "changes": changes})
 
+    # Change orders that landed today: a job present both days whose CO# rose.
+    # Only compare when yesterday's snapshot carried co_number (older snapshots
+    # predate it), so the first enriched run doesn't flag the whole board.
+    co_changed: List[Dict[str, Any]] = []
+    for jn, today_job in today_idx.items():
+        prev = yesterday_idx.get(jn)
+        if not prev or "co_number" not in prev:
+            continue
+        old_co, new_co = int(prev.get("co_number") or 0), int(today_job.get("co_number") or 0)
+        if new_co > old_co:
+            co_changed.append({
+                "job": jn,
+                "customer": today_job.get("customer", ""),
+                "old_co": old_co,
+                "new_co": new_co,
+                "co_history": today_job.get("co_history", []),
+            })
+
     lookback = _load_lookback_jobsets(today)
     persistent: List[Dict[str, Any]] = []
     for jn, job in today_idx.items():
@@ -176,6 +202,7 @@ def diff_queues(
         "returning": returning_jobs,
         "removed": removed_jobs,
         "changed": changed,
+        "co_changed": co_changed,
         "persistent": persistent,
         "today_count": len(today_jobs),
         "yesterday_count": len(yesterday_jobs or []),

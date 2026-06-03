@@ -22,6 +22,7 @@ from compare import diff_queues, load_history, load_snapshot, save_snapshot
 from config import ANTHROPIC_API_KEY, validate_runtime_config
 from emailer import send_alert, send_daily_briefing
 from excel_writer import build_workbook
+from sales_orders import enrich_with_sales_orders
 from scraper import scrape_queue
 
 
@@ -45,6 +46,16 @@ def main() -> int:
         jobs = scrape_queue(headless=True)
         if not jobs:
             raise RuntimeError("Scraper returned 0 jobs — site may be down or layout changed.")
+
+        # Enrich every job with its sales order: CO# / change-order history,
+        # fan design/size/arrangement, and the AutoCAD folder link. This opens
+        # each order's detail in parallel and is the slow step (~minutes). Never
+        # let it sink the run — on failure we alert and continue without it.
+        try:
+            enrich_with_sales_orders(jobs)
+        except Exception:
+            log.exception("Sales-order enrichment failed — continuing without it")
+            send_alert(today.isoformat(), "Sales-order enrichment failed:\n\n" + traceback.format_exc())
 
         yesterday = load_snapshot(today - timedelta(days=1))
         diff = diff_queues(jobs, yesterday, today)
