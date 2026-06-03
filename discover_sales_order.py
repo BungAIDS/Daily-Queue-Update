@@ -98,7 +98,7 @@ def main() -> None:
         page.on("response", lambda r: responses_seen.append(r))
 
         start_idx = len(responses_seen)
-        log.info("\nTriggering the detail modal for the first order...")
+        log.info("\nTriggering the detail modal for the first order (can take ~30s to load)...")
         trigger = f"""() => {{
             if (typeof loadDetail !== 'function') return 'loadDetail missing';
             if (window.jQuery) {{
@@ -108,8 +108,28 @@ def main() -> None:
             }} else {{ loadDetail({args_js}); }}
             return 'triggered';
         }}"""
-        log.info("  trigger result: %s", page.evaluate(trigger))
-        page.wait_for_timeout(5000)  # let the AJAX land and the modal render
+
+        # The detail load is slow (~30s observed), so don't use a fixed sleep —
+        # wait for the actual detail response (a non-static html/json call that
+        # isn't just a re-fetch of the dispatch page) with a generous timeout.
+        def _is_detail(r) -> bool:
+            base = r.url.lower().split("?", 1)[0]
+            if base.endswith(_STATIC):
+                return False
+            if base == target.lower().split("?", 1)[0]:
+                return False
+            ctype = (r.headers or {}).get("content-type", "")
+            return any(t in ctype for t in ("html", "json", "text", "xml"))
+
+        try:
+            with page.expect_response(_is_detail, timeout=90000) as resp_info:
+                log.info("  trigger result: %s", page.evaluate(trigger))
+                log.info("  waiting for the detail response (up to 90s)...")
+            detail = resp_info.value
+            log.info("  >>> detail response: %s %s", detail.status, detail.url)
+        except PlaywrightTimeout:
+            log.info("  no detail response seen within 90s — will still dump whatever loaded.")
+        page.wait_for_timeout(3000)  # let the modal finish rendering the response
 
         # 4) Dump the rendered modal.
         try:
