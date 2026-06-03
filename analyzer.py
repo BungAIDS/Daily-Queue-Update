@@ -27,6 +27,21 @@ AI_FIELDS = [
     "oper", "start_date", "end_date", "fannet_date", "plan_hrs", "ship_with",
 ]
 
+# Lean field set sent for OTHER orders on the board, used purely as grouping
+# context (cluster detection, ship-with partner lookups, possible duplicates).
+# Cuts the context payload roughly in half vs sending all 12 AI_FIELDS per
+# job — meaningful cost savings on a 50-job board.
+CONTEXT_FIELDS = [
+    "job", "customer", "primary_rep", "design", "oper",
+    "end_date", "fannet_date", "ship_with",
+]
+
+
+def _trim_context(job: Dict[str, Any]) -> Dict[str, Any]:
+    """Leaner trim for the full-queue-for-context list — only enough fields for
+    the AI to detect clusters, ship-with partners, and possible duplicates."""
+    return {k: job.get(k, "") for k in CONTEXT_FIELDS}
+
 
 def _trim(job: Dict[str, Any]) -> Dict[str, Any]:
     """Keep only the whitelisted fields the AI is allowed to reason about."""
@@ -102,7 +117,7 @@ def analyze(diff: Dict[str, Any], today: date, all_jobs: list | None = None) -> 
         },
         "new_orders": [_trim(j) for j in diff["new"]],
         "returning_orders": [_trim(j) for j in diff.get("returning", [])],
-        "full_queue_for_context": [_trim(j) for j in (all_jobs or [])],
+        "full_queue_for_context": [_trim_context(j) for j in (all_jobs or [])],
     }
 
     log.info("Calling Claude (%s) with %d new, %d returning orders (%d on board for context)",
