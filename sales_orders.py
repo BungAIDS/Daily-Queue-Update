@@ -25,13 +25,14 @@ folder isn't found simply gets blank/zero fields rather than failing the run.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List
 from urllib.parse import urlparse, parse_qs, urljoin
 
-from playwright.async_api import async_playwright, TimeoutError as PWTimeout
+from playwright.async_api import async_playwright, TimeoutError as PWTimeout, Error as PWError
 
 from config import (
     CBC_URL, CBC_QUEUE_URL, STORAGE_STATE_PATH,
@@ -171,14 +172,21 @@ def _trigger_js(args_js: str) -> str:
 
 
 async def _open_board(context, url):
+    """Load the dispatch board, retrying transient nav timeouts (the server can
+    be slow/congested, especially during the retry pass)."""
     page = await context.new_page()
-    await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-    try:
-        await page.wait_for_load_state("networkidle", timeout=15000)
-    except PWTimeout:
-        pass
-    await page.wait_for_selector(CONTAINER_SELECTOR, timeout=45000)
-    return page
+    last = None
+    for attempt in (1, 2, 3):
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_selector(CONTAINER_SELECTOR, timeout=45000)
+            return page
+        except (PWTimeout, PWError) as e:
+            last = e
+            if attempt < 3:
+                await page.wait_for_timeout(3000 * attempt)
+    await page.close()
+    raise last
 
 
 async def _args_map(page) -> Dict[str, str]:
@@ -235,8 +243,14 @@ async def _process_job(page, context, job: str, args_js: str) -> Dict[str, Any]:
 
 
 async def _worker(context, url, queue, results, total):
-    page = await _open_board(context, url)
-    amap = await _args_map(page)
+    # A worker that can't even load the board sits the round out rather than
+    # crashing the whole fetch — the shared queue is drained by the others.
+    try:
+        page = await _open_board(context, url)
+        amap = await _args_map(page)
+    except Exception as e:  # noqa: BLE001
+        log.warning("SO worker could not open the board (%s); sitting out this pass", e)
+        return
     while True:
         try:
             job = queue.get_nowait()
@@ -247,15 +261,17 @@ async def _worker(context, url, queue, results, total):
             results[job] = await _process_job(page, context, job, args_js) if args_js else {"rev": None, "pdf_path": None}
         except Exception as e:  # noqa: BLE001
             log.warning("SO fetch error for %s: %s", job, e)
-            results[job] = {"rev": None, "pdf_path": None}
+            results.setdefault(job, {"rev": None, "pdf_path": None})
         finally:
             r = results.get(job) or {}
             mark = "ok" if r.get("pdf_path") else ("no SO" if r.get("rev") is None else "no pdf")
             log.info("  sales orders %d/%d  (%s: %s)", len(results), total, job, mark)
-            await page.evaluate("() => window.jQuery && jQuery('#modalDetail').modal('hide')")
-            await page.wait_for_timeout(300)
+            with contextlib.suppress(Exception):
+                await page.evaluate("() => window.jQuery && jQuery('#modalDetail').modal('hide')")
+                await page.wait_for_timeout(300)
             queue.task_done()
-    await page.close()
+    with contextlib.suppress(Exception):
+        await page.close()
 
 
 async def _afetch_all(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -271,8 +287,13 @@ async def _afetch_all(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
         for j in job_numbers:
             queue.put_nowait(j)
         n = min(SO_CONCURRENCY, total) or 1
-        await asyncio.gather(*[asyncio.create_task(_worker(context, url, queue, results, total)) for _ in range(n)])
-        await browser.close()
+        # return_exceptions so one worker dying never cancels the others.
+        await asyncio.gather(
+            *[asyncio.create_task(_worker(context, url, queue, results, total)) for _ in range(n)],
+            return_exceptions=True,
+        )
+        with contextlib.suppress(Exception):
+            await browser.close()
     return results
 
 
@@ -298,7 +319,11 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
     todo = list(by_job.keys())
     for p in range(1, max_passes + 1):
         log.info("Sales-order fetch pass %d: %d job(s), %d parallel...", p, len(todo), SO_CONCURRENCY)
-        res = asyncio.run(_afetch_all(todo))
+        try:
+            res = asyncio.run(_afetch_all(todo))
+        except Exception as e:  # noqa: BLE001 - keep earlier passes' results
+            log.warning("Sales-order fetch pass %d failed (%s); keeping results so far", p, e)
+            break
         for k, v in res.items():
             old = so_results.get(k)
             # Keep the best result seen: a downloaded pdf beats a bare rev beats nothing.
