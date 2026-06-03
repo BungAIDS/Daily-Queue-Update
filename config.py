@@ -67,6 +67,13 @@ try:
 except ValueError:
     SO_CONCURRENCY = 8
 
+# Root of the AutoCAD job folders on the Z: drive. A job appears under exactly
+# one <type>\<intermediate>\<job> path, so finding its folder both gives the
+# Excel link target and tells us the job type. Read-only lookup (not created).
+AUTOCAD_JOBS_DIR = _expand_path(
+    (os.environ.get("AUTOCAD_JOBS_DIR") or r"Z:\AUTOCAD\CURRENT\JOBS").strip()
+)
+
 # Email is sent through your local Outlook desktop app — no password needed.
 # These are just the destination addresses (an address alone isn't sensitive).
 EMAIL_TO = os.environ.get("EMAIL_TO", "")
