@@ -1,28 +1,27 @@
-"""Discovery helper #2: capture how a job's SALES ORDER detail is loaded.
+"""Discovery helper #3: find and download a job's SALES ORDER pdf.
 
-We learned from round 1 that clicking a dispatch row has no link/anchor — the
-row's own onclick calls a JS function:
+What we've learned so far:
+  - Clicking a dispatch row runs loadDetail('<job>-<n>', ...), which opens a
+    Bootstrap modal (#modalDetail) and loads the detail over an ASP.NET async
+    postback (__doPostBackAsync("NotesPanel", jobid)). It's slow (~30s).
+  - The loaded modal contains a "Documents" list, and one entry is the sales
+    order, named like "421314 - Sales Order.pdf".
 
-    loadDetail('421314-0','19','DRIVE SET RPM',' ', 0)
-
-...which opens a Bootstrap modal (#modalDetail) and fills it over AJAX. This
-script triggers that for the FIRST order and captures:
-
-  1. the SOURCE of loadDetail()      -> shows the exact backend URL it calls
-  2. every network request it fires   -> the real endpoint + params
-  3. the response body of the detail call
-  4. the rendered modal HTML          -> what the "sales order" actually contains
+This script opens the FIRST order, waits for that Documents list, prints every
+document link's href, and DOWNLOADS the "... - Sales Order.pdf" as proof — so
+we learn whether the pdf is a direct URL (fast: fetch per job) or a
+javascript/handler link (must be clicked).
 
     python discover_sales_order.py
 
-Read-only: it just opens one order's detail pop-up, same as clicking it.
-Everything is saved under OUTPUT_DIR/so_discovery/. When done, paste the
-console output back to me and attach the files it lists.
+Read-only: it just opens one order and downloads its sales order, the same as
+clicking it yourself. Output is saved under OUTPUT_DIR/so_discovery/.
 """
 from __future__ import annotations
 
 import logging
 import re
+from urllib.parse import urljoin
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
@@ -34,8 +33,8 @@ log = logging.getLogger("discover")
 
 OUT = OUTPUT_DIR / "so_discovery"
 
-# Static assets we don't care about when logging what the modal fetched.
 _STATIC = (".js", ".css", ".png", ".gif", ".jpg", ".jpeg", ".svg", ".woff", ".woff2", ".ico")
+_SALES_ORDER_RE = re.compile(r"sales order", re.I)
 
 
 def _save(name: str, text: str) -> None:
@@ -69,36 +68,15 @@ def main() -> None:
         log.info("Found %d order rows.", len(containers))
 
         first = containers[0]
-
-        # 1) The row's own onclick -> pull out the loadDetail(...) call.
         onclick = first.get_attribute("onclick") or ""
         m = re.search(r"loadDetail\((.*?)\)", onclick)
         if not m:
             _save("first_container.html", first.evaluate("e => e.outerHTML"))
-            raise SystemExit(
-                "Couldn't find loadDetail(...) in the row's onclick. Saved the row "
-                "HTML to so_discovery/first_container.html — paste that back to me."
-            )
+            raise SystemExit("Couldn't find loadDetail(...) in the first row — paste first_container.html.")
         args_js = m.group(1).strip()
-        log.info("\nRow opens its detail via:  loadDetail(%s)", args_js)
+        log.info("\nOpening detail via: loadDetail(%s)", args_js)
 
-        # 2) Source of loadDetail() — usually reveals the endpoint URL directly.
-        src = page.evaluate(
-            "() => (typeof loadDetail === 'function') ? loadDetail.toString() : 'loadDetail NOT DEFINED'"
-        )
-        _save("loaddetail_source.js", src)
-        log.info("\n--- loadDetail() source (also saved) ---\n%s", src[:1500])
-        if len(src) > 1500:
-            log.info("...(truncated; full version in loaddetail_source.js)")
-
-        # 3) Capture network traffic while the modal loads.
-        requests_seen: list[tuple[str, str]] = []
-        responses_seen = []
-        page.on("request", lambda r: requests_seen.append((r.method, r.url)))
-        page.on("response", lambda r: responses_seen.append(r))
-
-        start_idx = len(responses_seen)
-        log.info("\nTriggering the detail modal for the first order (can take ~30s to load)...")
+        # Open the modal (replicates the row's onclick).
         trigger = f"""() => {{
             if (typeof loadDetail !== 'function') return 'loadDetail missing';
             if (window.jQuery) {{
@@ -108,33 +86,24 @@ def main() -> None:
             }} else {{ loadDetail({args_js}); }}
             return 'triggered';
         }}"""
+        log.info("Trigger: %s", page.evaluate(trigger))
 
-        # The detail load is slow (~30s observed), so don't use a fixed sleep —
-        # wait for the actual detail response (a non-static html/json call that
-        # isn't just a re-fetch of the dispatch page) with a generous timeout.
-        def _is_detail(r) -> bool:
-            base = r.url.lower().split("?", 1)[0]
-            if base.endswith(_STATIC):
-                return False
-            if base == target.lower().split("?", 1)[0]:
-                return False
-            ctype = (r.headers or {}).get("content-type", "")
-            return any(t in ctype for t in ("html", "json", "text", "xml"))
-
+        # Wait (up to 90s) for the Documents list — specifically the Sales Order
+        # link — to appear. The notes/documents load is the slow (~30s) part.
+        log.info("Waiting for the Documents list / Sales Order link (up to 90s)...")
+        so_link = page.locator("#modalDetail a").filter(has_text=_SALES_ORDER_RE)
+        have_so = True
         try:
-            with page.expect_response(_is_detail, timeout=90000) as resp_info:
-                log.info("  trigger result: %s", page.evaluate(trigger))
-                log.info("  waiting for the detail response (up to 90s)...")
-            detail = resp_info.value
-            log.info("  >>> detail response: %s %s", detail.status, detail.url)
+            so_link.first.wait_for(state="attached", timeout=90000)
+            log.info("Sales Order link appeared.")
         except PlaywrightTimeout:
-            log.info("  no detail response seen within 90s — will still dump whatever loaded.")
-        page.wait_for_timeout(3000)  # let the modal finish rendering the response
+            have_so = False
+            log.info("No 'Sales Order' link within 90s — dumping whatever links loaded.")
+        page.wait_for_timeout(1500)
 
-        # 4) Dump the rendered modal.
+        # Save the rendered modal + a screenshot for the record.
         try:
-            modal_html = page.locator("#modalDetail").inner_html(timeout=3000)
-            _save("modal_detail.html", modal_html)
+            _save("modal_detail.html", page.locator("#modalDetail").inner_html(timeout=3000))
         except Exception as e:  # noqa: BLE001
             log.info("  (couldn't read #modalDetail: %s)", e)
         try:
@@ -143,36 +112,90 @@ def main() -> None:
         except Exception as e:  # noqa: BLE001
             log.info("  (screenshot failed: %s)", e)
 
-        # 5) Report the non-static requests fired during the load + save bodies.
-        log.info("\n--- Network calls fired while opening the modal ---")
-        new_responses = responses_seen[start_idx:]
-        dumped = 0
-        for resp in new_responses:
-            url = resp.url
-            low = url.lower().split("?", 1)[0]
-            if low.endswith(_STATIC):
-                continue
-            ctype = (resp.headers or {}).get("content-type", "")
-            log.info("  %s  %s  [%s]", resp.status, url, ctype)
-            if any(t in ctype for t in ("html", "json", "text", "xml")):
+        # List every document link with its href/onclick — this reveals the URL
+        # pattern (direct pdf vs. handler) for ALL the docs, not just the SO.
+        log.info("\n--- Links in the detail modal ---")
+        anchors = page.locator("#modalDetail a").all()
+        log.info("Found %d link(s):", len(anchors))
+        for i, a in enumerate(anchors):
+            try:
+                text = (a.inner_text() or "").strip().replace("\n", " ")
+                href = a.get_attribute("href")
+                oc = a.get_attribute("onclick")
+                log.info("  [%d] %r", i, text[:70])
+                log.info("       href = %r", href)
+                if oc:
+                    log.info("       onclick = %r", oc[:200])
+            except Exception as e:  # noqa: BLE001
+                log.info("  [%d] (couldn't read: %s)", i, e)
+
+        if not have_so:
+            log.info("\n(No Sales Order link found — see the list above and modal_detail.html.)")
+            input("\nPress Enter to close the browser... ")
+            browser.close()
+            return
+
+        # Pull the Sales Order link's href and try the FAST path: fetch the pdf
+        # directly with the logged-in session (works if href is a real URL).
+        link = so_link.first
+        so_text = (link.inner_text() or "").strip()
+        so_href = link.get_attribute("href")
+        so_onclick = link.get_attribute("onclick")
+        log.info("\n=== SALES ORDER link ===")
+        log.info("  text    = %r", so_text)
+        log.info("  href    = %r", so_href)
+        log.info("  onclick = %r", so_onclick)
+
+        if so_href and not so_href.lower().startswith("javascript") and so_href.strip() != "#":
+            full = urljoin(page.url, so_href)
+            log.info("\nFetching directly with the session: %s", full)
+            try:
+                resp = context.request.get(full)
+                body = resp.body()
+                ct = resp.headers.get("content-type", "")
+                dest = OUT / "sample_sales_order.pdf"
+                dest.write_bytes(body)
+                log.info("  -> %d bytes, content-type=%s", len(body), ct)
+                log.info("  -> saved %s", dest)
+                log.info("  => DIRECT URL works. The real tool can fetch each SO in one call (fast).")
+            except Exception as e:  # noqa: BLE001
+                log.info("  direct fetch failed (%s) — falling back to clicking.", e)
+                so_href = None  # force the click path below
+
+        if not so_href or so_href.lower().startswith("javascript") or so_href.strip() == "#":
+            log.info("\nhref isn't a plain URL — clicking the link and capturing the result...")
+            downloads, popups = [], []
+            page.on("download", downloads.append)
+            context.on("page", popups.append)
+            try:
+                link.click()
+            except Exception as e:  # noqa: BLE001
+                log.info("  click raised: %s", e)
+            page.wait_for_timeout(8000)
+            if downloads:
+                d = downloads[0]
+                dest = OUT / (d.suggested_filename or "sample_sales_order.pdf")
                 try:
-                    body = resp.text()
-                    dumped += 1
-                    _save(f"response_{dumped}.txt", f"URL: {url}\nSTATUS: {resp.status}\nCONTENT-TYPE: {ctype}\n\n{body}")
+                    d.save_as(str(dest))
+                    log.info("  -> DOWNLOAD: file=%r url=%r saved %s", d.suggested_filename, d.url, dest)
                 except Exception as e:  # noqa: BLE001
-                    log.info("       (couldn't read body: %s)", e)
-        if dumped == 0:
-            log.info("  (no obvious HTML/JSON response captured — the source file above")
-            log.info("   should still show the endpoint loadDetail calls.)")
+                    log.info("  -> download save failed: %s", e)
+                log.info("  => CLICK-TO-DOWNLOAD. The real tool will click each SO link.")
+            elif popups:
+                pg = popups[-1]
+                try:
+                    pg.wait_for_load_state("domcontentloaded", timeout=10000)
+                except PlaywrightTimeout:
+                    pass
+                log.info("  -> opened a new tab: %s", pg.url)
+                log.info("  => If that's a .pdf URL we can fetch it directly next round.")
+            else:
+                log.info("  -> no download or popup detected within 8s.")
 
         log.info("\n========== NEXT STEPS ==========")
         log.info("Saved under: %s", OUT)
-        log.info("Paste the console output back to me, and attach:")
-        log.info("  - loaddetail_source.js")
-        log.info("  - modal_detail.html")
-        log.info("  - response_*.txt   (if any)")
-        log.info("  - modal_detail.png")
-        log.info("That tells me the exact endpoint + what a 'sales order' contains.")
+        log.info("Paste the console output back to me (especially the SALES ORDER block")
+        log.info("and the link list). If sample_sales_order.pdf saved and opens, we're done discovering.")
 
         input("\nPress Enter to close the browser... ")
         browser.close()
