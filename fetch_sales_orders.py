@@ -197,12 +197,15 @@ async def _amain(limit: int | None):
         downloaded = sum(1 for r in results if str(r["status"]).startswith("downloaded"))
         have = sum(1 for r in results if r["status"] == "have it")
         cos = [r for r in results if r.get("rev") and r["rev"] > 1]
-        problems = [r for r in results if any(k in str(r["status"]) for k in ("FAIL", "ERROR", "no ", "not on"))]
+        # "no sales order doc" is expected for some order types (e.g. HDX /
+        # Michael's) — count it separately, not as a problem.
+        no_so = [r for r in results if r["status"] == "no sales order doc"]
+        problems = [r for r in results if any(k in str(r["status"]) for k in ("FAIL", "ERROR", "timeout", "not on"))]
         log.info("=" * 64)
         log.info("Done: %d orders in %.0fs (%.1fs/order wall-clock, %d workers).",
                  len(results), elapsed, elapsed / max(1, len(results)), n_workers)
-        log.info("  %d downloaded, %d already had, %d with a change order, %d problems.",
-                 downloaded, have, len(cos), len(problems))
+        log.info("  %d downloaded, %d already had, %d with a change order, %d no-SO (e.g. HDX), %d problems.",
+                 downloaded, have, len(cos), len(no_so), len(problems))
         if cos:
             log.info("  Change orders: %s", ", ".join(f"{r['job']}={r['co']}" for r in cos))
         if problems:
