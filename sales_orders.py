@@ -234,7 +234,7 @@ async def _process_job(page, context, job: str, args_js: str) -> Dict[str, Any]:
     return res
 
 
-async def _worker(context, url, queue, results):
+async def _worker(context, url, queue, results, total):
     page = await _open_board(context, url)
     amap = await _args_map(page)
     while True:
@@ -249,6 +249,9 @@ async def _worker(context, url, queue, results):
             log.warning("SO fetch error for %s: %s", job, e)
             results[job] = {"rev": None, "pdf_path": None}
         finally:
+            r = results.get(job) or {}
+            mark = "ok" if r.get("pdf_path") else ("no SO" if r.get("rev") is None else "no pdf")
+            log.info("  sales orders %d/%d  (%s: %s)", len(results), total, job, mark)
             await page.evaluate("() => window.jQuery && jQuery('#modalDetail').modal('hide')")
             await page.wait_for_timeout(300)
             queue.task_done()
@@ -259,6 +262,7 @@ async def _afetch_all(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
     if not STORAGE_STATE_PATH.exists():
         raise RuntimeError(f"No saved session at {STORAGE_STATE_PATH}. Run `python login.py`.")
     url = CBC_QUEUE_URL or CBC_URL
+    total = len(job_numbers)
     results: Dict[str, Dict[str, Any]] = {}
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -266,8 +270,8 @@ async def _afetch_all(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
         queue: asyncio.Queue = asyncio.Queue()
         for j in job_numbers:
             queue.put_nowait(j)
-        n = min(SO_CONCURRENCY, len(job_numbers)) or 1
-        await asyncio.gather(*[asyncio.create_task(_worker(context, url, queue, results)) for _ in range(n)])
+        n = min(SO_CONCURRENCY, total) or 1
+        await asyncio.gather(*[asyncio.create_task(_worker(context, url, queue, results, total)) for _ in range(n)])
         await browser.close()
     return results
 
