@@ -50,31 +50,28 @@ SPEC_CELL = re.compile(r"^(Design|Size|Arrangement)\b\s*(.*)$", re.I)
 # --------------------------------------------------------------------------- #
 # AutoCAD folder / job-type lookup                                            #
 # --------------------------------------------------------------------------- #
-def _build_autocad_index() -> Dict[str, Dict[str, Any]]:
-    """Walk AUTOCAD_JOBS_DIR/<type>/<intermediate>/<job> once, mapping each job
-    number to its type + folder. Returns {} if the drive isn't reachable."""
-    index: Dict[str, Dict[str, Any]] = {}
+def _find_autocad_folders(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Locate each job under AUTOCAD_JOBS_DIR/<type>/<intermediate>/<job>.
+
+    Targeted glob per job (a job appears under exactly one type) — far cheaper
+    than walking the whole tree. Returns {job: {type, path}}; {} if the drive
+    isn't reachable. The <type> the job sits under is its job type.
+    """
+    out: Dict[str, Dict[str, Any]] = {}
     root = AUTOCAD_JOBS_DIR
     try:
         if not root.exists():
             log.warning("AutoCAD jobs root not reachable: %s (folder links disabled)", root)
-            return index
-        for type_dir in root.iterdir():
-            if not type_dir.is_dir():
-                continue
-            for inter_dir in type_dir.iterdir():
-                if not inter_dir.is_dir():
-                    continue
-                for job_dir in inter_dir.iterdir():
-                    if job_dir.is_dir():
-                        # first 6+ digit token is the job number
-                        m = re.match(r"(\d{4,})", job_dir.name)
-                        if m:
-                            index.setdefault(m.group(1), {"type": type_dir.name, "path": job_dir})
-        log.info("Indexed %d AutoCAD job folders under %s", len(index), root)
+            return out
+        for job in job_numbers:
+            matches = list(root.glob(f"*/*/{job}")) or list(root.glob(f"*/*/{job}*"))
+            if matches:
+                m = matches[0]
+                out[job] = {"type": m.relative_to(root).parts[0], "path": m}
+        log.info("Located %d/%d AutoCAD job folders under %s", len(out), len(job_numbers), root)
     except OSError as e:
-        log.warning("Could not index AutoCAD folders (%s); folder links disabled", e)
-    return index
+        log.warning("Could not look up AutoCAD folders (%s); folder links disabled", e)
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -219,13 +216,21 @@ async def _process_job(page, context, job: str, args_js: str) -> Dict[str, Any]:
     if dest.exists():
         res["pdf_path"] = str(dest)
         return res
-    try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        resp = await context.request.get(urljoin(page.url, href))
-        dest.write_bytes(await resp.body())
-        res["pdf_path"] = str(dest)
-    except Exception as e:  # noqa: BLE001
-        log.warning("SO download failed for %s: %s", job, e)
+
+    # Download with a couple of retries — the doc server occasionally times out.
+    url = urljoin(page.url, href)
+    for attempt in (1, 2, 3):
+        try:
+            resp = await context.request.get(url, timeout=60000)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(await resp.body())
+            res["pdf_path"] = str(dest)
+            return res
+        except Exception as e:  # noqa: BLE001
+            if attempt == 3:
+                log.warning("SO download failed for %s after %d tries: %s", job, attempt, e)
+            else:
+                await asyncio.sleep(2 * attempt)
     return res
 
 
@@ -277,7 +282,7 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]]) -> None:
     if not by_job:
         return
 
-    index = _build_autocad_index()
+    index = _find_autocad_folders(list(by_job.keys()))
     log.info("Fetching sales orders for %d jobs (%d parallel)...", len(by_job), SO_CONCURRENCY)
     so_results = asyncio.run(_afetch_all(list(by_job.keys())))
 
