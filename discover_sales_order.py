@@ -1,21 +1,23 @@
-"""Discovery probe #4: can we beat the ~30s detail load?
+"""Inspect ONE job's documents — to confirm how a CHANGE ORDER shows up.
 
-Two unknowns decide the fastest way to grab sales orders:
-  1. Is the document list delivered by a SEPARATE, faster endpoint we could
-     hit directly, or only by the slow NotesPanel postback to dispatch.aspx?
-  2. Is the ~30s a one-time warmup, or does every order cost ~30s?
+Usage:
+    python discover_sales_order.py            # first order on the board
+    python discover_sales_order.py 421314     # a specific job number
 
-This opens the FIRST TWO orders, times each load until that order's documents
-appear, prints the slowest network calls, and identifies which response
-actually carries the 'downloaddoc.aspx' links. Read-only.
+It opens that order's detail modal, lists every document with its parsed
+pid (doctype / internal id / REVISION), highlights the Sales Order revision
+and any change-order ("...CO..." / "change") docs, and downloads the SO.
 
-    python discover_sales_order.py
+This is the signal we'll track to catch change orders: the Sales Order
+revision number and the presence of change-order documents both come straight
+from this list — no PDF parsing needed. Read-only.
 """
 from __future__ import annotations
 
 import logging
 import re
-import time
+import sys
+from urllib.parse import urlparse, parse_qs, urljoin
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
@@ -26,19 +28,38 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("discover")
 
 OUT = OUTPUT_DIR / "so_discovery"
-_STATIC = (".js", ".css", ".png", ".gif", ".jpg", ".jpeg", ".svg", ".woff", ".woff2", ".ico")
+
+# pid looks like "CBC_SalesOrder-32045-3-LATEST" -> type / id / revision / tag.
+PID_RE = re.compile(r"^(?P<type>.+?)-(?P<id>\d+)-(?P<rev>\d+)-(?P<tag>[A-Za-z0-9]+)$")
 
 
 def _jobnum(args_js: str) -> str:
-    """First loadDetail arg is like '421314-0' -> job number '421314'."""
     first = args_js.split(",", 1)[0].strip().strip("'\"")
     return first.split("-", 1)[0]
+
+
+def _parse_doc(href: str) -> dict:
+    """Pull pid + filename out of a downloaddoc.aspx href and split the pid."""
+    q = parse_qs(urlparse(href).query)
+    pid = q.get("pid", [""])[0]
+    fn = q.get("fn", [""])[0]
+    m = PID_RE.match(pid)
+    if m:
+        return {"pid": pid, "fn": fn, "type": m["type"], "id": m["id"], "rev": int(m["rev"])}
+    return {"pid": pid, "fn": fn, "type": pid, "id": "", "rev": None}
+
+
+def _is_change_order(doc: dict) -> bool:
+    t = (doc["type"] or "").lower()
+    f = (doc["fn"] or "").lower()
+    return ("co" in t and "sales" not in t) or "change" in f or "change" in t
 
 
 def main() -> None:
     if not STORAGE_STATE_PATH.exists():
         raise SystemExit(f"No saved session at {STORAGE_STATE_PATH}. Run `python login.py` first.")
     OUT.mkdir(parents=True, exist_ok=True)
+    want_job = sys.argv[1].strip() if len(sys.argv) > 1 else None
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
@@ -57,97 +78,81 @@ def main() -> None:
 
         page.wait_for_selector(CONTAINER_SELECTOR, timeout=30000)
         containers = page.locator(CONTAINER_SELECTOR).all()
-        log.info("Found %d order rows.\n", len(containers))
+        log.info("Found %d order rows.", len(containers))
 
-        # Per-request timing + the responses we'll scan for the doc-list carrier.
-        reqs: dict = {}
-        responses: list = []
-        page.on("request", lambda r: reqs.__setitem__(r, {"url": r.url, "start": time.monotonic(), "end": None}))
-
-        def _finish(r):
-            if r in reqs:
-                reqs[r]["end"] = time.monotonic()
-
-        page.on("requestfinished", _finish)
-        page.on("requestfailed", _finish)
-        page.on("response", responses.append)
-
-        for idx in (0, 1):
-            if idx >= len(containers):
-                break
-            c = containers[idx]
+        # Pick the container: match the requested job number, else the first.
+        chosen, args = None, None
+        for c in containers:
             m = re.search(r"loadDetail\((.*?)\)", c.get_attribute("onclick") or "")
             if not m:
-                log.info("[job %d] no loadDetail() — skipping", idx)
                 continue
-            args = m.group(1).strip()
-            jn = _jobnum(args)
-            log.info("=" * 60)
-            log.info("[job %d] %s — opening detail...", idx, jn)
+            a = m.group(1).strip()
+            if want_job is None or _jobnum(a) == want_job:
+                chosen, args = c, a
+                break
+        if chosen is None:
+            raise SystemExit(
+                f"Job {want_job!r} not found on the board. (It may have dropped off — "
+                "try a job that's currently in the queue, or screenshot its SO instead.)"
+            )
 
-            reqs.clear()
-            responses.clear()
-            t0 = time.monotonic()
+        jn = _jobnum(args)
+        log.info("\nOpening detail for job %s ...", jn)
+        page.evaluate(f"""() => {{
+            if (window.jQuery) {{
+                jQuery('#modalDetail').off('show.bs.modal')
+                    .on('show.bs.modal', function () {{ loadDetail({args}); }})
+                    .modal('show');
+            }} else {{ loadDetail({args}); }}
+        }}""")
 
-            page.evaluate(f"""() => {{
-                if (window.jQuery) {{
-                    jQuery('#modalDetail').off('show.bs.modal')
-                        .on('show.bs.modal', function () {{ loadDetail({args}); }})
-                        .modal('show');
-                }} else {{ loadDetail({args}); }}
-            }}""")
+        so_re = re.compile(re.escape(jn))
+        try:
+            page.locator("#modalDetail a").filter(has_text=so_re).first.wait_for(state="attached", timeout=120000)
+        except PlaywrightTimeout:
+            log.info("Documents didn't appear within 120s.")
 
-            # "Loaded" = this order's own documents (named with its job number)
-            # have appeared in the modal.
-            link = page.locator("#modalDetail a").filter(has_text=re.compile(re.escape(jn)))
+        # Collect + parse every document link.
+        docs = []
+        for a in page.locator("#modalDetail a").all():
+            href = a.get_attribute("href") or ""
+            if "downloaddoc.aspx" not in href.lower():
+                continue
+            docs.append(_parse_doc(href))
+
+        log.info("\n--- Documents for job %s (%d) ---", jn, len(docs))
+        for d in docs:
+            tag = "  <-- CHANGE ORDER" if _is_change_order(d) else ""
+            rev = f"rev {d['rev']}" if d["rev"] is not None else "rev ?"
+            log.info("  %-22s %-6s  %s%s", d["type"], rev, d["fn"][:55], tag)
+
+        sales_orders = [d for d in docs if "salesorder" in (d["type"] or "").lower() and not _is_change_order(d)]
+        change_orders = [d for d in docs if _is_change_order(d)]
+
+        log.info("\n--- Summary ---")
+        if sales_orders:
+            top = max(sales_orders, key=lambda d: d["rev"] or 0)
+            log.info("  Sales Order: %s  (revision %s)", top["fn"], top["rev"])
+        else:
+            log.info("  No Sales Order doc found.")
+        log.info("  Change-order docs: %d %s", len(change_orders),
+                 [d["fn"] for d in change_orders] or "")
+
+        # Download the SO as a sample.
+        so_link = page.locator("#modalDetail a").filter(has_text=re.compile(r"sales order", re.I))
+        if so_link.count() > 0:
+            href = so_link.first.get_attribute("href")
+            full = urljoin(page.url, href)
             try:
-                link.first.wait_for(state="attached", timeout=120000)
-                elapsed = time.monotonic() - t0
-                log.info("[job %d] documents appeared after %.1fs", idx, elapsed)
-            except PlaywrightTimeout:
-                log.info("[job %d] documents did NOT appear within 120s", idx)
+                resp = context.request.get(full)
+                dest = OUT / f"{jn}_sales_order.pdf"
+                dest.write_bytes(resp.body())
+                log.info("\n  Downloaded SO -> %s (%d bytes)", dest, len(resp.body()))
+            except Exception as e:  # noqa: BLE001
+                log.info("\n  SO download failed: %s", e)
 
-            # Slowest network calls during this load.
-            durs = [(info["end"] - info["start"], info["url"])
-                    for info in reqs.values() if info["end"]]
-            durs.sort(reverse=True)
-            log.info("[job %d] slowest network calls:", idx)
-            for dur, url in durs[:5]:
-                log.info("    %6.1fs  %s", dur, url[:110])
-
-            # Which response actually carried the document links?
-            carrier = None
-            for resp in responses:
-                base = resp.url.lower().split("?", 1)[0]
-                if base.endswith(_STATIC):
-                    continue
-                try:
-                    body = resp.text()
-                except Exception:  # noqa: BLE001
-                    continue
-                if "downloaddoc.aspx" in body:
-                    carrier = resp
-                    info = reqs.get(resp.request)
-                    dur = (info["end"] - info["start"]) if info and info["end"] else None
-                    log.info("[job %d] doc-list carrier: %s", idx, resp.url[:110])
-                    log.info("           method=%s  took=%s  bytes=%d",
-                             resp.request.method,
-                             f"{dur:.1f}s" if dur else "?", len(body))
-                    break
-            if carrier is None:
-                log.info("[job %d] couldn't pin the doc-list carrier response.", idx)
-
-            # Close the modal before the next job.
-            page.evaluate("() => { if (window.jQuery) jQuery('#modalDetail').modal('hide'); }")
-            page.wait_for_timeout(1500)
-
-        log.info("\n" + "=" * 60)
-        log.info("READ ME: compare the two jobs' times (warmup vs. always-slow),")
-        log.info("and look at the 'doc-list carrier' line:")
-        log.info("  - if its URL is dispatch.aspx (a POST) and it's the slow call,")
-        log.info("    the 30s is unavoidable per job -> we parallelize.")
-        log.info("  - if it's a SEPARATE fast URL, we can hit that directly per job.")
-        log.info("Paste this whole console output back to me.")
+        log.info("\nPaste the console output back to me — especially the Documents list")
+        log.info("and Summary. That confirms how a change order shows up so I can track it.")
 
         input("\nPress Enter to close the browser... ")
         browser.close()
