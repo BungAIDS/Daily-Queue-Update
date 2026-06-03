@@ -31,6 +31,19 @@ def main() -> None:
     print(f"Report: {path}\n")
     wb = load_workbook(path)
 
+    # AI overview (top of the Changes tab, up to the 'New orders' section).
+    print("AI OVERVIEW")
+    ch = wb["Changes"]
+    for r in range(1, min(ch.max_row, 60) + 1):
+        a = ch.cell(r, 1).value
+        if isinstance(a, str) and a.startswith("New orders"):
+            break
+        rowvals = [str(ch.cell(r, c).value) for c in range(1, 6)
+                   if ch.cell(r, c).value not in (None, "")]
+        if rowvals:
+            print("  " + " | ".join(rowvals))
+    print()
+
     fq = wb["Full Queue"]
     headers = [fq.cell(1, c).value for c in range(1, fq.max_column + 1)]
     idx = {h: i + 1 for i, h in enumerate(headers) if h}
