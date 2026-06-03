@@ -50,6 +50,23 @@ SNAPSHOT_DIR = _output_path("SNAPSHOT_DIR", str(OUTPUT_DIR / "snapshots"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
+# Where downloaded sales-order PDFs are archived (one subfolder per job).
+# Defaults to the Z: drive share; override in .env. A UNC path
+# (\\server\share\...) is recommended for the scheduled task, since a mapped
+# drive letter may not exist for a non-interactive session. NOT created at
+# import — it may be an unmounted network drive when other scripts run, so the
+# downloader creates it on use.
+SALES_ORDER_DIR = _expand_path(
+    (os.environ.get("SALES_ORDER_DIR") or r"Z:\DAG\SALES ORDERS FOR DAILY QUEUE").strip()
+)
+# How many order-detail modals to open in parallel when fetching sales orders.
+# Start modest (one login = one server session, which ASP.NET may serialize);
+# raise it once you see how the server handles the load.
+try:
+    SO_CONCURRENCY = max(1, int(os.environ.get("SO_CONCURRENCY", "8")))
+except ValueError:
+    SO_CONCURRENCY = 8
+
 # Email is sent through your local Outlook desktop app — no password needed.
 # These are just the destination addresses (an address alone isn't sensitive).
 EMAIL_TO = os.environ.get("EMAIL_TO", "")
