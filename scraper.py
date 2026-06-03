@@ -29,7 +29,7 @@ import logging
 import re
 from typing import List, Dict, Any
 
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout, Error as PlaywrightError
 
 from config import CBC_URL, CBC_QUEUE_URL, CBC_WORK_CENTER, STORAGE_STATE_PATH
 
@@ -127,7 +127,26 @@ def scrape_queue(headless: bool = True) -> List[Dict[str, Any]]:
 
         target = CBC_QUEUE_URL or CBC_URL
         log.info("Loading queue with saved session: %s", target)
-        page.goto(target, wait_until="domcontentloaded", timeout=30000)
+        # Retry the initial nav a couple of times — at 5 AM the PC may have just
+        # woken from sleep and the Wi-Fi/VPN may take a moment to come up, which
+        # surfaces as ERR_CONNECTION_TIMED_OUT on the first attempt.
+        import time as _time
+        last_err = None
+        for attempt in (1, 2, 3):
+            try:
+                page.goto(target, wait_until="domcontentloaded", timeout=30000)
+                last_err = None
+                break
+            except (PlaywrightTimeout, PlaywrightError) as e:
+                last_err = e
+                if attempt == 3:
+                    break
+                wait_s = 5 * attempt  # 5s, then 10s
+                log.warning("page.goto attempt %d failed (%s); retrying in %ds",
+                            attempt, type(e).__name__, wait_s)
+                _time.sleep(wait_s)
+        if last_err is not None:
+            raise last_err
         # Best-effort: this app uses AJAX/long-poll, so "networkidle" may never
         # settle. Don't fail the run on it — we gate on the order rows below.
         try:
