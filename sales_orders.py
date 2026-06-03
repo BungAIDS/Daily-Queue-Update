@@ -275,16 +275,37 @@ async def _afetch_all(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
 # --------------------------------------------------------------------------- #
 # Public entry point                                                          #
 # --------------------------------------------------------------------------- #
-def enrich_with_sales_orders(jobs: List[Dict[str, Any]]) -> None:
+def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) -> None:
     """Mutate `jobs` in place, attaching sales-order + folder fields (see module
-    docstring). Opens every job's detail modal in parallel — the slow step."""
+    docstring). Opens every job's detail modal in parallel — the slow step.
+
+    Under heavy parallel load the doc server occasionally lets a modal time out,
+    leaving a job empty. So we make up to `max_passes` passes, re-running only
+    the jobs that came back incomplete; that leftover set is small and far less
+    contended, so the stragglers come through — without changing concurrency.
+    """
     by_job = {j["job"]: j for j in jobs if j.get("job")}
     if not by_job:
         return
 
     index = _find_autocad_folders(list(by_job.keys()))
-    log.info("Fetching sales orders for %d jobs (%d parallel)...", len(by_job), SO_CONCURRENCY)
-    so_results = asyncio.run(_afetch_all(list(by_job.keys())))
+
+    so_results: Dict[str, Dict[str, Any]] = {}
+    todo = list(by_job.keys())
+    for p in range(1, max_passes + 1):
+        log.info("Sales-order fetch pass %d: %d job(s), %d parallel...", p, len(todo), SO_CONCURRENCY)
+        res = asyncio.run(_afetch_all(todo))
+        for k, v in res.items():
+            old = so_results.get(k)
+            # Keep the best result seen: a downloaded pdf beats a bare rev beats nothing.
+            if old is None or (v.get("pdf_path") and not old.get("pdf_path")) \
+                    or (v.get("rev") is not None and old.get("rev") is None):
+                so_results[k] = v
+        todo = [k for k in by_job if not (so_results.get(k) or {}).get("pdf_path")]
+        if not todo:
+            break
+        if p < max_passes:
+            log.info("  %d job(s) still incomplete; retrying those.", len(todo))
 
     n_co = n_dl = 0
     for jn, j in by_job.items():
@@ -313,4 +334,5 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]]) -> None:
             # Fall back to the SO archive folder when there's no AutoCAD folder yet.
             j["job_folder"] = str(SALES_ORDER_DIR / jn) if pdf else ""
 
-    log.info("Sales orders: %d jobs have a SO, %d currently at a change order.", n_dl, n_co)
+    log.info("Sales orders: %d jobs have a SO, %d at a change order, %d still missing a SO.",
+             n_dl, n_co, len(by_job) - n_dl)
