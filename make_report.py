@@ -1,11 +1,13 @@
 """Build the Excel report from a live scrape WITHOUT sending email or touching
 tracking state — handy for a quick demo or a one-off manual report.
 
-    python make_report.py
+    python make_report.py            # includes the AI overview if a key is set
+    python make_report.py --no-ai    # skip Claude even when a key is set
 
-Produces the same workbook the daily run does. If ANTHROPIC_API_KEY is set it
-generates the real AI overview too (otherwise that section is a placeholder) —
-either way it sends no email and writes no snapshot/history.
+Produces the same workbook the daily run does. If ANTHROPIC_API_KEY is set (and
+--no-ai isn't passed) it generates the real AI overview too; otherwise that
+section is a placeholder. Either way it sends no email and writes no
+snapshot/history.
 
 This is READ-ONLY: it does not save today's snapshot or modify history, so you
 can run it as many times as you like without disturbing the official once-a-day
@@ -51,13 +53,17 @@ def main() -> int:
     diff = diff_queues(jobs, yesterday, today, persist_history=False)
 
     # Run the real AI overview if a key is set — still no email, no snapshot.
-    if ANTHROPIC_API_KEY:
+    # Pass --no-ai to skip Claude even when a key is set.
+    no_ai = "--no-ai" in sys.argv
+    if ANTHROPIC_API_KEY and not no_ai:
         print("Generating AI overview via Claude...")
         try:
             briefing = analyze(diff, today, all_jobs=jobs)
         except Exception as e:  # noqa: BLE001
             print(f"(AI analysis failed: {e})")
             briefing = _placeholder(f"(AI analysis failed: {e})")
+    elif no_ai:
+        briefing = _placeholder("(AI overview skipped — ran with --no-ai.)")
     else:
         briefing = _placeholder(
             "(AI overview skipped — set ANTHROPIC_API_KEY in .env to generate it here.)"
