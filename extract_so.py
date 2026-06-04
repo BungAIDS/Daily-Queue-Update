@@ -22,13 +22,26 @@ SPEC_LABELS = {
     "design": "Design", "size": "Size", "arrangement": "Arrangement",
     "motorpos": "MotorPos", "class": "Class", "rotation": "Rotation",
     "discharge": "Discharge", "%width": "%Width", "wheeltype": "WheelType",
+    "designtemp": "DesignTemp", "maxtemp": "MaxTemp",
 }
 SPEC_CELL = re.compile(
-    r"^(Design|Size|Arrangement|MotorPos|Class|Rotation|Discharge|%Width|WheelType)\b\s*(.*)$", re.I
+    r"^(DesignTemp|MaxTemp|Design|Size|Arrangement|MotorPos|Class|Rotation|Discharge|%Width|WheelType)\b\s*(.*)$",
+    re.I,
 )
 SPEC_OUT = [("MotorPos", "motor_pos"), ("Class", "fan_class"), ("Rotation", "rotation"),
-            ("Discharge", "discharge"), ("%Width", "pct_width"), ("WheelType", "wheel_type")]
+            ("Discharge", "discharge"), ("%Width", "pct_width"), ("WheelType", "wheel_type"),
+            ("DesignTemp", "design_temp"), ("MaxTemp", "max_temp")]
 TEMP_RE = re.compile(r"suitable\s*for\s*(-?\d+\s*(?:°\s*[CF]?|[CF]))", re.I)
+
+
+def _special_temp(design_temp: str, max_temp: str, suitable: str) -> str:
+    def _num(s):
+        m = re.search(r"-?\d+", s or "")
+        return int(m.group()) if m else None
+    highs = [t for t in (_num(design_temp), _num(max_temp)) if t is not None]
+    if highs and max(highs) > 150:
+        return str(max(highs))
+    return suitable or "0"
 
 
 def _resolve(arg: str) -> list[Path]:
@@ -101,6 +114,7 @@ def parse(path: Path) -> dict:
     res = {"design": "", "design_desc": "", "size": "", "arrangement": "",
            "motor_pos": "", "fan_class": "", "rotation": "", "discharge": "",
            "pct_width": "", "wheel_type": "", "temp": "",
+           "design_temp": "", "max_temp": "", "special_temp": "0",
            "header_co": None, "change_orders_raw": [], "change_orders_spaced": []}
     with pdfplumber.open(str(path)) as pdf:
         p1 = pdf.pages[0]
@@ -141,6 +155,7 @@ def parse(path: Path) -> dict:
         mt = TEMP_RE.search(raw_all)
         if mt:
             res["temp"] = re.sub(r"\s+", "", mt.group(1))
+        res["special_temp"] = _special_temp(res["design_temp"], res["max_temp"], res["temp"])
     return res
 
 
@@ -168,7 +183,10 @@ def main() -> None:
         print(f"  Discharge    : {r['discharge']}")
         print(f"  % Width      : {r['pct_width']}")
         print(f"  Wheel Type   : {r['wheel_type']}")
-        print(f"  Temp rating  : {r['temp']}")
+        print(f"  Design Temp  : {r['design_temp']}")
+        print(f"  Max Temp     : {r['max_temp']}")
+        print(f"  Suitable-for : {r['temp']}")
+        print(f"  Special Temp : {r['special_temp']}")
         print(f"  Header CO#   : {r['header_co']}")
         print(f"  Change orders ({len(r['change_orders_spaced'])}):")
         print("    -- RAW (no spaces) --")

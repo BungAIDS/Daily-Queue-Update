@@ -50,15 +50,29 @@ SPEC_LABELS = {
     "design": "Design", "size": "Size", "arrangement": "Arrangement",
     "motorpos": "MotorPos", "class": "Class", "rotation": "Rotation",
     "discharge": "Discharge", "%width": "%Width", "wheeltype": "WheelType",
+    "designtemp": "DesignTemp", "maxtemp": "MaxTemp",
 }
 SPEC_CELL = re.compile(
-    r"^(Design|Size|Arrangement|MotorPos|Class|Rotation|Discharge|%Width|WheelType)\b\s*(.*)$", re.I
+    r"^(DesignTemp|MaxTemp|Design|Size|Arrangement|MotorPos|Class|Rotation|Discharge|%Width|WheelType)\b\s*(.*)$",
+    re.I,
 )
 # Special temperature rating, written in the Base Fan line as "Suitable for
 # <temp>" (e.g. "Suitable for -45C", "Suitable for -40°"). Distinct from the
 # DesignTemp/MaxTemp airstream values and the BHP@ reference temp. Requires a
 # degree symbol or C/F unit so it doesn't catch "Suitable for 3600 rpm Motor".
 TEMP_RE = re.compile(r"suitable\s*for\s*(-?\d+\s*(?:°\s*[CF]?|[CF]))", re.I)
+
+
+def _special_temp(design_temp: str, max_temp: str, suitable: str) -> str:
+    """Headline temp: the high airstream temp if Design/Max > 150, else the
+    low 'Suitable for' rating if present, else '0' (a standard-temp fan)."""
+    def _num(s):
+        m = re.search(r"-?\d+", s or "")
+        return int(m.group()) if m else None
+    highs = [t for t in (_num(design_temp), _num(max_temp)) if t is not None]
+    if highs and max(highs) > 150:
+        return str(max(highs))
+    return suitable or "0"
 
 
 # --------------------------------------------------------------------------- #
@@ -149,6 +163,7 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
     """Pull Design/Size/Arrangement + change-order history out of an SO pdf."""
     res = {"design_desc": "", "size": "", "arrangement": "", "motor_pos": "", "fan_class": "",
            "rotation": "", "discharge": "", "pct_width": "", "wheel_type": "", "temp": "",
+           "design_temp": "", "max_temp": "", "special_temp": "0",
            "header_co": None, "co_history": []}
     try:
         import pdfplumber
@@ -183,6 +198,8 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
                     res["discharge"] = spec.get("Discharge", "")
                     res["pct_width"] = spec.get("%Width", "")
                     res["wheel_type"] = spec.get("WheelType", "")
+                    res["design_temp"] = spec.get("DesignTemp", "")
+                    res["max_temp"] = spec.get("MaxTemp", "")
                     break
             for page in pdf.pages:
                 for ln in _recon_lines(page):
@@ -193,6 +210,7 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
             mt = TEMP_RE.search(raw_all)
             if mt:
                 res["temp"] = re.sub(r"\s+", "", mt.group(1))
+            res["special_temp"] = _special_temp(res["design_temp"], res["max_temp"], res["temp"])
     except Exception as e:  # noqa: BLE001 - never let a bad pdf fail the run
         log.warning("Could not parse SO pdf %s: %s", path, e)
     return res
@@ -416,7 +434,9 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
         j["so_discharge"] = parsed.get("discharge", "")
         j["so_pct_width"] = parsed.get("pct_width", "")
         j["so_wheel_type"] = parsed.get("wheel_type", "")
-        j["so_temp"] = parsed.get("temp", "")
+        j["so_design_temp"] = parsed.get("design_temp", "")
+        j["so_max_temp"] = parsed.get("max_temp", "")
+        j["so_special_temp"] = parsed.get("special_temp", "") if pdf else ""
         j["so_pdf"] = pdf or ""
         if pdf:
             n_dl += 1
