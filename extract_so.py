@@ -79,7 +79,13 @@ def parse(path: Path) -> dict:
             if d and not res["design"]:
                 res["design"], res["design_desc"] = d.group(1), d.group(2).strip()
 
-        spec = _spec_from_tables(p1.extract_tables())
+        # Spec row can be pushed to a later page by a long Tag section — scan all.
+        spec = {}
+        for page in pdf.pages:
+            found = _spec_from_tables(page.extract_tables())
+            if found.get("Size") or found.get("Arrangement"):
+                spec = found
+                break
         res["size"] = spec.get("Size", "")
         res["arrangement"] = spec.get("Arrangement", "") or "N/A"
         if not res["design"]:

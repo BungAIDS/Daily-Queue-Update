@@ -126,9 +126,15 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
                 d = DESIGN_HDR.match(ln)
                 if d and not res["design_desc"]:
                     res["design_desc"] = d.group(2).strip()
-            spec = _spec_from_tables(p1.extract_tables())
-            res["size"] = spec.get("Size", "")
-            res["arrangement"] = spec.get("Arrangement", "") or "N/A"
+            # The Qty/Design/Size/Arrangement spec row is normally on page 1, but
+            # a long Tag (nameplate) section can push it onto a later page — so
+            # scan every page until the spec row turns up.
+            for page in pdf.pages:
+                spec = _spec_from_tables(page.extract_tables())
+                if spec.get("Size") or spec.get("Arrangement"):
+                    res["size"] = spec.get("Size", "")
+                    res["arrangement"] = spec.get("Arrangement", "") or "N/A"
+                    break
             for page in pdf.pages:
                 for ln in _recon_lines(page):
                     if CO_START.match(ln):
