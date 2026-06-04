@@ -122,8 +122,9 @@ def parse(path: Path) -> dict:
                 break
         res["size"] = _respace_value(spec.get("Size", ""), recon)
         res["arrangement"] = _respace_value(spec.get("Arrangement", "") or "N/A", recon)
+        # Short codes (DB, CCW, BI, …) taken verbatim — re-spacing would split them.
         for key, field in SPEC_OUT:
-            res[field] = _respace_value(spec.get(key, ""), recon)
+            res[field] = spec.get(key, "")
         if not res["design"]:
             res["design"] = spec.get("Design", "")
 

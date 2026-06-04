@@ -170,12 +170,14 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
                     recon = "\n".join(_recon_lines(page))
                     res["size"] = _respace_value(spec.get("Size", ""), recon)
                     res["arrangement"] = _respace_value(spec.get("Arrangement", "") or "N/A", recon)
-                    res["motor_pos"] = _respace_value(spec.get("MotorPos", ""), recon)
-                    res["fan_class"] = _respace_value(spec.get("Class", ""), recon)
-                    res["rotation"] = _respace_value(spec.get("Rotation", ""), recon)
-                    res["discharge"] = _respace_value(spec.get("Discharge", ""), recon)
-                    res["pct_width"] = _respace_value(spec.get("%Width", ""), recon)
-                    res["wheel_type"] = _respace_value(spec.get("WheelType", ""), recon)
+                    # These six are short codes (DB, CCW, BI, 100, …) — take them
+                    # verbatim; re-spacing would wrongly split e.g. "DB" -> "D B".
+                    res["motor_pos"] = spec.get("MotorPos", "")
+                    res["fan_class"] = spec.get("Class", "")
+                    res["rotation"] = spec.get("Rotation", "")
+                    res["discharge"] = spec.get("Discharge", "")
+                    res["pct_width"] = spec.get("%Width", "")
+                    res["wheel_type"] = spec.get("WheelType", "")
                     break
             for page in pdf.pages:
                 for ln in _recon_lines(page):
