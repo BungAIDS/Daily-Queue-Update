@@ -74,7 +74,7 @@ __OPERATIONS_GLOSSARY__
 
 __ROUTING_GLOSSARY__
 
-When you reference an operation in the briefing, translate the number into its workflow step (e.g. "Op 200 (straight-to-shop drafting)"). Operation is a first-class grouping signal: spotting which operations are loaded heaviest, where bottlenecks may form on a workflow path, and which new orders enter which step are all valuable.
+Refer to operations by their NUMBER ONLY in the briefing (e.g. "Op 200"). Do NOT spell out, translate, or explain what an operation means — no parenthetical like "(straight-to-shop drafting)". Use the glossary above only for your own understanding. Operation is a first-class grouping signal: spotting which operations are loaded heaviest, where bottlenecks may form on a workflow path, and which new orders enter which step are all valuable.
 
 Each day you receive:
   - new orders (never seen before)

@@ -137,7 +137,7 @@ def routing_glossary() -> str:
 def operations_glossary() -> str:
     """Render the glossary as plaintext for inclusion in the AI prompt."""
     lines = [
-        "OPERATION GLOSSARY (translate op numbers into workflow steps when briefing):",
+        "OPERATION GLOSSARY (for your understanding only — in the briefing refer to operations by number, do NOT spell out their meaning):",
     ]
     for code in sorted(OPERATIONS, key=lambda c: int(c)):
         info = OPERATIONS[code]
