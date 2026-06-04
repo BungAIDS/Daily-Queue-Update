@@ -28,12 +28,13 @@ LINK_FONT = Font(color="0563C1", underline="single")  # job-folder hyperlinks
 
 QUEUE_HEADERS = [
     "Status", "Customer", "Primary Rep", "Ship With", "Job #", "Oper", "Item",
-    "Design", "Size", "Arrangement", "CO#", "Assigned To", "Checker",
+    "Design", "Size", "Arrangement", "Motor Pos", "Class", "Rotation",
+    "Discharge", "% Width", "Wheel Type", "CO#", "Assigned To", "Checker",
     "Start Date", "End Date", "Plan Hrs", "FanNet Date", "Total Price",
     "Note", "Flags", "Folder",
 ]
-TOTAL_PRICE_COL = 18  # 1-based column index of Total Price in QUEUE_HEADERS
-FOLDER_COL = 21       # 1-based column index of the Folder hyperlink
+TOTAL_PRICE_COL = 24  # 1-based column index of Total Price in QUEUE_HEADERS
+FOLDER_COL = 27       # 1-based column index of the Folder hyperlink
 
 
 def _flags_str(j: Dict[str, Any]) -> str:
@@ -279,16 +280,22 @@ def _write_job_row(ws, row: int, j: Dict[str, Any], co_changed: bool = False) ->
     ws.cell(row=row, column=8, value=j.get("design", ""))
     ws.cell(row=row, column=9, value=j.get("so_size", ""))
     ws.cell(row=row, column=10, value=j.get("so_arrangement", ""))
-    ws.cell(row=row, column=11, value=_co_label(j))
-    ws.cell(row=row, column=12, value=j.get("assigned_to", ""))
-    ws.cell(row=row, column=13, value=j.get("checker", ""))
-    ws.cell(row=row, column=14, value=j.get("start_date", ""))
-    ws.cell(row=row, column=15, value=j.get("end_date", ""))
-    ws.cell(row=row, column=16, value=j.get("plan_hrs", ""))
-    ws.cell(row=row, column=17, value=j.get("fannet_date", ""))
+    ws.cell(row=row, column=11, value=j.get("so_motor_pos", ""))
+    ws.cell(row=row, column=12, value=j.get("so_class", ""))
+    ws.cell(row=row, column=13, value=j.get("so_rotation", ""))
+    ws.cell(row=row, column=14, value=j.get("so_discharge", ""))
+    ws.cell(row=row, column=15, value=j.get("so_pct_width", ""))
+    ws.cell(row=row, column=16, value=j.get("so_wheel_type", ""))
+    ws.cell(row=row, column=17, value=_co_label(j))
+    ws.cell(row=row, column=18, value=j.get("assigned_to", ""))
+    ws.cell(row=row, column=19, value=j.get("checker", ""))
+    ws.cell(row=row, column=20, value=j.get("start_date", ""))
+    ws.cell(row=row, column=21, value=j.get("end_date", ""))
+    ws.cell(row=row, column=22, value=j.get("plan_hrs", ""))
+    ws.cell(row=row, column=23, value=j.get("fannet_date", ""))
     _write_money_cell(ws, row, TOTAL_PRICE_COL, j.get("total_price", ""))
-    ws.cell(row=row, column=19, value=j.get("status_note", ""))
-    ws.cell(row=row, column=20, value=_flags_str(j))
+    ws.cell(row=row, column=25, value=j.get("status_note", ""))
+    ws.cell(row=row, column=26, value=_flags_str(j))
 
     # Folder hyperlink (AutoCAD job folder, or the SO archive folder as fallback).
     folder = (j.get("job_folder") or "").strip()

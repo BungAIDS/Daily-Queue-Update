@@ -45,7 +45,15 @@ log = logging.getLogger(__name__)
 PID_RE = re.compile(r"^(?P<type>.+?)-(?P<id>\d+)-(?P<rev>\d+)-(?P<tag>[A-Za-z0-9]+)$")
 CO_START = re.compile(r"^\s*C\s*/?\s*O\s*#?\s*\d", re.I)
 DESIGN_HDR = re.compile(r"^\s*Design\s+(\S+)\s*(.*)$")
-SPEC_CELL = re.compile(r"^(Design|Size|Arrangement)\b\s*(.*)$", re.I)
+# Spec-row cells look like "Label value" (e.g. "Size M2", "WheelType BI").
+SPEC_LABELS = {
+    "design": "Design", "size": "Size", "arrangement": "Arrangement",
+    "motorpos": "MotorPos", "class": "Class", "rotation": "Rotation",
+    "discharge": "Discharge", "%width": "%Width", "wheeltype": "WheelType",
+}
+SPEC_CELL = re.compile(
+    r"^(Design|Size|Arrangement|MotorPos|Class|Rotation|Discharge|%Width|WheelType)\b\s*(.*)$", re.I
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -126,7 +134,7 @@ def _spec_from_tables(tables) -> Dict[str, str]:
                     continue
                 m = SPEC_CELL.match(cell.replace("\n", " ").strip())
                 if m:
-                    label, val = m.group(1).title(), m.group(2).strip()
+                    label, val = SPEC_LABELS[m.group(1).lower()], m.group(2).strip()
                     if label not in fields and val:  # first wins (vaneaxial repeats "Design")
                         fields[label] = val
     return fields
@@ -134,7 +142,9 @@ def _spec_from_tables(tables) -> Dict[str, str]:
 
 def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
     """Pull Design/Size/Arrangement + change-order history out of an SO pdf."""
-    res = {"design_desc": "", "size": "", "arrangement": "", "header_co": None, "co_history": []}
+    res = {"design_desc": "", "size": "", "arrangement": "", "motor_pos": "", "fan_class": "",
+           "rotation": "", "discharge": "", "pct_width": "", "wheel_type": "",
+           "header_co": None, "co_history": []}
     try:
         import pdfplumber
     except ImportError:
@@ -160,6 +170,12 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
                     recon = "\n".join(_recon_lines(page))
                     res["size"] = _respace_value(spec.get("Size", ""), recon)
                     res["arrangement"] = _respace_value(spec.get("Arrangement", "") or "N/A", recon)
+                    res["motor_pos"] = _respace_value(spec.get("MotorPos", ""), recon)
+                    res["fan_class"] = _respace_value(spec.get("Class", ""), recon)
+                    res["rotation"] = _respace_value(spec.get("Rotation", ""), recon)
+                    res["discharge"] = _respace_value(spec.get("Discharge", ""), recon)
+                    res["pct_width"] = _respace_value(spec.get("%Width", ""), recon)
+                    res["wheel_type"] = _respace_value(spec.get("WheelType", ""), recon)
                     break
             for page in pdf.pages:
                 for ln in _recon_lines(page):
@@ -382,6 +398,12 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
         j["so_design_desc"] = parsed.get("design_desc", "")
         j["so_size"] = parsed.get("size", "")
         j["so_arrangement"] = parsed.get("arrangement", "")
+        j["so_motor_pos"] = parsed.get("motor_pos", "")
+        j["so_class"] = parsed.get("fan_class", "")
+        j["so_rotation"] = parsed.get("rotation", "")
+        j["so_discharge"] = parsed.get("discharge", "")
+        j["so_pct_width"] = parsed.get("pct_width", "")
+        j["so_wheel_type"] = parsed.get("wheel_type", "")
         j["so_pdf"] = pdf or ""
         if pdf:
             n_dl += 1

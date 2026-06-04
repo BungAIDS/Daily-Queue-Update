@@ -18,7 +18,16 @@ from pathlib import Path
 # A change-order note line: starts with CO#, C/O#, CO #, etc. then a digit.
 CO_START = re.compile(r"^\s*C\s*/?\s*O\s*#?\s*\d", re.I)
 DESIGN_HDR = re.compile(r"^\s*Design\s+(\S+)\s*(.*)$")
-SPEC_CELL = re.compile(r"^(Design|Size|Arrangement)\b\s*(.*)$", re.I)
+SPEC_LABELS = {
+    "design": "Design", "size": "Size", "arrangement": "Arrangement",
+    "motorpos": "MotorPos", "class": "Class", "rotation": "Rotation",
+    "discharge": "Discharge", "%width": "%Width", "wheeltype": "WheelType",
+}
+SPEC_CELL = re.compile(
+    r"^(Design|Size|Arrangement|MotorPos|Class|Rotation|Discharge|%Width|WheelType)\b\s*(.*)$", re.I
+)
+SPEC_OUT = [("MotorPos", "motor_pos"), ("Class", "fan_class"), ("Rotation", "rotation"),
+            ("Discharge", "discharge"), ("%Width", "pct_width"), ("WheelType", "wheel_type")]
 
 
 def _resolve(arg: str) -> list[Path]:
@@ -80,7 +89,7 @@ def _spec_from_tables(tables) -> dict:
                     continue
                 m = SPEC_CELL.match(cell.replace("\n", " ").strip())
                 if m:
-                    label, val = m.group(1).title(), m.group(2).strip()
+                    label, val = SPEC_LABELS[m.group(1).lower()], m.group(2).strip()
                     if label not in fields and val:   # first wins (vaneaxial has a 2nd "Design")
                         fields[label] = val
     return fields
@@ -89,6 +98,8 @@ def _spec_from_tables(tables) -> dict:
 def parse(path: Path) -> dict:
     import pdfplumber
     res = {"design": "", "design_desc": "", "size": "", "arrangement": "",
+           "motor_pos": "", "fan_class": "", "rotation": "", "discharge": "",
+           "pct_width": "", "wheel_type": "",
            "header_co": None, "change_orders_raw": [], "change_orders_spaced": []}
     with pdfplumber.open(str(path)) as pdf:
         p1 = pdf.pages[0]
@@ -111,6 +122,8 @@ def parse(path: Path) -> dict:
                 break
         res["size"] = _respace_value(spec.get("Size", ""), recon)
         res["arrangement"] = _respace_value(spec.get("Arrangement", "") or "N/A", recon)
+        for key, field in SPEC_OUT:
+            res[field] = _respace_value(spec.get(key, ""), recon)
         if not res["design"]:
             res["design"] = spec.get("Design", "")
 
@@ -142,6 +155,12 @@ def main() -> None:
         print(f"  Design       : {r['design']}  ({r['design_desc']})")
         print(f"  Size         : {r['size']}")
         print(f"  Arrangement  : {r['arrangement']}")
+        print(f"  Motor Pos    : {r['motor_pos']}")
+        print(f"  Class        : {r['fan_class']}")
+        print(f"  Rotation     : {r['rotation']}")
+        print(f"  Discharge    : {r['discharge']}")
+        print(f"  % Width      : {r['pct_width']}")
+        print(f"  Wheel Type   : {r['wheel_type']}")
         print(f"  Header CO#   : {r['header_co']}")
         print(f"  Change orders ({len(r['change_orders_spaced'])}):")
         print("    -- RAW (no spaces) --")
