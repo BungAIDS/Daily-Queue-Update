@@ -54,6 +54,11 @@ SPEC_LABELS = {
 SPEC_CELL = re.compile(
     r"^(Design|Size|Arrangement|MotorPos|Class|Rotation|Discharge|%Width|WheelType)\b\s*(.*)$", re.I
 )
+# Special temperature rating, written in the Base Fan line as "Suitable for
+# <temp>" (e.g. "Suitable for -45C", "Suitable for -40°"). Distinct from the
+# DesignTemp/MaxTemp airstream values and the BHP@ reference temp. Requires a
+# degree symbol or C/F unit so it doesn't catch "Suitable for 3600 rpm Motor".
+TEMP_RE = re.compile(r"suitable\s*for\s*(-?\d+\s*(?:°\s*[CF]?|[CF]))", re.I)
 
 
 # --------------------------------------------------------------------------- #
@@ -143,7 +148,7 @@ def _spec_from_tables(tables) -> Dict[str, str]:
 def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
     """Pull Design/Size/Arrangement + change-order history out of an SO pdf."""
     res = {"design_desc": "", "size": "", "arrangement": "", "motor_pos": "", "fan_class": "",
-           "rotation": "", "discharge": "", "pct_width": "", "wheel_type": "",
+           "rotation": "", "discharge": "", "pct_width": "", "wheel_type": "", "temp": "",
            "header_co": None, "co_history": []}
     try:
         import pdfplumber
@@ -183,6 +188,11 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
                 for ln in _recon_lines(page):
                     if CO_START.match(ln):
                         res["co_history"].append(ln.strip())
+            # Special temperature rating from the "Suitable for <temp>" phrase.
+            raw_all = "\n".join((page.extract_text() or "") for page in pdf.pages)
+            mt = TEMP_RE.search(raw_all)
+            if mt:
+                res["temp"] = re.sub(r"\s+", "", mt.group(1))
     except Exception as e:  # noqa: BLE001 - never let a bad pdf fail the run
         log.warning("Could not parse SO pdf %s: %s", path, e)
     return res
@@ -406,6 +416,7 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
         j["so_discharge"] = parsed.get("discharge", "")
         j["so_pct_width"] = parsed.get("pct_width", "")
         j["so_wheel_type"] = parsed.get("wheel_type", "")
+        j["so_temp"] = parsed.get("temp", "")
         j["so_pdf"] = pdf or ""
         if pdf:
             n_dl += 1

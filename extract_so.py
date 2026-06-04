@@ -28,6 +28,7 @@ SPEC_CELL = re.compile(
 )
 SPEC_OUT = [("MotorPos", "motor_pos"), ("Class", "fan_class"), ("Rotation", "rotation"),
             ("Discharge", "discharge"), ("%Width", "pct_width"), ("WheelType", "wheel_type")]
+TEMP_RE = re.compile(r"suitable\s*for\s*(-?\d+\s*(?:°\s*[CF]?|[CF]))", re.I)
 
 
 def _resolve(arg: str) -> list[Path]:
@@ -99,7 +100,7 @@ def parse(path: Path) -> dict:
     import pdfplumber
     res = {"design": "", "design_desc": "", "size": "", "arrangement": "",
            "motor_pos": "", "fan_class": "", "rotation": "", "discharge": "",
-           "pct_width": "", "wheel_type": "",
+           "pct_width": "", "wheel_type": "", "temp": "",
            "header_co": None, "change_orders_raw": [], "change_orders_spaced": []}
     with pdfplumber.open(str(path)) as pdf:
         p1 = pdf.pages[0]
@@ -135,6 +136,11 @@ def parse(path: Path) -> dict:
             for ln in _recon_lines(page):
                 if CO_START.match(ln):
                     res["change_orders_spaced"].append(ln.strip())
+
+        raw_all = "\n".join((page.extract_text() or "") for page in pdf.pages)
+        mt = TEMP_RE.search(raw_all)
+        if mt:
+            res["temp"] = re.sub(r"\s+", "", mt.group(1))
     return res
 
 
@@ -162,6 +168,7 @@ def main() -> None:
         print(f"  Discharge    : {r['discharge']}")
         print(f"  % Width      : {r['pct_width']}")
         print(f"  Wheel Type   : {r['wheel_type']}")
+        print(f"  Temp rating  : {r['temp']}")
         print(f"  Header CO#   : {r['header_co']}")
         print(f"  Change orders ({len(r['change_orders_spaced'])}):")
         print("    -- RAW (no spaces) --")
