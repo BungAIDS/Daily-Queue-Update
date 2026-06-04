@@ -66,6 +66,12 @@ BACKLOG_DIR.mkdir(parents=True, exist_ok=True)
 SALES_ORDER_DIR = _expand_path(
     (os.environ.get("SALES_ORDER_DIR") or r"Z:\DAG\SALES ORDERS FOR DAILY QUEUE").strip()
 )
+# Where downloaded construction/drive-run PDFs are archived (one subfolder per
+# job). Only the highly-custom orders that actually have a CBC_DriveRun document
+# get one. Same conventions as SALES_ORDER_DIR; created on use, not at import.
+DRIVE_RUN_DIR = _expand_path(
+    (os.environ.get("DRIVE_RUN_DIR") or r"Z:\DAG\DRIVE RUNS FOR DAILY QUEUE").strip()
+)
 # How many order-detail modals to open in parallel when fetching sales orders.
 # Start modest (one login = one server session, which ASP.NET may serialize);
 # raise it once you see how the server handles the load.

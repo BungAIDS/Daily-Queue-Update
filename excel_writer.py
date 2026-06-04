@@ -25,6 +25,7 @@ HEADER_FONT = Font(color="FFFFFF", bold=True)
 SECTION_FONT = Font(bold=True, size=12)
 RED_FONT = Font(color="C00000", bold=True)  # rows whose change order landed this run
 LINK_FONT = Font(color="0563C1", underline="single")  # job-folder hyperlinks
+DRIVE_RUN_FONT = Font(color="C55A11", bold=True)  # highly-custom (has a drive run)
 
 QUEUE_HEADERS = [
     "Status", "Customer", "Primary Rep", "Ship With", "Job #", "Oper", "Item",
@@ -32,10 +33,11 @@ QUEUE_HEADERS = [
     "Discharge", "% Width", "Wheel Type", "Design Temp", "Max Temp", "Special Temp",
     "CO#", "Assigned To", "Checker",
     "Start Date", "End Date", "Plan Hrs", "FanNet Date", "Total Price",
-    "Note", "Flags", "Folder",
+    "Note", "Flags", "Drive Run", "Folder",
 ]
 TOTAL_PRICE_COL = 28  # 1-based column index of Total Price in QUEUE_HEADERS
-FOLDER_COL = 31       # 1-based column index of the Folder hyperlink
+DRIVE_RUN_COL = 31    # 1-based column index of the Drive Run (highly-custom) flag
+FOLDER_COL = 32       # 1-based column index of the Folder hyperlink
 
 
 def _flags_str(j: Dict[str, Any]) -> str:
@@ -301,6 +303,11 @@ def _write_job_row(ws, row: int, j: Dict[str, Any], co_changed: bool = False) ->
     _write_money_cell(ws, row, TOTAL_PRICE_COL, j.get("total_price", ""))
     ws.cell(row=row, column=29, value=j.get("status_note", ""))
     ws.cell(row=row, column=30, value=_flags_str(j))
+
+    # Drive Run: YES when a CBC_DriveRun exists -> highly-custom fan.
+    dr_cell = ws.cell(row=row, column=DRIVE_RUN_COL, value="YES" if j.get("has_drive_run") else "")
+    if j.get("has_drive_run"):
+        dr_cell.font = DRIVE_RUN_FONT
 
     # Folder hyperlink (AutoCAD job folder, or the SO archive folder as fallback).
     folder = (j.get("job_folder") or "").strip()
