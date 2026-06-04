@@ -49,6 +49,28 @@ def _recon_lines(page, x_tol: float = 1.5) -> list[str]:
     return lines
 
 
+def _respace_value(value: str, recon_text: str) -> str:
+    """Re-insert spaces table extraction glued out of a value, using the page's
+    word-position reconstruction. Unmatched tokens are left as-is."""
+    if not value:
+        return value
+    chars, idxmap = [], []
+    for i, ch in enumerate(recon_text):
+        if not ch.isspace():
+            chars.append(ch)
+            idxmap.append(i)
+    blob = "".join(chars)
+    out = []
+    for token in value.split():
+        pos = blob.find(token)
+        if pos < 0:
+            out.append(token)
+            continue
+        s, e = idxmap[pos], idxmap[pos + len(token) - 1] + 1
+        out.append(re.sub(r"\s+", " ", recon_text[s:e]).strip())
+    return " ".join(out)
+
+
 def _spec_from_tables(tables) -> dict:
     fields: dict = {}
     for table in tables or []:
@@ -80,14 +102,15 @@ def parse(path: Path) -> dict:
                 res["design"], res["design_desc"] = d.group(1), d.group(2).strip()
 
         # Spec row can be pushed to a later page by a long Tag section — scan all.
-        spec = {}
+        spec, recon = {}, ""
         for page in pdf.pages:
             found = _spec_from_tables(page.extract_tables())
             if found.get("Size") or found.get("Arrangement"):
                 spec = found
+                recon = "\n".join(_recon_lines(page))
                 break
-        res["size"] = spec.get("Size", "")
-        res["arrangement"] = spec.get("Arrangement", "") or "N/A"
+        res["size"] = _respace_value(spec.get("Size", ""), recon)
+        res["arrangement"] = _respace_value(spec.get("Arrangement", "") or "N/A", recon)
         if not res["design"]:
             res["design"] = spec.get("Design", "")
 

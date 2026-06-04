@@ -92,6 +92,31 @@ def _recon_lines(page, x_tol: float = 1.5) -> List[str]:
     return out
 
 
+def _respace_value(value: str, recon_text: str) -> str:
+    """Re-insert spaces that table extraction glued out of a value (e.g.
+    'Flangemount' -> 'Flange mount'), using the page's word-position
+    reconstruction which recovers the small inter-word gaps. Each token is
+    looked up in the despaced recon and replaced with its properly-spaced span;
+    anything not found is left exactly as-is, so this never loses content."""
+    if not value:
+        return value
+    chars, idxmap = [], []
+    for i, ch in enumerate(recon_text):
+        if not ch.isspace():
+            chars.append(ch)
+            idxmap.append(i)
+    blob = "".join(chars)
+    out = []
+    for token in value.split():
+        pos = blob.find(token)
+        if pos < 0:
+            out.append(token)
+            continue
+        s, e = idxmap[pos], idxmap[pos + len(token) - 1] + 1
+        out.append(re.sub(r"\s+", " ", recon_text[s:e]).strip())
+    return " ".join(out)
+
+
 def _spec_from_tables(tables) -> Dict[str, str]:
     fields: Dict[str, str] = {}
     for table in tables or []:
@@ -132,8 +157,9 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
             for page in pdf.pages:
                 spec = _spec_from_tables(page.extract_tables())
                 if spec.get("Size") or spec.get("Arrangement"):
-                    res["size"] = spec.get("Size", "")
-                    res["arrangement"] = spec.get("Arrangement", "") or "N/A"
+                    recon = "\n".join(_recon_lines(page))
+                    res["size"] = _respace_value(spec.get("Size", ""), recon)
+                    res["arrangement"] = _respace_value(spec.get("Arrangement", "") or "N/A", recon)
                     break
             for page in pdf.pages:
                 for ln in _recon_lines(page):
