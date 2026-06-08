@@ -40,8 +40,8 @@ DRIVE_RUN_LINK_FONT = Font(color="C55A11", bold=True, underline="single")  # ^ +
 COLUMNS = [
     ("Job #", "job"),
     ("Folder", "folder"),
-    ("CO#", "co"),
     ("Drive Run", "drive_run"),
+    ("CO#", "co"),
     ("Oper", "oper"),
     ("Design", "design"),
     ("Description", "so_design_desc"),
