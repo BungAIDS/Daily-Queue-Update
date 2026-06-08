@@ -113,11 +113,17 @@ def _write_money_cell(ws, row: int, col: int, raw: str):
     return cell
 
 
-def _autosize(ws, num_cols: int) -> None:
+def _autosize(ws, num_cols: int, skip_cells: set | None = None) -> None:
+    """Size each column to its widest cell. Cells listed in skip_cells (a set of
+    (row, col) tuples) are ignored — used for values we deliberately let overflow
+    into an empty neighbor instead of widening their whole column."""
+    skip_cells = skip_cells or set()
     for col in range(1, num_cols + 1):
         letter = get_column_letter(col)
         max_len = 0
         for cell in ws[letter]:
+            if (cell.row, cell.column) in skip_cells:
+                continue
             val = "" if cell.value is None else str(cell.value)
             max_len = max(max_len, len(val))
         ws.column_dimensions[letter].width = min(max(max_len + 2, 10), 60)
@@ -126,6 +132,7 @@ def _autosize(ws, num_cols: int) -> None:
 def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any],
                        co_changed_ids: set | None = None) -> None:
     co_changed_ids = co_changed_ids or set()
+    overflow: set = set()  # (row, col) cells excluded from autosize so they overrun
     row = 1
 
     # AI Briefing block
@@ -252,11 +259,14 @@ def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any],
         row += 1
     row += 1
 
-    # Orders that have changed
+    # Orders that have changed. Customer spans two columns: it's written in col 2
+    # with col 3 left blank so a long name overflows into it, and the customer
+    # cells are excluded from autosize so they don't force col 2 (shared with the
+    # narrow Folder column in the sections above) wide. Field/Old/New shift right.
     ws.cell(row=row, column=1, value=f"Orders that have changed ({len(diff['changed'])})").font = SECTION_FONT
     row += 1
     if diff["changed"]:
-        for c, h in enumerate(["Job #", "Customer", "Field", "Old value", "New value"], start=1):
+        for c, h in enumerate(["Job #", "Customer", "", "Field", "Old value", "New value"], start=1):
             cell = ws.cell(row=row, column=c, value=h)
             cell.font = HEADER_FONT
             cell.fill = HEADER_FILL
@@ -265,9 +275,10 @@ def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any],
             for (field, old, new) in ch["changes"]:
                 ws.cell(row=row, column=1, value=ch["job"])
                 ws.cell(row=row, column=2, value=ch["customer"])
-                ws.cell(row=row, column=3, value=field)
-                ws.cell(row=row, column=4, value=old)
-                ws.cell(row=row, column=5, value=new)
+                overflow.add((row, 2))  # let the customer name overrun the blank col 3
+                ws.cell(row=row, column=4, value=field)
+                ws.cell(row=row, column=5, value=old)
+                ws.cell(row=row, column=6, value=new)
                 row += 1
     else:
         ws.cell(row=row, column=1, value="(none)")
@@ -296,7 +307,7 @@ def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any],
         ws.cell(row=row, column=1, value="(none)")
         row += 1
 
-    _autosize(ws, num_cols=len(QUEUE_HEADERS))
+    _autosize(ws, num_cols=len(QUEUE_HEADERS), skip_cells=overflow)
 
 
 def _co_label(j: Dict[str, Any]) -> str:
