@@ -24,21 +24,56 @@ HEADER_FILL = PatternFill(start_color="305496", end_color="305496", fill_type="s
 HEADER_FONT = Font(color="FFFFFF", bold=True)
 SECTION_FONT = Font(bold=True, size=12)
 RED_FONT = Font(color="C00000", bold=True)  # rows whose change order landed this run
-LINK_FONT = Font(color="0563C1", underline="single")  # job-folder hyperlinks
+LINK_FONT = Font(color="0563C1", underline="single")  # hyperlinks (Job # -> SO pdf, Folder)
 DRIVE_RUN_FONT = Font(color="C55A11", bold=True)  # highly-custom (has a drive run)
 DRIVE_RUN_LINK_FONT = Font(color="C55A11", bold=True, underline="single")  # ^ + links to the PDF
 
-QUEUE_HEADERS = [
-    "Status", "Customer", "Primary Rep", "Ship With", "Job #", "Oper", "Item",
-    "Design", "Description", "Size", "Arrangement", "Motor Pos", "Class", "Rotation",
-    "Discharge", "% Width", "Wheel Type", "Design Temp", "Max Temp", "Special Temp",
-    "CO#", "Assigned To", "Checker",
-    "Start Date", "End Date", "Plan Hrs", "FanNet Date", "Total Price",
-    "Note", "Flags", "Drive Run", "Folder",
+# Single source of truth for column order. Each entry is (header, key); the key
+# names the job field to print, or a special renderer handled in _write_job_row:
+#   "job"         -> job number, hyperlinked to its Sales Order pdf (Z: drive)
+#   "folder"      -> AutoCAD job folder (or SO archive folder) hyperlink
+#   "co"          -> CO# label
+#   "drive_run"   -> YES, hyperlinked to the drive-run pdf (highly-custom fans)
+#   "total_price" -> money-formatted cell
+#   "flags"       -> flag summary string
+# To reorder the report, reorder this list — everything else follows.
+COLUMNS = [
+    ("Job #", "job"),
+    ("Folder", "folder"),
+    ("CO#", "co"),
+    ("Drive Run", "drive_run"),
+    ("Oper", "oper"),
+    ("Design", "design"),
+    ("Description", "so_design_desc"),
+    ("Size", "so_size"),
+    ("Arrangement", "so_arrangement"),
+    ("Motor Pos", "so_motor_pos"),
+    ("Class", "so_class"),
+    ("Rotation", "so_rotation"),
+    ("Discharge", "so_discharge"),
+    ("% Width", "so_pct_width"),
+    ("Wheel Type", "so_wheel_type"),
+    ("Design Temp", "so_design_temp"),
+    ("Max Temp", "so_max_temp"),
+    ("Special Temp", "so_special_temp"),
+    ("Customer", "customer"),
+    ("Primary Rep", "primary_rep"),
+    ("Assigned To", "assigned_to"),
+    ("Checker", "checker"),
+    ("Start Date", "start_date"),
+    ("End Date", "end_date"),
+    ("FanNet Date", "fannet_date"),
+    ("Item", "item"),
+    ("Plan Hrs", "plan_hrs"),
+    ("Total Price", "total_price"),
+    ("Ship With", "ship_with"),
+    ("Note", "status_note"),
+    ("Flags", "flags"),
+    ("Status", "status"),
 ]
-TOTAL_PRICE_COL = 28  # 1-based column index of Total Price in QUEUE_HEADERS
-DRIVE_RUN_COL = 31    # 1-based column index of the Drive Run (highly-custom) flag
-FOLDER_COL = 32       # 1-based column index of the Folder hyperlink
+QUEUE_HEADERS = [h for h, _ in COLUMNS]
+_COL_IDX = {key: i for i, (_, key) in enumerate(COLUMNS, start=1)}
+TOTAL_PRICE_COL = _COL_IDX["total_price"]  # 1-based; used by the footer total
 
 
 def _flags_str(j: Dict[str, Any]) -> str:
@@ -82,11 +117,17 @@ def _write_money_cell(ws, row: int, col: int, raw: str):
     return cell
 
 
-def _autosize(ws, num_cols: int) -> None:
+def _autosize(ws, num_cols: int, skip_cells: set | None = None) -> None:
+    """Size each column to its widest cell. Cells listed in skip_cells (a set of
+    (row, col) tuples) are ignored — used for values we deliberately let overflow
+    into an empty neighbor instead of widening their whole column."""
+    skip_cells = skip_cells or set()
     for col in range(1, num_cols + 1):
         letter = get_column_letter(col)
         max_len = 0
         for cell in ws[letter]:
+            if (cell.row, cell.column) in skip_cells:
+                continue
             val = "" if cell.value is None else str(cell.value)
             max_len = max(max_len, len(val))
         ws.column_dimensions[letter].width = min(max(max_len + 2, 10), 60)
@@ -95,6 +136,7 @@ def _autosize(ws, num_cols: int) -> None:
 def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any],
                        co_changed_ids: set | None = None) -> None:
     co_changed_ids = co_changed_ids or set()
+    overflow: set = set()  # (row, col) cells excluded from autosize so they overrun
     row = 1
 
     # AI Briefing block
@@ -152,6 +194,38 @@ def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any],
         row += 1
     row += 1
 
+    # Change orders that landed this run (CO# rose since yesterday, including
+    # jobs that came back at a higher CO#). Placed right under New orders.
+    co_changed = list(diff.get("co_changed", []))
+    for j in diff.get("returning", []):
+        cr = j.get("_co_returned")
+        if cr:
+            co_changed.append({"job": j.get("job"), "customer": j.get("customer", ""),
+                               "old_co": cr["old_co"], "new_co": cr["new_co"],
+                               "co_history": j.get("co_history", []), "_returned": True})
+    ws.cell(row=row, column=1, value=f"Change orders this run ({len(co_changed)})").font = SECTION_FONT
+    row += 1
+    if co_changed:
+        for c, h in enumerate(["Job #", "Customer", "Change", "Latest change-order note"], start=1):
+            cell = ws.cell(row=row, column=c, value=h)
+            cell.font = HEADER_FONT
+            cell.fill = HEADER_FILL
+        row += 1
+        for c in co_changed:
+            arrow = f"CO#{c['old_co']} -> CO#{c['new_co']}"
+            if c.get("_returned"):
+                arrow += " (returned)"
+            note = c["co_history"][0] if c.get("co_history") else ""
+            ws.cell(row=row, column=1, value=c["job"]).font = RED_FONT
+            ws.cell(row=row, column=2, value=c["customer"]).font = RED_FONT
+            ws.cell(row=row, column=3, value=arrow).font = RED_FONT
+            ws.cell(row=row, column=4, value=note).font = RED_FONT
+            row += 1
+    else:
+        ws.cell(row=row, column=1, value="(none)")
+        row += 1
+    row += 1
+
     # Returning orders (came back from history)
     returning = diff.get("returning", [])
     ws.cell(row=row, column=1, value=f"Returning orders — back from history ({len(returning)})").font = SECTION_FONT
@@ -189,11 +263,14 @@ def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any],
         row += 1
     row += 1
 
-    # Changed
-    ws.cell(row=row, column=1, value=f"Changed orders ({len(diff['changed'])})").font = SECTION_FONT
+    # Orders that have changed. Customer spans two columns: it's written in col 2
+    # with col 3 left blank so a long name overflows into it, and the customer
+    # cells are excluded from autosize so they don't force col 2 (shared with the
+    # narrow Folder column in the sections above) wide. Field/Old/New shift right.
+    ws.cell(row=row, column=1, value=f"Orders that have changed ({len(diff['changed'])})").font = SECTION_FONT
     row += 1
     if diff["changed"]:
-        for c, h in enumerate(["Job #", "Customer", "Field", "Old value", "New value"], start=1):
+        for c, h in enumerate(["Job #", "Customer", "", "Field", "Old value", "New value"], start=1):
             cell = ws.cell(row=row, column=c, value=h)
             cell.font = HEADER_FONT
             cell.fill = HEADER_FILL
@@ -202,42 +279,11 @@ def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any],
             for (field, old, new) in ch["changes"]:
                 ws.cell(row=row, column=1, value=ch["job"])
                 ws.cell(row=row, column=2, value=ch["customer"])
-                ws.cell(row=row, column=3, value=field)
-                ws.cell(row=row, column=4, value=old)
-                ws.cell(row=row, column=5, value=new)
+                overflow.add((row, 2))  # let the customer name overrun the blank col 3
+                ws.cell(row=row, column=4, value=field)
+                ws.cell(row=row, column=5, value=old)
+                ws.cell(row=row, column=6, value=new)
                 row += 1
-    else:
-        ws.cell(row=row, column=1, value="(none)")
-        row += 1
-    row += 1
-
-    # Change orders that landed this run (CO# rose since yesterday, including
-    # jobs that came back at a higher CO#).
-    co_changed = list(diff.get("co_changed", []))
-    for j in diff.get("returning", []):
-        cr = j.get("_co_returned")
-        if cr:
-            co_changed.append({"job": j.get("job"), "customer": j.get("customer", ""),
-                               "old_co": cr["old_co"], "new_co": cr["new_co"],
-                               "co_history": j.get("co_history", []), "_returned": True})
-    ws.cell(row=row, column=1, value=f"Change orders this run ({len(co_changed)})").font = SECTION_FONT
-    row += 1
-    if co_changed:
-        for c, h in enumerate(["Job #", "Customer", "Change", "Latest change-order note"], start=1):
-            cell = ws.cell(row=row, column=c, value=h)
-            cell.font = HEADER_FONT
-            cell.fill = HEADER_FILL
-        row += 1
-        for c in co_changed:
-            arrow = f"CO#{c['old_co']} -> CO#{c['new_co']}"
-            if c.get("_returned"):
-                arrow += " (returned)"
-            note = c["co_history"][0] if c.get("co_history") else ""
-            ws.cell(row=row, column=1, value=c["job"]).font = RED_FONT
-            ws.cell(row=row, column=2, value=c["customer"]).font = RED_FONT
-            ws.cell(row=row, column=3, value=arrow).font = RED_FONT
-            ws.cell(row=row, column=4, value=note).font = RED_FONT
-            row += 1
     else:
         ws.cell(row=row, column=1, value="(none)")
         row += 1
@@ -265,7 +311,7 @@ def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any],
         ws.cell(row=row, column=1, value="(none)")
         row += 1
 
-    _autosize(ws, num_cols=len(QUEUE_HEADERS))
+    _autosize(ws, num_cols=len(QUEUE_HEADERS), skip_cells=overflow)
 
 
 def _co_label(j: Dict[str, Any]) -> str:
@@ -274,62 +320,49 @@ def _co_label(j: Dict[str, Any]) -> str:
 
 
 def _write_job_row(ws, row: int, j: Dict[str, Any], co_changed: bool = False) -> None:
-    ws.cell(row=row, column=1, value=j.get("status", ""))
-    ws.cell(row=row, column=2, value=j.get("customer", ""))
-    ws.cell(row=row, column=3, value=j.get("primary_rep", ""))
-    ws.cell(row=row, column=4, value=j.get("ship_with", ""))
-    ws.cell(row=row, column=5, value=j.get("job", ""))
-    ws.cell(row=row, column=6, value=j.get("oper", ""))
-    ws.cell(row=row, column=7, value=j.get("item", ""))
-    ws.cell(row=row, column=8, value=j.get("design", ""))
-    ws.cell(row=row, column=9, value=j.get("so_design_desc", ""))
-    ws.cell(row=row, column=10, value=j.get("so_size", ""))
-    ws.cell(row=row, column=11, value=j.get("so_arrangement", ""))
-    ws.cell(row=row, column=12, value=j.get("so_motor_pos", ""))
-    ws.cell(row=row, column=13, value=j.get("so_class", ""))
-    ws.cell(row=row, column=14, value=j.get("so_rotation", ""))
-    ws.cell(row=row, column=15, value=j.get("so_discharge", ""))
-    ws.cell(row=row, column=16, value=j.get("so_pct_width", ""))
-    ws.cell(row=row, column=17, value=j.get("so_wheel_type", ""))
-    ws.cell(row=row, column=18, value=j.get("so_design_temp", ""))
-    ws.cell(row=row, column=19, value=j.get("so_max_temp", ""))
-    ws.cell(row=row, column=20, value=j.get("so_special_temp", ""))
-    ws.cell(row=row, column=21, value=_co_label(j))
-    ws.cell(row=row, column=22, value=j.get("assigned_to", ""))
-    ws.cell(row=row, column=23, value=j.get("checker", ""))
-    ws.cell(row=row, column=24, value=j.get("start_date", ""))
-    ws.cell(row=row, column=25, value=j.get("end_date", ""))
-    ws.cell(row=row, column=26, value=j.get("plan_hrs", ""))
-    ws.cell(row=row, column=27, value=j.get("fannet_date", ""))
-    _write_money_cell(ws, row, TOTAL_PRICE_COL, j.get("total_price", ""))
-    ws.cell(row=row, column=29, value=j.get("status_note", ""))
-    ws.cell(row=row, column=30, value=_flags_str(j))
-
-    # Drive Run: a CBC_DriveRun marks a highly-custom fan. Link the cell to the
-    # archived drive-run PDF when we have it; otherwise just flag YES.
-    dr_pdf = (j.get("drive_run_pdf") or "").strip()
-    dr_cell = ws.cell(row=row, column=DRIVE_RUN_COL, value="YES" if j.get("has_drive_run") else "")
-    if dr_pdf:
-        dr_cell.hyperlink = dr_pdf
-        dr_cell.font = DRIVE_RUN_LINK_FONT
-    elif j.get("has_drive_run"):
-        dr_cell.font = DRIVE_RUN_FONT
-
-    # Folder hyperlink (AutoCAD job folder, or the SO archive folder as fallback).
-    folder = (j.get("job_folder") or "").strip()
-    fcell = ws.cell(row=row, column=FOLDER_COL, value=(j.get("job_type") or "Open") if folder else "")
-    if folder:
-        fcell.hyperlink = folder
-        fcell.font = LINK_FONT
+    linked_cols = set()  # hyperlink cells keep their link style, not red
+    for col, (_header, key) in enumerate(COLUMNS, start=1):
+        if key == "job":
+            cell = ws.cell(row=row, column=col, value=j.get("job", ""))
+            # Job # links to its Sales Order pdf on the Z: drive (when we have one).
+            so_pdf = (j.get("so_pdf") or "").strip()
+            if so_pdf and j.get("job"):
+                cell.hyperlink = so_pdf
+                cell.font = LINK_FONT
+                linked_cols.add(col)
+        elif key == "folder":
+            # AutoCAD job folder, or the SO archive folder as fallback.
+            folder = (j.get("job_folder") or "").strip()
+            cell = ws.cell(row=row, column=col, value=(j.get("job_type") or "Open") if folder else "")
+            if folder:
+                cell.hyperlink = folder
+                cell.font = LINK_FONT
+                linked_cols.add(col)
+        elif key == "co":
+            ws.cell(row=row, column=col, value=_co_label(j))
+        elif key == "drive_run":
+            # YES for a highly-custom fan, linked to the archived drive-run pdf.
+            dr_pdf = (j.get("drive_run_pdf") or "").strip()
+            cell = ws.cell(row=row, column=col, value="YES" if j.get("has_drive_run") else "")
+            if dr_pdf:
+                cell.hyperlink = dr_pdf
+                cell.font = DRIVE_RUN_LINK_FONT
+                linked_cols.add(col)
+            elif j.get("has_drive_run"):
+                cell.font = DRIVE_RUN_FONT
+        elif key == "total_price":
+            _write_money_cell(ws, row, col, j.get("total_price", ""))
+        elif key == "flags":
+            ws.cell(row=row, column=col, value=_flags_str(j))
+        else:
+            ws.cell(row=row, column=col, value=j.get(key, ""))
 
     # A change order that landed this run -> the whole row's text goes red,
-    # but hyperlinked cells (the Folder link, and a linked Drive Run) keep theirs.
+    # except the hyperlink cells, which keep their link style.
     if co_changed:
-        for c in range(1, FOLDER_COL):  # the Folder link sits at FOLDER_COL, outside this range
-            cell = ws.cell(row=row, column=c)
-            if cell.hyperlink:
-                continue
-            cell.font = RED_FONT
+        for col in range(1, len(COLUMNS) + 1):
+            if col not in linked_cols:
+                ws.cell(row=row, column=col).font = RED_FONT
 
 
 def _write_full_queue_tab(
@@ -382,7 +415,7 @@ def _write_full_queue_tab(
         last_col = get_column_letter(len(QUEUE_HEADERS))
         ws.auto_filter.ref = f"A1:{last_col}{len(jobs) + 1}"
 
-    ws.freeze_panes = "A2"
+    ws.freeze_panes = "B2"  # keep the header row AND the Job # column visible
     _autosize(ws, num_cols=len(QUEUE_HEADERS))
 
 
@@ -397,7 +430,7 @@ def _write_history_tab(ws, history: Dict[str, Any]) -> None:
     if not history:
         ws.cell(row=2, column=1,
                 value="(no archived orders yet — a job appears here after it drops off the queue)")
-        ws.freeze_panes = "A2"
+        ws.freeze_panes = "B2"  # keep the header row AND the Job # column visible
         _autosize(ws, num_cols=len(headers))
         return
 
@@ -408,7 +441,7 @@ def _write_history_tab(ws, history: Dict[str, Any]) -> None:
 
     last_col = get_column_letter(len(headers))
     ws.auto_filter.ref = f"A1:{last_col}{len(entries) + 1}"
-    ws.freeze_panes = "A2"
+    ws.freeze_panes = "B2"  # keep the header row AND the Job # column visible
     _autosize(ws, num_cols=len(headers))
 
 
