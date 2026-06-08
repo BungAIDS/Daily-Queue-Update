@@ -24,18 +24,52 @@ HEADER_FILL = PatternFill(start_color="305496", end_color="305496", fill_type="s
 HEADER_FONT = Font(color="FFFFFF", bold=True)
 SECTION_FONT = Font(bold=True, size=12)
 RED_FONT = Font(color="C00000", bold=True)  # rows whose change order landed this run
-LINK_FONT = Font(color="0563C1", underline="single")  # job-folder hyperlinks
+LINK_FONT = Font(color="0563C1", underline="single")  # hyperlinks (Job # -> SO pdf, Folder)
 
-QUEUE_HEADERS = [
-    "Status", "Customer", "Primary Rep", "Ship With", "Job #", "Oper", "Item",
-    "Design", "Description", "Size", "Arrangement", "Motor Pos", "Class", "Rotation",
-    "Discharge", "% Width", "Wheel Type", "Design Temp", "Max Temp", "Special Temp",
-    "CO#", "Assigned To", "Checker",
-    "Start Date", "End Date", "Plan Hrs", "FanNet Date", "Total Price",
-    "Note", "Flags", "Folder",
+# Single source of truth for column order. Each entry is (header, key); the key
+# names the job field to print, or a special renderer handled in _write_job_row:
+#   "job"         -> job number, hyperlinked to its Sales Order pdf (Z: drive)
+#   "folder"      -> AutoCAD job folder (or SO archive folder) hyperlink
+#   "co"          -> CO# label
+#   "total_price" -> money-formatted cell
+#   "flags"       -> flag summary string
+# To reorder the report, reorder this list — everything else follows.
+COLUMNS = [
+    ("Job #", "job"),
+    ("Folder", "folder"),
+    ("CO#", "co"),
+    ("Oper", "oper"),
+    ("Design", "design"),
+    ("Description", "so_design_desc"),
+    ("Size", "so_size"),
+    ("Arrangement", "so_arrangement"),
+    ("Motor Pos", "so_motor_pos"),
+    ("Class", "so_class"),
+    ("Rotation", "so_rotation"),
+    ("Discharge", "so_discharge"),
+    ("% Width", "so_pct_width"),
+    ("Wheel Type", "so_wheel_type"),
+    ("Design Temp", "so_design_temp"),
+    ("Max Temp", "so_max_temp"),
+    ("Special Temp", "so_special_temp"),
+    ("Customer", "customer"),
+    ("Primary Rep", "primary_rep"),
+    ("Assigned To", "assigned_to"),
+    ("Checker", "checker"),
+    ("Start Date", "start_date"),
+    ("End Date", "end_date"),
+    ("FanNet Date", "fannet_date"),
+    ("Item", "item"),
+    ("Plan Hrs", "plan_hrs"),
+    ("Total Price", "total_price"),
+    ("Ship With", "ship_with"),
+    ("Note", "status_note"),
+    ("Flags", "flags"),
+    ("Status", "status"),
 ]
-TOTAL_PRICE_COL = 28  # 1-based column index of Total Price in QUEUE_HEADERS
-FOLDER_COL = 31       # 1-based column index of the Folder hyperlink
+QUEUE_HEADERS = [h for h, _ in COLUMNS]
+_COL_IDX = {key: i for i, (_, key) in enumerate(COLUMNS, start=1)}
+TOTAL_PRICE_COL = _COL_IDX["total_price"]  # 1-based; used by the footer total
 
 
 def _flags_str(j: Dict[str, Any]) -> str:
@@ -271,48 +305,39 @@ def _co_label(j: Dict[str, Any]) -> str:
 
 
 def _write_job_row(ws, row: int, j: Dict[str, Any], co_changed: bool = False) -> None:
-    ws.cell(row=row, column=1, value=j.get("status", ""))
-    ws.cell(row=row, column=2, value=j.get("customer", ""))
-    ws.cell(row=row, column=3, value=j.get("primary_rep", ""))
-    ws.cell(row=row, column=4, value=j.get("ship_with", ""))
-    ws.cell(row=row, column=5, value=j.get("job", ""))
-    ws.cell(row=row, column=6, value=j.get("oper", ""))
-    ws.cell(row=row, column=7, value=j.get("item", ""))
-    ws.cell(row=row, column=8, value=j.get("design", ""))
-    ws.cell(row=row, column=9, value=j.get("so_design_desc", ""))
-    ws.cell(row=row, column=10, value=j.get("so_size", ""))
-    ws.cell(row=row, column=11, value=j.get("so_arrangement", ""))
-    ws.cell(row=row, column=12, value=j.get("so_motor_pos", ""))
-    ws.cell(row=row, column=13, value=j.get("so_class", ""))
-    ws.cell(row=row, column=14, value=j.get("so_rotation", ""))
-    ws.cell(row=row, column=15, value=j.get("so_discharge", ""))
-    ws.cell(row=row, column=16, value=j.get("so_pct_width", ""))
-    ws.cell(row=row, column=17, value=j.get("so_wheel_type", ""))
-    ws.cell(row=row, column=18, value=j.get("so_design_temp", ""))
-    ws.cell(row=row, column=19, value=j.get("so_max_temp", ""))
-    ws.cell(row=row, column=20, value=j.get("so_special_temp", ""))
-    ws.cell(row=row, column=21, value=_co_label(j))
-    ws.cell(row=row, column=22, value=j.get("assigned_to", ""))
-    ws.cell(row=row, column=23, value=j.get("checker", ""))
-    ws.cell(row=row, column=24, value=j.get("start_date", ""))
-    ws.cell(row=row, column=25, value=j.get("end_date", ""))
-    ws.cell(row=row, column=26, value=j.get("plan_hrs", ""))
-    ws.cell(row=row, column=27, value=j.get("fannet_date", ""))
-    _write_money_cell(ws, row, TOTAL_PRICE_COL, j.get("total_price", ""))
-    ws.cell(row=row, column=29, value=j.get("status_note", ""))
-    ws.cell(row=row, column=30, value=_flags_str(j))
+    linked_cols = set()  # hyperlink cells keep their link style, not red
+    for col, (_header, key) in enumerate(COLUMNS, start=1):
+        if key == "job":
+            cell = ws.cell(row=row, column=col, value=j.get("job", ""))
+            # Job # links to its Sales Order pdf on the Z: drive (when we have one).
+            so_pdf = (j.get("so_pdf") or "").strip()
+            if so_pdf and j.get("job"):
+                cell.hyperlink = so_pdf
+                cell.font = LINK_FONT
+                linked_cols.add(col)
+        elif key == "folder":
+            # AutoCAD job folder, or the SO archive folder as fallback.
+            folder = (j.get("job_folder") or "").strip()
+            cell = ws.cell(row=row, column=col, value=(j.get("job_type") or "Open") if folder else "")
+            if folder:
+                cell.hyperlink = folder
+                cell.font = LINK_FONT
+                linked_cols.add(col)
+        elif key == "co":
+            ws.cell(row=row, column=col, value=_co_label(j))
+        elif key == "total_price":
+            _write_money_cell(ws, row, col, j.get("total_price", ""))
+        elif key == "flags":
+            ws.cell(row=row, column=col, value=_flags_str(j))
+        else:
+            ws.cell(row=row, column=col, value=j.get(key, ""))
 
-    # Folder hyperlink (AutoCAD job folder, or the SO archive folder as fallback).
-    folder = (j.get("job_folder") or "").strip()
-    fcell = ws.cell(row=row, column=FOLDER_COL, value=(j.get("job_type") or "Open") if folder else "")
-    if folder:
-        fcell.hyperlink = folder
-        fcell.font = LINK_FONT
-
-    # A change order that landed this run -> the whole row's text goes red.
+    # A change order that landed this run -> the whole row's text goes red,
+    # except the hyperlink cells, which keep their link style.
     if co_changed:
-        for c in range(1, FOLDER_COL):  # leave the hyperlink cell its link style
-            ws.cell(row=row, column=c).font = RED_FONT
+        for col in range(1, len(COLUMNS) + 1):
+            if col not in linked_cols:
+                ws.cell(row=row, column=col).font = RED_FONT
 
 
 def _write_full_queue_tab(
