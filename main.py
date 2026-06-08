@@ -51,6 +51,11 @@ _AI_PENDING = {
 }
 
 
+class StageNotReady(Exception):
+    """A staged run was invoked before the stage it depends on. This is operator
+    error, not a system failure, so main() reports it without emailing an alert."""
+
+
 def setup_logging() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -115,7 +120,7 @@ def _build_excel(jobs: list, diff: dict, briefing: dict, today: date) -> Path:
 
 def _require(value, what: str, hint: str):
     if value is None:
-        raise RuntimeError(f"No saved {what} for today — {hint}")
+        raise StageNotReady(f"No saved {what} for today — {hint}")
     return value
 
 
@@ -149,7 +154,7 @@ def run_mail_only(today: date) -> None:
     briefing = _require(load_briefing(today), "briefing", "run `python main.py --ai-only` first.")
     excel_path = _require(load_excel_path(today), "Excel report", "run `python main.py --no-ai` first.")
     if not excel_path.exists():
-        raise RuntimeError(f"Saved Excel path no longer exists: {excel_path} — re-run --no-ai.")
+        raise StageNotReady(f"Saved Excel path no longer exists: {excel_path} — re-run --no-ai.")
     send_daily_briefing(briefing, diff, excel_path, today.isoformat())
     log.info("Email sent.")
 
@@ -184,6 +189,12 @@ def main() -> int:
 
         log.info("=== Done ===")
         return 0
+
+    except StageNotReady as e:
+        # Operator ran a stage before its prerequisite — not a real failure, so
+        # report it plainly and skip the alert email (don't spam the team).
+        log.error("%s", e)
+        return 1
 
     except Exception:
         log.exception("Daily queue run failed")
