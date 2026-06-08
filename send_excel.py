@@ -1,24 +1,28 @@
-"""Email an existing Excel report as-is — no scrape, no diff, no AI, no stages.
+"""Email an existing Excel report — no scrape, no diff, no AI, no stages.
 
-    python send_excel.py                          # newest queue_*.xlsx in OUTPUT_DIR
-    python send_excel.py "C:\\path\\queue_2026-06-08.xlsx"
+    python send_excel.py                 # newest report that HAS an AI overview
+    python send_excel.py --dry-run       # show what would be sent, send nothing
+    python send_excel.py "C:\\path\\queue_2026-06-08.xlsx"   # send a specific file
 
 Use this when you already have a report you're happy with and just want it in
 your inbox. It regenerates nothing.
 
-The email is built to be identical to a normal daily run's: the briefing text,
-anomalies, action items, and the counts line are read back out of the report's
-Changes tab and sent through the same emailer the daily run uses, with the
-workbook attached. (If anything about the sheet can't be parsed, it still sends
-the file with a short body rather than failing.)
+With no path, it scans OUTPUT_DIR and picks the most recent report that actually
+contains an AI overview — so a later "no-AI" report (e.g. from `main.py --no-ai`)
+won't be sent by mistake. It prints the folder it searched and the full path it
+chose, so you can always see exactly which file went out.
+
+The email is rebuilt to match a normal daily run exactly: the briefing text,
+anomalies, action items, and counts line are read back out of the Changes tab
+and sent through the same emailer the daily run uses, with the workbook attached.
 """
 from __future__ import annotations
 
 import re
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 from openpyxl import load_workbook
 
@@ -35,18 +39,31 @@ _SECTIONS = [
     ("Persistent orders", "persistent"),
 ]
 
+# Markers that mean a report's "AI Briefing" is a placeholder, not real output
+# (no API key, AI stage not run yet, API failed, etc.).
+_PLACEHOLDER_MARKERS = (
+    "skip", "not generated", "unavailable", "no briefing",
+    "no anthropic", "failed", "in the attached report",
+)
 
-def _latest() -> Path:
-    files = sorted(OUTPUT_DIR.glob("queue_*.xlsx"), key=lambda p: p.stat().st_mtime)
-    if not files:
-        raise SystemExit(f"No queue_*.xlsx found in {OUTPUT_DIR}")
-    return files[-1]
+
+def _candidates() -> List[Path]:
+    """All reports in OUTPUT_DIR, newest (by save time) first."""
+    return sorted(OUTPUT_DIR.glob("queue_*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
 
 
 def _report_date(path: Path) -> str:
     """The date in the filename (queue_YYYY-MM-DD.xlsx), else today."""
     m = re.search(r"\d{4}-\d{2}-\d{2}", path.stem)
     return m.group(0) if m else date.today().isoformat()
+
+
+def _is_placeholder(briefing_text: str) -> bool:
+    t = (briefing_text or "").strip().lower()
+    if not t:
+        return True
+    # Real briefings are prose; placeholders are short parenthesized notes.
+    return t.startswith("(") and any(m in t for m in _PLACEHOLDER_MARKERS)
 
 
 def _parse_changes_tab(path: Path) -> Tuple[Dict[str, Any], Dict[str, int]]:
@@ -101,30 +118,82 @@ def _parse_changes_tab(path: Path) -> Tuple[Dict[str, Any], Dict[str, int]]:
     return briefing, counts
 
 
+def _select() -> Tuple[Path, Dict[str, Any], Dict[str, int], bool]:
+    """Pick the report to send: the most recent one that has a real AI overview,
+    falling back to the most recent overall if none do. Returns
+    (path, briefing, counts, has_ai)."""
+    cands = _candidates()
+    if not cands:
+        raise SystemExit(f"No queue_*.xlsx found in {OUTPUT_DIR}")
+
+    newest_fallback = None
+    for p in cands:  # newest first
+        try:
+            briefing, counts = _parse_changes_tab(p)
+        except Exception:
+            continue
+        has_ai = not _is_placeholder(briefing["briefing"])
+        if newest_fallback is None:
+            newest_fallback = (p, briefing, counts, has_ai)
+        if has_ai:
+            return p, briefing, counts, True
+
+    # Nothing parsed at all -> use the newest file with empty briefing.
+    if newest_fallback is None:
+        p = cands[0]
+        return p, {"briefing": "(briefing in the attached report)", "anomalies": [], "action_items": []}, {}, False
+    return newest_fallback
+
+
+def _send_report(path: Path, briefing: Dict[str, Any], counts: Dict[str, int]) -> None:
+    # send_daily_briefing only needs each section's length, so size throwaway
+    # lists to the parsed counts — the email's "Counts:" line then matches.
+    diff = {k: [None] * counts.get(k, 0)
+            for k in ("new", "returning", "removed", "changed", "persistent")}
+    try:
+        send_daily_briefing(briefing, diff, path, _report_date(path))
+    except Exception as e:  # never fail to send just because parsing drifted
+        print(f"(Could not rebuild the full briefing body: {e}; sending file with a short note.)")
+        _send(EMAIL_TO, f"Daily Queue Briefing — {_report_date(path)}",
+              f"Daily queue report attached: {path.name}", attachment=path)
+
+
 def main() -> int:
     if not EMAIL_TO:
         print("EMAIL_TO is not set in .env — nothing to send to.")
         return 1
 
-    path = Path(sys.argv[1]) if len(sys.argv) > 1 else _latest()
-    if not path.exists():
-        print(f"File not found: {path}")
-        return 1
+    dry_run = "--dry-run" in sys.argv
+    paths = [a for a in sys.argv[1:] if not a.startswith("--")]
 
-    report_date = _report_date(path)
-    try:
-        briefing, counts = _parse_changes_tab(path)
-        # send_daily_briefing only needs each section's length, so size throwaway
-        # lists to the parsed counts — the email's "Counts:" line then matches.
-        diff = {k: [None] * counts.get(k, 0)
-                for k in ("new", "returning", "removed", "changed", "persistent")}
-        send_daily_briefing(briefing, diff, path, report_date)
-    except Exception as e:  # never fail to send just because parsing drifted
-        print(f"(Could not rebuild the full briefing body: {e}; sending file with a short note.)")
-        _send(EMAIL_TO, f"Daily Queue Briefing — {report_date}",
-              f"Daily queue report attached: {path.name}", attachment=path)
+    if paths:
+        path = Path(paths[0])
+        if not path.exists():
+            print(f"File not found: {path}")
+            return 1
+        try:
+            briefing, counts = _parse_changes_tab(path)
+            has_ai = not _is_placeholder(briefing["briefing"])
+        except Exception:
+            briefing, counts, has_ai = {"briefing": "", "anomalies": [], "action_items": []}, {}, False
+    else:
+        path, briefing, counts, has_ai = _select()
 
-    print(f"Sent {path.name} to {EMAIL_TO}")
+    mtime = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+    print(f"Searched folder: {OUTPUT_DIR}")
+    print(f"Selected report: {path}")
+    print(f"  last saved:    {mtime}")
+    print(f"  AI overview:   {'present' if has_ai else 'MISSING (placeholder only)'}")
+    if not has_ai:
+        print("  WARNING: this report has no AI overview. If you expected one, the report")
+        print("           you want may be elsewhere (pass its full path), or run the AI stage.")
+
+    if dry_run:
+        print("\n--dry-run: nothing was sent. Re-run without --dry-run to send.")
+        return 0
+
+    _send_report(path, briefing, counts)
+    print(f"\nSent {path.name} to {EMAIL_TO}")
     return 0
 
 
