@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import logging
 import sys
-from datetime import date, timedelta
+from datetime import date
 
 from analyzer import analyze
-from compare import diff_queues, load_history, load_snapshot
+from compare import diff_queues, load_history, load_latest_snapshot
 from config import ANTHROPIC_API_KEY
 from excel_writer import build_workbook
 from sales_orders import enrich_with_sales_orders
@@ -48,9 +48,11 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         print(f"(Sales-order enrichment skipped: {e})")
 
-    yesterday = load_snapshot(today - timedelta(days=1))
+    # Diff against the most recent prior snapshot (may be Fri when today is
+    # Mon), not a fixed today-1 that would mark the whole queue new on Mondays.
+    yesterday, prev_date = load_latest_snapshot(today)
     # Read-only: classify returning orders from history but don't write state.
-    diff = diff_queues(jobs, yesterday, today, persist_history=False)
+    diff = diff_queues(jobs, yesterday, today, persist_history=False, prev_date=prev_date)
 
     # Run the real AI overview if a key is set — still no email, no snapshot.
     # Pass --no-ai to skip Claude even when a key is set.

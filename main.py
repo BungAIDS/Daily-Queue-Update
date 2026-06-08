@@ -15,10 +15,10 @@ from __future__ import annotations
 import logging
 import sys
 import traceback
-from datetime import date, timedelta
+from datetime import date
 
 from analyzer import analyze
-from compare import diff_queues, load_history, load_snapshot, save_snapshot
+from compare import diff_queues, load_history, load_latest_snapshot, save_snapshot
 from config import ANTHROPIC_API_KEY, validate_runtime_config
 from emailer import send_alert, send_daily_briefing
 from excel_writer import build_workbook
@@ -57,8 +57,18 @@ def main() -> int:
             log.exception("Sales-order enrichment failed — continuing without it")
             send_alert(today.isoformat(), "Sales-order enrichment failed:\n\n" + traceback.format_exc())
 
-        yesterday = load_snapshot(today - timedelta(days=1))
-        diff = diff_queues(jobs, yesterday, today)
+        # Diff against the most recent prior snapshot, not a fixed today-1: the
+        # run only fires on business days, so on a Monday "yesterday" is Sunday
+        # (no snapshot) and a today-1 lookback would flag the whole queue as new.
+        yesterday, prev_date = load_latest_snapshot(today)
+        if yesterday is None:
+            log.warning(
+                "No prior snapshot within lookback window — every job will be "
+                "reported as new (expected only on a first run)."
+            )
+        else:
+            log.info("Diffing against previous snapshot from %s", prev_date)
+        diff = diff_queues(jobs, yesterday, today, prev_date=prev_date)
         save_snapshot(jobs, today)
 
         if not ANTHROPIC_API_KEY:
