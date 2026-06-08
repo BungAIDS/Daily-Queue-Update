@@ -99,7 +99,7 @@ def validate_runtime_config() -> None:
     Only EMAIL_TO is hard-required so the run can email its results. The
     Anthropic API key is optional: if it's empty the daily run still scrapes,
     diffs, builds the Excel, and emails it — just without the AI briefing.
-    Helper scripts (login.py, check_access.py, make_report.py) don't call
+    Helper scripts (login.py, check_access.py, dump_report.py) don't call
     this at all.
     """
     if not os.environ.get("EMAIL_TO"):

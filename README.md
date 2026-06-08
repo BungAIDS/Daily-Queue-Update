@@ -83,6 +83,28 @@ If it returns 0 jobs, set `CBC_QUEUE_URL` to your exact dispatch page URL (and
 check `scraper.py`'s selectors against cbcinsider's current layout) — see
 Troubleshooting below.
 
+### The four scripts
+
+`main.py` is the once-a-day job. The other three are its individual stages, so
+if the 5 AM run goes wrong you can re-run just the part you need without redoing
+the slow scrape:
+
+```bash
+python main.py     # everything: scrape -> AI overview -> Excel -> email  (the 5 AM job)
+
+python scrape.py   # 1. scrape + diff + Excel        (no AI, no email)
+python brief.py    # 2. add the AI overview           (no email; reuses today's scrape)
+python send.py     # 3. email the most recent report
+```
+
+`main.py` runs stages 1→2→3 in one shot. Each stage reuses what the previous one
+wrote to disk, so `brief.py` never re-scrapes — it just makes the one Claude
+call. `send.py` picks the newest report that actually has an AI overview (pass a
+path, or `--dry-run`, to override). The history/tracking state is advanced
+exactly once — by whichever run does the scrape (`scrape.py` or `main.py`) — so
+re-running `brief.py`/`send.py` is safe and never double-counts.
+
+
 ## Scheduling at 5 AM daily
 
 ### Windows — Task Scheduler
@@ -124,14 +146,19 @@ Troubleshooting below.
 ```
 Daily-Queue-Update/
 ├── login.py            # Run once — log in by hand, save session (no password stored)
-├── main.py             # Entrypoint — orchestrates the whole run
+├── main.py             # The 5 AM job — runs scrape -> brief -> send in one shot
+├── scrape.py           # Stage 1 — scrape + diff + Excel (no AI, no email)
+├── brief.py            # Stage 2 — add the AI overview to today's run (no email)
+├── send.py             # Stage 3 — email the most recent report
+├── pipeline.py         # Shared stage logic the four scripts above call into
 ├── scraper.py          # Reuses saved session + dispatch parser (per-order container, job+detail rows)
 ├── sales_orders.py     # Per-job enrichment: Sales Order + construction/drive run + folder
 ├── drive_run.py        # Parse a construction/drive-run ("CBC_DriveRun") PDF
-├── compare.py          # Diff today vs yesterday; persistence tracking
+├── compare.py          # Diff today vs the most recent prior run; persistence tracking
 ├── analyzer.py         # Claude API call — briefing + anomalies + action items
 ├── excel_writer.py     # Two-tab .xlsx report with AutoFilter and date highlights
 ├── emailer.py          # Plain-text email + failure alert email
+├── runstate.py         # Persists each day's diff/briefing/Excel so stages can hand off
 ├── config.py           # Loads .env
 ├── autocad_scan.py     # Backlog tool — sweep AutoCAD folders, record each fan's custom DWGs
 ├── backfill_orders.py  # Backlog tool — look up old orders 1-by-1 (resumable)
