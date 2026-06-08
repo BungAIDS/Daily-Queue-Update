@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import date
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import anthropic
 
@@ -41,6 +42,37 @@ def _trim_context(job: Dict[str, Any]) -> Dict[str, Any]:
     """Leaner trim for the full-queue-for-context list — only enough fields for
     the AI to detect clusters, ship-with partners, and possible duplicates."""
     return {k: job.get(k, "") for k in CONTEXT_FIELDS}
+
+
+# A penalty job carries a contract late-delivery penalty; it's marked in the
+# Items column. Matched case-insensitively so "PENALTY", "Penalty", etc. all hit.
+_PENALTY_RE = re.compile(r"penalty", re.IGNORECASE)
+
+
+def _penalty_orders(all_jobs: list | None) -> List[Dict[str, Any]]:
+    """Every order on the board whose item text is flagged as a penalty job."""
+    out: List[Dict[str, Any]] = []
+    for j in all_jobs or []:
+        if _PENALTY_RE.search(str(j.get("item", ""))):
+            out.append({k: j.get(k, "") for k in
+                        ("job", "customer", "item", "design", "oper", "end_date", "fannet_date")})
+    return out
+
+
+def _ensure_penalty_flagged(result: Dict[str, Any], penalty: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Guarantee every penalty order is surfaced, even if the model didn't.
+    Appends an anomaly for any penalty job not already named in the output."""
+    if not penalty:
+        return result
+    mentioned = (result.get("briefing", "") + " " + " ".join(result.get("anomalies") or [])).lower()
+    anomalies = list(result.get("anomalies") or [])
+    for p in penalty:
+        job = str(p.get("job", "")).strip()
+        if job and not re.search(rf"\b{re.escape(job)}\b", mentioned):
+            cust = f" ({p['customer']})" if p.get("customer") else ""
+            anomalies.append(f"PENALTY job {job}{cust} is on the board — contract penalty order, treat as high priority.")
+    result["anomalies"] = anomalies
+    return result
 
 
 def _trim(job: Dict[str, Any]) -> Dict[str, Any]:
@@ -81,7 +113,10 @@ Each day you receive:
   - returning orders (back after previously dropping off; "last_seen" = when they were last here). Some carry "returned_due_to_change_order" — these came back specifically because the sales order was revised.
   - change_orders_today: orders already on the board whose sales order picked up a NEW change order since yesterday (CO# rose). Each lists old/new CO# and the change-order notes describing what changed.
   - full_queue_for_context: EVERY order currently on the board (same fields), provided so you can spot groupings — do not summarize the full queue itself.
+  - penalty_orders_on_board: every order currently on the board flagged as a PENALTY job (its item is marked "penalty" — a contract late-delivery penalty). These may or may not be new today.
 plus aggregate counts.
+
+PENALTY ORDERS are the highest-priority signal. A penalty job carries a contractual late-delivery penalty, so it must NEVER be missed. ALWAYS call out every order in penalty_orders_on_board — name the job and customer — in the briefing AND as an anomaly, even if it is not new today. This is the one deliberate exception to the new-orders-only scope below. If a penalty order is also late (at/past its End Date), say so emphatically.
 
 CHANGE ORDERS are a priority signal. Orders carry "co_number" (how many change orders the sales order has had) and "change_orders" (the actual notes — what each CO changed, who, when). When an order is new/returning with change orders, or appears in change_orders_today, call it out and summarize WHAT changed in plain language (from the notes). Some orders also carry "fan_type", "size", and "arrangement" from the sales order — weave those in when describing an order.
 
@@ -122,6 +157,10 @@ def analyze(diff: Dict[str, Any], today: date, all_jobs: list | None = None) -> 
         raise RuntimeError("ANTHROPIC_API_KEY is not set (check your .env).")
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
+    # Penalty jobs (item marked "penalty") anywhere on the board — always
+    # flagged, regardless of whether they're new today.
+    penalty_orders = _penalty_orders(all_jobs)
+
     # Only the newly-appeared orders are the subject, but the full board is sent
     # as context. All of it is trimmed to the allowed fields.
     payload = {
@@ -139,11 +178,13 @@ def analyze(diff: Dict[str, Any], today: date, all_jobs: list | None = None) -> 
             for c in diff.get("co_changed", [])
         ],
         "full_queue_for_context": [_trim_context(j) for j in (all_jobs or [])],
+        "penalty_orders_on_board": penalty_orders,
     }
 
-    log.info("Calling Claude (%s) with %d new, %d returning, %d change-orders-today (%d on board for context)",
+    log.info("Calling Claude (%s) with %d new, %d returning, %d change-orders-today, "
+             "%d penalty (%d on board for context)",
              CLAUDE_MODEL, len(diff["new"]), len(diff.get("returning", [])),
-             len(diff.get("co_changed", [])), len(all_jobs or []))
+             len(diff.get("co_changed", [])), len(penalty_orders), len(all_jobs or []))
 
     # Pick a thinking mode by model. Opus 4.x only supports adaptive thinking
     # (manual/disabled get rejected), and on this small structured-JSON task
@@ -194,7 +235,11 @@ def analyze(diff: Dict[str, Any], today: date, all_jobs: list | None = None) -> 
             cleaned = cleaned[:-3].strip()
 
     try:
-        return json.loads(cleaned)
+        result = json.loads(cleaned)
     except json.JSONDecodeError as e:
         log.error("Claude response was not valid JSON. Raw text:\n%s", text)
         raise RuntimeError(f"Failed to parse Claude JSON output: {e}")
+
+    # Belt-and-suspenders: never let a penalty job slip through, even if the
+    # model overlooked it.
+    return _ensure_penalty_flagged(result, penalty_orders)
