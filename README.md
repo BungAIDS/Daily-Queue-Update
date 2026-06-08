@@ -177,8 +177,9 @@ Three extra capabilities, on top of the daily run:
 The daily enrichment now grabs the **construction run** alongside the Sales
 Order. Both are found by their document *type* (`CBC_SalesOrder`,
 `CBC_DriveRun`). Only highly-custom fans have a drive run, so its presence is a
-signal in itself: the Full Queue tab gains a **Drive Run** column (`YES`), and
-the drive-run PDF is archived under `DRIVE_RUN_DIR`.
+signal in itself: the Full Queue tab gains a **Drive Run** column — `YES`,
+hyperlinked straight to the archived drive-run PDF (under `DRIVE_RUN_DIR`); it
+shows a plain `YES` only if the flag is set but the file didn't download.
 
 The exact fields inside a drive run depend on your documents. Confirm them once:
 

@@ -26,6 +26,7 @@ SECTION_FONT = Font(bold=True, size=12)
 RED_FONT = Font(color="C00000", bold=True)  # rows whose change order landed this run
 LINK_FONT = Font(color="0563C1", underline="single")  # job-folder hyperlinks
 DRIVE_RUN_FONT = Font(color="C55A11", bold=True)  # highly-custom (has a drive run)
+DRIVE_RUN_LINK_FONT = Font(color="C55A11", bold=True, underline="single")  # ^ + links to the PDF
 
 QUEUE_HEADERS = [
     "Status", "Customer", "Primary Rep", "Ship With", "Job #", "Oper", "Item",
@@ -304,9 +305,14 @@ def _write_job_row(ws, row: int, j: Dict[str, Any], co_changed: bool = False) ->
     ws.cell(row=row, column=29, value=j.get("status_note", ""))
     ws.cell(row=row, column=30, value=_flags_str(j))
 
-    # Drive Run: YES when a CBC_DriveRun exists -> highly-custom fan.
+    # Drive Run: a CBC_DriveRun marks a highly-custom fan. Link the cell to the
+    # archived drive-run PDF when we have it; otherwise just flag YES.
+    dr_pdf = (j.get("drive_run_pdf") or "").strip()
     dr_cell = ws.cell(row=row, column=DRIVE_RUN_COL, value="YES" if j.get("has_drive_run") else "")
-    if j.get("has_drive_run"):
+    if dr_pdf:
+        dr_cell.hyperlink = dr_pdf
+        dr_cell.font = DRIVE_RUN_LINK_FONT
+    elif j.get("has_drive_run"):
         dr_cell.font = DRIVE_RUN_FONT
 
     # Folder hyperlink (AutoCAD job folder, or the SO archive folder as fallback).
@@ -316,10 +322,14 @@ def _write_job_row(ws, row: int, j: Dict[str, Any], co_changed: bool = False) ->
         fcell.hyperlink = folder
         fcell.font = LINK_FONT
 
-    # A change order that landed this run -> the whole row's text goes red.
+    # A change order that landed this run -> the whole row's text goes red,
+    # but hyperlinked cells (the Folder link, and a linked Drive Run) keep theirs.
     if co_changed:
-        for c in range(1, FOLDER_COL):  # leave the hyperlink cell its link style
-            ws.cell(row=row, column=c).font = RED_FONT
+        for c in range(1, FOLDER_COL):  # the Folder link sits at FOLDER_COL, outside this range
+            cell = ws.cell(row=row, column=c)
+            if cell.hyperlink:
+                continue
+            cell.font = RED_FONT
 
 
 def _write_full_queue_tab(

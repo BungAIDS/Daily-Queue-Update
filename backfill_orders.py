@@ -247,6 +247,7 @@ def write_workbook(records: Dict[str, Dict[str, Any]], dwg: Dict[str, Dict[str, 
     header_font = Font(color="FFFFFF", bold=True)
     link_font = Font(color="0563C1", underline="single")
     dr_font = Font(color="C55A11", bold=True)
+    dr_link_font = Font(color="C55A11", bold=True, underline="single")  # Drive Run -> PDF link
 
     suffixes = autocad_scan.all_extra_suffixes(dwg)
     fixed = ["Job #", "Type", "Description", "Size", "Arrangement", "Motor Pos", "Class",
@@ -277,8 +278,14 @@ def write_workbook(records: Dict[str, Dict[str, Any]], dwg: Dict[str, Dict[str, 
         ]
         for c, v in enumerate(vals, start=1):
             ws.cell(i, c, v)
+        # Drive Run cell links to the archived drive-run PDF when we have it.
         if r.get("has_drive_run"):
-            ws.cell(i, fixed.index("Drive Run") + 1).font = dr_font
+            dr_cell = ws.cell(i, fixed.index("Drive Run") + 1)
+            if r.get("drive_run_pdf"):
+                dr_cell.hyperlink = r["drive_run_pdf"]
+                dr_cell.font = dr_link_font
+            else:
+                dr_cell.font = dr_font
         # Link the AutoCAD folder if we scanned one, else the SO archive folder.
         folder = d.get("folder") or (str(Path(r["so_pdf"]).parent) if r.get("so_pdf") else "")
         if folder:
