@@ -390,7 +390,7 @@ def _write_full_queue_tab(
         last_col = get_column_letter(len(QUEUE_HEADERS))
         ws.auto_filter.ref = f"A1:{last_col}{len(jobs) + 1}"
 
-    ws.freeze_panes = "A2"
+    ws.freeze_panes = "B2"  # keep the header row AND the Job # column visible
     _autosize(ws, num_cols=len(QUEUE_HEADERS))
 
 
@@ -405,7 +405,7 @@ def _write_history_tab(ws, history: Dict[str, Any]) -> None:
     if not history:
         ws.cell(row=2, column=1,
                 value="(no archived orders yet — a job appears here after it drops off the queue)")
-        ws.freeze_panes = "A2"
+        ws.freeze_panes = "B2"  # keep the header row AND the Job # column visible
         _autosize(ws, num_cols=len(headers))
         return
 
@@ -416,7 +416,7 @@ def _write_history_tab(ws, history: Dict[str, Any]) -> None:
 
     last_col = get_column_letter(len(headers))
     ws.auto_filter.ref = f"A1:{last_col}{len(entries) + 1}"
-    ws.freeze_panes = "A2"
+    ws.freeze_panes = "B2"  # keep the header row AND the Job # column visible
     _autosize(ws, num_cols=len(headers))
 
 
