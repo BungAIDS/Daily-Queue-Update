@@ -141,10 +141,22 @@ def run_no_ai(today: date) -> None:
 
 
 def run_ai_only(today: date) -> None:
-    jobs = _require(load_snapshot(today), "snapshot", "run `python main.py --no-ai` first.")
-    diff = _require(load_diff(today), "diff", "run `python main.py --no-ai` first.")
+    jobs = _require(load_snapshot(today), "snapshot",
+                    "run `python main.py --no-ai` first (or a full run) to scrape today.")
+    diff = load_diff(today)
+    if diff is None:
+        # Today's snapshot exists but no staged diff was saved — e.g. it came
+        # from an older/full run, not from `--no-ai`. Recompute the diff
+        # read-only from the snapshot so we can add AI without re-scraping.
+        # persist_history=False: don't advance tracking state (the scraping run
+        # already owns that).
+        yesterday, prev_date = load_latest_snapshot(today)
+        diff = diff_queues(jobs, yesterday, today, persist_history=False, prev_date=prev_date)
+        log.info("No saved diff for today; recomputed read-only from the snapshot "
+                 "(vs %s).", prev_date or "no prior snapshot")
     briefing = _run_ai(diff, today, jobs)
     save_briefing(briefing, today)
+    save_diff(diff, today)
     _build_excel(jobs, diff, briefing, today)
     log.info("AI stage complete. Next: python main.py --mail-only")
 

@@ -184,6 +184,11 @@ def main() -> int:
     print(f"Selected report: {path}")
     print(f"  last saved:    {mtime}")
     print(f"  AI overview:   {'present' if has_ai else 'MISSING (placeholder only)'}")
+    if not paths:
+        newest = _candidates()[0]
+        if path != newest:
+            print(f"  NOTE: a newer report ({newest.name}) was skipped because it has no")
+            print(f"        AI overview. To brief today's data, run `python main.py --ai-only`.")
     if not has_ai:
         print("  WARNING: this report has no AI overview. If you expected one, the report")
         print("           you want may be elsewhere (pass its full path), or run the AI stage.")
