@@ -54,6 +54,21 @@ def save_history(history: Dict[str, Any]) -> None:
     log.info("Updated history (%d archived jobs)", len(history))
 
 
+def _history_at_day_start(today: date, current: Dict[str, Any]) -> Dict[str, Any]:
+    """The history as it stood at the start of `today`, so repeated scrapes on
+    the same day all advance from the same baseline (idempotent). The first
+    scrape of the day records it; later scrapes restore it."""
+    path = SNAPSHOT_DIR / f"history_{today.isoformat()}_start.json"
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            log.warning("Could not read %s (%s); using current history", path, e)
+            return current
+    path.write_text(json.dumps(current, indent=2), encoding="utf-8")
+    return current
+
+
 def snapshot_path(d: date) -> Path:
     return SNAPSHOT_DIR / f"queue_{d.isoformat()}.json"
 
@@ -150,6 +165,14 @@ def diff_queues(
     yesterday_idx = _index(yesterday_jobs or [])
 
     history = load_history()
+    if persist_history:
+        # Make same-day re-scrapes idempotent. The history advance (archiving
+        # removed jobs, popping returning ones) must always start from the state
+        # as of the BEGINNING of today — not from a copy an earlier scrape today
+        # already mutated, which would relabel a returning order as "new" on the
+        # second run. Snapshot that starting state once per day and restore it on
+        # every later run, so any number of scrapes today yield the same result.
+        history = _history_at_day_start(today, history)
     yesterday_date = (prev_date or (today - timedelta(days=1))).isoformat()
 
     # New today = in today, not in yesterday. Split by whether we've ever seen
