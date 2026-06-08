@@ -1,9 +1,10 @@
 """One-time helper: drop the bundled 49-job baseline into your snapshots
-folder as YESTERDAY's snapshot, so the next make_report.py / main.py run
-shows a real day-over-day diff against the live cbcinsider queue.
+folder as YESTERDAY's snapshot, so the next run shows a real day-over-day diff
+against the live cbcinsider queue.
 
-Run this once. After it succeeds, run `python make_report.py` to scrape the
-live site and see what's changed since the baseline.
+Run this once. After it succeeds, run `python scrape.py` to scrape the live
+site and see what's changed since the baseline (then `python brief.py` to add
+the AI overview).
 
     python seed_yesterday.py
 
@@ -39,7 +40,7 @@ def main() -> int:
 
     save_snapshot(jobs, yesterday)
     print(f"\nSeeded yesterday ({yesterday}) with {len(jobs)} baseline jobs.")
-    print("Next: run  python make_report.py  to scrape live and see the real diff.")
+    print("Next: run  python scrape.py  to scrape live and see the real diff.")
     return 0
 
 

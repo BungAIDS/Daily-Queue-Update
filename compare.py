@@ -54,6 +54,21 @@ def save_history(history: Dict[str, Any]) -> None:
     log.info("Updated history (%d archived jobs)", len(history))
 
 
+def _history_at_day_start(today: date, current: Dict[str, Any]) -> Dict[str, Any]:
+    """The history as it stood at the start of `today`, so repeated scrapes on
+    the same day all advance from the same baseline (idempotent). The first
+    scrape of the day records it; later scrapes restore it."""
+    path = SNAPSHOT_DIR / f"history_{today.isoformat()}_start.json"
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            log.warning("Could not read %s (%s); using current history", path, e)
+            return current
+    path.write_text(json.dumps(current, indent=2), encoding="utf-8")
+    return current
+
+
 def snapshot_path(d: date) -> Path:
     return SNAPSHOT_DIR / f"queue_{d.isoformat()}.json"
 
@@ -72,13 +87,36 @@ def load_snapshot(d: date) -> List[Dict[str, Any]] | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def load_latest_snapshot(
+    today: date, max_lookback: int = 14
+) -> Tuple[List[Dict[str, Any]] | None, date | None]:
+    """Most recent snapshot strictly before `today`, scanning back up to
+    `max_lookback` days. Returns (jobs, date), or (None, None) if none found.
+
+    The daily run only fires on business days, so the previous run may be
+    Friday (or further back, across a holiday) rather than literal yesterday.
+    Diffing against a fixed today-1 means a Monday with no Sunday snapshot
+    treats the entire queue as new; this finds the real previous run instead.
+    """
+    for delta in range(1, max_lookback + 1):
+        d = today - timedelta(days=delta)
+        jobs = load_snapshot(d)
+        if jobs is not None:
+            return jobs, d
+    return None, None
+
+
 def _index(jobs: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     return {j["job"]: j for j in jobs if j.get("job")}
 
 
 def _load_lookback_jobsets(today: date, max_lookback: int = 14) -> List[set]:
-    """Sets of job numbers present on today-1, today-2, ... stopping at the
-    first day that has no snapshot (a missing day breaks the streak).
+    """Sets of job numbers from each prior snapshot, most-recent first.
+
+    Skips calendar days with no snapshot rather than stopping at them: the run
+    only fires on business days, so expected weekend/holiday gaps must not break
+    the persistence streak. The actual streak (a job dropping out of the queue)
+    is detected by _persistence_count walking these sets, not by missing files.
 
     Loaded once per run so persistence is O(jobs) instead of re-reading and
     re-parsing every snapshot file once per job.
@@ -87,7 +125,7 @@ def _load_lookback_jobsets(today: date, max_lookback: int = 14) -> List[set]:
     for delta in range(1, max_lookback):
         prev = load_snapshot(today - timedelta(days=delta))
         if prev is None:
-            break
+            continue
         day_sets.append({j.get("job") for j in prev if j.get("job")})
     return day_sets
 
@@ -108,21 +146,34 @@ def diff_queues(
     yesterday_jobs: List[Dict[str, Any]] | None,
     today: date,
     persist_history: bool = True,
+    prev_date: date | None = None,
 ) -> Dict[str, Any]:
     """Return new / returning / removed / changed / persistent jobs.
 
     Also updates the long-term history store as a side effect: jobs that left
     the queue get archived to it, and jobs that come back get popped off.
 
-    Set persist_history=False for ad-hoc/manual reports (make_report.py) so the
+    Set persist_history=False for read-only recomputes (brief.py) so the
     official tracking state is only ever advanced by the once-a-day run. With
     it False, history is still read to label returning orders, but not written.
+
+    `prev_date` is the date of the baseline snapshot (which may be several days
+    back, e.g. Friday when today is Monday). It's recorded as `last_seen` for
+    jobs that dropped off; defaults to today-1 when not given.
     """
     today_idx = _index(today_jobs)
     yesterday_idx = _index(yesterday_jobs or [])
 
     history = load_history()
-    yesterday_date = (today - timedelta(days=1)).isoformat()
+    if persist_history:
+        # Make same-day re-scrapes idempotent. The history advance (archiving
+        # removed jobs, popping returning ones) must always start from the state
+        # as of the BEGINNING of today — not from a copy an earlier scrape today
+        # already mutated, which would relabel a returning order as "new" on the
+        # second run. Snapshot that starting state once per day and restore it on
+        # every later run, so any number of scrapes today yield the same result.
+        history = _history_at_day_start(today, history)
+    yesterday_date = (prev_date or (today - timedelta(days=1))).isoformat()
 
     # New today = in today, not in yesterday. Split by whether we've ever seen
     # them before: anything in history is "returning"; otherwise truly new.
