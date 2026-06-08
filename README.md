@@ -83,22 +83,26 @@ If it returns 0 jobs, set `CBC_QUEUE_URL` to your exact dispatch page URL (and
 check `scraper.py`'s selectors against cbcinsider's current layout) — see
 Troubleshooting below.
 
-### Recovering a botched run (staged execution)
+### The four scripts
 
-If the 5 AM run goes wrong, you don't have to re-run the whole thing. The
-pipeline can run one stage at a time, reusing what the previous stage wrote to
-disk so the slow scrape happens only once:
+`main.py` is the once-a-day job. The other three are its individual stages, so
+if the 5 AM run goes wrong you can re-run just the part you need without redoing
+the slow scrape:
 
 ```bash
-python main.py --no-ai      # 1. scrape + diff + Excel — no AI, no email
-python main.py --ai-only    # 2. add the AI briefing to today's saved run — no email
-python main.py --mail-only  # 3. email today's finished briefing + Excel
+python main.py     # everything: scrape -> AI overview -> Excel -> email  (the 5 AM job)
+
+python scrape.py   # 1. scrape + diff + Excel        (no AI, no email)
+python brief.py    # 2. add the AI overview           (no email; reuses today's scrape)
+python send.py     # 3. email the most recent report
 ```
 
-A plain `python main.py` still does all three in one shot. The history/tracking
-state is advanced exactly once — by whichever stage does the scrape+diff
-(`--no-ai` or a full run) — so re-running `--ai-only` or `--mail-only` is safe
-and never double-counts. Run the stages in order; each tells you the next one.
+`main.py` runs stages 1→2→3 in one shot. Each stage reuses what the previous one
+wrote to disk, so `brief.py` never re-scrapes — it just makes the one Claude
+call. `send.py` picks the newest report that actually has an AI overview (pass a
+path, or `--dry-run`, to override). The history/tracking state is advanced
+exactly once — by whichever run does the scrape (`scrape.py` or `main.py`) — so
+re-running `brief.py`/`send.py` is safe and never double-counts.
 
 
 ## Scheduling at 5 AM daily
@@ -142,12 +146,17 @@ and never double-counts. Run the stages in order; each tells you the next one.
 ```
 Daily-Queue-Update/
 ├── login.py            # Run once — log in by hand, save session (no password stored)
-├── main.py             # Entrypoint — orchestrates the whole run
+├── main.py             # The 5 AM job — runs scrape -> brief -> send in one shot
+├── scrape.py           # Stage 1 — scrape + diff + Excel (no AI, no email)
+├── brief.py            # Stage 2 — add the AI overview to today's run (no email)
+├── send.py             # Stage 3 — email the most recent report
+├── pipeline.py         # Shared stage logic the four scripts above call into
 ├── scraper.py          # Reuses saved session + dispatch parser (per-order container, job+detail rows)
-├── compare.py          # Diff today vs yesterday; persistence tracking
+├── compare.py          # Diff today vs the most recent prior run; persistence tracking
 ├── analyzer.py         # Claude API call — briefing + anomalies + action items
 ├── excel_writer.py     # Two-tab .xlsx report with AutoFilter and date highlights
 ├── emailer.py          # Plain-text email + failure alert email
+├── runstate.py         # Persists each day's diff/briefing/Excel so stages can hand off
 ├── config.py           # Loads .env
 ├── requirements.txt
 ├── .env.example

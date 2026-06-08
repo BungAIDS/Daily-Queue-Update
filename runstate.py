@@ -1,9 +1,9 @@
 """Persist a single day's run artifacts so the pipeline can run in stages.
 
-The daily run can be split into three resumable stages (see main.py):
-  1. --no-ai     scrape + diff + Excel  (writes snapshot, diff, Excel)
-  2. --ai-only   add the AI briefing      (reads snapshot + diff, writes briefing)
-  3. --mail-only email it                 (reads briefing + diff + Excel path)
+The daily run can be split into three resumable stages (see pipeline.py):
+  1. scrape.py  scrape + diff + Excel  (writes snapshot, diff, Excel)
+  2. brief.py   add the AI briefing     (reads snapshot + diff, writes briefing)
+  3. send.py    email it                (reads the most recent report off disk)
 
 The scraped jobs are already persisted as the day's snapshot (compare.py). This
 module persists the other hand-off artifacts — the diff, the AI briefing, and

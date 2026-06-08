@@ -1,16 +1,17 @@
-"""Email an existing Excel report — no scrape, no diff, no AI, no stages.
+"""Stage 3 of the daily run: email the most recent report. No scrape, no AI.
 
-    python send_excel.py                 # newest report that HAS an AI overview
-    python send_excel.py --dry-run       # show what would be sent, send nothing
-    python send_excel.py "C:\\path\\queue_2026-06-08.xlsx"   # send a specific file
+    python send.py                 # newest report that HAS an AI overview
+    python send.py --dry-run       # show what would be sent, send nothing
+    python send.py "C:\\path\\queue_2026-06-08.xlsx"   # send a specific file
 
-Use this when you already have a report you're happy with and just want it in
-your inbox. It regenerates nothing.
+Use this to send the latest run, or any report you're happy with. It
+regenerates nothing.
 
 With no path, it scans OUTPUT_DIR and picks the most recent report that actually
-contains an AI overview — so a later "no-AI" report (e.g. from `main.py --no-ai`)
-won't be sent by mistake. It prints the folder it searched and the full path it
-chose, so you can always see exactly which file went out.
+contains an AI overview — so a report still missing its briefing (e.g. one from
+`scrape.py` before `brief.py` has run) won't be sent by mistake. It prints the
+folder it searched and the full path it chose, so you always see which file
+went out.
 
 The email is rebuilt to match a normal daily run exactly: the briefing text,
 anomalies, action items, and counts line are read back out of the Changes tab
@@ -188,7 +189,7 @@ def main() -> int:
         newest = _candidates()[0]
         if path != newest:
             print(f"  NOTE: a newer report ({newest.name}) was skipped because it has no")
-            print(f"        AI overview. To brief today's data, run `python main.py --ai-only`.")
+            print(f"        AI overview. To brief today's data, run `python brief.py`.")
     if not has_ai:
         print("  WARNING: this report has no AI overview. If you expected one, the report")
         print("           you want may be elsewhere (pass its full path), or run the AI stage.")

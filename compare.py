@@ -138,7 +138,7 @@ def diff_queues(
     Also updates the long-term history store as a side effect: jobs that left
     the queue get archived to it, and jobs that come back get popped off.
 
-    Set persist_history=False for ad-hoc/manual reports (make_report.py) so the
+    Set persist_history=False for read-only recomputes (brief.py) so the
     official tracking state is only ever advanced by the once-a-day run. With
     it False, history is still read to label returning orders, but not written.
 
