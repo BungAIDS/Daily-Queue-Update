@@ -69,9 +69,11 @@ def job_key(folder_name: str) -> str:
 def parse_drawing(filename: str, job: str) -> Optional[Tuple[str, str]]:
     """If `filename` is a drawing for `job`, return (suffix, ext); else None.
 
-    Matches `<job>-<digits>` at the start of the name (any trailing text like a
-    revision is ignored for grouping), with a .dwg/.pdf extension. The suffix is
-    returned zero-padded as written (e.g. "01", "51")."""
+    DWG/PDF names take the form `<job>-<suffix><revletter>` (e.g. "421314-01A",
+    "421314-51B"). We match `<job>-<digits>` and capture only the digits, so the
+    trailing revision letter is dropped — `-01A` and `-01B` both group under
+    suffix "01" (one column, different revisions). Suffix is kept as written
+    ("01", "51"). (Capturing the revision letter is a later add — see WORKLOG.)"""
     p = Path(filename)
     ext = p.suffix.lower()
     if ext not in DRAWING_EXTS:

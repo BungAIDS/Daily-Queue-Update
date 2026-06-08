@@ -96,3 +96,19 @@ All modules compile; scanner tests pass on the merged tree.
   compact "Drive Run" column.
 - **Extra-suffix columns** show `yes`/`no` (per the request). The richer PDF/DWG
   format is kept in the JSON store and shown for the CW/CCW columns.
+
+## Confirmed conventions (from you)
+
+- **DWG/PDF filename form: `<job>-<suffix><revletter>`** (e.g. `421314-01A`,
+  `421314-51B`). The scanner captures only the digit suffix and drops the
+  revision letter, so revisions of one drawing share a single column. Verified
+  by `test_revision_letters`.
+
+## Deferred (save for later)
+
+- Verifying the scan against real folders/filenames (spot-check with
+  `python autocad_scan.py <job#>`), and loosening the folder enumeration if
+  needed.
+- **Capture the revision letter** and track the latest rev per drawing — pairs
+  naturally with opening the DWG (or its `-01/-02` PDF title block) to read who
+  drafted and who checked it.

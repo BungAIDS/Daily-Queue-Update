@@ -30,6 +30,17 @@ def test_parse_drawing():
     assert a.parse_drawing("4213140-01.dwg", "421314") is None
 
 
+def test_revision_letters():
+    # Names are [job]-[suffix][revletter]; the rev letter is dropped for grouping.
+    assert a.parse_drawing("421314-01A.dwg", "421314") == ("01", "dwg")
+    assert a.parse_drawing("421314-51B.pdf", "421314") == ("51", "pdf")
+    assert a.parse_drawing("421314-02.dwg", "421314") == ("02", "dwg")  # no rev letter
+    # Different revisions of one drawing collapse to a single suffix/column.
+    found = a.scan_files(["421314-01A.dwg", "421314-01B.dwg", "421314-51A.pdf"], "421314")
+    assert sorted(found) == ["01", "51"]
+    assert a.build_record("421314", "AX", "/x", found)["extras"] == {"51": "PDF"}
+
+
 def test_fmt_exts():
     assert a.fmt_exts({"pdf", "dwg"}) == "PDF+DWG"
     assert a.fmt_exts({"dwg"}) == "DWG"
