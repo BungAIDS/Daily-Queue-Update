@@ -25,18 +25,22 @@ HEADER_FONT = Font(color="FFFFFF", bold=True)
 SECTION_FONT = Font(bold=True, size=12)
 RED_FONT = Font(color="C00000", bold=True)  # rows whose change order landed this run
 LINK_FONT = Font(color="0563C1", underline="single")  # hyperlinks (Job # -> SO pdf, Folder)
+DRIVE_RUN_FONT = Font(color="C55A11", bold=True)  # highly-custom (has a drive run)
+DRIVE_RUN_LINK_FONT = Font(color="C55A11", bold=True, underline="single")  # ^ + links to the PDF
 
 # Single source of truth for column order. Each entry is (header, key); the key
 # names the job field to print, or a special renderer handled in _write_job_row:
 #   "job"         -> job number, hyperlinked to its Sales Order pdf (Z: drive)
 #   "folder"      -> AutoCAD job folder (or SO archive folder) hyperlink
 #   "co"          -> CO# label
+#   "drive_run"   -> YES, hyperlinked to the drive-run pdf (highly-custom fans)
 #   "total_price" -> money-formatted cell
 #   "flags"       -> flag summary string
 # To reorder the report, reorder this list — everything else follows.
 COLUMNS = [
     ("Job #", "job"),
     ("Folder", "folder"),
+    ("Drive Run", "drive_run"),
     ("CO#", "co"),
     ("Oper", "oper"),
     ("Design", "design"),
@@ -336,6 +340,16 @@ def _write_job_row(ws, row: int, j: Dict[str, Any], co_changed: bool = False) ->
                 linked_cols.add(col)
         elif key == "co":
             ws.cell(row=row, column=col, value=_co_label(j))
+        elif key == "drive_run":
+            # YES for a highly-custom fan, linked to the archived drive-run pdf.
+            dr_pdf = (j.get("drive_run_pdf") or "").strip()
+            cell = ws.cell(row=row, column=col, value="YES" if j.get("has_drive_run") else "")
+            if dr_pdf:
+                cell.hyperlink = dr_pdf
+                cell.font = DRIVE_RUN_LINK_FONT
+                linked_cols.add(col)
+            elif j.get("has_drive_run"):
+                cell.font = DRIVE_RUN_FONT
         elif key == "total_price":
             _write_money_cell(ws, row, col, j.get("total_price", ""))
         elif key == "flags":

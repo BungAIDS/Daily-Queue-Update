@@ -16,18 +16,22 @@ from pathlib import Path
 
 
 def _resolve(arg: str) -> list[Path]:
-    """Accept an explicit file path, or a job number to look up under
-    SALES_ORDER_DIR/<job>/ (handy for comparing several orders)."""
+    """Accept an explicit file path, or a job number to look up under the
+    SALES_ORDER_DIR/<job>/ and DRIVE_RUN_DIR/<job>/ archives (handy for
+    comparing several orders, or dumping a job's drive run)."""
     p = Path(arg)
     if p.is_file():
         return [p]
-    from config import SALES_ORDER_DIR
-    folder = SALES_ORDER_DIR / arg
-    if folder.is_dir():
-        pdfs = sorted(folder.glob("*.pdf"))
-        if pdfs:
-            return pdfs
-    raise SystemExit(f"No PDF found for {arg!r} (checked that path and {folder}).")
+    from config import SALES_ORDER_DIR, DRIVE_RUN_DIR
+    pdfs: list[Path] = []
+    checked = []
+    for folder in (SALES_ORDER_DIR / arg, DRIVE_RUN_DIR / arg):
+        checked.append(str(folder))
+        if folder.is_dir():
+            pdfs.extend(sorted(folder.glob("*.pdf")))
+    if pdfs:
+        return pdfs
+    raise SystemExit(f"No PDF found for {arg!r} (checked that path and {', '.join(checked)}).")
 
 
 def main() -> None:

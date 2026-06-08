@@ -16,6 +16,10 @@ For every job on the board this:
     so_size        str
     so_arrangement str
     so_pdf         str   (path to the latest SO pdf, or "")
+    has_drive_run  bool  (True = a CBC_DriveRun exists -> highly custom fan)
+    drive_run_pdf  str   (path to the latest drive-run pdf, or "")
+    drive_run      dict  (parsed drive-run fields; see drive_run.py)
+    drive_run_summary str (compact one-liner of the drive-run fields)
     job_type       str   (e.g. "AXIAL" / "GENERAL LINE", or "")
     job_folder     str   (AutoCAD folder if found, else the SO archive folder)
 
@@ -36,13 +40,20 @@ from playwright.async_api import async_playwright, TimeoutError as PWTimeout, Er
 
 from config import (
     CBC_URL, CBC_QUEUE_URL, STORAGE_STATE_PATH,
-    SALES_ORDER_DIR, SO_CONCURRENCY, AUTOCAD_JOBS_DIR,
+    SALES_ORDER_DIR, DRIVE_RUN_DIR, SO_CONCURRENCY, AUTOCAD_JOBS_DIR,
 )
+from drive_run import parse_drive_run_pdf
 from scraper import CONTAINER_SELECTOR
 
 log = logging.getLogger(__name__)
 
 PID_RE = re.compile(r"^(?P<type>.+?)-(?P<id>\d+)-(?P<rev>\d+)-(?P<tag>[A-Za-z0-9]+)$")
+
+# Documents are identified by the *type* prefix of their pid
+# (CBC_SalesOrder-<id>-<rev>-<tag>). That prefix is the reliable key — we match
+# on it for both the Sales Order and the construction/drive run.
+SO_TYPE = "CBC_SalesOrder"
+DRIVE_RUN_TYPE = "CBC_DriveRun"
 CO_START = re.compile(r"^\s*C\s*/?\s*O\s*#?\s*\d", re.I)
 DESIGN_HDR = re.compile(r"^\s*Design\s+(\S+)\s*(.*)$")
 # Spec-row cells look like "Label value" (e.g. "Size M2", "WheelType BI").
@@ -233,10 +244,48 @@ def _parse_doc(href: str) -> Dict[str, Any]:
     return {"fn": fn, "type": m["type"] if m else pid, "rev": int(m["rev"]) if m else None}
 
 
+def _norm_type(t: str | None) -> str:
+    """Normalize a pid type for comparison: lowercase, drop a leading 'cbc_'."""
+    t = (t or "").lower()
+    return t[4:] if t.startswith("cbc_") else t
+
+
+def _latest_of_type(docs: List, type_name: str):
+    """Highest-revision (href, doc) whose pid type matches type_name, or None."""
+    want = _norm_type(type_name)
+    matches = [hd for hd in docs if _norm_type(hd[1].get("type")) == want]
+    return max(matches, key=lambda hd: hd[1].get("rev") or 0) if matches else None
+
+
 def _so_filename(job: str, rev: int | None) -> str:
     if rev and rev > 1:
         return f"{job} - Sales Order CO#{rev - 1}.pdf"
     return f"{job} - Sales Order (original).pdf"
+
+
+def _doc_filename(job: str, label: str, rev: int | None) -> str:
+    """Archive filename for a non-SO document (e.g. the drive run)."""
+    return f"{job} - {label} rev {rev}.pdf" if rev and rev > 1 else f"{job} - {label}.pdf"
+
+
+async def _download(context, page_url: str, href: str, dest: Path) -> str | None:
+    """Download a document to `dest` (skipping if present), retrying transient
+    doc-server timeouts. Returns the path on success, else None."""
+    if dest.exists():
+        return str(dest)
+    url = urljoin(page_url, href)
+    for attempt in (1, 2, 3):
+        try:
+            resp = await context.request.get(url, timeout=60000)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(await resp.body())
+            return str(dest)
+        except Exception as e:  # noqa: BLE001
+            if attempt == 3:
+                log.warning("download failed for %s after %d tries: %s", dest.name, attempt, e)
+            else:
+                await asyncio.sleep(2 * attempt)
+    return None
 
 
 def _trigger_js(args_js: str) -> str:
@@ -277,7 +326,7 @@ async def _args_map(page) -> Dict[str, str]:
 
 
 async def _process_job(page, context, job: str, args_js: str) -> Dict[str, Any]:
-    res = {"rev": None, "pdf_path": None}
+    res = {"rev": None, "pdf_path": None, "dr_rev": None, "dr_pdf_path": None}
     await page.evaluate(_trigger_js(args_js))
     link = page.locator("#modalDetail a").filter(has_text=re.compile(re.escape(job)))
     try:
@@ -285,38 +334,29 @@ async def _process_job(page, context, job: str, args_js: str) -> Dict[str, Any]:
     except PWTimeout:
         return res  # no docs for this job (e.g. HDX)
 
-    sos = []
+    # Collect every document link once, then pick the latest of each type we
+    # want by its pid type prefix — the Sales Order and the drive run.
+    docs = []
     for a in await page.locator("#modalDetail a").all():
         href = await a.get_attribute("href") or ""
         if "downloaddoc.aspx" in href.lower():
-            d = _parse_doc(href)
-            if "salesorder" in (d["type"] or "").lower() and "sales order" in (d["fn"] or "").lower():
-                sos.append((href, d))
-    if not sos:
-        return res
+            docs.append((href, _parse_doc(href)))
 
-    href, doc = max(sos, key=lambda hd: hd[1]["rev"] or 0)
-    rev = doc["rev"]
-    res["rev"] = rev
-    dest = SALES_ORDER_DIR / job / _so_filename(job, rev)
-    if dest.exists():
-        res["pdf_path"] = str(dest)
-        return res
+    so = _latest_of_type(docs, SO_TYPE)
+    if so:
+        href, doc = so
+        res["rev"] = doc["rev"]
+        res["pdf_path"] = await _download(
+            context, page.url, href, SALES_ORDER_DIR / job / _so_filename(job, doc["rev"]))
 
-    # Download with a couple of retries — the doc server occasionally times out.
-    url = urljoin(page.url, href)
-    for attempt in (1, 2, 3):
-        try:
-            resp = await context.request.get(url, timeout=60000)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(await resp.body())
-            res["pdf_path"] = str(dest)
-            return res
-        except Exception as e:  # noqa: BLE001
-            if attempt == 3:
-                log.warning("SO download failed for %s after %d tries: %s", job, attempt, e)
-            else:
-                await asyncio.sleep(2 * attempt)
+    # Construction / drive run — only the highly-custom orders have one.
+    dr = _latest_of_type(docs, DRIVE_RUN_TYPE)
+    if dr:
+        href, doc = dr
+        res["dr_rev"] = doc["rev"]
+        res["dr_pdf_path"] = await _download(
+            context, page.url, href, DRIVE_RUN_DIR / job / _doc_filename(job, "Drive Run", doc["rev"]))
+
     return res
 
 
@@ -343,6 +383,8 @@ async def _worker(context, url, queue, results, total):
         finally:
             r = results.get(job) or {}
             mark = "ok" if r.get("pdf_path") else ("no SO" if r.get("rev") is None else "no pdf")
+            if r.get("dr_pdf_path"):
+                mark += " +DriveRun"
             log.info("  sales orders %d/%d  (%s: %s)", len(results), total, job, mark)
             with contextlib.suppress(Exception):
                 await page.evaluate("() => window.jQuery && jQuery('#modalDetail').modal('hide')")
@@ -407,6 +449,9 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
             # Keep the best result seen: a downloaded pdf beats a bare rev beats nothing.
             if old is None or (v.get("pdf_path") and not old.get("pdf_path")) \
                     or (v.get("rev") is not None and old.get("rev") is None):
+                # Don't lose an earlier pass's drive run if this result missed it.
+                if old and old.get("dr_pdf_path") and not v.get("dr_pdf_path"):
+                    v = {**v, "dr_pdf_path": old["dr_pdf_path"], "dr_rev": old.get("dr_rev")}
                 so_results[k] = v
         todo = [k for k in by_job if not (so_results.get(k) or {}).get("pdf_path")]
         if not todo:
@@ -414,7 +459,7 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
         if p < max_passes:
             log.info("  %d job(s) still incomplete; retrying those.", len(todo))
 
-    n_co = n_dl = 0
+    n_co = n_dl = n_dr = 0
     for jn, j in by_job.items():
         r = so_results.get(jn, {})
         rev = r.get("rev")
@@ -441,6 +486,17 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
         if pdf:
             n_dl += 1
 
+        # Construction / drive run: presence alone flags a highly-custom fan.
+        dr_pdf = r.get("dr_pdf_path")
+        j["has_drive_run"] = bool(dr_pdf or r.get("dr_rev") is not None)
+        j["drive_run_pdf"] = dr_pdf or ""
+        j["drive_run_rev"] = r.get("dr_rev")
+        dparsed = parse_drive_run_pdf(dr_pdf) if dr_pdf else {}
+        j["drive_run"] = dparsed.get("fields", {})
+        j["drive_run_summary"] = dparsed.get("summary", "")
+        if j["has_drive_run"]:
+            n_dr += 1
+
         info = index.get(jn)
         if info:
             j["job_type"] = info["type"]
@@ -452,3 +508,4 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
 
     log.info("Sales orders: %d jobs have a SO, %d at a change order, %d still missing a SO.",
              n_dl, n_co, len(by_job) - n_dl)
+    log.info("Drive runs: %d job(s) have a CBC_DriveRun (highly custom).", n_dr)

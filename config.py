@@ -50,6 +50,13 @@ SNAPSHOT_DIR = _output_path("SNAPSHOT_DIR", str(OUTPUT_DIR / "snapshots"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
+# Where the long-running backlog tools (autocad_scan.py, backfill_orders.py)
+# keep their resumable progress stores and master workbooks. Kept separate from
+# the daily queue report, which stays a one-day snapshot. Defaults under
+# OUTPUT_DIR; override in .env if the backlog should live elsewhere.
+BACKLOG_DIR = _output_path("BACKLOG_DIR", str(OUTPUT_DIR / "backlog"))
+BACKLOG_DIR.mkdir(parents=True, exist_ok=True)
+
 # Where downloaded sales-order PDFs are archived (one subfolder per job).
 # Defaults to the Z: drive share; override in .env. A UNC path
 # (\\server\share\...) is recommended for the scheduled task, since a mapped
@@ -58,6 +65,12 @@ SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 # downloader creates it on use.
 SALES_ORDER_DIR = _expand_path(
     (os.environ.get("SALES_ORDER_DIR") or r"Z:\DAG\SALES ORDERS FOR DAILY QUEUE").strip()
+)
+# Where downloaded construction/drive-run PDFs are archived (one subfolder per
+# job). Only the highly-custom orders that actually have a CBC_DriveRun document
+# get one. Same conventions as SALES_ORDER_DIR; created on use, not at import.
+DRIVE_RUN_DIR = _expand_path(
+    (os.environ.get("DRIVE_RUN_DIR") or r"Z:\DAG\DRIVE RUNS FOR DAILY QUEUE").strip()
 )
 # How many order-detail modals to open in parallel when fetching sales orders.
 # Start modest (one login = one server session, which ASP.NET may serialize);

@@ -152,16 +152,77 @@ Daily-Queue-Update/
 ├── send.py             # Stage 3 — email the most recent report
 ├── pipeline.py         # Shared stage logic the four scripts above call into
 ├── scraper.py          # Reuses saved session + dispatch parser (per-order container, job+detail rows)
+├── sales_orders.py     # Per-job enrichment: Sales Order + construction/drive run + folder
+├── drive_run.py        # Parse a construction/drive-run ("CBC_DriveRun") PDF
 ├── compare.py          # Diff today vs the most recent prior run; persistence tracking
 ├── analyzer.py         # Claude API call — briefing + anomalies + action items
 ├── excel_writer.py     # Two-tab .xlsx report with AutoFilter and date highlights
 ├── emailer.py          # Plain-text email + failure alert email
 ├── runstate.py         # Persists each day's diff/briefing/Excel so stages can hand off
 ├── config.py           # Loads .env
+├── autocad_scan.py     # Backlog tool — sweep AutoCAD folders, record each fan's custom DWGs
+├── backfill_orders.py  # Backlog tool — look up old orders 1-by-1 (resumable)
+├── discover_documents.py  # Discovery — list a job's docs; probe how to reach old orders
 ├── requirements.txt
 ├── .env.example
 └── README.md
 ```
+
+## Custom fans & the backlog (construction runs + AutoCAD DWGs)
+
+Three extra capabilities, on top of the daily run:
+
+### Construction / drive run (`CBC_DriveRun`)
+
+The daily enrichment now grabs the **construction run** alongside the Sales
+Order. Both are found by their document *type* (`CBC_SalesOrder`,
+`CBC_DriveRun`). Only highly-custom fans have a drive run, so its presence is a
+signal in itself: the Full Queue tab gains a **Drive Run** column — `YES`,
+hyperlinked straight to the archived drive-run PDF (under `DRIVE_RUN_DIR`); it
+shows a plain `YES` only if the flag is set but the file didn't download.
+
+The exact fields inside a drive run depend on your documents. Confirm them once:
+
+```bash
+python discover_documents.py <a-custom-job#>   # lists docs, downloads SO + drive run
+python dump_pdf.py <same-job#>                 # dumps the drive-run text/tables
+# or: python drive_run.py "<path to the drive run pdf>"
+```
+
+Paste that back and the specific fields get wired into `drive_run.py` /
+the report. Until then the report still shows the `YES` flag and a best-effort
+summary of whatever labels the PDF carries.
+
+### AutoCAD DWG scan
+
+Sweep the AutoCAD job folders and record each fan's custom drawings — fast,
+filesystem-only, resumable:
+
+```bash
+python autocad_scan.py                 # every job folder under AUTOCAD_JOBS_DIR
+python autocad_scan.py 421314 421388   # specific jobs
+```
+
+It writes `backlog/autocad_dwgs.xlsx`: one row per job with **CW (01)** and
+**CCW (02)** (PDF, DWG, or both), plus a **yes/no column for every other suffix**
+seen (`-51`, `-35`, …). Jobs missing both `-01` and `-02` are flagged. Progress
+is saved after every batch, so an interrupted run resumes.
+
+### Backfill old orders
+
+Grind through a backlog of historical orders one at a time (run it all day):
+
+```bash
+python backfill_orders.py                  # all AutoCAD job folders
+python backfill_orders.py --list jobs.txt  # or a file of job numbers
+python backfill_orders.py --range 420000 421000
+```
+
+It downloads + parses each order's Sales Order and drive run, merges the DWG
+scan, and writes `backlog/backlog.xlsx`. It's resumable (kill and re-run any
+time). **One thing must be confirmed first:** how to open an order that's no
+longer on the board. Run `python discover_documents.py --probe <old-job#>`,
+paste the output back, and the lookup gets wired into `open_order_detail()`.
 
 ## Troubleshooting
 
