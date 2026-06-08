@@ -83,6 +83,24 @@ If it returns 0 jobs, set `CBC_QUEUE_URL` to your exact dispatch page URL (and
 check `scraper.py`'s selectors against cbcinsider's current layout) — see
 Troubleshooting below.
 
+### Recovering a botched run (staged execution)
+
+If the 5 AM run goes wrong, you don't have to re-run the whole thing. The
+pipeline can run one stage at a time, reusing what the previous stage wrote to
+disk so the slow scrape happens only once:
+
+```bash
+python main.py --no-ai      # 1. scrape + diff + Excel — no AI, no email
+python main.py --ai-only    # 2. add the AI briefing to today's saved run — no email
+python main.py --mail-only  # 3. email today's finished briefing + Excel
+```
+
+A plain `python main.py` still does all three in one shot. The history/tracking
+state is advanced exactly once — by whichever stage does the scrape+diff
+(`--no-ai` or a full run) — so re-running `--ai-only` or `--mail-only` is safe
+and never double-counts. Run the stages in order; each tells you the next one.
+
+
 ## Scheduling at 5 AM daily
 
 ### Windows — Task Scheduler
