@@ -47,6 +47,23 @@ shaping) is unit-tested in the sandbox.
    plausible entry points (search box, direct `loadDetail`, URL params) and
    reports which one surfaces the documents. Paste the result back.
 
+## Merged main's restructure (2026-06-08) — still compatible
+
+Main was restructured (PR #2): orchestration moved out of `main.py` into
+`pipeline.py` (stages `scrape`/`brief`/`send`), and `compare.py` now diffs
+against the most recent prior snapshot (`prev_date`). I merged `origin/main`
+into this branch. Compatibility confirmed:
+
+- `pipeline.scrape_and_diff()` still calls **`enrich_with_sales_orders(jobs)`**
+  (unchanged signature) → the construction-run capture runs automatically.
+- `pipeline.build_excel()` still calls **`build_workbook(...)`** → the Drive Run
+  column flows through. Merged `compare.py` emits the same diff keys
+  `excel_writer` consumes.
+- Only README + config.py overlapped; config auto-merged, README resolved.
+- The four backlog/discovery tools don't touch `main.py`/`pipeline.py`.
+
+All modules compile; scanner tests pass on the merged tree.
+
 ## Status
 
 - [x] Read the codebase, mapped the data flow, wrote this log.
