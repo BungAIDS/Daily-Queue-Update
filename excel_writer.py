@@ -183,6 +183,38 @@ def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any],
         row += 1
     row += 1
 
+    # Change orders that landed this run (CO# rose since yesterday, including
+    # jobs that came back at a higher CO#). Placed right under New orders.
+    co_changed = list(diff.get("co_changed", []))
+    for j in diff.get("returning", []):
+        cr = j.get("_co_returned")
+        if cr:
+            co_changed.append({"job": j.get("job"), "customer": j.get("customer", ""),
+                               "old_co": cr["old_co"], "new_co": cr["new_co"],
+                               "co_history": j.get("co_history", []), "_returned": True})
+    ws.cell(row=row, column=1, value=f"Change orders this run ({len(co_changed)})").font = SECTION_FONT
+    row += 1
+    if co_changed:
+        for c, h in enumerate(["Job #", "Customer", "Change", "Latest change-order note"], start=1):
+            cell = ws.cell(row=row, column=c, value=h)
+            cell.font = HEADER_FONT
+            cell.fill = HEADER_FILL
+        row += 1
+        for c in co_changed:
+            arrow = f"CO#{c['old_co']} -> CO#{c['new_co']}"
+            if c.get("_returned"):
+                arrow += " (returned)"
+            note = c["co_history"][0] if c.get("co_history") else ""
+            ws.cell(row=row, column=1, value=c["job"]).font = RED_FONT
+            ws.cell(row=row, column=2, value=c["customer"]).font = RED_FONT
+            ws.cell(row=row, column=3, value=arrow).font = RED_FONT
+            ws.cell(row=row, column=4, value=note).font = RED_FONT
+            row += 1
+    else:
+        ws.cell(row=row, column=1, value="(none)")
+        row += 1
+    row += 1
+
     # Returning orders (came back from history)
     returning = diff.get("returning", [])
     ws.cell(row=row, column=1, value=f"Returning orders — back from history ({len(returning)})").font = SECTION_FONT
@@ -220,8 +252,8 @@ def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any],
         row += 1
     row += 1
 
-    # Changed
-    ws.cell(row=row, column=1, value=f"Changed orders ({len(diff['changed'])})").font = SECTION_FONT
+    # Orders that have changed
+    ws.cell(row=row, column=1, value=f"Orders that have changed ({len(diff['changed'])})").font = SECTION_FONT
     row += 1
     if diff["changed"]:
         for c, h in enumerate(["Job #", "Customer", "Field", "Old value", "New value"], start=1):
@@ -237,38 +269,6 @@ def _write_changes_tab(ws, briefing: Dict[str, Any], diff: Dict[str, Any],
                 ws.cell(row=row, column=4, value=old)
                 ws.cell(row=row, column=5, value=new)
                 row += 1
-    else:
-        ws.cell(row=row, column=1, value="(none)")
-        row += 1
-    row += 1
-
-    # Change orders that landed this run (CO# rose since yesterday, including
-    # jobs that came back at a higher CO#).
-    co_changed = list(diff.get("co_changed", []))
-    for j in diff.get("returning", []):
-        cr = j.get("_co_returned")
-        if cr:
-            co_changed.append({"job": j.get("job"), "customer": j.get("customer", ""),
-                               "old_co": cr["old_co"], "new_co": cr["new_co"],
-                               "co_history": j.get("co_history", []), "_returned": True})
-    ws.cell(row=row, column=1, value=f"Change orders this run ({len(co_changed)})").font = SECTION_FONT
-    row += 1
-    if co_changed:
-        for c, h in enumerate(["Job #", "Customer", "Change", "Latest change-order note"], start=1):
-            cell = ws.cell(row=row, column=c, value=h)
-            cell.font = HEADER_FONT
-            cell.fill = HEADER_FILL
-        row += 1
-        for c in co_changed:
-            arrow = f"CO#{c['old_co']} -> CO#{c['new_co']}"
-            if c.get("_returned"):
-                arrow += " (returned)"
-            note = c["co_history"][0] if c.get("co_history") else ""
-            ws.cell(row=row, column=1, value=c["job"]).font = RED_FONT
-            ws.cell(row=row, column=2, value=c["customer"]).font = RED_FONT
-            ws.cell(row=row, column=3, value=arrow).font = RED_FONT
-            ws.cell(row=row, column=4, value=note).font = RED_FONT
-            row += 1
     else:
         ws.cell(row=row, column=1, value="(none)")
         row += 1
