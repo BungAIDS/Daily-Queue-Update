@@ -50,7 +50,7 @@ from config import (
 from drive_run import parse_drive_run_pdf
 from sales_orders import (
     _parse_doc, _latest_of_type, _trigger_js, _so_filename, _doc_filename,
-    SO_TYPE, DRIVE_RUN_TYPE, parse_sales_order_pdf,
+    _download_error, SO_TYPE, DRIVE_RUN_TYPE, parse_sales_order_pdf,
 )
 from scraper import CONTAINER_SELECTOR
 import autocad_scan
@@ -98,8 +98,12 @@ def _board_args(page) -> Dict[str, str]:
 def _open_via_loaddetail(page, job: str, args_js: str) -> bool:
     page.evaluate(_trigger_js(args_js))
     try:
+        # The modal's docs typically load in ~30s. The backfill is serial
+        # (uncontended), so 45s is ample headroom — the daily run's parallel
+        # fetch keeps its longer 90s wait. This bounds the per-job worst case
+        # on an all-day grind.
         page.locator("#modalDetail a").filter(
-            has_text=re.compile(re.escape(job))).first.wait_for(state="attached", timeout=90000)
+            has_text=re.compile(re.escape(job))).first.wait_for(state="attached", timeout=45000)
         return True
     except Exception:  # noqa: BLE001
         return False
@@ -188,8 +192,15 @@ def _download(context, page_url: str, href: str, dest: Path) -> Optional[str]:
         return str(dest)
     try:
         resp = context.request.get(urljoin(page_url, href), timeout=60000)
+        body = resp.body()
+        # Never archive an error page / expired-session login page as the PDF —
+        # the dest.exists() cache would then skip re-downloading it forever.
+        err = _download_error(resp.status, body)
+        if err:
+            log.warning("  download failed for %s: %s", dest.name, err)
+            return None
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(resp.body())
+        dest.write_bytes(body)
         return str(dest)
     except Exception as e:  # noqa: BLE001
         log.warning("  download failed for %s: %s", dest.name, e)
@@ -213,6 +224,7 @@ def process_one(page, context, job: str) -> Dict[str, Any]:
             return rec
         docs = _collect_docs(page)
 
+        so_pdf = dr_pdf = None
         so = _latest_of_type(docs, SO_TYPE)
         if so:
             href, doc = so
@@ -237,7 +249,15 @@ def process_one(page, context, job: str) -> Dict[str, Any]:
             rec["drive_run_pdf"] = dr_pdf or ""
             rec["drive_run_summary"] = parse_drive_run_pdf(dr_pdf).get("summary", "") if dr_pdf else ""
 
-        rec["status"] = "ok" if so else "no-SO"
+        # "ok" only when every document we found actually downloaded — a found-
+        # but-failed download stays "error" so the resume retries it, instead of
+        # permanently recording the job with empty fields.
+        if not so:
+            rec["status"] = "no-SO"
+        elif so_pdf and (not dr or dr_pdf):
+            rec["status"] = "ok"
+        else:
+            rec["status"] = "error"
     except Exception as e:  # noqa: BLE001 - one bad order never stops the backlog
         log.warning("  %s: error (%s)", job, e)
         rec["status"] = "error"
@@ -397,6 +417,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     from playwright.sync_api import sync_playwright
     processed = 0
+    rc = 0
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(storage_state=str(STORAGE_STATE_PATH), accept_downloads=True)
@@ -415,6 +436,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             log.error("Could not find the 'search order' box on %s. Set CBC_SEARCH_SELECTOR in .env "
                       "to its CSS selector (run `python discover_documents.py --probe %s` to print it), "
                       "then re-run.", CBC_QUEUE_URL or CBC_URL, targets[0] if targets else "<job#>")
+            rc = 1  # fail loudly so a scripted/scheduled run notices (workbook still written below)
         else:
             for job in targets:
                 if args.limit and processed >= args.limit:
@@ -443,7 +465,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                  "CBC_SEARCH_SELECTOR / CBC_SEARCH_BUTTON set (see `discover_documents.py --probe`).",
                  by_status["not-found"])
     log.info("  Wrote %s", out)
-    return 0
+    return rc
 
 
 if __name__ == "__main__":

@@ -29,6 +29,7 @@ from urllib.parse import urlparse, parse_qs, urljoin
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
 from config import CBC_URL, CBC_QUEUE_URL, STORAGE_STATE_PATH, SALES_ORDER_DIR, SO_CONCURRENCY
+from sales_orders import _download_error
 from scraper import CONTAINER_SELECTOR
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
@@ -125,11 +126,17 @@ async def _process_job(page, context, job: str, args_js: str) -> dict:
         res["status"] = "have it"
         return res
     try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
         resp = await context.request.get(urljoin(page.url, href))
         body = await resp.body()
-        dest.write_bytes(body)
-        res["status"] = f"downloaded {len(body)}b"
+        # Never write an error page / expired-session login page into the
+        # archive — the dest.exists() check would trust it forever.
+        err = _download_error(resp.status, body)
+        if err:
+            res["status"] = f"download FAILED: {err}"
+        else:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(body)
+            res["status"] = f"downloaded {len(body)}b"
     except Exception as e:  # noqa: BLE001
         res["status"] = f"download FAILED: {e}"
     return res

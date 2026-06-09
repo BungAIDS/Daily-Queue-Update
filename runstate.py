@@ -13,11 +13,15 @@ botched 5 AM run can be recovered one stage at a time without re-scraping.
 from __future__ import annotations
 
 import json
-from datetime import date
+import logging
+import re
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict
 
-from config import SNAPSHOT_DIR
+from config import OUTPUT_DIR, SNAPSHOT_DIR
+
+log = logging.getLogger(__name__)
 
 
 def _path(kind: str, d: date) -> Path:
@@ -53,3 +57,61 @@ def load_excel_path(d: date) -> Path | None:
     if not p.exists():
         return None
     return Path(json.loads(p.read_text(encoding="utf-8"))["path"])
+
+
+# --- archiving ---------------------------------------------------------------
+
+# Dated per-run files older than this many days are swept into an archive/
+# subfolder. They are MOVED, never deleted — the point of this program is a
+# complete record of every order ever run, so nothing is thrown away; the
+# sweep just keeps the working folders small enough to browse.
+ARCHIVE_AFTER_DAYS = 60
+
+_DATED_NAME = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+# (folder, filename patterns) swept by archive_old_runs. history.json — the
+# live long-term store — deliberately matches none of these.
+_ARCHIVE_SWEEPS = (
+    (SNAPSHOT_DIR, ("queue_*.json", "diff_*.json", "briefing_*.json",
+                    "excel_*.json", "history_*_start.json")),
+    (OUTPUT_DIR, ("queue_*.xlsx",)),
+)
+
+
+def archive_old_runs(today: date, keep_days: int = ARCHIVE_AFTER_DAYS) -> None:
+    """Move per-run files older than `keep_days` into <folder>/archive/.
+
+    Runs once per scrape (pipeline.scrape_and_diff). The lookback that the
+    daily diff and persistence tracking need is 14 days, so 60 is comfortably
+    safe. Never raises: a locked or unreadable file is logged and left for the
+    next day's sweep.
+    """
+    cutoff = today - timedelta(days=keep_days)
+    moved = 0
+    for folder, patterns in _ARCHIVE_SWEEPS:
+        dest = folder / "archive"
+        for pattern in patterns:
+            try:
+                matches = list(folder.glob(pattern))
+            except OSError as e:
+                log.warning("Archive sweep of %s/%s failed: %s", folder, pattern, e)
+                continue
+            for p in matches:
+                m = _DATED_NAME.search(p.name)
+                if not m:
+                    continue
+                try:
+                    d = date.fromisoformat(m.group(0))
+                except ValueError:
+                    continue
+                if d >= cutoff:
+                    continue
+                try:
+                    dest.mkdir(parents=True, exist_ok=True)
+                    p.replace(dest / p.name)
+                    moved += 1
+                except OSError as e:
+                    log.warning("Could not archive %s (%s); leaving it in place", p.name, e)
+    if moved:
+        log.info("Archived %d run file(s) older than %d days into archive/ (moved, not deleted)",
+                 moved, keep_days)

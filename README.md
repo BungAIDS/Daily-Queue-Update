@@ -10,6 +10,7 @@ Logs into cbcinsider.com every morning at 5 AM, scrapes the work queue, compares
   - **Changes** (first tab): AI briefing, anomalies, top action items, new orders, removed/completed orders, changed orders (with old → new values), persistent orders (3+ consecutive days in queue).
   - **Full Queue**: one row per job, AutoFilter enabled, red highlight for today/overdue End Dates, yellow for due within 3 days, summary row at the bottom with total job count and total dollar value.
 - `snapshots/queue_YYYY-MM-DD.json` — full structured snapshot used for tomorrow's diff.
+- Housekeeping: reports/snapshots/diffs older than 60 days are **moved into `archive/` subfolders** (under `OUTPUT_DIR` and `SNAPSHOT_DIR`) — never deleted, so the complete record of every order stays on disk.
 - A plain-text email (via your desktop Outlook) with the briefing, counts, top action items, anomalies, and the Excel report attached.
 - An alert email if any step fails (login failure, site down, Claude API error, etc.).
 
@@ -33,7 +34,7 @@ playwright install chromium
 
 ### 2. Get an Anthropic API key
 
-Sign up at https://console.anthropic.com, add a payment method, and create an API key. This script uses `claude-opus-4-7` — expect ~$0.05–0.20 per daily run (a few pennies to a couple dimes depending on queue size).
+Sign up at https://console.anthropic.com, add a payment method, and create an API key. This script uses `claude-haiku-4-5` — expect ~$0.02–0.05 per daily run (a few pennies, depending on queue size). The model is set by `CLAUDE_MODEL` in `config.py`.
 
 ### 3. Configure `.env`
 

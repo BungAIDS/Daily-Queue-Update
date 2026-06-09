@@ -3,6 +3,39 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-09 — full-codebase review pass: bug fixes + archiving
+
+Whole-repo bug/optimization review, fixes applied (model stays **haiku**):
+
+- **send.py**: the Changes-tab section is headed "Orders that have changed",
+  but the parser looked for "Changed orders" — re-sent emails always said
+  `changed=0`. Fixed (verified with a repro before/after).
+- **Downloads validated** (`sales_orders`/`backfill_orders`/`fetch_sales_orders`):
+  a non-200 or non-`%PDF-` body (e.g. the login page after session expiry) is
+  no longer written to the archive — previously it was cached forever by the
+  `dest.exists()` skip and silently stood in for the order's PDF.
+- **backfill_orders**: a found-but-failed download now records `error` (retried
+  on resume) instead of `ok`; missing search box exits 1; per-job modal wait
+  45s (serial run, typical load ~30s).
+- **autocad_scan `--limit`** now counts folders *scanned this run* — before,
+  already-done folders consumed the limit and a resumed run could do nothing.
+- **compare.py**: brief.py's read-only recompute now reads the day-start
+  history baseline (no more relabeling a returning order as "new" when the
+  diff file is missing); lookback off-by-one fixed (13 → 14 days); duplicate
+  job numbers on the board now log a warning instead of being silently merged.
+- **sales_orders**: AutoCAD folder lookup is one sweep of the Z: tree instead
+  of one glob per job; jobs whose modal loaded with no Sales Order (HDX) are
+  terminal and skip the 90s wait on the retry pass.
+- **Archiving (new)**: each scrape moves per-run files older than 60 days
+  (`queue_*.json`, `diff_*`, `briefing_*`, `excel_*`, `history_*_start`, old
+  `queue_*.xlsx`) into `archive/` subfolders — **moved, never deleted**; the
+  goal is a complete record of every order. `history.json` is never touched.
+  See `runstate.archive_old_runs` (`ARCHIVE_AFTER_DAYS = 60`).
+- Minor: config placeholder-tuple duplicate removed; off-Windows default
+  output dir is `~/Documents/DailyQueue` (no more literal `%USERPROFILE%`
+  folder when running tests off the work machine); README model/cost note
+  matches the configured haiku.
+
 ## The goal (from the request)
 
 1. **Construction run (`CBC_DriveRun`)** — alongside the Sales Order, open the

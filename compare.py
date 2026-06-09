@@ -54,10 +54,12 @@ def save_history(history: Dict[str, Any]) -> None:
     log.info("Updated history (%d archived jobs)", len(history))
 
 
-def _history_at_day_start(today: date, current: Dict[str, Any]) -> Dict[str, Any]:
+def _history_at_day_start(today: date, current: Dict[str, Any], record: bool = True) -> Dict[str, Any]:
     """The history as it stood at the start of `today`, so repeated scrapes on
     the same day all advance from the same baseline (idempotent). The first
-    scrape of the day records it; later scrapes restore it."""
+    scrape of the day records it; later scrapes restore it. With record=False
+    (read-only recomputes, e.g. brief.py) an existing baseline is still used,
+    but a missing one is not written."""
     path = SNAPSHOT_DIR / f"history_{today.isoformat()}_start.json"
     if path.exists():
         try:
@@ -65,7 +67,8 @@ def _history_at_day_start(today: date, current: Dict[str, Any]) -> Dict[str, Any
         except (json.JSONDecodeError, OSError) as e:
             log.warning("Could not read %s (%s); using current history", path, e)
             return current
-    path.write_text(json.dumps(current, indent=2), encoding="utf-8")
+    if record:
+        path.write_text(json.dumps(current, indent=2), encoding="utf-8")
     return current
 
 
@@ -107,7 +110,16 @@ def load_latest_snapshot(
 
 
 def _index(jobs: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    return {j["job"]: j for j in jobs if j.get("job")}
+    idx: Dict[str, Dict[str, Any]] = {}
+    for j in jobs:
+        jn = j.get("job")
+        if not jn:
+            continue
+        if jn in idx:
+            log.warning("Job %s appears more than once in the queue (two operations?); "
+                        "only the last row is tracked in the diff", jn)
+        idx[jn] = j
+    return idx
 
 
 def _load_lookback_jobsets(today: date, max_lookback: int = 14) -> List[set]:
@@ -122,7 +134,7 @@ def _load_lookback_jobsets(today: date, max_lookback: int = 14) -> List[set]:
     re-parsing every snapshot file once per job.
     """
     day_sets: List[set] = []
-    for delta in range(1, max_lookback):
+    for delta in range(1, max_lookback + 1):
         prev = load_snapshot(today - timedelta(days=delta))
         if prev is None:
             continue
@@ -165,14 +177,14 @@ def diff_queues(
     yesterday_idx = _index(yesterday_jobs or [])
 
     history = load_history()
-    if persist_history:
-        # Make same-day re-scrapes idempotent. The history advance (archiving
-        # removed jobs, popping returning ones) must always start from the state
-        # as of the BEGINNING of today — not from a copy an earlier scrape today
-        # already mutated, which would relabel a returning order as "new" on the
-        # second run. Snapshot that starting state once per day and restore it on
-        # every later run, so any number of scrapes today yield the same result.
-        history = _history_at_day_start(today, history)
+    # Make same-day re-runs consistent. The history advance (archiving removed
+    # jobs, popping returning ones) must always start from the state as of the
+    # BEGINNING of today — not from a copy an earlier scrape today already
+    # mutated, which would relabel a returning order as "new" on the second
+    # run. The first scrape of the day snapshots that starting state; every
+    # later run — including brief.py's read-only recompute — restores it (the
+    # recompute only reads the baseline, never writes it).
+    history = _history_at_day_start(today, history, record=persist_history)
     yesterday_date = (prev_date or (today - timedelta(days=1))).isoformat()
 
     # New today = in today, not in yesterday. Split by whether we've ever seen
