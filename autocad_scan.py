@@ -197,7 +197,7 @@ def save_progress(records: Dict[str, Dict[str, Any]]) -> None:
 def write_workbook(records: Dict[str, Dict[str, Any]], path: Path) -> Path:
     """Write the per-job matrix: fixed columns + one yes/no column per suffix."""
     from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill
+    from openpyxl.styles import Font, PatternFill, Alignment
     from openpyxl.utils import get_column_letter
 
     header_fill = PatternFill("solid", fgColor="305496")
@@ -206,6 +206,7 @@ def write_workbook(records: Dict[str, Dict[str, Any]], path: Path) -> Path:
     present_fill = PatternFill("solid", fgColor="C6EFCE")  # green: job HAS this drawing
     absent_fill = PatternFill("solid", fgColor="FFC7CE")   # red: it doesn't
     missing_font = Font(color="9C0006", bold=True)         # job missing BOTH -01 and -02
+    center = Alignment(horizontal="center")
 
     suffixes = all_extra_suffixes(records)
     # -01/-02 (CW/CCW) are on essentially every job, so they're not shown; only
@@ -235,8 +236,11 @@ def write_workbook(records: Dict[str, Dict[str, Any]], path: Path) -> Path:
             fcell.font = link_font
         extras = rec.get("extras", {})
         for k, s in enumerate(suffixes, start=len(fixed) + 1):
-            # Color is the signal (no text): green = has this drawing, red = doesn't.
-            ws.cell(i, k).fill = present_fill if s in extras else absent_fill
+            cell = ws.cell(i, k)
+            if s in extras:  # green + a tiny check; red + blank when absent
+                cell.value, cell.fill, cell.alignment = "✓", present_fill, center
+            else:
+                cell.fill = absent_fill
         if rec.get("missing_std"):
             ws.cell(i, 1).font = missing_font  # rare job with neither -01 nor -02
 

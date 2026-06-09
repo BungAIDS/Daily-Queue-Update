@@ -138,7 +138,7 @@ def test_workbook_color_cells(tmp: Path):
     headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
     col = headers.index("-51") + 1
     has, hasnt = ws.cell(2, col), ws.cell(3, col)  # rows sorted by job: 403425, 403500
-    assert has.value in (None, "") and hasnt.value in (None, "")
+    assert has.value == "✓" and hasnt.value in (None, "")  # check only on the "has it" cell
     assert (has.fill.fgColor.rgb or "").endswith("C6EFCE"), has.fill.fgColor.rgb   # green
     assert (hasnt.fill.fgColor.rgb or "").endswith("FFC7CE"), hasnt.fill.fgColor.rgb  # red
 

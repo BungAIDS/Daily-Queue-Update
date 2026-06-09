@@ -277,7 +277,7 @@ def _is_done(rec: Dict[str, Any]) -> bool:
 # --------------------------------------------------------------------------- #
 def write_workbook(records: Dict[str, Dict[str, Any]], dwg: Dict[str, Dict[str, Any]], path: Path) -> Path:
     from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill
+    from openpyxl.styles import Font, PatternFill, Alignment
     from openpyxl.utils import get_column_letter
 
     header_fill = PatternFill("solid", fgColor="305496")
@@ -287,6 +287,7 @@ def write_workbook(records: Dict[str, Dict[str, Any]], dwg: Dict[str, Dict[str, 
     dr_link_font = Font(color="C55A11", bold=True, underline="single")  # Drive Run -> PDF link
     present_fill = PatternFill("solid", fgColor="C6EFCE")  # green: job HAS this drawing
     absent_fill = PatternFill("solid", fgColor="FFC7CE")   # red: it doesn't
+    center = Alignment(horizontal="center")
 
     suffixes = autocad_scan.all_extra_suffixes(dwg)
     # -01/-02 (CW/CCW) aren't shown — nearly every job has them; only the custom
@@ -335,8 +336,11 @@ def write_workbook(records: Dict[str, Dict[str, Any]], dwg: Dict[str, Dict[str, 
             fcell.font = link_font
         extras = d.get("extras", {})
         for k, s in enumerate(suffixes, start=len(fixed) + 1):
-            # Color is the signal (no text): green = has this drawing, red = doesn't.
-            ws.cell(i, k).fill = present_fill if s in extras else absent_fill
+            cell = ws.cell(i, k)
+            if s in extras:  # green + a tiny check; red + blank when absent
+                cell.value, cell.fill, cell.alignment = "✓", present_fill, center
+            else:
+                cell.fill = absent_fill
 
     if jobs:
         ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{len(jobs) + 1}"
