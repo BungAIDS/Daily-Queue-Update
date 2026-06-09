@@ -123,7 +123,24 @@ def test_end_to_end(tmp: Path):
     headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
     assert "-51" in headers and "CW (01)" not in headers and "CCW (02)" not in headers
     row = {headers[c - 1]: ws.cell(2, c).value for c in range(1, ws.max_column + 1)}
-    assert row["Job #"] == "421314" and row["-51"] == "yes" and row["Extras"] == 1
+    assert row["Job #"] == "421314" and row["Extras"] == 1
+
+
+def test_workbook_color_cells(tmp: Path):
+    # Suffix cells carry no text; color is the signal (green=has, red=doesn't).
+    recs = {
+        "403425": a.build_record("403425", "AX", "/x", a.scan_files(["403425-51.dwg"], "403425")),
+        "403500": a.build_record("403500", "AX", "/y", a.scan_files(["403500-01.dwg", "403500-02.dwg"], "403500")),
+    }
+    out = a.write_workbook(recs, tmp / "colors.xlsx")
+    from openpyxl import load_workbook
+    ws = load_workbook(out).active
+    headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
+    col = headers.index("-51") + 1
+    has, hasnt = ws.cell(2, col), ws.cell(3, col)  # rows sorted by job: 403425, 403500
+    assert has.value in (None, "") and hasnt.value in (None, "")
+    assert (has.fill.fgColor.rgb or "").endswith("C6EFCE"), has.fill.fgColor.rgb   # green
+    assert (hasnt.fill.fgColor.rgb or "").endswith("FFC7CE"), hasnt.fill.fgColor.rgb  # red
 
 
 def main() -> int:

@@ -285,6 +285,8 @@ def write_workbook(records: Dict[str, Dict[str, Any]], dwg: Dict[str, Dict[str, 
     link_font = Font(color="0563C1", underline="single")
     dr_font = Font(color="C55A11", bold=True)
     dr_link_font = Font(color="C55A11", bold=True, underline="single")  # Drive Run -> PDF link
+    present_fill = PatternFill("solid", fgColor="C6EFCE")  # green: job HAS this drawing
+    absent_fill = PatternFill("solid", fgColor="FFC7CE")   # red: it doesn't
 
     suffixes = autocad_scan.all_extra_suffixes(dwg)
     # -01/-02 (CW/CCW) aren't shown — nearly every job has them; only the custom
@@ -333,7 +335,8 @@ def write_workbook(records: Dict[str, Dict[str, Any]], dwg: Dict[str, Dict[str, 
             fcell.font = link_font
         extras = d.get("extras", {})
         for k, s in enumerate(suffixes, start=len(fixed) + 1):
-            ws.cell(i, k, "yes" if s in extras else "no")
+            # Color is the signal (no text): green = has this drawing, red = doesn't.
+            ws.cell(i, k).fill = present_fill if s in extras else absent_fill
 
     if jobs:
         ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{len(jobs) + 1}"

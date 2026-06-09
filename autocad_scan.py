@@ -203,7 +203,9 @@ def write_workbook(records: Dict[str, Dict[str, Any]], path: Path) -> Path:
     header_fill = PatternFill("solid", fgColor="305496")
     header_font = Font(color="FFFFFF", bold=True)
     link_font = Font(color="0563C1", underline="single")
-    warn_fill = PatternFill("solid", fgColor="FFC7CE")  # missing CW/CCW
+    present_fill = PatternFill("solid", fgColor="C6EFCE")  # green: job HAS this drawing
+    absent_fill = PatternFill("solid", fgColor="FFC7CE")   # red: it doesn't
+    missing_font = Font(color="9C0006", bold=True)         # job missing BOTH -01 and -02
 
     suffixes = all_extra_suffixes(records)
     # -01/-02 (CW/CCW) are on essentially every job, so they're not shown; only
@@ -233,9 +235,10 @@ def write_workbook(records: Dict[str, Dict[str, Any]], path: Path) -> Path:
             fcell.font = link_font
         extras = rec.get("extras", {})
         for k, s in enumerate(suffixes, start=len(fixed) + 1):
-            ws.cell(i, k, "yes" if s in extras else "no")
+            # Color is the signal (no text): green = has this drawing, red = doesn't.
+            ws.cell(i, k).fill = present_fill if s in extras else absent_fill
         if rec.get("missing_std"):
-            ws.cell(i, 1).fill = warn_fill
+            ws.cell(i, 1).font = missing_font  # rare job with neither -01 nor -02
 
     # AutoFilter + freeze + a light auto-size.
     if rows:
