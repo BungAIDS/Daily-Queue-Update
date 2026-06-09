@@ -210,10 +210,12 @@ that drawing and **red** when it doesn't, plus an `Extras` count. The standard
 just be noise — but a job missing **both** is flagged red as the rare exception.
 Progress is saved after every batch, so an interrupted run resumes.
 
-The **daily queue report's Full Queue tab carries the same green-✓/red matrix**,
-appended after the standard columns: every morning the run scans each board
-job's AutoCAD folder live (reusing the folder lookup it already does) and adds a
-column for each custom suffix found across the board.
+The **daily queue report carries the same green-✓/red matrix** on both the **Full
+Queue** and **History** tabs, appended after the standard columns: every morning
+the run scans each board job's AutoCAD folder live (reusing the folder lookup it
+already does) and adds a column for each custom suffix found. History keeps it
+per archived order too, so it builds into a complete per-order log over time
+(orders archived once the scan went live carry their DWG data).
 
 ### Backfill old orders
 
