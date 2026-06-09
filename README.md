@@ -220,9 +220,22 @@ python backfill_orders.py --range 420000 421000
 
 It downloads + parses each order's Sales Order and drive run, merges the DWG
 scan, and writes `backlog/backlog.xlsx`. It's resumable (kill and re-run any
-time). **One thing must be confirmed first:** how to open an order that's no
-longer on the board. Run `python discover_documents.py --probe <old-job#>`,
-paste the output back, and the lookup gets wired into `open_order_detail()`.
+time).
+
+Old orders are opened through the queue page's **"search order" / "find order"**
+box — the backfill types each job number in and opens the surfaced order. The
+box is auto-detected; the run preflights it and stops with a clear message (no
+all-day grind) if it can't be found. Confirm it once, and grab the exact
+selector if auto-detect misses:
+
+```bash
+python discover_documents.py --probe <a-real-job#>
+```
+
+That lists the page's text inputs, shows what auto-detect picked, and runs the
+**real** lookup — `SUCCESS` means you're ready. If it misses, set
+`CBC_SEARCH_SELECTOR` (and `CBC_SEARCH_BUTTON` if a button submits the search)
+in `.env` to the selector it printed, then re-probe.
 
 ## Troubleshooting
 

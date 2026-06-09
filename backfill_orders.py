@@ -22,12 +22,12 @@ Outputs (under BACKLOG_DIR):
     backfill_progress.json   resumable per-job store (source of truth)
     backlog.xlsx             master sheet: SO/drive-run fields + DWG suffix matrix
 
->>> THE ONE UNKNOWN is how to open an order that is NOT on the board. Run
-    `python discover_documents.py --probe <old-job#>` to find the exact lookup,
-    then wire it into open_order_detail() below (marked SEAM). Until then this
-    handles any target that happens to still be on the board and records the
-    rest as "lookup-unconfirmed" — the AutoCAD/DWG half of the backlog still
-    fills in regardless.
+Old orders are opened through the queue page's "search order" / "find order"
+box: each job number is typed in and the surfaced order's detail is opened. The
+box is auto-detected; if that misses on your layout, set CBC_SEARCH_SELECTOR
+(and optionally CBC_SEARCH_BUTTON) in .env — `python discover_documents.py
+--probe <job#>` prints the exact selector. The run preflights the box and stops
+with a clear message rather than grinding the whole list if it can't be found.
 """
 from __future__ import annotations
 
@@ -45,6 +45,7 @@ from urllib.parse import urljoin
 from config import (
     CBC_URL, CBC_QUEUE_URL, STORAGE_STATE_PATH,
     SALES_ORDER_DIR, DRIVE_RUN_DIR, BACKLOG_DIR, AUTOCAD_JOBS_DIR,
+    CBC_SEARCH_SELECTOR, CBC_SEARCH_BUTTON,
 )
 from drive_run import parse_drive_run_pdf
 from sales_orders import (
@@ -103,36 +104,71 @@ def _open_via_loaddetail(page, job: str, args_js: str) -> bool:
         return False
 
 
-def open_order_detail(page, job: str, board_args: Dict[str, str]) -> bool:
-    """Surface `job`'s documents in #modalDetail. Returns True if they appear.
+def find_search_box(page):
+    """Locate the queue page's "search order" / "find order" box, or None.
 
-    If the job is still on the board we just call its loadDetail(...). Otherwise
-    we hit the SEAM below — the off-board lookup that discovery must confirm.
-    """
-    args = board_args.get(job)
-    if args:
-        return _open_via_loaddetail(page, job, args)
+    Honors CBC_SEARCH_SELECTOR if set; otherwise matches a text input whose
+    placeholder / aria-label / title / id / name mentions "search" or "find"
+    (preferring one that also mentions "order")."""
+    if CBC_SEARCH_SELECTOR:
+        loc = page.locator(CBC_SEARCH_SELECTOR)
+        return loc.first if loc.count() else None
+    best = None
+    for el in page.locator("input[type=text], input[type=search], input:not([type])").all():
+        blob = " ".join(filter(None, [
+            el.get_attribute("placeholder"), el.get_attribute("aria-label"),
+            el.get_attribute("title"), el.get_attribute("id"), el.get_attribute("name"),
+        ])).lower()
+        if "search" in blob or "find" in blob:
+            if "order" in blob:
+                return el          # best: a "search order" / "find order" box
+            best = best or el      # fallback: any search/find input
+    return best
 
-    # ---------------------------------------------------------------- SEAM ---
-    # OFF-BOARD LOOKUP — replace with the mechanism `discover_documents.py
-    # --probe` confirms (a search box, a deep-link URL, or loadDetail with a
-    # known arg shape). The search-box attempt below is a best guess; if it
-    # doesn't apply on your site it simply returns False and the job is recorded
-    # as "lookup-unconfirmed" so nothing crashes.
-    box = page.locator(
-        "input#MainContent_txtSearch, input[id*=earch], input[placeholder*=earch]").first
-    if box.count():
+
+def _modal_has_job(page, job: str) -> bool:
+    try:
+        return page.locator("#modalDetail a").filter(
+            has_text=re.compile(re.escape(job))).count() > 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def open_order_detail(page, job: str) -> bool:
+    """Surface `job`'s documents in #modalDetail via the queue's search box.
+
+    Types the job number into the search bar, submits (Enter, plus an optional
+    CBC_SEARCH_BUTTON click), then waits for either the board to re-render with
+    the order (and opens it via loadDetail) or the detail modal to populate
+    directly. Returns True once the documents are present, else False."""
+    box = find_search_box(page)
+    if box is None:
+        return False
+    try:
+        box.click()
+        box.fill("")
+        box.fill(job)
+        box.press("Enter")
+    except Exception:  # noqa: BLE001
+        return False
+    if CBC_SEARCH_BUTTON:
         try:
-            box.fill(job)
-            box.press("Enter")
-            page.wait_for_timeout(4000)
-            refreshed = _board_args(page)
-            if job in refreshed:
-                return _open_via_loaddetail(page, job, refreshed[job])
+            btn = page.locator(CBC_SEARCH_BUTTON)
+            if btn.count():
+                btn.first.click()
         except Exception:  # noqa: BLE001
-            return False
+            pass
+    # Poll: the search may re-render the board (postback/filter) or open the
+    # detail directly. Either way, wait for the order to surface.
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        page.wait_for_timeout(500)
+        amap = _board_args(page)
+        if job in amap and _open_via_loaddetail(page, job, amap[job]):
+            return True
+        if _modal_has_job(page, job):
+            return True
     return False
-    # ------------------------------------------------------------------------ #
 
 
 def _collect_docs(page) -> List[Dict[str, Any]]:
@@ -167,12 +203,12 @@ def _close_modal(page) -> None:
         pass
 
 
-def process_one(page, context, job: str, board_args: Dict[str, str]) -> Dict[str, Any]:
-    """Open one order, download + parse its SO and drive run."""
+def process_one(page, context, job: str) -> Dict[str, Any]:
+    """Open one order via the search box, download + parse its SO and drive run."""
     rec: Dict[str, Any] = {"job": job, "status": "", "scanned_at": datetime.now().isoformat(timespec="seconds")}
     try:
-        if not open_order_detail(page, job, board_args):
-            rec["status"] = "no-order" if job in board_args else "lookup-unconfirmed"
+        if not open_order_detail(page, job):
+            rec["status"] = "not-found"  # search returned no order/documents for this job#
             return rec
         docs = _collect_docs(page)
 
@@ -231,8 +267,8 @@ def save_progress(records: Dict[str, Dict[str, Any]]) -> None:
 
 def _is_done(rec: Dict[str, Any]) -> bool:
     """A job is 'done' (skip on resume) once we have a real answer for it.
-    'lookup-unconfirmed' is NOT done — it should be retried once the seam works."""
-    return bool(rec) and rec.get("status") in ("ok", "no-SO", "no-order")
+    'error' is NOT done — those get retried on the next run."""
+    return bool(rec) and rec.get("status") in ("ok", "no-SO", "not-found")
 
 
 # --------------------------------------------------------------------------- #
@@ -358,20 +394,27 @@ def main(argv: Optional[List[str]] = None) -> int:
             log.error("Landed on login — session expired. Re-run `python login.py`.")
             return 1
         page.wait_for_selector(CONTAINER_SELECTOR, timeout=45000)
-        board_args = _board_args(page)
 
-        for job in targets:
-            if args.limit and processed >= args.limit:
-                break
-            if not args.rescan and _is_done(records.get(job, {})):
-                continue
-            records[job] = process_one(page, context, job, board_args)
-            processed += 1
-            log.info("  %d  %s -> %s", processed, job, records[job].get("status"))
-            if processed % 25 == 0:
-                save_progress(records)
-            if args.delay:
-                time.sleep(args.delay)
+        # Preflight: the backfill drives the queue page's "search order" box.
+        # If we can't find it, don't grind through the whole list — tell the
+        # operator how to pin it and stop (the DWG merge still writes output).
+        if find_search_box(page) is None:
+            log.error("Could not find the 'search order' box on %s. Set CBC_SEARCH_SELECTOR in .env "
+                      "to its CSS selector (run `python discover_documents.py --probe %s` to print it), "
+                      "then re-run.", CBC_QUEUE_URL or CBC_URL, targets[0] if targets else "<job#>")
+        else:
+            for job in targets:
+                if args.limit and processed >= args.limit:
+                    break
+                if not args.rescan and _is_done(records.get(job, {})):
+                    continue
+                records[job] = process_one(page, context, job)
+                processed += 1
+                log.info("  %d  %s -> %s", processed, job, records[job].get("status"))
+                if processed % 25 == 0:
+                    save_progress(records)
+                if args.delay:
+                    time.sleep(args.delay)
 
         browser.close()
 
@@ -382,9 +425,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         by_status[r.get("status", "?")] = by_status.get(r.get("status", "?"), 0) + 1
     log.info("Done: processed %d this run; store has %d job(s).", processed, len(records))
     log.info("  status breakdown: %s", ", ".join(f"{k}={v}" for k, v in sorted(by_status.items())))
-    if by_status.get("lookup-unconfirmed"):
-        log.info("  %d job(s) need the off-board lookup wired in (see the SEAM in this file).",
-                 by_status["lookup-unconfirmed"])
+    if by_status.get("not-found"):
+        log.info("  %d job(s) not found via search — if that seems high, the search box may need "
+                 "CBC_SEARCH_SELECTOR / CBC_SEARCH_BUTTON set (see `discover_documents.py --probe`).",
+                 by_status["not-found"])
     log.info("  Wrote %s", out)
     return 0
 

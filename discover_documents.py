@@ -141,7 +141,10 @@ def run_list(want_job: str | None) -> None:
 
 
 def run_probe(old_job: str) -> None:
-    """Try to reach an order that's not on the board — for the backfill tool."""
+    """Confirm the backfill's old-order lookup: list the page's text inputs, show
+    what auto-detect picks, then run the REAL backfill search path for `old_job`
+    and report whether its documents surface."""
+    from backfill_orders import find_search_box, open_order_detail
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
         context = browser.new_context(storage_state=str(STORAGE_STATE_PATH), accept_downloads=True)
@@ -151,49 +154,33 @@ def run_probe(old_job: str) -> None:
             raise SystemExit("Landed on login — session expired. Re-run `python login.py`.")
         page.wait_for_selector(CONTAINER_SELECTOR, timeout=30000)
 
-        # 1) The exact loadDetail(...) signature from a live row — the off-board
-        #    lookup probably calls the same function with different args.
-        rows = _board_args(page)
-        log.info("=== loadDetail signature (from a live board row) ===")
-        if rows:
-            sample = page.locator(CONTAINER_SELECTOR).first.get_attribute("onclick") or ""
-            log.info("  sample onclick: %s", sample[:240])
-            log.info("  parsed job=%s  args=%s", rows[0][0], rows[0][1])
+        # 1) Every text input — so you can read off the exact CBC_SEARCH_SELECTOR.
+        log.info("=== text inputs on the queue page ===")
+        for el in page.locator("input[type=text], input[type=search], input:not([type])").all():
+            ident, name = el.get_attribute("id") or "", el.get_attribute("name") or ""
+            ph, al = el.get_attribute("placeholder") or "", el.get_attribute("aria-label") or ""
+            sel = f"#{ident}" if ident else (f"input[name='{name}']" if name else "input[..]")
+            log.info("  %-28s placeholder=%r aria-label=%r", sel, ph, al)
 
-        # 2) Any search / lookup controls on the page.
-        log.info("\n=== candidate search/lookup controls ===")
-        inputs = page.locator(
-            "input[type=text], input[type=search], input:not([type]), select").all()
-        for el in inputs:
-            ident = el.get_attribute("id") or el.get_attribute("name") or ""
-            ph = el.get_attribute("placeholder") or ""
-            if any(k in (ident + ph).lower() for k in ("search", "job", "order", "find", "filter", "lookup")):
-                log.info("  <%s id/name=%r placeholder=%r>", el.evaluate("e => e.tagName"), ident, ph)
-        log.info("  (if nothing useful here, the order detail may live at its own URL — "
-                 "open an old order in the browser and copy the address bar)")
-
-        # 3) Best-effort: type the old job into the first search-y box and submit.
-        box = page.locator("input#MainContent_txtSearch, input[id*=earch], input[placeholder*=earch]").first
-        if box.count():
-            log.info("\n=== trying to search for %s ===", old_job)
-            try:
-                box.fill(old_job)
-                box.press("Enter")
-                page.wait_for_timeout(4000)
-                rows2 = _board_args(page)
-                hit = next((a for jn, a in rows2 if jn == old_job), None)
-                if hit and _open_detail(page, old_job, hit):
-                    _report_docs(old_job, _collect_docs(page))
-                    log.info("  ^ search worked — backfill can drive this box.")
-                else:
-                    log.info("  search did not surface %s on the board.", old_job)
-            except Exception as e:  # noqa: BLE001
-                log.info("  search attempt errored: %s", e)
+        # 2) What the backfill's auto-detector picks.
+        box = find_search_box(page)
+        if box is None:
+            log.info("\n  Auto-detect found NO search box. Choose the right input above and set its\n"
+                     "  CSS selector as CBC_SEARCH_SELECTOR in .env (e.g. #MainContent_txtFindOrder).")
         else:
-            log.info("\n  No obvious search box found.")
+            log.info("\n  Auto-detect picked: id=%r name=%r placeholder=%r",
+                     box.get_attribute("id") or "", box.get_attribute("name") or "",
+                     box.get_attribute("placeholder") or "")
 
-        log.info("\nPaste everything above back so we can wire the exact old-order lookup "
-                 "into backfill_orders.open_order_detail().")
+        # 3) Run the ACTUAL backfill lookup and report — this is the real path.
+        log.info("\n=== running the real backfill lookup for %s ===", old_job)
+        if open_order_detail(page, old_job):
+            _report_docs(old_job, _collect_docs(page))
+            log.info("  ^ SUCCESS — backfill can pull this order. You're ready: python backfill_orders.py")
+        else:
+            log.info("  Did NOT surface %s. If a box is listed above, set CBC_SEARCH_SELECTOR to it "
+                     "(and CBC_SEARCH_BUTTON if a separate button submits), then re-probe.", old_job)
+
         input("\nPress Enter to close the browser... ")
         browser.close()
 

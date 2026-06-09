@@ -79,8 +79,11 @@ All modules compile; scanner tests pass on the merged tree.
       downloads SO + drive run, `--probe` for old-order lookup.
 - [x] **`backfill_orders.py`** — resumable 1-by-1 runner with a single
       `open_order_detail()` seam to fill in once discovery reveals the lookup.
-- [ ] **Wire the confirmed old-order lookup** into `backfill_orders.py` (blocked
-      on discovery step 2).
+- [x] **Old-order lookup wired in** — backfill opens off-board orders via the
+      queue page's "search order" box (auto-detected; `CBC_SEARCH_SELECTOR` /
+      `CBC_SEARCH_BUTTON` overrides). Preflighted so it stops loudly instead of
+      grinding if the box isn't found. `discover_documents.py --probe` runs the
+      real path to confirm. (Confirm/tune selector on the work machine.)
 - [ ] **Finalize drive-run fields** in `drive_run.py` (blocked on discovery step 1).
 - [x] README + `.env.example` updated for the new paths/flags.
 
