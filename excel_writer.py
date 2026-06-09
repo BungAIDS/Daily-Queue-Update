@@ -27,6 +27,9 @@ RED_FONT = Font(color="C00000", bold=True)  # rows whose change order landed thi
 LINK_FONT = Font(color="0563C1", underline="single")  # hyperlinks (Job # -> SO pdf, Folder)
 DRIVE_RUN_FONT = Font(color="C55A11", bold=True)  # highly-custom (has a drive run)
 DRIVE_RUN_LINK_FONT = Font(color="C55A11", bold=True, underline="single")  # ^ + links to the PDF
+DWG_HAS_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")  # green: has the drawing
+DWG_NO_FILL = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")   # red: doesn't
+CENTER_ALIGN = Alignment(horizontal="center")
 
 # Single source of truth for column order. Each entry is (header, key); the key
 # names the job field to print, or a special renderer handled in _write_job_row:
@@ -365,6 +368,15 @@ def _write_job_row(ws, row: int, j: Dict[str, Any], co_changed: bool = False) ->
                 ws.cell(row=row, column=col).font = RED_FONT
 
 
+def _dwg_suffixes(jobs: List[Dict[str, Any]]) -> List[str]:
+    """Sorted union of every custom-DWG suffix found across the jobs (the -NN
+    extras beyond the standard -01/-02), numeric-ordered."""
+    seen: set = set()
+    for j in jobs:
+        seen.update((j.get("dwg_extras") or {}).keys())
+    return sorted(seen, key=lambda s: (int(s), s) if s.isdigit() else (10**9, s))
+
+
 def _write_full_queue_tab(
     ws,
     jobs: List[Dict[str, Any]],
@@ -374,8 +386,18 @@ def _write_full_queue_tab(
 ) -> None:
     new_job_ids = new_job_ids or set()
     co_changed_ids = co_changed_ids or set()
+    # Custom-DWG matrix: one column per distinct extra suffix, appended after the
+    # standard columns. Green ✓ = the job has that drawing, red = it doesn't.
+    suffixes = _dwg_suffixes(jobs)
+    dwg_start = len(QUEUE_HEADERS) + 1
+    total_cols = len(QUEUE_HEADERS) + len(suffixes)
+
     for c, h in enumerate(QUEUE_HEADERS, start=1):
         cell = ws.cell(row=1, column=c, value=h)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+    for k, s in enumerate(suffixes, start=dwg_start):
+        cell = ws.cell(row=1, column=k, value=f"-{s}")
         cell.font = HEADER_FONT
         cell.fill = HEADER_FILL
 
@@ -398,8 +420,16 @@ def _write_full_queue_tab(
         else:
             fill = None
         if fill is not None:
-            for c in range(1, len(QUEUE_HEADERS) + 1):
+            for c in range(1, len(QUEUE_HEADERS) + 1):  # urgency fill: standard cols only
                 ws.cell(row=i, column=c).fill = fill
+        # DWG matrix cells (after the urgency fill, so their green/red stands).
+        extras = j.get("dwg_extras") or {}
+        for k, s in enumerate(suffixes, start=dwg_start):
+            cell = ws.cell(row=i, column=k)
+            if s in extras:
+                cell.value, cell.fill, cell.alignment = "✓", DWG_HAS_FILL, CENTER_ALIGN
+            else:
+                cell.fill = DWG_NO_FILL
         total_price_sum += _parse_money(j.get("total_price", ""))
 
     # Summary footer
@@ -410,13 +440,13 @@ def _write_full_queue_tab(
     total_cell.number_format = MONEY_FMT
     total_cell.font = SECTION_FONT
 
-    # AutoFilter across the data rows
+    # AutoFilter across the data rows (including the DWG columns)
     if jobs:
-        last_col = get_column_letter(len(QUEUE_HEADERS))
+        last_col = get_column_letter(total_cols)
         ws.auto_filter.ref = f"A1:{last_col}{len(jobs) + 1}"
 
     ws.freeze_panes = "B2"  # keep the header row AND the Job # column visible
-    _autosize(ws, num_cols=len(QUEUE_HEADERS))
+    _autosize(ws, num_cols=total_cols)
 
 
 def _write_history_tab(ws, history: Dict[str, Any]) -> None:

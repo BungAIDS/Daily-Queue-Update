@@ -203,11 +203,17 @@ python autocad_scan.py                 # every job folder under AUTOCAD_JOBS_DIR
 python autocad_scan.py 421314 421388   # specific jobs
 ```
 
-It writes `backlog/autocad_dwgs.xlsx`: one row per job with a **yes/no column for
-every custom suffix** seen (`-51`, `-35`, …) and an `Extras` count. The standard
+It writes `backlog/autocad_dwgs.xlsx`: one row per job with a column for **every
+custom suffix** seen (`-51`, `-35`, …), each cell **green ✓** when the job has
+that drawing and **red** when it doesn't, plus an `Extras` count. The standard
 `-01`/`-02` (CW/CCW) drawings aren't shown — nearly every job has them, so they'd
 just be noise — but a job missing **both** is flagged red as the rare exception.
 Progress is saved after every batch, so an interrupted run resumes.
+
+The **daily queue report's Full Queue tab carries the same green-✓/red matrix**,
+appended after the standard columns: every morning the run scans each board
+job's AutoCAD folder live (reusing the folder lookup it already does) and adds a
+column for each custom suffix found across the board.
 
 ### Backfill old orders
 

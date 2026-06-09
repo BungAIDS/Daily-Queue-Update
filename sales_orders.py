@@ -44,6 +44,7 @@ from config import (
 )
 from drive_run import parse_drive_run_pdf
 from scraper import CONTAINER_SELECTOR
+import autocad_scan
 
 log = logging.getLogger(__name__)
 
@@ -93,8 +94,10 @@ def _find_autocad_folders(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
     """Locate each job under AUTOCAD_JOBS_DIR/<type>/<intermediate>/<job>.
 
     Targeted glob per job (a job appears under exactly one type) — far cheaper
-    than walking the whole tree. Returns {job: {type, path}}; {} if the drive
-    isn't reachable. The <type> the job sits under is its job type.
+    than walking the whole tree. Returns {job: {type, path, dwg_extras,
+    dwg_missing_std}}; {} if the drive isn't reachable. The <type> the job sits
+    under is its job type. While we have the folder open we also scan it for the
+    job's custom drawings (the extra -NN suffixes), reusing autocad_scan.
     """
     out: Dict[str, Dict[str, Any]] = {}
     root = AUTOCAD_JOBS_DIR
@@ -106,7 +109,16 @@ def _find_autocad_folders(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
             matches = list(root.glob(f"*/*/{job}")) or list(root.glob(f"*/*/{job}*"))
             if matches:
                 m = matches[0]
-                out[job] = {"type": m.relative_to(root).parts[0], "path": m}
+                info: Dict[str, Any] = {"type": m.relative_to(root).parts[0], "path": m,
+                                        "dwg_extras": {}, "dwg_missing_std": False}
+                try:  # live scan of this job's custom DWGs (names only — never opens a file)
+                    names = [f.name for f in m.glob("*") if f.is_file()]
+                    rec = autocad_scan.build_record(job, info["type"], str(m),
+                                                    autocad_scan.scan_files(names, job))
+                    info["dwg_extras"], info["dwg_missing_std"] = rec["extras"], rec["missing_std"]
+                except OSError as e:
+                    log.warning("  could not scan DWGs for %s (%s)", job, e)
+                out[job] = info
         log.info("Located %d/%d AutoCAD job folders under %s", len(out), len(job_numbers), root)
     except OSError as e:
         log.warning("Could not look up AutoCAD folders (%s); folder links disabled", e)
@@ -501,10 +513,14 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
         if info:
             j["job_type"] = info["type"]
             j["job_folder"] = str(info["path"])
+            j["dwg_extras"] = info.get("dwg_extras", {})
+            j["dwg_missing_std"] = info.get("dwg_missing_std", False)
         else:
             j["job_type"] = ""
             # Fall back to the SO archive folder when there's no AutoCAD folder yet.
             j["job_folder"] = str(SALES_ORDER_DIR / jn) if pdf else ""
+            j["dwg_extras"] = {}
+            j["dwg_missing_std"] = False
 
     log.info("Sales orders: %d jobs have a SO, %d at a change order, %d still missing a SO.",
              n_dl, n_co, len(by_job) - n_dl)
