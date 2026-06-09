@@ -287,9 +287,11 @@ def write_workbook(records: Dict[str, Dict[str, Any]], dwg: Dict[str, Dict[str, 
     dr_link_font = Font(color="C55A11", bold=True, underline="single")  # Drive Run -> PDF link
 
     suffixes = autocad_scan.all_extra_suffixes(dwg)
+    # -01/-02 (CW/CCW) aren't shown — nearly every job has them; only the custom
+    # extra suffixes carry signal.
     fixed = ["Job #", "Type", "Description", "Size", "Arrangement", "Motor Pos", "Class",
              "Rotation", "Discharge", "% Width", "Special Temp", "CO#", "Drive Run",
-             "Drive Run Summary", "CW (01)", "CCW (02)", "Folder", "Order Status"]
+             "Drive Run Summary", "Folder", "Order Status"]
     headers = fixed + [f"-{s}" for s in suffixes]
     folder_col = fixed.index("Folder") + 1
 
@@ -311,7 +313,7 @@ def write_workbook(records: Dict[str, Dict[str, Any]], dwg: Dict[str, Dict[str, 
             r.get("so_rotation", ""), r.get("so_discharge", ""), r.get("so_pct_width", ""),
             r.get("so_special_temp", ""), (f"CO#{r['co_number']}" if r.get("co_number") else ""),
             "YES" if r.get("has_drive_run") else "", r.get("drive_run_summary", ""),
-            d.get("cw", ""), d.get("ccw", ""), "", r.get("status", ""),
+            "", r.get("status", ""),  # "" = Folder placeholder (hyperlinked below)
         ]
         for c, v in enumerate(vals, start=1):
             ws.cell(i, c, v)

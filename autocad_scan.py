@@ -206,7 +206,10 @@ def write_workbook(records: Dict[str, Dict[str, Any]], path: Path) -> Path:
     warn_fill = PatternFill("solid", fgColor="FFC7CE")  # missing CW/CCW
 
     suffixes = all_extra_suffixes(records)
-    fixed = ["Job #", "Type", "CW (01)", "CCW (02)", "Extras", "Folder"]
+    # -01/-02 (CW/CCW) are on essentially every job, so they're not shown; only
+    # the custom extra suffixes carry signal. A job missing BOTH still gets
+    # flagged (red) as the rare exception.
+    fixed = ["Job #", "Type", "Extras", "Folder"]
     headers = fixed + [f"-{s}" for s in suffixes]
 
     wb = Workbook()
@@ -217,14 +220,12 @@ def write_workbook(records: Dict[str, Dict[str, Any]], path: Path) -> Path:
         cell.font = header_font
         cell.fill = header_fill
 
-    folder_col = 6
+    folder_col = len(fixed)  # "Folder" is the last fixed column
     rows = sorted(records.values(), key=lambda r: r.get("job", ""))
     for i, rec in enumerate(rows, start=2):
         ws.cell(i, 1, rec.get("job", ""))
         ws.cell(i, 2, rec.get("type", ""))
-        ws.cell(i, 3, rec.get("cw", ""))
-        ws.cell(i, 4, rec.get("ccw", ""))
-        ws.cell(i, 5, len(rec.get("extras", {})))
+        ws.cell(i, 3, len(rec.get("extras", {})))  # how many custom drawings
         folder = (rec.get("folder") or "").strip()
         fcell = ws.cell(i, folder_col, "Open" if folder else "")
         if folder:

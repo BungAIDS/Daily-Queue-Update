@@ -203,10 +203,11 @@ python autocad_scan.py                 # every job folder under AUTOCAD_JOBS_DIR
 python autocad_scan.py 421314 421388   # specific jobs
 ```
 
-It writes `backlog/autocad_dwgs.xlsx`: one row per job with **CW (01)** and
-**CCW (02)** (PDF, DWG, or both), plus a **yes/no column for every other suffix**
-seen (`-51`, `-35`, …). Jobs missing both `-01` and `-02` are flagged. Progress
-is saved after every batch, so an interrupted run resumes.
+It writes `backlog/autocad_dwgs.xlsx`: one row per job with a **yes/no column for
+every custom suffix** seen (`-51`, `-35`, …) and an `Extras` count. The standard
+`-01`/`-02` (CW/CCW) drawings aren't shown — nearly every job has them, so they'd
+just be noise — but a job missing **both** is flagged red as the rare exception.
+Progress is saved after every batch, so an interrupted run resumes.
 
 ### Backfill old orders
 

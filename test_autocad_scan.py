@@ -121,9 +121,9 @@ def test_end_to_end(tmp: Path):
     from openpyxl import load_workbook
     ws = load_workbook(out).active
     headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
-    assert "-51" in headers and "CW (01)" in headers
+    assert "-51" in headers and "CW (01)" not in headers and "CCW (02)" not in headers
     row = {headers[c - 1]: ws.cell(2, c).value for c in range(1, ws.max_column + 1)}
-    assert row["Job #"] == "421314" and row["CW (01)"] == "PDF+DWG" and row["-51"] == "yes"
+    assert row["Job #"] == "421314" and row["-51"] == "yes" and row["Extras"] == 1
 
 
 def main() -> int:
