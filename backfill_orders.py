@@ -64,9 +64,10 @@ WORKBOOK_PATH = BACKLOG_DIR / "backlog.xlsx"
 # --------------------------------------------------------------------------- #
 # Job sources                                                                 #
 # --------------------------------------------------------------------------- #
-def jobs_from_folders(root: Path) -> List[str]:
-    """Every job number under AUTOCAD_JOBS_DIR — same list the DWG scan walks."""
-    return [job for job, _type, _path in autocad_scan.iter_job_folders(root)]
+def jobs_from_folders(root: Path, min_job: int = autocad_scan.DEFAULT_MIN_JOB, max_job: int = 0) -> List[str]:
+    """Every real job number under AUTOCAD_JOBS_DIR — same list the DWG scan walks.
+    Folders below min_job (year/template/archive dirs) are skipped."""
+    return [job for job, _type, _path in autocad_scan.iter_job_folders(root, min_job, max_job)]
 
 
 def jobs_from_list(path: Path) -> List[str]:
@@ -355,7 +356,7 @@ def _resolve_jobs(args: argparse.Namespace) -> List[str]:
         return jobs_from_list(Path(args.list))
     if args.range:
         return jobs_from_range(args.range[0], args.range[1])
-    return jobs_from_folders(Path(args.root))
+    return jobs_from_folders(Path(args.root), args.min_job, args.max_job)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -368,6 +369,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--out", default=str(WORKBOOK_PATH), help="Master workbook path.")
     ap.add_argument("--delay", type=float, default=1.0, help="Seconds to pause between orders.")
     ap.add_argument("--limit", type=int, default=0, help="Stop after N orders this run (0 = no limit).")
+    ap.add_argument("--min-job", type=int, default=autocad_scan.DEFAULT_MIN_JOB,
+                    help=f"On a folder sweep, skip job numbers below this (default {autocad_scan.DEFAULT_MIN_JOB}).")
+    ap.add_argument("--max-job", type=int, default=0, help="Skip job numbers above this (0 = no cap).")
     ap.add_argument("--rescan", action="store_true", help="Ignore saved progress.")
     args = ap.parse_args(sys.argv[1:] if argv is None else argv)
 

@@ -213,10 +213,16 @@ is saved after every batch, so an interrupted run resumes.
 Grind through a backlog of historical orders one at a time (run it all day):
 
 ```bash
-python backfill_orders.py                  # all AutoCAD job folders
+python backfill_orders.py                  # all real AutoCAD job folders
 python backfill_orders.py --list jobs.txt  # or a file of job numbers
 python backfill_orders.py --range 420000 421000
 ```
+
+A folder sweep only considers job numbers at or above `--min-job` (default
+`400000`), so non-job folders (year/template/archive dirs with small or
+non-numeric names) are skipped. Raise it once you know your exact lowest job,
+e.g. `--min-job 403000` (and `--max-job` to cap the top). The same flags apply
+to `autocad_scan.py`.
 
 It downloads + parses each order's Sales Order and drive run, merges the DWG
 scan, and writes `backlog/backlog.xlsx`. It's resumable (kill and re-run any

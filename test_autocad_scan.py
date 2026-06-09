@@ -82,6 +82,25 @@ def test_job_key():
     assert a.job_key("LEGACY-AB") == "LEGACY-AB"  # no leading digits -> whole name
 
 
+def test_is_real_job():
+    assert a._is_real_job("403425", 400000, 0)
+    assert a._is_real_job("421314", 400000, 0)
+    assert not a._is_real_job("133567", 400000, 0)   # below floor (the goofy numbers)
+    assert not a._is_real_job("2024", 400000, 0)     # year folder
+    assert not a._is_real_job("TEMPLATES", 400000, 0)  # non-numeric
+    assert a._is_real_job("405000", 400000, 410000) and not a._is_real_job("415000", 400000, 410000)
+
+
+def test_iter_job_folders_floor(tmp: Path):
+    root = tmp / "JOBS2"
+    for typ, inter, leaf in [("AXIAL", "4034", "403425"), ("AXIAL", "4213", "421314"),
+                             ("AXIAL", "1335", "133567"), ("MISC", "x", "TEMPLATES"),
+                             ("AXIAL", "2024", "2024")]:
+        (root / typ / inter / leaf).mkdir(parents=True)
+    jobs = sorted(job for job, _t, _p in a.iter_job_folders(root))  # default floor 400000
+    assert jobs == ["403425", "421314"], jobs
+
+
 def test_end_to_end(tmp: Path):
     # Build  <root>/AXIAL/4213/421314/<drawings>  and scan it.
     root = tmp / "JOBS"

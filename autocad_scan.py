@@ -51,6 +51,12 @@ STD_SUFFIXES = (CW_SUFFIX, CCW_SUFFIX)
 PROGRESS_PATH = BACKLOG_DIR / "autocad_scan_progress.json"
 WORKBOOK_PATH = BACKLOG_DIR / "autocad_dwgs.xlsx"
 
+# Real job numbers start a bit below 403425; folders with smaller numeric names
+# (or non-numeric names) aren't jobs, so the full sweep skips them. Override with
+# --min-job once you know your exact lowest. Kept conservative so it never
+# excludes a real job by default.
+DEFAULT_MIN_JOB = 400000
+
 
 # --------------------------------------------------------------------------- #
 # Pure logic (no I/O — unit-tested)                                           #
@@ -138,11 +144,24 @@ def all_extra_suffixes(records: Dict[str, Dict[str, Any]]) -> List[str]:
 # --------------------------------------------------------------------------- #
 # Filesystem walk                                                             #
 # --------------------------------------------------------------------------- #
-def iter_job_folders(root: Path) -> Iterator[Tuple[str, str, Path]]:
-    """Yield (job, type, folder) for every `<type>/<intermediate>/<job>` dir."""
+def iter_job_folders(root: Path, min_job: int = DEFAULT_MIN_JOB, max_job: int = 0) -> Iterator[Tuple[str, str, Path]]:
+    """Yield (job, type, folder) for every `<type>/<intermediate>/<job>` dir whose
+    leaf is a real job number. Non-job folders (year/template/archive dirs, etc.)
+    have names that aren't digits or fall below min_job, so they're skipped."""
     for path in root.glob("*/*/*"):
-        if path.is_dir():
-            yield job_key(path.name), path.relative_to(root).parts[0], path
+        if not path.is_dir():
+            continue
+        job = job_key(path.name)
+        if _is_real_job(job, min_job, max_job):
+            yield job, path.relative_to(root).parts[0], path
+
+
+def _is_real_job(job: str, min_job: int = DEFAULT_MIN_JOB, max_job: int = 0) -> bool:
+    """A real job number is all digits, >= min_job, and (if max_job>0) <= max_job."""
+    if not job.isdigit():
+        return False
+    n = int(job)
+    return n >= min_job and (max_job <= 0 or n <= max_job)
 
 
 def scan_one(job: str, jtype: str, folder: Path, recursive: bool) -> Dict[str, Any]:
@@ -242,6 +261,9 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ap.add_argument("--recursive", action="store_true", help="Also scan sub-folders of each job.")
     ap.add_argument("--rescan", action="store_true", help="Ignore saved progress; redo every job.")
     ap.add_argument("--limit", type=int, default=0, help="Stop after N folders (0 = no limit).")
+    ap.add_argument("--min-job", type=int, default=DEFAULT_MIN_JOB,
+                    help=f"Skip folders below this job number on a full sweep (default {DEFAULT_MIN_JOB}).")
+    ap.add_argument("--max-job", type=int, default=0, help="Skip folders above this job number (0 = no cap).")
     return ap.parse_args(argv)
 
 
@@ -267,7 +289,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 log.warning("  %s: folder not found", job)
         folders: Iterator[Tuple[str, str, Path]] = iter(targets)
     else:
-        folders = iter_job_folders(root)
+        folders = iter_job_folders(root, min_job=args.min_job, max_job=args.max_job)
 
     t0 = time.monotonic()
     done = scanned = 0
