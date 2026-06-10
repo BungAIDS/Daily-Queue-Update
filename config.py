@@ -85,6 +85,16 @@ SALES_ORDER_DIR = _expand_path(
 DRIVE_RUN_DIR = _expand_path(
     (os.environ.get("DRIVE_RUN_DIR") or r"Z:\DAG\DRIVE RUNS FOR DAILY QUEUE").strip()
 )
+# The pid type(s) that identify the construction "drive run" / "quote run"
+# document (pids look like <type>-<id>-<rev>-<tag>). The site's exact name for
+# it hasn't been confirmed, so several candidates are tried; the run log prints
+# every pid type it saw, so if yours is named differently just add it here
+# (comma-separated, matching is case-insensitive and ignores a CBC_ prefix).
+DRIVE_RUN_TYPES = [
+    t.strip() for t in
+    (os.environ.get("DRIVE_RUN_TYPES") or "CBC_DriveRun,CBC_QuoteRun").split(",")
+    if t.strip()
+]
 # How many order-detail modals to open in parallel when fetching sales orders.
 # Start modest (one login = one server session, which ASP.NET may serialize);
 # raise it once you see how the server handles the load.

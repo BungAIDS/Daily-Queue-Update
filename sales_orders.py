@@ -40,7 +40,7 @@ from playwright.async_api import async_playwright, TimeoutError as PWTimeout, Er
 
 from config import (
     CBC_URL, CBC_QUEUE_URL, STORAGE_STATE_PATH,
-    SALES_ORDER_DIR, DRIVE_RUN_DIR, SO_CONCURRENCY, AUTOCAD_JOBS_DIR,
+    SALES_ORDER_DIR, DRIVE_RUN_DIR, DRIVE_RUN_TYPES, SO_CONCURRENCY, AUTOCAD_JOBS_DIR,
 )
 from drive_run import parse_drive_run_pdf
 from scraper import CONTAINER_SELECTOR
@@ -52,9 +52,10 @@ PID_RE = re.compile(r"^(?P<type>.+?)-(?P<id>\d+)-(?P<rev>\d+)-(?P<tag>[A-Za-z0-9
 
 # Documents are identified by the *type* prefix of their pid
 # (CBC_SalesOrder-<id>-<rev>-<tag>). That prefix is the reliable key — we match
-# on it for both the Sales Order and the construction/drive run.
+# on it for both the Sales Order and the construction/drive ("quote") run,
+# whose candidate names live in config.DRIVE_RUN_TYPES.
 SO_TYPE = "CBC_SalesOrder"
-DRIVE_RUN_TYPE = "CBC_DriveRun"
+DRIVE_RUN_TYPE = DRIVE_RUN_TYPES[0]  # back-compat alias for older importers
 CO_START = re.compile(r"^\s*C\s*/?\s*O\s*#?\s*\d", re.I)
 DESIGN_HDR = re.compile(r"^\s*Design\s+(\S+)\s*(.*)$")
 # Spec-row cells look like "Label value" (e.g. "Size M2", "WheelType BI").
@@ -273,6 +274,30 @@ def _latest_of_type(docs: List, type_name: str):
     return max(matches, key=lambda hd: hd[1].get("rev") or 0) if matches else None
 
 
+def _latest_run_doc(docs: List):
+    """The construction/quote-run document, or None.
+
+    Tries each configured DRIVE_RUN_TYPES name first. The site's exact pid
+    type for the run hasn't been confirmed yet, so if none match, fall back to
+    any other doc type ending in "run" — and say so loudly, so the real name
+    can be pinned in DRIVE_RUN_TYPES.
+    """
+    for name in DRIVE_RUN_TYPES:
+        hit = _latest_of_type(docs, name)
+        if hit:
+            return hit
+    known = {_norm_type(SO_TYPE)} | {_norm_type(t) for t in DRIVE_RUN_TYPES}
+    fallbacks = [hd for hd in docs
+                 if _norm_type(hd[1].get("type")).endswith("run")
+                 and _norm_type(hd[1].get("type")) not in known]
+    if fallbacks:
+        best = max(fallbacks, key=lambda hd: hd[1].get("rev") or 0)
+        log.warning("Run document matched by fallback (pid type %r) — add it to "
+                    "DRIVE_RUN_TYPES in .env to make this explicit.", best[1].get("type"))
+        return best
+    return None
+
+
 def _so_filename(job: str, rev: int | None) -> str:
     if rev and rev > 1:
         return f"{job} - Sales Order CO#{rev - 1}.pdf"
@@ -376,6 +401,9 @@ async def _process_job(page, context, job: str, args_js: str) -> Dict[str, Any]:
         href = await a.get_attribute("href") or ""
         if "downloaddoc.aspx" in href.lower():
             docs.append((href, _parse_doc(href)))
+    # Surface the raw pid types so the run log can name what's actually there
+    # (the key diagnostic when the quote/drive run isn't being recognized).
+    res["doc_types"] = sorted({d.get("type") or "?" for _, d in docs})
 
     so = _latest_of_type(docs, SO_TYPE)
     if so:
@@ -388,8 +416,8 @@ async def _process_job(page, context, job: str, args_js: str) -> Dict[str, Any]:
         # HDX). Terminal — don't burn another 90s wait on it in the retry pass.
         res["no_so"] = True
 
-    # Construction / drive run — only the highly-custom orders have one.
-    dr = _latest_of_type(docs, DRIVE_RUN_TYPE)
+    # Construction / drive ("quote") run — only the highly-custom orders have one.
+    dr = _latest_run_doc(docs)
     if dr:
         href, doc = dr
         res["dr_rev"] = doc["rev"]
@@ -488,6 +516,7 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
     index = _find_autocad_folders(list(by_job.keys()))
 
     so_results: Dict[str, Dict[str, Any]] = {}
+    seen_types: set = set()
     todo = list(by_job.keys())
     for p in range(1, max_passes + 1):
         log.info("Sales-order fetch pass %d: %d job(s), %d parallel...", p, len(todo), SO_CONCURRENCY)
@@ -497,6 +526,7 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
             log.warning("Sales-order fetch pass %d failed (%s); keeping results so far", p, e)
             break
         for k, v in res.items():
+            seen_types.update(v.get("doc_types") or [])
             old = so_results.get(k)
             # Keep the best result seen: a downloaded pdf beats a confirmed
             # no-SO beats a bare rev beats nothing.
@@ -566,4 +596,8 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
 
     log.info("Sales orders: %d jobs have a SO, %d at a change order, %d still missing a SO.",
              n_dl, n_co, len(by_job) - n_dl)
-    log.info("Drive runs: %d job(s) have a CBC_DriveRun (highly custom).", n_dr)
+    log.info("Drive/quote runs: %d job(s) have one (highly custom).", n_dr)
+    if n_dr == 0 and seen_types:
+        log.warning("No document matched DRIVE_RUN_TYPES=%s. pid types seen on the "
+                    "board: %s — if the run doc is listed under another name, set "
+                    "DRIVE_RUN_TYPES in .env.", DRIVE_RUN_TYPES, sorted(seen_types))

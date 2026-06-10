@@ -173,21 +173,25 @@ Daily-Queue-Update/
 
 Three extra capabilities, on top of the daily run:
 
-### Construction / drive run (`CBC_DriveRun`)
+### Construction / quote ("drive") run
 
-The daily enrichment now grabs the **construction run** alongside the Sales
-Order. Both are found by their document *type* (`CBC_SalesOrder`,
-`CBC_DriveRun`). Only highly-custom fans have a drive run, so its presence is a
-signal in itself: the Full Queue tab gains a **Drive Run** column — `YES`,
-hyperlinked straight to the archived drive-run PDF (under `DRIVE_RUN_DIR`); it
-shows a plain `YES` only if the flag is set but the file didn't download.
+The daily enrichment now grabs the **quote/construction run** alongside the
+Sales Order. Both are found by their document *type* in the pid
+(`CBC_SalesOrder-...`). The run document's exact type name varies, so the
+candidates in `DRIVE_RUN_TYPES` (default `CBC_DriveRun,CBC_QuoteRun`; override
+in `.env`) are tried, then any other doc type ending in `Run` as a fallback.
+If a run shows zero matches, the log prints every pid type it saw on the board
+so you can read off the right name. Only highly-custom fans have a run, so its
+presence is a signal in itself: the Full Queue tab gains a **Drive Run** column
+— `YES`, hyperlinked straight to the archived run PDF (under `DRIVE_RUN_DIR`);
+it shows a plain `YES` only if the flag is set but the file didn't download.
 
-The exact fields inside a drive run depend on your documents. Confirm them once:
+The exact fields inside a quote run depend on your documents. Confirm them once:
 
 ```bash
-python discover_documents.py <a-custom-job#>   # lists docs, downloads SO + drive run
-python dump_pdf.py <same-job#>                 # dumps the drive-run text/tables
-# or: python drive_run.py "<path to the drive run pdf>"
+python discover_documents.py <a-custom-job#>   # lists docs + pid types, downloads SO + run
+python dump_pdf.py <same-job#>                 # dumps the run's text/tables
+# or: python drive_run.py "<path to the quote run pdf>"
 ```
 
 Paste that back and the specific fields get wired into `drive_run.py` /

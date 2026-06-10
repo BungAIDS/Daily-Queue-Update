@@ -49,8 +49,8 @@ from config import (
 )
 from drive_run import parse_drive_run_pdf
 from sales_orders import (
-    _parse_doc, _latest_of_type, _trigger_js, _so_filename, _doc_filename,
-    _download_error, SO_TYPE, DRIVE_RUN_TYPE, parse_sales_order_pdf,
+    _parse_doc, _latest_of_type, _latest_run_doc, _trigger_js, _so_filename, _doc_filename,
+    _download_error, SO_TYPE, parse_sales_order_pdf,
 )
 from scraper import CONTAINER_SELECTOR
 import autocad_scan
@@ -241,7 +241,7 @@ def process_one(page, context, job: str) -> Dict[str, Any]:
                     "so_pdf": so_pdf,
                 })
 
-        dr = _latest_of_type(docs, DRIVE_RUN_TYPE)
+        dr = _latest_run_doc(docs)
         if dr:
             href, doc = dr
             dr_pdf = _download(context, page.url, href, DRIVE_RUN_DIR / job / _doc_filename(job, "Drive Run", doc["rev"]))

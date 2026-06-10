@@ -31,9 +31,10 @@ from scraper import CONTAINER_SELECTOR
 # Reuse the SAME selection logic the daily run uses, so discovery reflects
 # exactly what enrichment will pick.
 from sales_orders import (
-    _parse_doc, _norm_type, _latest_of_type, _trigger_js,
-    SO_TYPE, DRIVE_RUN_TYPE,
+    _parse_doc, _norm_type, _latest_of_type, _latest_run_doc, _trigger_js,
+    SO_TYPE,
 )
+from config import DRIVE_RUN_TYPES
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("discover")
@@ -78,14 +79,17 @@ def _collect_docs(page) -> list[dict]:
 
 
 def _report_docs(jn: str, docs: list[dict]) -> None:
+    run_types = {_norm_type(t) for t in DRIVE_RUN_TYPES}
     log.info("\n--- Documents for job %s (%d) ---", jn, len(docs))
     for d in docs:
         rev = f"rev {d['rev']}" if d["rev"] is not None else "rev ?"
         flag = ""
         if _norm_type(d["type"]) == _norm_type(SO_TYPE):
             flag = "   <== SALES ORDER"
-        elif _norm_type(d["type"]) == _norm_type(DRIVE_RUN_TYPE):
-            flag = "   <== DRIVE RUN (construction)"
+        elif _norm_type(d["type"]) in run_types:
+            flag = "   <== QUOTE/DRIVE RUN"
+        elif _norm_type(d["type"]).endswith("run"):
+            flag = "   <== QUOTE/DRIVE RUN? (fallback match — add this type to DRIVE_RUN_TYPES)"
         log.info("  %-26s %-7s  %s%s", d["type"], rev, (d["fn"] or "")[:48], flag)
 
 
@@ -125,10 +129,12 @@ def run_list(want_job: str | None) -> None:
         _report_docs(jn, docs)
 
         so = _latest_of_type([(d["href"], d) for d in docs], SO_TYPE)
-        dr = _latest_of_type([(d["href"], d) for d in docs], DRIVE_RUN_TYPE)
+        dr = _latest_run_doc([(d["href"], d) for d in docs])
         log.info("\n--- Summary ---")
         log.info("  Sales Order : %s", f"rev {so[1]['rev']}  {so[1]['fn']}" if so else "NONE FOUND")
-        log.info("  Drive Run   : %s", f"rev {dr[1]['rev']}  {dr[1]['fn']}" if dr else "none (not a custom order)")
+        log.info("  Quote/Drive Run : %s",
+                 f"type {dr[1]['type']}  rev {dr[1]['rev']}  {dr[1]['fn']}" if dr
+                 else "none matched (if one is listed above, add its pid type to DRIVE_RUN_TYPES in .env)")
         if so:
             _download(context, page, so[1], f"{jn}_sales_order")
         if dr:
