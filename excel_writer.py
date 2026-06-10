@@ -377,6 +377,27 @@ def _dwg_suffixes(jobs: List[Dict[str, Any]]) -> List[str]:
     return sorted(seen, key=lambda s: (int(s), s) if s.isdigit() else (10**9, s))
 
 
+def _append_dwg_matrix(ws, rows: List, start_col: int) -> List[str]:
+    """Append the custom-DWG matrix starting at column `start_col`: one header
+    per distinct suffix (row 1), then per-row green-✓ (has the drawing) / red
+    (doesn't). `rows` is a list of (row_index, job_dict). Returns the suffixes so
+    the caller can size the AutoFilter/columns."""
+    suffixes = _dwg_suffixes([j for _, j in rows])
+    for k, s in enumerate(suffixes, start=start_col):
+        cell = ws.cell(row=1, column=k, value=f"-{s}")
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+    for row_i, j in rows:
+        extras = j.get("dwg_extras") or {}
+        for k, s in enumerate(suffixes, start=start_col):
+            cell = ws.cell(row=row_i, column=k)
+            if s in extras:
+                cell.value, cell.fill, cell.alignment = "✓", DWG_HAS_FILL, CENTER_ALIGN
+            else:
+                cell.fill = DWG_NO_FILL
+    return suffixes
+
+
 def _write_full_queue_tab(
     ws,
     jobs: List[Dict[str, Any]],
@@ -386,18 +407,8 @@ def _write_full_queue_tab(
 ) -> None:
     new_job_ids = new_job_ids or set()
     co_changed_ids = co_changed_ids or set()
-    # Custom-DWG matrix: one column per distinct extra suffix, appended after the
-    # standard columns. Green ✓ = the job has that drawing, red = it doesn't.
-    suffixes = _dwg_suffixes(jobs)
-    dwg_start = len(QUEUE_HEADERS) + 1
-    total_cols = len(QUEUE_HEADERS) + len(suffixes)
-
     for c, h in enumerate(QUEUE_HEADERS, start=1):
         cell = ws.cell(row=1, column=c, value=h)
-        cell.font = HEADER_FONT
-        cell.fill = HEADER_FILL
-    for k, s in enumerate(suffixes, start=dwg_start):
-        cell = ws.cell(row=1, column=k, value=f"-{s}")
         cell.font = HEADER_FONT
         cell.fill = HEADER_FILL
 
@@ -422,14 +433,6 @@ def _write_full_queue_tab(
         if fill is not None:
             for c in range(1, len(QUEUE_HEADERS) + 1):  # urgency fill: standard cols only
                 ws.cell(row=i, column=c).fill = fill
-        # DWG matrix cells (after the urgency fill, so their green/red stands).
-        extras = j.get("dwg_extras") or {}
-        for k, s in enumerate(suffixes, start=dwg_start):
-            cell = ws.cell(row=i, column=k)
-            if s in extras:
-                cell.value, cell.fill, cell.alignment = "✓", DWG_HAS_FILL, CENTER_ALIGN
-            else:
-                cell.fill = DWG_NO_FILL
         total_price_sum += _parse_money(j.get("total_price", ""))
 
     # Summary footer
@@ -439,6 +442,10 @@ def _write_full_queue_tab(
     total_cell = ws.cell(row=footer, column=TOTAL_PRICE_COL, value=total_price_sum)
     total_cell.number_format = MONEY_FMT
     total_cell.font = SECTION_FONT
+
+    # Custom-DWG green-✓/red matrix, appended after the standard columns.
+    suffixes = _append_dwg_matrix(ws, list(enumerate(jobs, start=2)), len(QUEUE_HEADERS) + 1)
+    total_cols = len(QUEUE_HEADERS) + len(suffixes)
 
     # AutoFilter across the data rows (including the DWG columns)
     if jobs:
@@ -469,10 +476,17 @@ def _write_history_tab(ws, history: Dict[str, Any]) -> None:
         _write_job_row(ws, i, entry.get("snapshot", {}))
         ws.cell(row=i, column=len(QUEUE_HEADERS) + 1, value=entry.get("last_seen", ""))
 
-    last_col = get_column_letter(len(headers))
+    # Custom-DWG matrix, appended after "Last Seen" (same green-✓/red as the Full
+    # Queue) so History is a complete per-order log. Uses each archived order's
+    # snapshot, so it carries DWG data for orders archived once the scan was live.
+    rows = [(i, e.get("snapshot", {})) for i, e in enumerate(entries, start=2)]
+    suffixes = _append_dwg_matrix(ws, rows, len(headers) + 1)
+    total_cols = len(headers) + len(suffixes)
+
+    last_col = get_column_letter(total_cols)
     ws.auto_filter.ref = f"A1:{last_col}{len(entries) + 1}"
     ws.freeze_panes = "B2"  # keep the header row AND the Job # column visible
-    _autosize(ws, num_cols=len(headers))
+    _autosize(ws, num_cols=total_cols)
 
 
 def build_workbook(
