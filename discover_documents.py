@@ -3,10 +3,12 @@
 Two modes:
 
   python discover_documents.py [job#]
-      Open the job's detail (it must be on the board), list EVERY document with
-      its pid type / revision, flag the CBC_SalesOrder and CBC_DriveRun, and
-      download both as samples. This confirms how the construction/drive run
-      shows up and what its pid type is.
+      Open the job's detail, list EVERY document with its pid type / revision,
+      flag the Sales Order and the quote/drive run, and download both as
+      samples. The job is opened from the board if it's there; otherwise it's
+      looked up through the queue's search box (the same path the backfill
+      uses), so an old job with a quote run can be inspected too. This confirms
+      how the construction/quote run shows up and what its pid type is.
 
   python discover_documents.py --probe <old-job#>
       For backfill: figure out how to open an order that is NOT on the board.
@@ -117,13 +119,25 @@ def run_list(want_job: str | None) -> None:
         rows = _board_args(page)
         log.info("Found %d order rows.", len(rows))
         chosen = next(((jn, a) for jn, a in rows if want_job is None or jn == want_job), None)
-        if chosen is None:
-            raise SystemExit(f"Job {want_job!r} not on the board. Try one that's in the queue, "
-                             "or use --probe to look up an old order.")
-        jn, args = chosen
-        log.info("\nOpening detail for job %s ...", jn)
-        if not _open_detail(page, jn, args):
-            log.info("Documents didn't appear within 120s.")
+        if chosen is not None:
+            jn, args = chosen
+            log.info("\nOpening detail for job %s (on the board) ...", jn)
+            if not _open_detail(page, jn, args):
+                log.info("Documents didn't appear within 120s.")
+        elif want_job is None:
+            raise SystemExit("No orders on the board to inspect.")
+        else:
+            # Not on the board — look it up through the queue's search box, the
+            # same path the backfill uses (so an old job with a quote run can be
+            # inspected without it being in the queue).
+            from backfill_orders import open_order_detail
+            jn = want_job
+            log.info("\nJob %s isn't on the board — searching for it ...", jn)
+            if not open_order_detail(page, jn):
+                raise SystemExit(
+                    f"Couldn't surface job {jn!r} via the search box. If the queue page has a "
+                    "search/find-order field, set CBC_SEARCH_SELECTOR (and CBC_SEARCH_BUTTON if a "
+                    "separate button submits) in .env, then retry. `--probe` prints the candidates.")
 
         docs = _collect_docs(page)
         _report_docs(jn, docs)
