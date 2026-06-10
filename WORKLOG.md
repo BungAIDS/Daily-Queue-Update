@@ -148,3 +148,36 @@ All modules compile; scanner tests pass on the merged tree.
 - **Capture the revision letter** and track the latest rev per drawing — pairs
   naturally with opening the DWG (or its `-01/-02` PDF title block) to read who
   drafted and who checked it.
+
+## Quote-run discovery results (2026-06-10) — how runs actually appear
+
+Real listings (jobs 421473, 421492) settled discovery step 1. There is no
+`CBC_DriveRun`/`CBC_QuoteRun` pid on normal fans:
+
+- **Only HDX fans** give the run its own pid type. Everything else files it
+  under **`CBC_Inquiry`** and it's recognizable only by FILE NAME, e.g.
+  `421473_909-26-1604 Qt Run.txt` (note: a `.txt`).
+- **Design 64** fans carry it as an Excel sheet instead:
+  `421492_314-26-1647 D64 Wheel Construction (Inner...).xlsx` — needs its own
+  parser later.
+- **Some orders have no run in their documents at all** — it only lives in the
+  job's AutoCAD folder, often in a subfolder:
+  `Z:\AUTOCAD\CURRENT\JOBS\GENERAL LINE\420\420410\ENG REF\420410 qt  run.txt`.
+- Other namings will exist; handled as they turn up via the env settings below.
+
+Matching is now: pid type (`DRIVE_RUN_TYPES` + any `*Run` type) OR file name
+(`DRIVE_RUN_NAME_PATTERNS` regexes: `qt\s*run`, `quote\s*run`,
+`d64\s+wheel\s+construction`), with a recursive AutoCAD-folder fallback when
+the documents carry none (daily run + backfill when the DWG scan knows the
+folder). Downloads keep the original extension (the PDF-magic check now only
+applies to `.pdf`); every matching file is archived; the report column is
+labeled "Quote Run" and links the primary file (which may sit on Z: in the
+folder-fallback case). `parse_drive_run_pdf` only runs on `.pdf` runs.
+
+New deferred items:
+- Parse the `Qt Run.txt` text format (fields TBD — dump one with any editor).
+- Parse the D64 wheel-construction `.xlsx` (openpyxl; "pull the data
+  differently" per DG).
+- The `CS_SalesOrder` pid (seen at rev 2 on both jobs, an
+  OrderVerificationReportViewer doc) is NOT counted as the Sales Order — the
+  CO# still keys off `CBC_SalesOrder` revs only. Revisit if CO#s look low.

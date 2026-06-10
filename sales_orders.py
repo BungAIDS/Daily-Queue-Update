@@ -16,9 +16,10 @@ For every job on the board this:
     so_size        str
     so_arrangement str
     so_pdf         str   (path to the latest SO pdf, or "")
-    has_drive_run  bool  (True = a CBC_DriveRun exists -> highly custom fan)
-    drive_run_pdf  str   (path to the latest drive-run pdf, or "")
-    drive_run      dict  (parsed drive-run fields; see drive_run.py)
+    has_drive_run  bool  (True = a quote/construction run exists -> highly custom fan)
+    drive_run_pdf  str   (path to the run file: archived download, or the file
+                          in the job's AutoCAD folder; .pdf/.txt/.xlsx; or "")
+    drive_run      dict  (parsed drive-run fields, pdf runs only; see drive_run.py)
     drive_run_summary str (compact one-liner of the drive-run fields)
     job_type       str   (e.g. "AXIAL" / "GENERAL LINE", or "")
     job_folder     str   (AutoCAD folder if found, else the SO archive folder)
@@ -40,7 +41,8 @@ from playwright.async_api import async_playwright, TimeoutError as PWTimeout, Er
 
 from config import (
     CBC_URL, CBC_QUEUE_URL, STORAGE_STATE_PATH,
-    SALES_ORDER_DIR, DRIVE_RUN_DIR, DRIVE_RUN_TYPES, SO_CONCURRENCY, AUTOCAD_JOBS_DIR,
+    SALES_ORDER_DIR, DRIVE_RUN_DIR, DRIVE_RUN_TYPES, DRIVE_RUN_NAME_PATTERNS,
+    SO_CONCURRENCY, AUTOCAD_JOBS_DIR,
 )
 from drive_run import parse_drive_run_pdf
 from scraper import CONTAINER_SELECTOR
@@ -51,11 +53,13 @@ log = logging.getLogger(__name__)
 PID_RE = re.compile(r"^(?P<type>.+?)-(?P<id>\d+)-(?P<rev>\d+)-(?P<tag>[A-Za-z0-9]+)$")
 
 # Documents are identified by the *type* prefix of their pid
-# (CBC_SalesOrder-<id>-<rev>-<tag>). That prefix is the reliable key — we match
-# on it for both the Sales Order and the construction/drive ("quote") run,
-# whose candidate names live in config.DRIVE_RUN_TYPES.
+# (CBC_SalesOrder-<id>-<rev>-<tag>). That prefix is the reliable key for the
+# Sales Order. The quote/construction run only has its own pid type on HDX
+# fans (config.DRIVE_RUN_TYPES); on everything else it's filed under a generic
+# type like CBC_Inquiry and is recognizable only by its file name
+# (config.DRIVE_RUN_NAME_PATTERNS).
 SO_TYPE = "CBC_SalesOrder"
-DRIVE_RUN_TYPE = DRIVE_RUN_TYPES[0]  # back-compat alias for older importers
+RUN_NAME_RES = [re.compile(p, re.I) for p in DRIVE_RUN_NAME_PATTERNS]
 CO_START = re.compile(r"^\s*C\s*/?\s*O\s*#?\s*\d", re.I)
 DESIGN_HDR = re.compile(r"^\s*Design\s+(\S+)\s*(.*)$")
 # Spec-row cells look like "Label value" (e.g. "Size M2", "WheelType BI").
@@ -91,6 +95,18 @@ def _special_temp(design_temp: str, max_temp: str, suitable: str) -> str:
 # --------------------------------------------------------------------------- #
 # AutoCAD folder / job-type lookup                                            #
 # --------------------------------------------------------------------------- #
+def _run_files_in_folder(folder: Path) -> List[Path]:
+    """Quote-run files in a job's AutoCAD folder, searched recursively — they
+    are often tucked in a subfolder (e.g. ENG REF\\420410 qt  run.txt). Some
+    orders never get the run attached to their cbcinsider documents at all,
+    so the folder is the only place it lives."""
+    try:
+        return sorted(f for f in folder.rglob("*") if f.is_file() and _is_run_name(f.name))
+    except OSError as e:
+        log.warning("  could not scan %s for quote-run files (%s)", folder, e)
+        return []
+
+
 def _find_autocad_folders(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
     """Locate each job under AUTOCAD_JOBS_DIR/<type>/<intermediate>/<job>.
 
@@ -274,28 +290,31 @@ def _latest_of_type(docs: List, type_name: str):
     return max(matches, key=lambda hd: hd[1].get("rev") or 0) if matches else None
 
 
-def _latest_run_doc(docs: List):
-    """The construction/quote-run document, or None.
+def _is_run_name(fn: str) -> bool:
+    """True if a document/file name looks like a quote run (DRIVE_RUN_NAME_PATTERNS)."""
+    return any(rx.search(fn or "") for rx in RUN_NAME_RES)
 
-    Tries each configured DRIVE_RUN_TYPES name first. The site's exact pid
-    type for the run hasn't been confirmed yet, so if none match, fall back to
-    any other doc type ending in "run" — and say so loudly, so the real name
-    can be pinned in DRIVE_RUN_TYPES.
-    """
-    for name in DRIVE_RUN_TYPES:
-        hit = _latest_of_type(docs, name)
-        if hit:
-            return hit
-    known = {_norm_type(SO_TYPE)} | {_norm_type(t) for t in DRIVE_RUN_TYPES}
-    fallbacks = [hd for hd in docs
-                 if _norm_type(hd[1].get("type")).endswith("run")
-                 and _norm_type(hd[1].get("type")) not in known]
-    if fallbacks:
-        best = max(fallbacks, key=lambda hd: hd[1].get("rev") or 0)
-        log.warning("Run document matched by fallback (pid type %r) — add it to "
-                    "DRIVE_RUN_TYPES in .env to make this explicit.", best[1].get("type"))
-        return best
-    return None
+
+def _run_docs(docs: List) -> List:
+    """Every quote/construction-run document in `docs`, best match first.
+
+    A doc qualifies by pid type — DRIVE_RUN_TYPES, or any other non-SO type
+    ending in "run" (the HDX fans have a dedicated run pid) — or by file name
+    (DRIVE_RUN_NAME_PATTERNS; most fans file the run under a generic type like
+    CBC_Inquiry as "<job> ... Qt Run.txt", "... D64 Wheel Construction ...").
+    Type matches sort ahead of name matches, higher revisions first within."""
+    known = {_norm_type(t) for t in DRIVE_RUN_TYPES}
+    matches = []
+    for hd in docs:
+        t = _norm_type(hd[1].get("type"))
+        by_type = t != _norm_type(SO_TYPE) and (t in known or t.endswith("run"))
+        if by_type and t not in known:
+            log.warning("Run document matched by pid-type fallback (%r) — add it to "
+                        "DRIVE_RUN_TYPES in .env to make this explicit.", hd[1].get("type"))
+        if by_type or _is_run_name(hd[1].get("fn")):
+            matches.append((by_type, hd))
+    matches.sort(key=lambda m: (0 if m[0] else 1, -(m[1][1].get("rev") or 0)))
+    return [hd for _, hd in matches]
 
 
 def _so_filename(job: str, rev: int | None) -> str:
@@ -309,18 +328,34 @@ def _doc_filename(job: str, label: str, rev: int | None) -> str:
     return f"{job} - {label} rev {rev}.pdf" if rev and rev > 1 else f"{job} - {label}.pdf"
 
 
-def _download_error(status: int, body: bytes) -> str | None:
+def _run_filename(job: str, doc: Dict[str, Any]) -> str:
+    """Archive name for a quote-run document. Keeps the site's own file name —
+    it carries the identifying naming and the real extension (.txt qt runs,
+    .xlsx D64 wheel constructions, .pdf HDX runs) — prefixed with the job
+    number when it isn't already in it."""
+    fn = re.sub(r'[<>:"/\\|?*]', "_", (doc.get("fn") or "").strip())
+    if not fn:
+        return _doc_filename(job, "Quote Run", doc.get("rev"))
+    return fn if job in fn else f"{job} - {fn}"
+
+
+def _download_error(status: int, body: bytes, expect_pdf: bool = True) -> str | None:
     """Why a downloaded document isn't usable, or None if it looks fine.
 
     The doc server can return an error page (HTTP 5xx) or — once the session
     expires — the login page itself, with HTTP 200. Writing either to disk
     would poison the archive: the dest.exists() check skips re-downloading
     forever, so the bad file would permanently stand in for the order's PDF.
+    Quote runs aren't always PDFs (.txt, .xlsx, .rtf), so for those we only
+    reject what is recognizably an HTML page.
     """
     if status != 200:
         return f"HTTP {status}"
-    if not body[:1024].lstrip().startswith(b"%PDF-"):
+    head = body[:1024].lstrip()
+    if expect_pdf and not head.startswith(b"%PDF-"):
         return "response is not a PDF (expired-session login page or error page?)"
+    if not expect_pdf and head[:15].lower().startswith((b"<!doctype", b"<html")):
+        return "response is an HTML page (expired-session login page or error page?)"
     return None
 
 
@@ -334,7 +369,7 @@ async def _download(context, page_url: str, href: str, dest: Path) -> str | None
         try:
             resp = await context.request.get(url, timeout=60000)
             body = await resp.body()
-            err = _download_error(resp.status, body)
+            err = _download_error(resp.status, body, dest.suffix.lower() == ".pdf")
             if err:
                 raise RuntimeError(err)
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -416,13 +451,16 @@ async def _process_job(page, context, job: str, args_js: str) -> Dict[str, Any]:
         # HDX). Terminal — don't burn another 90s wait on it in the retry pass.
         res["no_so"] = True
 
-    # Construction / drive ("quote") run — only the highly-custom orders have one.
-    dr = _latest_run_doc(docs)
-    if dr:
-        href, doc = dr
-        res["dr_rev"] = doc["rev"]
-        res["dr_pdf_path"] = await _download(
-            context, page.url, href, DRIVE_RUN_DIR / job / _doc_filename(job, "Drive Run", doc["rev"]))
+    # Construction / quote run — only the highly-custom orders have one. More
+    # than one file can match (a qt-run txt and a D64 wheel-construction xlsx,
+    # say); archive them all, and link the best as the primary.
+    runs = _run_docs(docs)
+    if runs:
+        res["dr_rev"] = runs[0][1]["rev"]
+        for href, doc in runs:
+            got = await _download(context, page.url, href, DRIVE_RUN_DIR / job / _run_filename(job, doc))
+            if got and not res["dr_pdf_path"]:
+                res["dr_pdf_path"] = got
 
     return res
 
@@ -543,7 +581,7 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
         if p < max_passes:
             log.info("  %d job(s) still incomplete; retrying those.", len(todo))
 
-    n_co = n_dl = n_dr = 0
+    n_co = n_dl = n_dr = n_dr_folder = 0
     for jn, j in by_job.items():
         r = so_results.get(jn, {})
         rev = r.get("rev")
@@ -570,17 +608,6 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
         if pdf:
             n_dl += 1
 
-        # Construction / drive run: presence alone flags a highly-custom fan.
-        dr_pdf = r.get("dr_pdf_path")
-        j["has_drive_run"] = bool(dr_pdf or r.get("dr_rev") is not None)
-        j["drive_run_pdf"] = dr_pdf or ""
-        j["drive_run_rev"] = r.get("dr_rev")
-        dparsed = parse_drive_run_pdf(dr_pdf) if dr_pdf else {}
-        j["drive_run"] = dparsed.get("fields", {})
-        j["drive_run_summary"] = dparsed.get("summary", "")
-        if j["has_drive_run"]:
-            n_dr += 1
-
         info = index.get(jn)
         if info:
             j["job_type"] = info["type"]
@@ -594,10 +621,31 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
             j["dwg_extras"] = {}
             j["dwg_missing_std"] = False
 
+        # Construction / quote run: presence alone flags a highly-custom fan.
+        dr_pdf = r.get("dr_pdf_path")
+        j["has_drive_run"] = bool(dr_pdf or r.get("dr_rev") is not None)
+        if not j["has_drive_run"] and info:
+            # Not attached to the order's documents — some runs only live in
+            # the job's AutoCAD folder. Link the file in place (no download).
+            hits = _run_files_in_folder(info["path"])
+            if hits:
+                dr_pdf = str(hits[0])
+                j["has_drive_run"] = True
+                n_dr_folder += 1
+        j["drive_run_pdf"] = dr_pdf or ""
+        j["drive_run_rev"] = r.get("dr_rev")
+        dparsed = parse_drive_run_pdf(dr_pdf) if dr_pdf and str(dr_pdf).lower().endswith(".pdf") else {}
+        j["drive_run"] = dparsed.get("fields", {})
+        j["drive_run_summary"] = dparsed.get("summary", "")
+        if j["has_drive_run"]:
+            n_dr += 1
+
     log.info("Sales orders: %d jobs have a SO, %d at a change order, %d still missing a SO.",
              n_dl, n_co, len(by_job) - n_dl)
-    log.info("Drive/quote runs: %d job(s) have one (highly custom).", n_dr)
+    log.info("Quote/drive runs: %d job(s) have one (highly custom; %d found in the "
+             "AutoCAD folder rather than the documents).", n_dr, n_dr_folder)
     if n_dr == 0 and seen_types:
-        log.warning("No document matched DRIVE_RUN_TYPES=%s. pid types seen on the "
-                    "board: %s — if the run doc is listed under another name, set "
-                    "DRIVE_RUN_TYPES in .env.", DRIVE_RUN_TYPES, sorted(seen_types))
+        log.info("No quote run matched DRIVE_RUN_TYPES=%s or DRIVE_RUN_NAME_PATTERNS. "
+                 "pid types seen on the board: %s — a run filed under another "
+                 "type/name needs adding to those settings in .env.",
+                 DRIVE_RUN_TYPES, sorted(seen_types))

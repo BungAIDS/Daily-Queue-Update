@@ -86,14 +86,25 @@ DRIVE_RUN_DIR = _expand_path(
     (os.environ.get("DRIVE_RUN_DIR") or r"Z:\DAG\DRIVE RUNS FOR DAILY QUEUE").strip()
 )
 # The pid type(s) that identify the construction "drive run" / "quote run"
-# document (pids look like <type>-<id>-<rev>-<tag>). The site's exact name for
-# it hasn't been confirmed, so several candidates are tried; the run log prints
-# every pid type it saw, so if yours is named differently just add it here
-# (comma-separated, matching is case-insensitive and ignores a CBC_ prefix).
+# document (pids look like <type>-<id>-<rev>-<tag>). Only the HDX fans file
+# the run under a dedicated pid type; the run log prints every pid type it
+# saw, so if yours is named differently just add it here (comma-separated,
+# matching is case-insensitive and ignores a CBC_ prefix).
 DRIVE_RUN_TYPES = [
     t.strip() for t in
     (os.environ.get("DRIVE_RUN_TYPES") or "CBC_DriveRun,CBC_QuoteRun").split(",")
     if t.strip()
+]
+# Everything that isn't an HDX files its quote run under a generic pid type
+# (usually CBC_Inquiry), so those are recognized by FILE NAME instead — e.g.
+# "421473_909-26-1604 Qt Run.txt", "420410 qt  run.txt",
+# "421492_314-26-1647 D64 Wheel Construction (Inner...).xlsx".
+# Case-insensitive regexes, comma-separated; extend as new namings turn up.
+DRIVE_RUN_NAME_PATTERNS = [
+    p.strip() for p in
+    (os.environ.get("DRIVE_RUN_NAME_PATTERNS")
+     or r"qt\s*run,quote\s*run,d64\s+wheel\s+construction").split(",")
+    if p.strip()
 ]
 # How many order-detail modals to open in parallel when fetching sales orders.
 # Start modest (one login = one server session, which ASP.NET may serialize);

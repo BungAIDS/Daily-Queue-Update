@@ -49,8 +49,8 @@ from config import (
 )
 from drive_run import parse_drive_run_pdf
 from sales_orders import (
-    _parse_doc, _latest_of_type, _latest_run_doc, _trigger_js, _so_filename, _doc_filename,
-    _download_error, SO_TYPE, parse_sales_order_pdf,
+    _parse_doc, _latest_of_type, _run_docs, _run_filename, _run_files_in_folder,
+    _trigger_js, _so_filename, _download_error, SO_TYPE, parse_sales_order_pdf,
 )
 from scraper import CONTAINER_SELECTOR
 import autocad_scan
@@ -195,7 +195,7 @@ def _download(context, page_url: str, href: str, dest: Path) -> Optional[str]:
         body = resp.body()
         # Never archive an error page / expired-session login page as the PDF —
         # the dest.exists() cache would then skip re-downloading it forever.
-        err = _download_error(resp.status, body)
+        err = _download_error(resp.status, body, dest.suffix.lower() == ".pdf")
         if err:
             log.warning("  download failed for %s: %s", dest.name, err)
             return None
@@ -215,8 +215,10 @@ def _close_modal(page) -> None:
         pass
 
 
-def process_one(page, context, job: str) -> Dict[str, Any]:
-    """Open one order via the search box, download + parse its SO and drive run."""
+def process_one(page, context, job: str, folder: str = "") -> Dict[str, Any]:
+    """Open one order via the search box, download + parse its SO and quote run.
+    `folder` (the job's AutoCAD folder, when known from the DWG scan) is checked
+    for a quote-run file if the order's documents don't carry one."""
     rec: Dict[str, Any] = {"job": job, "status": "", "scanned_at": datetime.now().isoformat(timespec="seconds")}
     try:
         if not open_order_detail(page, job):
@@ -241,20 +243,30 @@ def process_one(page, context, job: str) -> Dict[str, Any]:
                     "so_pdf": so_pdf,
                 })
 
-        dr = _latest_run_doc(docs)
-        if dr:
-            href, doc = dr
-            dr_pdf = _download(context, page.url, href, DRIVE_RUN_DIR / job / _doc_filename(job, "Drive Run", doc["rev"]))
+        runs = _run_docs(docs)
+        if runs:
             rec["has_drive_run"] = True
+            for href, doc in runs:
+                got = _download(context, page.url, href, DRIVE_RUN_DIR / job / _run_filename(job, doc))
+                if got and not dr_pdf:
+                    dr_pdf = got
             rec["drive_run_pdf"] = dr_pdf or ""
-            rec["drive_run_summary"] = parse_drive_run_pdf(dr_pdf).get("summary", "") if dr_pdf else ""
+            rec["drive_run_summary"] = (parse_drive_run_pdf(dr_pdf).get("summary", "")
+                                        if dr_pdf and dr_pdf.lower().endswith(".pdf") else "")
+        elif folder:
+            # Some runs never get attached to the order's documents and only
+            # live in the job's AutoCAD folder — link the file in place.
+            hits = _run_files_in_folder(Path(folder))
+            if hits:
+                rec["has_drive_run"] = True
+                rec["drive_run_pdf"] = str(hits[0])
 
         # "ok" only when every document we found actually downloaded — a found-
         # but-failed download stays "error" so the resume retries it, instead of
         # permanently recording the job with empty fields.
         if not so:
             rec["status"] = "no-SO"
-        elif so_pdf and (not dr or dr_pdf):
+        elif so_pdf and (not runs or dr_pdf):
             rec["status"] = "ok"
         else:
             rec["status"] = "error"
@@ -313,8 +325,8 @@ def write_workbook(records: Dict[str, Dict[str, Any]], dwg: Dict[str, Dict[str, 
     # -01/-02 (CW/CCW) aren't shown — nearly every job has them; only the custom
     # extra suffixes carry signal.
     fixed = ["Job #", "Type", "Description", "Size", "Arrangement", "Motor Pos", "Class",
-             "Rotation", "Discharge", "% Width", "Special Temp", "CO#", "Drive Run",
-             "Drive Run Summary", "Folder", "Order Status"]
+             "Rotation", "Discharge", "% Width", "Special Temp", "CO#", "Quote Run",
+             "Quote Run Summary", "Folder", "Order Status"]
     headers = fixed + [f"-{s}" for s in suffixes]
     folder_col = fixed.index("Folder") + 1
 
@@ -342,7 +354,7 @@ def write_workbook(records: Dict[str, Dict[str, Any]], dwg: Dict[str, Dict[str, 
             ws.cell(i, c, v)
         # Drive Run cell links to the archived drive-run PDF when we have it.
         if r.get("has_drive_run"):
-            dr_cell = ws.cell(i, fixed.index("Drive Run") + 1)
+            dr_cell = ws.cell(i, fixed.index("Quote Run") + 1)
             if r.get("drive_run_pdf"):
                 dr_cell.hyperlink = r["drive_run_pdf"]
                 dr_cell.font = dr_link_font
@@ -443,7 +455,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     break
                 if not args.rescan and _is_done(records.get(job, {})):
                     continue
-                records[job] = process_one(page, context, job)
+                records[job] = process_one(page, context, job, dwg.get(job, {}).get("folder", ""))
                 processed += 1
                 log.info("  %d  %s -> %s", processed, job, records[job].get("status"))
                 if processed % 25 == 0:

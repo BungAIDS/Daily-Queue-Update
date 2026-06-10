@@ -36,14 +36,14 @@ CENTER_ALIGN = Alignment(horizontal="center")
 #   "job"         -> job number, hyperlinked to its Sales Order pdf (Z: drive)
 #   "folder"      -> AutoCAD job folder (or SO archive folder) hyperlink
 #   "co"          -> CO# label
-#   "drive_run"   -> YES, hyperlinked to the drive-run pdf (highly-custom fans)
+#   "drive_run"   -> YES, hyperlinked to the quote-run file (highly-custom fans)
 #   "total_price" -> money-formatted cell
 #   "flags"       -> flag summary string
 # To reorder the report, reorder this list — everything else follows.
 COLUMNS = [
     ("Job #", "job"),
     ("Folder", "folder"),
-    ("Drive Run", "drive_run"),
+    ("Quote Run", "drive_run"),
     ("CO#", "co"),
     ("Oper", "oper"),
     ("Design", "design"),

@@ -173,24 +173,36 @@ Daily-Queue-Update/
 
 Three extra capabilities, on top of the daily run:
 
-### Construction / quote ("drive") run
+### Construction / quote run
 
-The daily enrichment now grabs the **quote/construction run** alongside the
-Sales Order. Both are found by their document *type* in the pid
-(`CBC_SalesOrder-...`). The run document's exact type name varies, so the
-candidates in `DRIVE_RUN_TYPES` (default `CBC_DriveRun,CBC_QuoteRun`; override
-in `.env`) are tried, then any other doc type ending in `Run` as a fallback.
-If a run shows zero matches, the log prints every pid type it saw on the board
-so you can read off the right name. Only highly-custom fans have a run, so its
-presence is a signal in itself: the Full Queue tab gains a **Drive Run** column
-— `YES`, hyperlinked straight to the archived run PDF (under `DRIVE_RUN_DIR`);
-it shows a plain `YES` only if the flag is set but the file didn't download.
+The daily enrichment now grabs the **quote run** alongside the Sales Order.
+Quote runs are recognized three ways, in order:
 
-The exact fields inside a quote run depend on your documents. Confirm them once:
+1. **Dedicated pid type** — only the HDX fans file the run under its own
+   document type (`DRIVE_RUN_TYPES`, default `CBC_DriveRun,CBC_QuoteRun`, plus
+   any other type ending in `Run` as a fallback).
+2. **File name** — everything else files it under a generic type (usually
+   `CBC_Inquiry`), so document names are matched against
+   `DRIVE_RUN_NAME_PATTERNS` (default catches `... Qt Run.txt`,
+   `... Quote Run ...`, and the D64 `... D64 Wheel Construction ....xlsx`).
+3. **AutoCAD folder** — some orders never get the run attached to their
+   documents at all; the job's folder is searched recursively for the same
+   name patterns (e.g. `ENG REF\420410 qt  run.txt`) and the report links the
+   file in place.
+
+Every matching document is archived (keeping its real extension — runs come as
+`.txt`, `.xlsx`, `.rtf`, or `.pdf`) under `DRIVE_RUN_DIR`. If zero runs match,
+the log prints every pid type it saw on the board. Only highly-custom fans have
+a run, so its presence is a signal in itself: the Full Queue tab gains a
+**Quote Run** column — `YES`, hyperlinked straight to the run file; it shows a
+plain `YES` only if the flag is set but no file was reachable.
+
+The exact fields inside a quote run depend on your documents (the D64 Excel
+wheel-construction sheets will need their own parser). Inspect a job's docs:
 
 ```bash
-python discover_documents.py <a-custom-job#>   # lists docs + pid types, downloads SO + run
-python dump_pdf.py <same-job#>                 # dumps the run's text/tables
+python discover_documents.py <a-custom-job#>   # lists docs + pid types, downloads SO + run(s)
+python dump_pdf.py "<path to a pdf run>"       # dumps a pdf run's text/tables
 # or: python drive_run.py "<path to the quote run pdf>"
 ```
 

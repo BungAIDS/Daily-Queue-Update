@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import re
 import sys
+from pathlib import Path
 from urllib.parse import urljoin
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
@@ -33,10 +34,9 @@ from scraper import CONTAINER_SELECTOR
 # Reuse the SAME selection logic the daily run uses, so discovery reflects
 # exactly what enrichment will pick.
 from sales_orders import (
-    _parse_doc, _norm_type, _latest_of_type, _latest_run_doc, _trigger_js,
-    SO_TYPE,
+    _parse_doc, _norm_type, _latest_of_type, _run_docs, _is_run_name, _trigger_js,
+    _find_autocad_folders, _run_files_in_folder, SO_TYPE,
 )
-from config import DRIVE_RUN_TYPES
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("discover")
@@ -81,23 +81,24 @@ def _collect_docs(page) -> list[dict]:
 
 
 def _report_docs(jn: str, docs: list[dict]) -> None:
-    run_types = {_norm_type(t) for t in DRIVE_RUN_TYPES}
+    run_hrefs = {h for h, _ in _run_docs([(d["href"], d) for d in docs])}
     log.info("\n--- Documents for job %s (%d) ---", jn, len(docs))
     for d in docs:
         rev = f"rev {d['rev']}" if d["rev"] is not None else "rev ?"
         flag = ""
         if _norm_type(d["type"]) == _norm_type(SO_TYPE):
             flag = "   <== SALES ORDER"
-        elif _norm_type(d["type"]) in run_types:
-            flag = "   <== QUOTE/DRIVE RUN"
-        elif _norm_type(d["type"]).endswith("run"):
-            flag = "   <== QUOTE/DRIVE RUN? (fallback match — add this type to DRIVE_RUN_TYPES)"
+        elif d["href"] in run_hrefs:
+            how = "file name" if _is_run_name(d["fn"]) else "pid type"
+            flag = f"   <== QUOTE RUN (by {how})"
         log.info("  %-26s %-7s  %s%s", d["type"], rev, (d["fn"] or "")[:48], flag)
 
 
 def _download(context, page, doc: dict, label: str) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    dest = OUT / f"{label}.pdf"
+    # Keep the document's own extension — quote runs come as .txt/.xlsx/.rtf too.
+    ext = Path(doc.get("fn") or "").suffix or ".pdf"
+    dest = OUT / f"{label}{ext}"
     try:
         resp = context.request.get(urljoin(page.url, doc["href"]))
         dest.write_bytes(resp.body())
@@ -143,18 +144,41 @@ def run_list(want_job: str | None) -> None:
         _report_docs(jn, docs)
 
         so = _latest_of_type([(d["href"], d) for d in docs], SO_TYPE)
-        dr = _latest_run_doc([(d["href"], d) for d in docs])
+        runs = _run_docs([(d["href"], d) for d in docs])
         log.info("\n--- Summary ---")
         log.info("  Sales Order : %s", f"rev {so[1]['rev']}  {so[1]['fn']}" if so else "NONE FOUND")
-        log.info("  Quote/Drive Run : %s",
-                 f"type {dr[1]['type']}  rev {dr[1]['rev']}  {dr[1]['fn']}" if dr
-                 else "none matched (if one is listed above, add its pid type to DRIVE_RUN_TYPES in .env)")
+        if runs:
+            for _, d in runs:
+                log.info("  Quote Run   : type %s  rev %s  %s", d["type"], d["rev"], d["fn"])
+        else:
+            log.info("  Quote Run   : none matched in the documents (if one is listed above, "
+                     "add its pid type / file-name pattern to DRIVE_RUN_TYPES / "
+                     "DRIVE_RUN_NAME_PATTERNS in .env)")
         if so:
             _download(context, page, so[1], f"{jn}_sales_order")
-        if dr:
-            _download(context, page, dr[1], f"{jn}_drive_run")
-            log.info("\n  Now dump the drive run to see its fields:")
-            log.info("    python dump_pdf.py \"%s\"", OUT / f"{jn}_drive_run.pdf")
+        for i, (_, d) in enumerate(runs):
+            _download(context, page, d, f"{jn}_quote_run" + (f"_{i + 1}" if len(runs) > 1 else ""))
+        pdf_i = next((i for i, (_, d) in enumerate(runs)
+                      if (d.get("fn") or "").lower().endswith(".pdf")), None)
+        if pdf_i is not None:
+            name = f"{jn}_quote_run" + (f"_{pdf_i + 1}" if len(runs) > 1 else "") + ".pdf"
+            log.info("\n  Now dump the pdf run to see its fields:")
+            log.info("    python dump_pdf.py \"%s\"", OUT / name)
+
+        # Some orders only keep the run in their AutoCAD folder — check there too.
+        try:
+            info = _find_autocad_folders([jn]).get(jn)
+            if info:
+                hits = _run_files_in_folder(info["path"])
+                log.info("\n--- AutoCAD folder check (%s) ---", info["path"])
+                for f in hits:
+                    log.info("  run file: %s", f)
+                if not hits:
+                    log.info("  no run-named files found")
+            else:
+                log.info("\n(AutoCAD folder for %s not found — folder check skipped.)", jn)
+        except Exception as e:  # noqa: BLE001 - discovery should still finish
+            log.info("\n(AutoCAD folder check failed: %s)", e)
 
         input("\nPress Enter to close the browser... ")
         browser.close()
