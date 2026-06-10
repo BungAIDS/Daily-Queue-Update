@@ -82,6 +82,25 @@ def test_job_key():
     assert a.job_key("LEGACY-AB") == "LEGACY-AB"  # no leading digits -> whole name
 
 
+def test_is_real_job():
+    assert a._is_real_job("403425", 400000, 0)
+    assert a._is_real_job("421314", 400000, 0)
+    assert not a._is_real_job("133567", 400000, 0)   # below floor (the goofy numbers)
+    assert not a._is_real_job("2024", 400000, 0)     # year folder
+    assert not a._is_real_job("TEMPLATES", 400000, 0)  # non-numeric
+    assert a._is_real_job("405000", 400000, 410000) and not a._is_real_job("415000", 400000, 410000)
+
+
+def test_iter_job_folders_floor(tmp: Path):
+    root = tmp / "JOBS2"
+    for typ, inter, leaf in [("AXIAL", "4034", "403425"), ("AXIAL", "4213", "421314"),
+                             ("AXIAL", "1335", "133567"), ("MISC", "x", "TEMPLATES"),
+                             ("AXIAL", "2024", "2024")]:
+        (root / typ / inter / leaf).mkdir(parents=True)
+    jobs = sorted(job for job, _t, _p in a.iter_job_folders(root))  # default floor 400000
+    assert jobs == ["403425", "421314"], jobs
+
+
 def test_end_to_end(tmp: Path):
     # Build  <root>/AXIAL/4213/421314/<drawings>  and scan it.
     root = tmp / "JOBS"
@@ -102,9 +121,26 @@ def test_end_to_end(tmp: Path):
     from openpyxl import load_workbook
     ws = load_workbook(out).active
     headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
-    assert "-51" in headers and "CW (01)" in headers
+    assert "-51" in headers and "CW (01)" not in headers and "CCW (02)" not in headers
     row = {headers[c - 1]: ws.cell(2, c).value for c in range(1, ws.max_column + 1)}
-    assert row["Job #"] == "421314" and row["CW (01)"] == "PDF+DWG" and row["-51"] == "yes"
+    assert row["Job #"] == "421314" and row["Extras"] == 1
+
+
+def test_workbook_color_cells(tmp: Path):
+    # Suffix cells carry no text; color is the signal (green=has, red=doesn't).
+    recs = {
+        "403425": a.build_record("403425", "AX", "/x", a.scan_files(["403425-51.dwg"], "403425")),
+        "403500": a.build_record("403500", "AX", "/y", a.scan_files(["403500-01.dwg", "403500-02.dwg"], "403500")),
+    }
+    out = a.write_workbook(recs, tmp / "colors.xlsx")
+    from openpyxl import load_workbook
+    ws = load_workbook(out).active
+    headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
+    col = headers.index("-51") + 1
+    has, hasnt = ws.cell(2, col), ws.cell(3, col)  # rows sorted by job: 403425, 403500
+    assert has.value == "✓" and hasnt.value in (None, "")  # check only on the "has it" cell
+    assert (has.fill.fgColor.rgb or "").endswith("C6EFCE"), has.fill.fgColor.rgb   # green
+    assert (hasnt.fill.fgColor.rgb or "").endswith("FFC7CE"), hasnt.fill.fgColor.rgb  # red
 
 
 def main() -> int:

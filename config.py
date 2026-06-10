@@ -11,6 +11,13 @@ CBC_QUEUE_URL = os.environ.get("CBC_QUEUE_URL", "")
 # the scraper refuses to run when the page is showing a different Work Center,
 # so you never silently diff the wrong queue.
 CBC_WORK_CENTER = os.environ.get("CBC_WORK_CENTER", "")
+# Backfill (backfill_orders.py) looks up old orders through the queue page's
+# "search order" / "find order" box. The box is normally auto-detected; if that
+# misses on your layout, set the exact CSS selector here (run
+# `discover_documents.py --probe <job#>`, which prints it). CBC_SEARCH_BUTTON is
+# the optional selector of a search button to click when Enter doesn't submit.
+CBC_SEARCH_SELECTOR = os.environ.get("CBC_SEARCH_SELECTOR", "").strip()
+CBC_SEARCH_BUTTON = os.environ.get("CBC_SEARCH_BUTTON", "").strip()
 # Saved browser session (cookies) from login.py — no password is ever stored.
 STORAGE_STATE_PATH = Path(os.path.expandvars(os.path.expanduser(
     os.environ.get("STORAGE_STATE_PATH", "./cbc_session.json")

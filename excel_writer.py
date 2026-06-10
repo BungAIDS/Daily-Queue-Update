@@ -27,6 +27,9 @@ RED_FONT = Font(color="C00000", bold=True)  # rows whose change order landed thi
 LINK_FONT = Font(color="0563C1", underline="single")  # hyperlinks (Job # -> SO pdf, Folder)
 DRIVE_RUN_FONT = Font(color="C55A11", bold=True)  # highly-custom (has a drive run)
 DRIVE_RUN_LINK_FONT = Font(color="C55A11", bold=True, underline="single")  # ^ + links to the PDF
+DWG_HAS_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")  # green: has the drawing
+DWG_NO_FILL = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")   # red: doesn't
+CENTER_ALIGN = Alignment(horizontal="center")
 
 # Single source of truth for column order. Each entry is (header, key); the key
 # names the job field to print, or a special renderer handled in _write_job_row:
@@ -365,6 +368,36 @@ def _write_job_row(ws, row: int, j: Dict[str, Any], co_changed: bool = False) ->
                 ws.cell(row=row, column=col).font = RED_FONT
 
 
+def _dwg_suffixes(jobs: List[Dict[str, Any]]) -> List[str]:
+    """Sorted union of every custom-DWG suffix found across the jobs (the -NN
+    extras beyond the standard -01/-02), numeric-ordered."""
+    seen: set = set()
+    for j in jobs:
+        seen.update((j.get("dwg_extras") or {}).keys())
+    return sorted(seen, key=lambda s: (int(s), s) if s.isdigit() else (10**9, s))
+
+
+def _append_dwg_matrix(ws, rows: List, start_col: int) -> List[str]:
+    """Append the custom-DWG matrix starting at column `start_col`: one header
+    per distinct suffix (row 1), then per-row green-✓ (has the drawing) / red
+    (doesn't). `rows` is a list of (row_index, job_dict). Returns the suffixes so
+    the caller can size the AutoFilter/columns."""
+    suffixes = _dwg_suffixes([j for _, j in rows])
+    for k, s in enumerate(suffixes, start=start_col):
+        cell = ws.cell(row=1, column=k, value=f"-{s}")
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+    for row_i, j in rows:
+        extras = j.get("dwg_extras") or {}
+        for k, s in enumerate(suffixes, start=start_col):
+            cell = ws.cell(row=row_i, column=k)
+            if s in extras:
+                cell.value, cell.fill, cell.alignment = "✓", DWG_HAS_FILL, CENTER_ALIGN
+            else:
+                cell.fill = DWG_NO_FILL
+    return suffixes
+
+
 def _write_full_queue_tab(
     ws,
     jobs: List[Dict[str, Any]],
@@ -398,7 +431,7 @@ def _write_full_queue_tab(
         else:
             fill = None
         if fill is not None:
-            for c in range(1, len(QUEUE_HEADERS) + 1):
+            for c in range(1, len(QUEUE_HEADERS) + 1):  # urgency fill: standard cols only
                 ws.cell(row=i, column=c).fill = fill
         total_price_sum += _parse_money(j.get("total_price", ""))
 
@@ -410,13 +443,17 @@ def _write_full_queue_tab(
     total_cell.number_format = MONEY_FMT
     total_cell.font = SECTION_FONT
 
-    # AutoFilter across the data rows
+    # Custom-DWG green-✓/red matrix, appended after the standard columns.
+    suffixes = _append_dwg_matrix(ws, list(enumerate(jobs, start=2)), len(QUEUE_HEADERS) + 1)
+    total_cols = len(QUEUE_HEADERS) + len(suffixes)
+
+    # AutoFilter across the data rows (including the DWG columns)
     if jobs:
-        last_col = get_column_letter(len(QUEUE_HEADERS))
+        last_col = get_column_letter(total_cols)
         ws.auto_filter.ref = f"A1:{last_col}{len(jobs) + 1}"
 
     ws.freeze_panes = "B2"  # keep the header row AND the Job # column visible
-    _autosize(ws, num_cols=len(QUEUE_HEADERS))
+    _autosize(ws, num_cols=total_cols)
 
 
 def _write_history_tab(ws, history: Dict[str, Any]) -> None:
@@ -439,10 +476,17 @@ def _write_history_tab(ws, history: Dict[str, Any]) -> None:
         _write_job_row(ws, i, entry.get("snapshot", {}))
         ws.cell(row=i, column=len(QUEUE_HEADERS) + 1, value=entry.get("last_seen", ""))
 
-    last_col = get_column_letter(len(headers))
+    # Custom-DWG matrix, appended after "Last Seen" (same green-✓/red as the Full
+    # Queue) so History is a complete per-order log. Uses each archived order's
+    # snapshot, so it carries DWG data for orders archived once the scan was live.
+    rows = [(i, e.get("snapshot", {})) for i, e in enumerate(entries, start=2)]
+    suffixes = _append_dwg_matrix(ws, rows, len(headers) + 1)
+    total_cols = len(headers) + len(suffixes)
+
+    last_col = get_column_letter(total_cols)
     ws.auto_filter.ref = f"A1:{last_col}{len(entries) + 1}"
     ws.freeze_panes = "B2"  # keep the header row AND the Job # column visible
-    _autosize(ws, num_cols=len(headers))
+    _autosize(ws, num_cols=total_cols)
 
 
 def build_workbook(

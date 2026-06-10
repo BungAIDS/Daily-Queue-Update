@@ -203,26 +203,54 @@ python autocad_scan.py                 # every job folder under AUTOCAD_JOBS_DIR
 python autocad_scan.py 421314 421388   # specific jobs
 ```
 
-It writes `backlog/autocad_dwgs.xlsx`: one row per job with **CW (01)** and
-**CCW (02)** (PDF, DWG, or both), plus a **yes/no column for every other suffix**
-seen (`-51`, `-35`, …). Jobs missing both `-01` and `-02` are flagged. Progress
-is saved after every batch, so an interrupted run resumes.
+It writes `backlog/autocad_dwgs.xlsx`: one row per job with a column for **every
+custom suffix** seen (`-51`, `-35`, …), each cell **green ✓** when the job has
+that drawing and **red** when it doesn't, plus an `Extras` count. The standard
+`-01`/`-02` (CW/CCW) drawings aren't shown — nearly every job has them, so they'd
+just be noise — but a job missing **both** is flagged red as the rare exception.
+Progress is saved after every batch, so an interrupted run resumes.
+
+The **daily queue report carries the same green-✓/red matrix** on both the **Full
+Queue** and **History** tabs, appended after the standard columns: every morning
+the run scans each board job's AutoCAD folder live (reusing the folder lookup it
+already does) and adds a column for each custom suffix found. History keeps it
+per archived order too, so it builds into a complete per-order log over time
+(orders archived once the scan went live carry their DWG data).
 
 ### Backfill old orders
 
 Grind through a backlog of historical orders one at a time (run it all day):
 
 ```bash
-python backfill_orders.py                  # all AutoCAD job folders
+python backfill_orders.py                  # all real AutoCAD job folders
 python backfill_orders.py --list jobs.txt  # or a file of job numbers
 python backfill_orders.py --range 420000 421000
 ```
 
+A folder sweep only considers job numbers at or above `--min-job` (default
+`400000`), so non-job folders (year/template/archive dirs with small or
+non-numeric names) are skipped. Raise it once you know your exact lowest job,
+e.g. `--min-job 403000` (and `--max-job` to cap the top). The same flags apply
+to `autocad_scan.py`.
+
 It downloads + parses each order's Sales Order and drive run, merges the DWG
 scan, and writes `backlog/backlog.xlsx`. It's resumable (kill and re-run any
-time). **One thing must be confirmed first:** how to open an order that's no
-longer on the board. Run `python discover_documents.py --probe <old-job#>`,
-paste the output back, and the lookup gets wired into `open_order_detail()`.
+time).
+
+Old orders are opened through the queue page's **"search order" / "find order"**
+box — the backfill types each job number in and opens the surfaced order. The
+box is auto-detected; the run preflights it and stops with a clear message (no
+all-day grind) if it can't be found. Confirm it once, and grab the exact
+selector if auto-detect misses:
+
+```bash
+python discover_documents.py --probe <a-real-job#>
+```
+
+That lists the page's text inputs, shows what auto-detect picked, and runs the
+**real** lookup — `SUCCESS` means you're ready. If it misses, set
+`CBC_SEARCH_SELECTOR` (and `CBC_SEARCH_BUTTON` if a button submits the search)
+in `.env` to the selector it printed, then re-probe.
 
 ## Troubleshooting
 
