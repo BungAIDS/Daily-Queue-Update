@@ -93,32 +93,36 @@ def _special_temp(design_temp: str, max_temp: str, suitable: str) -> str:
 def _find_autocad_folders(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
     """Locate each job under AUTOCAD_JOBS_DIR/<type>/<intermediate>/<job>.
 
-    Targeted glob per job (a job appears under exactly one type) — far cheaper
-    than walking the whole tree. Returns {job: {type, path, dwg_extras,
-    dwg_missing_std}}; {} if the drive isn't reachable. The <type> the job sits
-    under is its job type. While we have the folder open we also scan it for the
-    job's custom drawings (the extra -NN suffixes), reusing autocad_scan.
+    One sweep of the two directory levels builds the whole index — a glob per
+    job re-scans every <type>/<intermediate> dir on the network share once per
+    job, which is N full sweeps for an N-job board. Returns {job: {type, path,
+    dwg_extras, dwg_missing_std}}; {} if the drive isn't reachable. The <type>
+    a job sits under is its job type. While we have the folder we also scan it
+    for the job's custom drawings (the extra -NN suffixes), reusing autocad_scan.
     """
     out: Dict[str, Dict[str, Any]] = {}
     root = AUTOCAD_JOBS_DIR
+    wanted = set(job_numbers)
     try:
         if not root.exists():
             log.warning("AutoCAD jobs root not reachable: %s (folder links disabled)", root)
             return out
-        for job in job_numbers:
-            matches = list(root.glob(f"*/*/{job}")) or list(root.glob(f"*/*/{job}*"))
-            if matches:
-                m = matches[0]
-                info: Dict[str, Any] = {"type": m.relative_to(root).parts[0], "path": m,
-                                        "dwg_extras": {}, "dwg_missing_std": False}
-                try:  # live scan of this job's custom DWGs (names only — never opens a file)
-                    names = [f.name for f in m.glob("*") if f.is_file()]
-                    rec = autocad_scan.build_record(job, info["type"], str(m),
-                                                    autocad_scan.scan_files(names, job))
-                    info["dwg_extras"], info["dwg_missing_std"] = rec["extras"], rec["missing_std"]
-                except OSError as e:
-                    log.warning("  could not scan DWGs for %s (%s)", job, e)
-                out[job] = info
+        for m in root.glob("*/*/*"):
+            job = autocad_scan.job_key(m.name)  # "421314 ACME CORP" -> "421314"
+            if job not in wanted or job in out or not m.is_dir():
+                continue
+            info: Dict[str, Any] = {"type": m.relative_to(root).parts[0], "path": m,
+                                    "dwg_extras": {}, "dwg_missing_std": False}
+            try:  # live scan of this job's custom DWGs (names only — never opens a file)
+                names = [f.name for f in m.glob("*") if f.is_file()]
+                rec = autocad_scan.build_record(job, info["type"], str(m),
+                                                autocad_scan.scan_files(names, job))
+                info["dwg_extras"], info["dwg_missing_std"] = rec["extras"], rec["missing_std"]
+            except OSError as e:
+                log.warning("  could not scan DWGs for %s (%s)", job, e)
+            out[job] = info
+            if len(out) == len(wanted):
+                break  # found every job on the board — stop walking the share
         log.info("Located %d/%d AutoCAD job folders under %s", len(out), len(job_numbers), root)
     except OSError as e:
         log.warning("Could not look up AutoCAD folders (%s); folder links disabled", e)
@@ -280,6 +284,21 @@ def _doc_filename(job: str, label: str, rev: int | None) -> str:
     return f"{job} - {label} rev {rev}.pdf" if rev and rev > 1 else f"{job} - {label}.pdf"
 
 
+def _download_error(status: int, body: bytes) -> str | None:
+    """Why a downloaded document isn't usable, or None if it looks fine.
+
+    The doc server can return an error page (HTTP 5xx) or — once the session
+    expires — the login page itself, with HTTP 200. Writing either to disk
+    would poison the archive: the dest.exists() check skips re-downloading
+    forever, so the bad file would permanently stand in for the order's PDF.
+    """
+    if status != 200:
+        return f"HTTP {status}"
+    if not body[:1024].lstrip().startswith(b"%PDF-"):
+        return "response is not a PDF (expired-session login page or error page?)"
+    return None
+
+
 async def _download(context, page_url: str, href: str, dest: Path) -> str | None:
     """Download a document to `dest` (skipping if present), retrying transient
     doc-server timeouts. Returns the path on success, else None."""
@@ -289,8 +308,12 @@ async def _download(context, page_url: str, href: str, dest: Path) -> str | None
     for attempt in (1, 2, 3):
         try:
             resp = await context.request.get(url, timeout=60000)
+            body = await resp.body()
+            err = _download_error(resp.status, body)
+            if err:
+                raise RuntimeError(err)
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(await resp.body())
+            dest.write_bytes(body)
             return str(dest)
         except Exception as e:  # noqa: BLE001
             if attempt == 3:
@@ -338,13 +361,13 @@ async def _args_map(page) -> Dict[str, str]:
 
 
 async def _process_job(page, context, job: str, args_js: str) -> Dict[str, Any]:
-    res = {"rev": None, "pdf_path": None, "dr_rev": None, "dr_pdf_path": None}
+    res = {"rev": None, "pdf_path": None, "dr_rev": None, "dr_pdf_path": None, "no_so": False}
     await page.evaluate(_trigger_js(args_js))
     link = page.locator("#modalDetail a").filter(has_text=re.compile(re.escape(job)))
     try:
         await link.first.wait_for(state="attached", timeout=90000)
     except PWTimeout:
-        return res  # no docs for this job (e.g. HDX)
+        return res  # modal never showed its docs — worth retrying on the next pass
 
     # Collect every document link once, then pick the latest of each type we
     # want by its pid type prefix — the Sales Order and the drive run.
@@ -360,6 +383,10 @@ async def _process_job(page, context, job: str, args_js: str) -> Dict[str, Any]:
         res["rev"] = doc["rev"]
         res["pdf_path"] = await _download(
             context, page.url, href, SALES_ORDER_DIR / job / _so_filename(job, doc["rev"]))
+    else:
+        # The docs DID load and there's just no Sales Order among them (e.g.
+        # HDX). Terminal — don't burn another 90s wait on it in the retry pass.
+        res["no_so"] = True
 
     # Construction / drive run — only the highly-custom orders have one.
     dr = _latest_of_type(docs, DRIVE_RUN_TYPE)
@@ -394,7 +421,14 @@ async def _worker(context, url, queue, results, total):
             results.setdefault(job, {"rev": None, "pdf_path": None})
         finally:
             r = results.get(job) or {}
-            mark = "ok" if r.get("pdf_path") else ("no SO" if r.get("rev") is None else "no pdf")
+            if r.get("pdf_path"):
+                mark = "ok"
+            elif r.get("no_so"):
+                mark = "no SO"
+            elif r.get("rev") is not None:
+                mark = "no pdf"
+            else:
+                mark = "no docs (timeout)"
             if r.get("dr_pdf_path"):
                 mark += " +DriveRun"
             log.info("  sales orders %d/%d  (%s: %s)", len(results), total, job, mark)
@@ -432,6 +466,12 @@ async def _afetch_all(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
 # --------------------------------------------------------------------------- #
 # Public entry point                                                          #
 # --------------------------------------------------------------------------- #
+def _terminal(r: Dict[str, Any]) -> bool:
+    """A fetch result that shouldn't be retried: we have the pdf, or the modal's
+    documents loaded and there's genuinely no Sales Order to fetch (e.g. HDX)."""
+    return bool(r.get("pdf_path") or r.get("no_so"))
+
+
 def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) -> None:
     """Mutate `jobs` in place, attaching sales-order + folder fields (see module
     docstring). Opens every job's detail modal in parallel — the slow step.
@@ -458,14 +498,16 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
             break
         for k, v in res.items():
             old = so_results.get(k)
-            # Keep the best result seen: a downloaded pdf beats a bare rev beats nothing.
+            # Keep the best result seen: a downloaded pdf beats a confirmed
+            # no-SO beats a bare rev beats nothing.
             if old is None or (v.get("pdf_path") and not old.get("pdf_path")) \
-                    or (v.get("rev") is not None and old.get("rev") is None):
+                    or (v.get("rev") is not None and old.get("rev") is None) \
+                    or (v.get("no_so") and not _terminal(old)):
                 # Don't lose an earlier pass's drive run if this result missed it.
                 if old and old.get("dr_pdf_path") and not v.get("dr_pdf_path"):
                     v = {**v, "dr_pdf_path": old["dr_pdf_path"], "dr_rev": old.get("dr_rev")}
                 so_results[k] = v
-        todo = [k for k in by_job if not (so_results.get(k) or {}).get("pdf_path")]
+        todo = [k for k in by_job if not _terminal(so_results.get(k) or {})]
         if not todo:
             break
         if p < max_passes:

@@ -36,7 +36,7 @@ _SECTIONS = [
     ("New orders", "new"),
     ("Returning orders", "returning"),
     ("Completed / Removed", "removed"),
-    ("Changed orders", "changed"),
+    ("Orders that have changed", "changed"),
     ("Persistent orders", "persistent"),
 ]
 

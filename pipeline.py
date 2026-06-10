@@ -26,7 +26,8 @@ from compare import (diff_queues, load_history, load_latest_snapshot,
 from config import ANTHROPIC_API_KEY, validate_runtime_config
 from emailer import send_alert, send_daily_briefing
 from excel_writer import build_workbook
-from runstate import load_diff, save_briefing, save_diff, save_excel_path
+from runstate import (archive_old_runs, load_diff, save_briefing, save_diff,
+                      save_excel_path)
 from sales_orders import enrich_with_sales_orders
 from scraper import scrape_queue
 
@@ -83,6 +84,9 @@ def scrape_and_diff(today: date) -> tuple[list, dict]:
     diff = diff_queues(jobs, yesterday, today, prev_date=prev_date)
     save_snapshot(jobs, today)
     save_diff(diff, today)
+    # Sweep per-run files older than ~2 months into archive/ subfolders. Moved,
+    # never deleted — the full record of every order stays on disk.
+    archive_old_runs(today)
     return jobs, diff
 
 

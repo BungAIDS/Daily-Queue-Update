@@ -26,7 +26,7 @@ STORAGE_STATE_PATH = Path(os.path.expandvars(os.path.expanduser(
 _raw_anthropic = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
 # Treat the literal placeholder from .env.example as unset, so a fresh
 # install (key not yet added) doesn't try the call and trigger a daily alert.
-if _raw_anthropic in ("", "sk-ant-...", "sk-ant-..."):
+if _raw_anthropic in ("", "sk-ant-..."):
     _raw_anthropic = ""
 ANTHROPIC_API_KEY = _raw_anthropic
 # Model used by analyzer.py for the daily AI briefing.
@@ -51,7 +51,13 @@ def _output_path(env_key: str, default: str) -> Path:
     return _expand_path(raw)
 
 
-_DEFAULT_OUTPUT = r"%USERPROFILE%\Documents\DailyQueue"
+# %USERPROFILE% only expands on Windows; elsewhere (dev sandbox, Mac) fall back
+# to ~ so importing this module doesn't create a literal "%USERPROFILE%\..."
+# directory in the working folder.
+if os.name == "nt":
+    _DEFAULT_OUTPUT = r"%USERPROFILE%\Documents\DailyQueue"
+else:
+    _DEFAULT_OUTPUT = os.path.join("~", "Documents", "DailyQueue")
 OUTPUT_DIR = _output_path("OUTPUT_DIR", _DEFAULT_OUTPUT)
 SNAPSHOT_DIR = _output_path("SNAPSHOT_DIR", str(OUTPUT_DIR / "snapshots"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

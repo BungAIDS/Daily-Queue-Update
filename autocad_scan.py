@@ -268,7 +268,9 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ap.add_argument("--out", default=str(WORKBOOK_PATH), help="Excel output path.")
     ap.add_argument("--recursive", action="store_true", help="Also scan sub-folders of each job.")
     ap.add_argument("--rescan", action="store_true", help="Ignore saved progress; redo every job.")
-    ap.add_argument("--limit", type=int, default=0, help="Stop after N folders (0 = no limit).")
+    ap.add_argument("--limit", type=int, default=0,
+                    help="Stop after scanning N folders this run (0 = no limit; "
+                         "folders already done on an earlier run don't count).")
     ap.add_argument("--min-job", type=int, default=DEFAULT_MIN_JOB,
                     help=f"Skip folders below this job number on a full sweep (default {DEFAULT_MIN_JOB}).")
     ap.add_argument("--max-job", type=int, default=0, help="Skip folders above this job number (0 = no cap).")
@@ -300,11 +302,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         folders = iter_job_folders(root, min_job=args.min_job, max_job=args.max_job)
 
     t0 = time.monotonic()
-    done = scanned = 0
+    scanned = 0
     for job, jtype, folder in folders:
-        if args.limit and done >= args.limit:
+        if args.limit and scanned >= args.limit:
             break
-        done += 1
         if job in records and not args.rescan and not args.jobs:
             continue  # already scanned on an earlier run
         try:
