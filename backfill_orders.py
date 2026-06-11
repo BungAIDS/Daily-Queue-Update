@@ -244,9 +244,10 @@ def process_one(page, context, job: str, folder: str = "") -> Dict[str, Any]:
                 })
 
         runs = _run_docs(docs)
+        dr_count = 0
         if runs:
             rec["has_drive_run"] = True
-            rec["drive_run_count"] = len(runs)
+            dr_count = len(runs)
             for href, doc in runs:
                 got = _download(context, page.url, href, DRIVE_RUN_DIR / job / _run_filename(job, doc))
                 if got and not dr_pdf:
@@ -254,14 +255,17 @@ def process_one(page, context, job: str, folder: str = "") -> Dict[str, Any]:
             rec["drive_run_pdf"] = dr_pdf or ""
             rec["drive_run_summary"] = (parse_drive_run_pdf(dr_pdf).get("summary", "")
                                         if dr_pdf and dr_pdf.lower().endswith(".pdf") else "")
-        elif folder:
-            # Some runs never get attached to the order's documents and only
-            # live in the job's AutoCAD folder — link the file in place.
+        if folder:
+            # Always scan the AutoCAD folder — cheap rglob, catches runs that
+            # only live there and any folder copies alongside document ones.
             hits = _run_files_in_folder(Path(folder))
             if hits:
-                rec["has_drive_run"] = True
-                rec["drive_run_count"] = len(hits)
-                rec["drive_run_pdf"] = str(hits[0])
+                if not rec.get("has_drive_run"):
+                    rec["has_drive_run"] = True
+                    rec["drive_run_pdf"] = str(hits[0])
+                dr_count += len(hits)
+        if dr_count:
+            rec["drive_run_count"] = dr_count
 
         # "ok" only when every document we found actually downloaded — a found-
         # but-failed download stays "error" so the resume retries it, instead of

@@ -631,15 +631,17 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
         dr_pdf = r.get("dr_pdf_path")
         dr_count = r.get("dr_count") or 0
         j["has_drive_run"] = bool(dr_pdf or r.get("dr_rev") is not None)
-        if not j["has_drive_run"] and info:
-            # Not attached to the order's documents — some runs only live in
-            # the job's AutoCAD folder. Link the file in place (no download).
+        if info:
+            # Always scan the AutoCAD folder — it's a cheap local rglob and
+            # catches runs that only live there, plus any folder copies
+            # alongside document ones (both add to the review count).
             hits = _run_files_in_folder(info["path"])
             if hits:
-                dr_pdf = str(hits[0])
-                dr_count = len(hits)
-                j["has_drive_run"] = True
-                n_dr_folder += 1
+                if not j["has_drive_run"]:
+                    dr_pdf = str(hits[0])
+                    j["has_drive_run"] = True
+                    n_dr_folder += 1
+                dr_count += len(hits)
         j["drive_run_pdf"] = dr_pdf or ""
         j["drive_run_count"] = dr_count if j["has_drive_run"] else 0
         j["drive_run_rev"] = r.get("dr_rev")
