@@ -1,0 +1,25 @@
+# CI: runs the pure-logic test suites on every push and PR.
+#
+# Scope note: this can only check the plain-Python logic (quote-run matching,
+# DWG scanning, Excel shaping). The live cbcinsider scrape, the Z: drive, and
+# the Outlook email (pywin32, Windows-only) are unreachable from a hosted
+# runner — so a green check means "the logic didn't regress", NOT "tomorrow's
+# 5 AM run will work". requirements.txt is deliberately not installed here:
+# pywin32 has no Linux build.
+name: tests
+
+on: [push, pull_request]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # Just what the tested modules import (playwright = pip package only;
+      # no browsers are downloaded).
+      - run: pip install playwright openpyxl python-dotenv
+      - run: python test_autocad_scan.py
+      - run: python test_quote_runs.py
