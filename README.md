@@ -248,8 +248,12 @@ so each line is kept three ways:
 
 - **raw** — exactly as printed on the SO (never altered, so rules can be
   re-tuned later without re-downloading anything),
-- **normalized** — uppercased, item numbers/qty/prices stripped, abbreviations
-  expanded (`W/`→`WITH`, `SS`→`STAINLESS STEEL`, …) so variants converge,
+- **normalized** — uppercased, the price columns and `L`/`C`/`N` type letter
+  stripped, abbreviations expanded (`W/`→`WITH`, `SS`→`STAINLESS STEEL`,
+  `IVD`→`INLET VANE DAMPER`, …) so variants converge,
+- **details** — the unpriced continuation lines printed under an item
+  (vendor, motor HP/enclosure, `Product: Damper`, …) — searchable, and they
+  contribute to the item's tags,
 - **tags** — canonical features (SHAFT SEAL, SPARK RESISTANT, COATING, …)
   matched by a rules table.
 

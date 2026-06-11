@@ -47,9 +47,9 @@ CO_IN_NAME = re.compile(r"CO#(\d+)", re.I)
 
 # How --dump marks each line of the PDF (kind -> short prefix).
 _DUMP_MARKS = {
-    "item-priced": "ITEM $", "item-section": "ITEM +", "skip": "skip  ",
-    "section-start": "sect> ", "section-end": "<sect ", "text": ".     ",
-    "blank": "",
+    "item-priced": "ITEM $", "item-section": "ITEM +", "detail": " +det ",
+    "skip": "skip  ", "section-start": "sect> ", "section-end": "<sect ",
+    "text": ".     ", "blank": "",
 }
 
 
@@ -121,17 +121,10 @@ def dump(targets: List[Tuple[str, Path, int]]) -> None:
         with pdfplumber.open(str(pdf)) as doc:
             for page in doc.pages:
                 lines.extend(_recon_lines(page))
-        section = ""
-        for ln in lines:
-            s = re.sub(r"\s+", " ", ln).strip()
-            kind, detail = li.classify_line(s, section, rules)
-            if kind == "section-start":
-                section = detail
-            elif kind == "section-end":
-                section = ""
+        for kind, detail, s in li.iter_classified(lines, rules):
             if kind == "blank":
                 continue
-            note = f"   [{detail}]" if kind == "skip" else ""
+            note = f"   [{detail}]" if kind in ("skip", "item-priced") and detail else ""
             print(f"  {_DUMP_MARKS[kind]}  {s}{note}")
         items = li.extract_items(lines, rules)
         print(f"\n  CAPTURED {len(items)} item(s):")
@@ -140,6 +133,8 @@ def dump(targets: List[Tuple[str, Path, int]]) -> None:
             extras = "  ".join(x for x in (f"qty={it['qty']}" if it['qty'] else "",
                                            f"price={it['price']}" if it['price'] else "") if x)
             print(f"    [{tags}]  {it['norm']}" + (f"   ({extras})" if extras else ""))
+            for d in it["details"]:
+                print(f"        · {d}")
 
 
 def scan(targets: List[Tuple[str, Path, int]], rescan: bool, limit: int) -> int:

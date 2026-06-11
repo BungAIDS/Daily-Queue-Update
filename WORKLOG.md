@@ -40,23 +40,49 @@ What was built (all tested; 18 new tests in `test_line_items.py`, CI updated):
   still-untagged unique items via the Claude API once (cached forever in
   `ai_tags`, pennies on haiku).
 
-**Discovery needed from the work machine** (same loop as the quote runs —
-no real SO PDF exists in the sandbox, so capture/skip rules are best-effort
-until tuned against real documents):
+**Tuned against real documents (2026-06-11, dumps of jobs 421314 + 421473)** —
+DG ran `--dump` on both and pasted the output back; the rules are now fitted
+to the actual CBC SO anatomy and the two dumps live verbatim in
+`test_line_items.py` (`REAL_LINES_*`) as the regression base:
 
-1. Run `python line_items_scan.py --dump <job#>` on a few representative
-   orders (a plain fan, a heavily-optioned custom, a multi-fan order) and
-   paste the output back. The dump marks exactly what was captured/skipped
-   and why — rules get fitted from that.
-2. Then `python line_items_scan.py` once over the archive, and
-   `python line_items_scan.py --ai` to classify the long tail.
+- Item rows are `<description> <L|C|N> <Price Freight Markup Net Comm.>` —
+  the type letter, then up to five money columns, **or `STD` / `INC` in the
+  price column, or nothing at all** (`Weights on drawing ... L`). All
+  captured now; the type letter is stripped from the norm (stored as
+  `ptype`), and the LEFTMOST money column (Price) is kept, not Comm.
+- **Unpriced continuation lines under an item are its `details`** (vendor,
+  motor HP/enclosure/frame, `VFD Suitable`, `Product: Damper`): captured per
+  item, searchable, and they contribute tags — the Ruskin `IVD C ...` row
+  tags DAMPER + INLET VANES via the abbreviation (IVD → INLET VANE DAMPER)
+  AND its `Product: Damper` detail. Page furniture interleaving a detail
+  block at page breaks (`Chicago Blower ... (cont.)`, `v1.8.1.5 -1-`,
+  ref-number rows) is excluded.
+- New skips from the dumps: `List Total`, `Lead Time`, `Type Price Freight`
+  header, commission/deduction lines, `Customs Invoice`, the
+  drawings-distribution checklist (`Fan Drawings`, `O & M X`, ...), version
+  footers, `^chicago blower`, `^order #`. The all-numeric CFM/RPM
+  performance row and the spec-table row are rejected structurally. The
+  email skip is now `\w@\w` so `Door Location: @9:00` stays a detail.
+- New tags/abbrevs from the dumps: HEAVY DUTY, 3D STEP DRAWINGS,
+  `grease fitting` → EXTENDED LUBE, `drive set` → V-BELT DRIVE, IVD.
+
+Remaining steps on the work machine:
+
+1. `python line_items_scan.py` once over the archive (builds the store from
+   every already-downloaded SO), then `python find_orders.py --list-tags` to
+   see the vocabulary land.
+2. `python line_items_scan.py --ai` to classify the long tail (MOUNTING
+   CHARGE, WHEEL STEEL, CASH IN ADVANCE, ... — whatever the rules left
+   untagged), cached forever.
+3. If another order layout turns up (multi-fan orders?), `--dump` it and
+   paste back.
 
 Deferred:
-- Multi-line (wrapped) item descriptions: v1 captures the priced line itself;
-  if dumps show descriptions wrapping onto unpriced continuation lines,
-  add a lookbehind join keyed on the layout.
-- A possible per-item quantity column is a guess (`qty` = leading enumeration
-  number ≤ 99) until real dumps confirm the layout.
+- A wheel-type spec row that happens to end in a bare `L`/`C`/`N` could
+  sneak past the structural guard (needs a ≥3-letter word, so most can't);
+  revisit if a junk spec-row item ever shows up in the store.
+- `qty` stays a guess (leading enumeration number) — the real dumps show
+  item rows don't carry one (Qty lives in the spec table).
 
 ## 2026-06-09 — full-codebase review pass: bug fixes + archiving
 

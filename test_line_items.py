@@ -44,6 +44,191 @@ SO_LINES = [
 ]
 
 
+# Verbatim line sequences from real CBC Sales-Order dumps (jobs 421473 and
+# 421314, 2026-06-11 discovery) — the regression base the rules were fitted to.
+REAL_LINES_473 = [
+    "Chicago Blower Corporation Sales Order",
+    "Date:",
+    "Design 16A SW",
+    "Order # Rep Ref. # Customer P.O. # Fan Serial Number:",
+    "421473 7074-49840-00-AI26 7074-49840-00-AI26",
+    "Sold To: Ship To:",
+    "INNO-VENT INDUSTRIAL INC. INNO-VENT INDUSTRIAL INC.",
+    "Total Commission: - BUY SELL w/ comm to dest rep (Rev 0%)",
+    "Qty Design Size Arrangement Motor Pos Class Rotation Discharge % Width Wheel Type",
+    "1 D16A 37 A/9H Z 3 CW TH 100 LS",
+    "CFM OV SP RPM BHP Design Temp Max Temp Elev. Density BHP @ 41° F",
+    "34000 4552 21 963 184.4 70 95 1352 0.0714 194.99",
+    "Type Price Freight Markup Net Comm.",
+    "Base Fan (Base fan Suitable for 447T motor frame, L 69,648.00",
+    "Inquiry Num: 909-26-1604)",
+    "Motor (Model ECP84407TR-5 complete with : C 11,435.83 457.00 1,903.00 13,796.00 571.00",
+    "Vendor: Baldor/Reliance",
+    "200 HP, 1800 RPM, Enclosure: TEFC Severe",
+    "Duty",
+    "447T, Cast Iron, Foot Mounted, 3/60/575, F1,",
+    "1.15 SF",
+    "Quote Num: 1101260457",
+    "Mounting Charge L 1,336.00",
+    "Drive N 4,366.00 437.00",
+    "Constant Speed, SF: 1.3",
+    "CBC Mount",
+    "Mounting Charge L INC",
+    "Access Door, Quick Clamp L 617.00",
+    "Door Location: @9:00",
+    "Belt Guard, Painted Safety Yellow L 2,338.00",
+    "Extended Grease Fittings L 280.00",
+    "Housing Drain with Plug L 129.00",
+    "Housing, Heavy Duty L 4,754.00",
+    "Include 3D STEP Drawings L 991.00",
+    "Inlet, Flanged, Punched L 312.00",
+    "v1.8.1.5 -1-",
+    "Chicago Blower Corporation Sales Order (cont.)",
+    "Order # Rep Ref. # Customer P.O. # Page 2 of 2",
+    "421473 7074-49840-00-AI26 7074-49840-00-AI26",
+    "Mechanical Run Test, Not Available L STD",
+    "Outlet, Flanged, Punched L STD",
+    "Shaft and Bearing Guard, Painted Safety Yellow L 805.00",
+    "Weights on drawing, Inquiry Num: 909-26-1812 L",
+    "Inlet flanged C 776.00 213.00 989.00 64.00",
+    "Vendor: FlexibleCompensators",
+    "Quote Num: 34592",
+    "Ship Loose",
+    "Product: Expansion Joint",
+    "Freight to CBC N 125.00",
+    "Ship Loose Charge N 49.00 5.00",
+    "List Total Each 81,710.00 0.38 31,050.00 2,484.00",
+    "Lead Time: 76 working days Product 51,866.00",
+    "See Additional Features / Notes below Freight",
+    "Total 51,866.00",
+    "Sales Tax (NT)",
+    "Buy/Sell Deduction -3,631.00",
+    "Total Billing 48,235.00",
+    "Additional Features / Notes:",
+    "E-Mail Prints to: hmallette@inno-vent.ca",
+    "Run Test - N/A (Send to Sales for Run Test Availability Check if CBC is mounting the motor)",
+    "Fan Drawings:",
+    "Emailed Mailed",
+    "Fan Drawings Both",
+    "O & M X",
+    "Motor Prints X",
+    "Motor Data Sheets X",
+    "Buyout Prints (e.g. silencer, filter, etc.) X",
+    "Other",
+    "v1.8.1.5 -2-",
+]
+
+REAL_LINES_314 = [
+    "Chicago Blower Corporation CO #2 Sales Order",
+    "Design 34 Vaneaxial Belt Drive",
+    "Qty Design Size Arrangement Motor Pos Class Rotation Discharge % Width Wheel Type",
+    "1 D34 15 N/A N/A 2 100 M",
+    "CFM OV SP RPM BHP Design Temp Max Temp Elev. Density BHP @ 70° F",
+    "3200 2607 2 3344 2.52 70 70 0 0.075 2.52",
+    "Type Price Freight Markup Net Comm.",
+    "Base Fan (Base fan, Suitable for 3600rpm Motor, L 5,761.00",
+    "Inquiry Num: 317-26-1510)",
+    "Motor C 254.83 5.00 62.00 322.00 19.00",
+    "Vendor: Toshiba or equivalent",
+    "3 HP, 3600 RPM, Enclosure: TEFC Premium",
+    "182T, Cast Iron, Foot Mounted, 3/60/230/460,",
+    "F1, 1.15 SF",
+    "Model #0032SDSR41A-P, PN 06-6-0020-01",
+    "VFD Suitable",
+    "CBC Mount",
+    "Mounting Charge L 479.00",
+    "Drive (Drive Set, Constant Speed (CBC mounted), N 360.00 36.00",
+    "Belt Guard, Painted Safety Yellow L 945.00",
+    "Mechanical Run Test, Standard L STD",
+    "Wheel, Steel L STD",
+    "IVD C 2,750.79 440.00 3,191.00 132.00",
+    "Vendor: Ruskin",
+    "Quote Num: 042426GCM2",
+    "Ship Loose",
+    "Product: Damper",
+    "Freight to CBC N 223.00",
+    "List Total Each 8,181.00 0.5000 4,090.00 818.00",
+    "Lead Time: 60 working days Product 8,346.00",
+    "Total Billing 9,564.00",
+    "Additional Features / Notes:",
+    "C/O #2 5/15/26 ECR: CORRECTED TOTAL BILLING.",
+    "CO#1 050826 AMF - CORRECTED CLASS",
+    "CASH IN ADVANCE",
+    "NO TAXES",
+    "Total Billing $ $9,023.00",
+    "Run Test - Required",
+]
+
+
+def test_real_so_std_inc_and_bare_type_letter():
+    items = {it["norm"]: it for it in li.extract_items(REAL_LINES_473)}
+    # STD / INC in the price column (after the L/C/N type letter) are items...
+    assert items["MECHANICAL RUN TEST NOT AVAILABLE"]["price"] == "STD"
+    assert "OUTLET FLANGED PUNCHED" in items
+    assert items["MOUNTING CHARGE"]["ptype"] == "L"
+    # ...and so is a row whose price column is simply empty (trailing bare L).
+    assert any(n.startswith("WEIGHTS ON DRAWING") for n in items), items.keys()
+    # But "INC." at the end of a company name never makes an address an item.
+    assert not any("INNO" in n for n in items), items.keys()
+
+
+def test_real_so_type_letter_stripped_and_price_column():
+    items = {it["norm"]: it for it in li.extract_items(REAL_LINES_473)}
+    bg = items["BELT GUARD PAINTED SAFETY YELLOW"]   # no trailing " L" in norm
+    assert bg["ptype"] == "L" and bg["price"] == "2,338.00", bg
+    # Multi-column money tail keeps the LEFTMOST (the Price column), not Comm.
+    motor = items["MOTOR MODEL ECP84407TR 5 COMPLETE WITH"]
+    assert motor["price"] == "11,435.83", motor
+
+
+def test_real_so_noise_excluded():
+    for lines in (REAL_LINES_473, REAL_LINES_314):
+        joined = " | ".join(it["norm"] for it in li.extract_items(lines))
+        for bad in ("LIST TOTAL", "LEAD TIME", "CUSTOMS", "FAN DRAWINGS",
+                    "EMAILED", "BUYOUT PRINTS", "CHICAGO BLOWER", "DEDUCTION",
+                    "COMMISSION", "CORRECTED CLASS"):
+            assert bad not in joined, (bad, joined)
+        # The CFM/RPM performance values row (numbers only) is not an item,
+        # and neither is the spec-table row under the Qty/Design/Size header.
+        assert "34000" not in joined and "D16A" not in joined, joined
+        assert "3200 2607" not in joined and "D34" not in joined, joined
+
+
+def test_real_so_details_attached():
+    items = {it["norm"]: it for it in li.extract_items(REAL_LINES_314)}
+    motor = items["MOTOR"]
+    det = " | ".join(motor["details"])
+    assert "Toshiba" in det and "3 HP" in det and "VFD Suitable" in det, det
+    assert "VFD" in motor["tags"], motor["tags"]  # detail lines drive tags too
+    # Page furniture between items must never attach as a detail.
+    items473 = {it["norm"]: it for it in li.extract_items(REAL_LINES_473)}
+    det = " | ".join(items473["INLET FLANGED PUNCHED"]["details"])
+    assert "Chicago" not in det and "7074" not in det and "v1.8" not in det, det
+
+
+def test_real_so_ivd_and_buyout_tagging():
+    items = {it["norm"]: it for it in li.extract_items(REAL_LINES_314)}
+    ivd = items["INLET VANE DAMPER"]            # IVD abbreviation expanded
+    assert "DAMPER" in ivd["tags"] and "INLET VANES" in ivd["tags"], ivd
+    assert any("Ruskin" in d for d in ivd["details"]), ivd["details"]
+    # The flanged expansion-joint buyouts tag FLEX CONNECTOR via "Product:".
+    items473 = {it["norm"]: it for it in li.extract_items(REAL_LINES_473)}
+    assert "FLEX CONNECTOR" in items473["INLET FLANGED"]["tags"]
+    assert "EXTENDED LUBE" in items473["EXTENDED GREASE FITTINGS"]["tags"]
+    assert "HEAVY DUTY" in items473["HOUSING HEAVY DUTY"]["tags"]
+    assert "3D STEP DRAWINGS" in items473["INCLUDE 3D STEP DRAWINGS"]["tags"]
+
+
+def test_real_so_search_reaches_details():
+    store = li.load_store(Path("/nonexistent/store.json"))
+    li.record_job(store, "421314", li.extract_items(REAL_LINES_314))
+    li.record_job(store, "421473", li.extract_items(REAL_LINES_473))
+    assert [h["job"] for h in li.search(store, ["toshiba"])] == ["421314"]
+    assert [h["job"] for h in li.search(store, ["baldor"])] == ["421473"]
+    assert [h["job"] for h in li.search(store, ["200 HP"])] == ["421473"]
+    assert {h["job"] for h in li.search(store, [], tag="DAMPER")} == {"421314"}
+
+
 def test_priced_lines_captured():
     items = li.extract_items(SO_LINES)
     raws = [it["raw"] for it in items]

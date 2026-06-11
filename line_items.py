@@ -5,29 +5,42 @@ lines and the "Additional Features"-style feature lines that describe what was
 actually sold (shaft seals, spark-resistant construction, coatings, isolators,
 special motors, ...). The same option is rarely written the same way twice
 ("SS SHAFT SLEEVE" / "Stainless Steel Shaft Sleeve" / "316SS sleeve"), so each
-captured line is kept three ways:
+captured line is kept several ways:
 
-    raw   the line exactly as printed on the Sales Order (never altered)
-    norm  a normalized form: uppercased, item numbers / qty / trailing prices
-          stripped, punctuation collapsed, known abbreviations expanded
-          (W/ -> WITH, SS -> STAINLESS STEEL, ...) so spelling variants of the
-          same option converge
-    tags  canonical feature tags matched by the rules table (SHAFT SEAL,
-          SPARK RESISTANT, COATING, ...) — the lookup vocabulary
+    raw      the line exactly as printed on the Sales Order (never altered)
+    norm     a normalized form: uppercased, item numbers / qty / the price
+             columns and trailing L/C/N type letter stripped, punctuation
+             collapsed, known abbreviations expanded (W/ -> WITH, SS ->
+             STAINLESS STEEL, IVD -> INLET VANE DAMPER, ...) so spelling
+             variants of the same option converge
+    details  the unpriced continuation lines printed under the item (vendor,
+             motor HP/enclosure, "Product: Damper", ...) — searchable, and
+             they contribute to the item's tags
+    tags     canonical feature tags matched by the rules table (SHAFT SEAL,
+             SPARK RESISTANT, COATING, ...) — the lookup vocabulary
+
+CBC Sales-Order anatomy (fitted against real dumps, jobs 421314/421473): the
+item table lists "<description> <L|C|N> <Price Freight Markup Net Comm.>" —
+the type letter then up to five money columns, or STD / INC / N/C in place of
+a price, or nothing at all. Unpriced lines between two items are that item's
+detail block. Page furniture (the "Chicago Blower Corporation ... (cont.)"
+headers, v-version footers, ref-number rows), the totals/freight/tax block,
+the Sold To / commission / terms front matter, the drawings-distribution
+checklist, and the CO-history lines are all excluded by skip rules.
 
 Everything lands in one resumable JSON store (LINE_ITEMS_STORE, default
 BACKLOG_DIR/line_items.json), keyed by job:
 
     {"jobs":    {"421314": {"customer": ..., "co_number": 1, "so_pdf": ...,
                             "scanned_at": ..., "items": [{raw, norm, qty,
-                            price, section, tags}, ...]}},
+                            price, ptype, section, details, tags}, ...]}},
      "ai_tags": {"<norm>": ["TAG", ...]}}   # cached Claude classifications
 
 The store is fed three ways: the daily run (sales_orders.py) records every
 board job it parses, backfill_orders.py records each historical order, and
 line_items_scan.py walks the already-archived PDFs under SALES_ORDER_DIR.
-Search it with find_orders.py. Because `raw` is stored verbatim, the
-normalization/tag rules can be tuned any time and re-applied with
+Search it with find_orders.py. Because `raw`/`details` are stored verbatim,
+the normalization/tag rules can be tuned any time and re-applied with
 `python line_items_scan.py --renorm` — nothing is ever lost.
 
 Rules are data, not code: DEFAULT_RULES below seeds the vocabulary, and an
@@ -45,7 +58,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Tuple
 
 from config import BACKLOG_DIR, LINE_ITEM_RULES, LINE_ITEMS_STORE
 
@@ -68,23 +81,36 @@ DEFAULT_RULES: Dict[str, Any] = {
         "HSG": "HOUSING", "WHL": "WHEEL", "CONN": "CONNECTOR",
         "HVY": "HEAVY", "DTY": "DUTY", "HD": "HEAVY DUTY",
         "XP": "EXPLOSION PROOF", "EXPL": "EXPLOSION",
+        "IVD": "INLET VANE DAMPER",
     },
     # Lines matching any of these are never items (case-insensitive regexes):
-    # page furniture, totals/charges, address blocks, order metadata, and the
-    # change-order history (captured separately as co_history).
+    # page furniture, totals/charges, address & terms front matter, the
+    # drawings-distribution checklist, and the change-order history (captured
+    # separately as co_history). Fitted against real CBC SO dumps.
     "skip_patterns": [
         r"^\s*c\s*/?\s*o\s*#?\s*\d",                  # CO#1 ... change-order notes
-        r"^(sub\s*)?total\b", r"total\s+(billing|price|order)", r"^amount\s+due",
+        r"^chicago\s+blower\b",                       # page header / (cont.) header
+        r"^v\d+\.\d+",                                # "v1.8.1.5 -1-" version footer
+        r"^(sub\s*)?total\b", r"total\s+(billing|price|order|commission)",
+        r"^amount\s+due", r"^list\s+total\b", r"deduction",
         r"^freight\b", r"^fob\b", r"^(sales\s+)?tax\b", r"surcharge",
+        r"^lead\s+time\b", r"^customs\s+invoice\b",
+        r"^type\s+price\b",                           # "Type Price Freight Markup Net Comm."
         r"^page\s+\d+", r"^\d+\s+of\s+\d+$",
-        r"^sales\s+order\b", r"^order\s+(no|number|date)\b", r"^job\s+(no|number)\b",
+        r"^sales\s+order\b", r"^order\s*#", r"^order\s+(no|number|date)\b",
+        r"^job\s+(no|number)\b",
         r"^sold\s+to\b", r"^ship\s+to\b", r"^bill\s+to\b",
-        r"^customer\s+(po|p\.o\.|order)\b", r"^p\.?\s*o\.?\s*(no|number|#)",
+        r"^customer\s+(po|p\.o\.|order|#|contact)", r"^p\.?\s*o\.?\s*(no|number|#)",
         r"^terms\b", r"^net\s+\d+", r"^quote\b", r"^quotation\b",
-        r"^phone\b", r"^fax\b", r"^www\.", r"@",
+        r"^phone\b", r"^fax\b", r"^www\.", r"\w@\w",  # \w@\w = emails, not "@9:00"
         r"^date\b", r"^entered\s+by\b", r"^salesman\b", r"^rep\b",
+        r"^sales\s+office\b", r"^splits?\b",
         r"list\s+price", r"multiplier", r"^unit\s+price", r"^price\s+each",
-        r"^discount\b",
+        r"^discount\b", r"^see\s+(additional|special)\b",
+        # Drawings-distribution checklist (trails the Notes section).
+        r"^fan\s+drawings?\b", r"^motor\s+prints?\b", r"^motor\s+data\s+sheets?\b",
+        r"^buyout\s+prints?\b", r"^emailed\b", r"^mailed\b", r"^o\s*&\s*m\b",
+        r"^other\s*$", r"^special\s+invoicing\b",
     ],
     # A short line matching one of these opens a feature section: every
     # following line is captured (priced or not) until a section_end marker.
@@ -98,9 +124,10 @@ DEFAULT_RULES: Dict[str, Any] = {
         r"^notes?\b", r"^tag\b", r"^nameplate\b", r"^total\b",
         r"^sold\s+to\b", r"^ship\s+to\b", r"^terms\b",
         r"^approval\b", r"^signature\b", r"^change\s+order",
+        r"^fan\s+drawings?\b", r"^special\s+invoicing\b",
     ],
     # Canonical feature tags: tag -> regexes matched against the NORMALIZED
-    # text (uppercase, abbreviations expanded). An item can carry several.
+    # text + details of an item. An item can carry several.
     "tags": {
         "SPARK RESISTANT": [r"spark"],
         "SHAFT SEAL": [r"shaft\s*seal", r"stuffing\s*box", r"lip\s*seal",
@@ -109,6 +136,7 @@ DEFAULT_RULES: Dict[str, Any] = {
         "SHAFT COOLER": [r"shaft\s*cooler", r"heat\s*slinger"],
         "STAINLESS STEEL": [r"stainless", r"\b304L?\b", r"\b316L?\b"],
         "HIGH TEMPERATURE": [r"high\s*temp", r"heat\s*fan"],
+        "HEAVY DUTY": [r"heavy\s*duty"],
         "COATING": [r"epoxy", r"\bcoat", r"galvaniz", r"paint", r"primer",
                     r"plasite", r"heresite", r"\bzinc\b"],
         "LINING": [r"rubber\s*lin", r"\blined\b", r"\blining\b", r"abrasion"],
@@ -131,14 +159,16 @@ DEFAULT_RULES: Dict[str, Any] = {
         "UNITARY BASE": [r"unitary\s*base", r"structural\s*(steel\s*)?base",
                          r"channel\s*base"],
         "BEARINGS": [r"bearing"],
-        "EXTENDED LUBE": [r"ext(ended)?\s*lube", r"lube\s*line", r"grease\s*line"],
+        "EXTENDED LUBE": [r"ext(ended)?\s*lube", r"lube\s*line", r"grease\s*line",
+                          r"grease\s*fitting"],
         "MOTOR": [r"\bmotor\b"],
         "VFD": [r"\bVFD\b", r"variable\s*freq", r"inverter"],
         "EXPLOSION PROOF": [r"explosion\s*proof", r"class\s*i+\b.*div"],
-        "V-BELT DRIVE": [r"v[\s-]*belt", r"sheave", r"bushing"],
+        "V-BELT DRIVE": [r"v[\s-]*belt", r"sheave", r"bushing", r"drive\s*set"],
         "BALANCE": [r"balanc"],
         "TESTING": [r"witness", r"\btest"],
         "SPARE PARTS": [r"spare"],
+        "3D STEP DRAWINGS": [r"3d\s+step"],
     },
 }
 
@@ -182,20 +212,26 @@ def load_rules(path: str | Path | None = None, refresh: bool = False) -> Dict[st
 # --------------------------------------------------------------------------- #
 # Normalization                                                               #
 # --------------------------------------------------------------------------- #
-# Trailing money / no-charge marker: "$1,234.56", "1,234", "1234.56", "N/C",
-# "NO CHARGE", "INCLUDED". A bare integer (no $ , or decimals) is NOT a price —
-# it could be "3600 RPM". Items often end "qty  unit  extended", so the tail is
-# stripped repeatedly.
+# Trailing money: "$1,234.56", "1,234", "1234.56". A bare integer (no $ , or
+# decimals) is NOT a price — it could be "3600 RPM". Item rows end in up to
+# five money columns (Price Freight Markup Net Comm.), so the tail is stripped
+# repeatedly and the LAST one stripped (the leftmost = the Price column) wins.
 _PRICE_TAIL = re.compile(
     r"""(?:^|\s)(?P<price>
           \$\s*\d[\d,]*(?:\.\d{2})?
         | \d{1,3}(?:,\d{3})+(?:\.\d{2})?
         | \d+\.\d{2}
-        | N/?C\b | NO\s+CHARGE | INCL(?:UDED)?
+        | N/?C\b | NO\s+CHARGE | INCLUDED
         )\s*$""",
     re.I | re.X,
 )
 _EACH_TAIL = re.compile(r"(?:^|\s)(?:EA(?:CH)?|/EA|PER\s+UNIT)\s*$", re.I)
+# The price-type letter ending a CBC item row: "<desc> L 945.00", "<desc> L
+# STD", "<desc> L INC", or a bare trailing "<desc> L" (empty price column).
+# STD/INC only count as a price right after the type letter — never let the
+# "INC." of a company name turn an address line into an item.
+_TYPE_PRICE_TAIL = re.compile(r"\s+(?P<ptype>[LCN])\s+(?P<mark>STD|INC|INCL|INCLUDED|N/?C)\.?\s*$", re.I)
+_TYPE_TAIL = re.compile(r"\s+(?P<ptype>[LCN])\s*$")
 # Leading enumeration: "1.", "(1)", "1)", "ITEM 2:", "2 -". Qty guess only.
 _LEAD = re.compile(r"^\s*(?:ITEM\s*)?\(?(?P<num>\d{1,3})\)?\s*(?:[.):]|-(?=\s))?\s+", re.I)
 _NONDECIMAL_DOT = re.compile(r"(?<!\d)\.|\.(?!\d)")
@@ -203,11 +239,11 @@ _DIGITS_SS = re.compile(r"^(\d+)(SS)$", re.I)
 
 
 def split_price_tail(text: str) -> Tuple[str, str]:
-    """Strip trailing price columns / 'EACH' markers off a line. Returns
-    (description, rightmost price found). Repeats so 'desc  1  847.00  847.00'
-    loses the whole money tail."""
+    """Strip the trailing price columns / 'EACH' markers off a line. Returns
+    (description, leftmost price stripped — the Price column on multi-column
+    rows like 'Motor C 254.83 5.00 62.00 322.00 19.00')."""
     price = ""
-    for _ in range(4):
+    for _ in range(8):
         m = _EACH_TAIL.search(text)
         if m:
             text = text[: m.start()].rstrip()
@@ -215,10 +251,21 @@ def split_price_tail(text: str) -> Tuple[str, str]:
         m = _PRICE_TAIL.search(text)
         if not m:
             break
-        if not price:
-            price = m.group("price").strip()
+        price = m.group("price").strip()
         text = text[: m.start()].rstrip()
     return text.strip(), price
+
+
+def split_type_tail(text: str) -> Tuple[str, str, str]:
+    """Strip the trailing L/C/N price-type letter (and an STD/INC/N-C mark in
+    the price column). Returns (description, ptype, price-mark or '')."""
+    m = _TYPE_PRICE_TAIL.search(text)
+    if m:
+        return text[: m.start()].rstrip(" ,;:-"), m.group("ptype").upper(), m.group("mark").upper()
+    m = _TYPE_TAIL.search(text)
+    if m:
+        return text[: m.start()].rstrip(" ,;:-"), m.group("ptype").upper(), ""
+    return text.strip(), "", ""
 
 
 def split_lead(text: str) -> Tuple[str, str]:
@@ -230,13 +277,15 @@ def split_lead(text: str) -> Tuple[str, str]:
 
 
 def normalize_text(raw: str, rules: Dict[str, Any] | None = None) -> str:
-    """The canonical lookup form of a line: uppercase, enumeration/qty and
-    price columns stripped, known abbreviations expanded, punctuation collapsed
-    to spaces (decimals inside numbers survive). Spelling variants of the same
-    option converge here — this is what search and tagging run against."""
+    """The canonical lookup form of a line: uppercase, enumeration/qty, price
+    columns and the L/C/N type letter stripped, known abbreviations expanded,
+    punctuation collapsed to spaces (decimals inside numbers survive).
+    Spelling variants of the same option converge here — this is what search
+    and tagging run against."""
     rules = rules or load_rules()
     s, _ = split_lead(raw.strip().upper())
     s, _ = split_price_tail(s)
+    s, _, _ = split_type_tail(s)
     abbrev = rules["abbreviations"]
     out: List[str] = []
     for tok in s.split():
@@ -259,7 +308,8 @@ def normalize_text(raw: str, rules: Dict[str, Any] | None = None) -> str:
 
 
 def tag_item(norm: str, rules: Dict[str, Any] | None = None) -> List[str]:
-    """Canonical feature tags whose patterns match the normalized text."""
+    """Canonical feature tags whose patterns match the normalized text (pass
+    norm + normalized details to let an item's detail block contribute)."""
     rules = rules or load_rules()
     return sorted(t for t, pats in rules["tags"].items() if any(p.search(norm) for p in pats))
 
@@ -268,18 +318,19 @@ def tag_item(norm: str, rules: Dict[str, Any] | None = None) -> List[str]:
 # Extraction from a Sales Order's text lines                                  #
 # --------------------------------------------------------------------------- #
 def classify_line(line: str, section: str, rules: Dict[str, Any]) -> Tuple[str, str]:
-    """How one reconstructed text line is treated. Returns (kind, detail):
+    """How one reconstructed text line is treated (stateless part — the
+    item-vs-detail decision needs the running state in iter_classified).
+    Returns (kind, detail):
 
         blank          empty line
         section-start  opens a feature section (detail = its title)
         section-end    closes it (detail = the matched pattern)
         skip           never an item (detail = the skip pattern that hit)
-        item-priced    an item line — it ends in a price / N/C column
+        item-priced    an item line — it ends in price columns, an L/C/N
+                       price-type letter, or both (detail = what anchored it)
         item-section   an unpriced line captured because a section is open
-        text           everything else (ignored)
-
-    Single source of truth for extract_items AND the --dump tuning view, so
-    what the dump shows is exactly what the extractor does."""
+        text           everything else
+    """
     s = line.strip()
     if not s:
         return "blank", ""
@@ -294,55 +345,126 @@ def classify_line(line: str, section: str, rules: Dict[str, Any]) -> Tuple[str, 
     for p in rules["skip"]:
         if p.search(s):
             return "skip", p.pattern
-    _, price = split_price_tail(s)
-    if price:
-        return "item-priced", price
+    body, price = split_price_tail(s)
+    body, ptype, mark = split_type_tail(body)
+    if price or ptype:
+        if not re.search(r"[A-Za-z]", body):
+            return "text", ""  # all-numeric row (the CFM/RPM performance values)
+        if ptype and not (price or mark) and not re.search(r"[A-Za-z]{3}", body):
+            return "text", ""  # spec-table row that happens to end in L/C/N
+        anchor = " ".join(x for x in (ptype, mark or price) if x)
+        return "item-priced", anchor
     if section:
         return "item-section", section
     return "text", ""
+
+
+def _detail_worthy(s: str) -> bool:
+    """Is an unpriced line a plausible item detail? Needs real words, and rows
+    of bare reference numbers ('421473 7074-49840-00-AI26') don't qualify —
+    every token containing a digit means it's an order/PO ref row, not specs
+    ('200 HP, 1800 RPM' has the unit words)."""
+    if not re.search(r"[A-Za-z]{2}", s):
+        return False
+    if all(any(ch.isdigit() for ch in t) for t in s.split()):
+        return False
+    return True
+
+
+MAX_DETAILS = 10  # per item — continuation blocks run ~7 lines (motors)
+
+
+def iter_classified(lines: Iterable[str], rules: Dict[str, Any] | None = None,
+                    ) -> Iterator[Tuple[str, str, str]]:
+    """The full extraction state machine, yielding (kind, detail, line) for
+    every line — classify_line's kinds plus "detail" (an unpriced line
+    attached to the item above: vendor, motor specs, "Product: Damper", ...).
+    Skips do NOT break a detail block (page furniture interleaves one), but a
+    new item, a section event, or MAX_DETAILS does. Single source of truth for
+    extract_items AND the --dump tuning view, so the dump shows exactly what
+    the extractor does."""
+    rules = rules or load_rules()
+    section = ""
+    have_item = False
+    n_details = 0
+    for line in lines:
+        s = re.sub(r"\s+", " ", str(line)).strip()
+        kind, detail = classify_line(s, section, rules)
+        if kind == "section-start":
+            section, have_item = detail, False
+        elif kind == "section-end":
+            section, have_item = "", False
+        elif kind in ("item-priced", "item-section"):
+            have_item, n_details = True, 0
+        elif kind == "text" and have_item and n_details < MAX_DETAILS and _detail_worthy(s):
+            kind = "detail"
+            n_details += 1
+        yield kind, detail, s
 
 
 def extract_items(lines: Iterable[str], rules: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
     """Pull the line items out of a Sales Order's reconstructed text lines.
 
     Two capture signals, covering both ways SOs lay items out: any line ending
-    in a price/N-C column is an item wherever it sits, and every line inside a
-    recognized feature section ("Additional Features", "Accessories", ...) is
-    an item even unpriced. Duplicate lines (same normalized form) collapse to
-    one. Items come back as {raw, norm, qty, price, section, tags}."""
+    in the price columns / L-C-N type letter is an item wherever it sits, and
+    every line inside a recognized feature section ("Additional Features",
+    "Accessories", ...) is an item even unpriced. Unpriced lines under an item
+    become its `details`. Duplicate lines (same normalized form) collapse to
+    one. Items come back as {raw, norm, qty, price, ptype, section, details,
+    tags} — tags consider the details too."""
     rules = rules or load_rules()
-    section = ""
     by_norm: Dict[str, Dict[str, Any]] = {}
-    for line in lines:
-        s = re.sub(r"\s+", " ", str(line)).strip()
-        kind, detail = classify_line(s, section, rules)
+    last: Dict[str, Any] | None = None
+    section = ""
+    for kind, detail, s in iter_classified(lines, rules):
         if kind == "section-start":
-            section = detail
+            section, last = detail, None
             continue
         if kind == "section-end":
-            section = ""
+            section, last = "", None
+            continue
+        if kind == "detail":
+            if last is not None:
+                last["details"].append(s)
             continue
         if kind not in ("item-priced", "item-section"):
             continue
         body, qty = split_lead(s)
         body, price = split_price_tail(body)
+        body, ptype, mark = split_type_tail(body)
         norm = normalize_text(body, rules)
         if len(norm) < 3:  # stray cell fragments ("X", "1") aren't items
+            last = None
             continue
         prev = by_norm.get(norm)
         if prev is not None:
-            if price and not prev["price"]:
-                prev["price"] = price
+            if (price or mark) and not prev["price"]:
+                prev["price"] = price or mark
+            last = prev
             continue
-        by_norm[norm] = {
+        last = by_norm[norm] = {
             "raw": s,
             "norm": norm,
             "qty": qty,
-            "price": price,
+            "price": price or mark,
+            "ptype": ptype,
             "section": section,
-            "tags": tag_item(norm, rules),
+            "details": [],
+            "tags": [],
         }
-    return list(by_norm.values())
+    # Tags consider the details too — "Product: Damper" under an "IVD" row is
+    # what identifies it.
+    items = list(by_norm.values())
+    for it in items:
+        it["tags"] = tag_item(_taggable_text(it, rules), rules)
+    return items
+
+
+def _taggable_text(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> str:
+    """norm + normalized details — everything a tag pattern may match."""
+    parts = [item.get("norm", "")]
+    parts += [normalize_text(d, rules) for d in item.get("details") or []]
+    return " ; ".join(p for p in parts if p)
 
 
 def tags_label(items: List[Dict[str, Any]] | None) -> str:
@@ -415,12 +537,15 @@ def _job_sort_key(job: str):
 
 
 def _term_matches(term: str, item: Dict[str, Any], fuzzy: float = 0.0) -> bool:
-    """One search term vs one item: substring of the normalized/raw text or any
-    tag; with fuzzy > 0, also a close difflib match against any same-length
-    word window of the normalized text (catches typos/odd spellings)."""
+    """One search term vs one item: substring of the normalized/raw text, the
+    detail lines, or any tag; with fuzzy > 0, also a close difflib match
+    against any same-length word window of the normalized text."""
     t = term.upper().strip()
-    hay = [item.get("norm", ""), item.get("raw", "").upper()] + [
-        x.upper() for x in item.get("tags") or []]
+    hay = [item.get("norm", ""), item.get("raw", "").upper()]
+    hay += [x.upper() for x in item.get("tags") or []]
+    for d in item.get("details") or []:
+        hay.append(d.upper())
+        hay.append(normalize_text(d))
     if any(t in h for h in hay):
         return True
     if fuzzy <= 0:
@@ -568,20 +693,24 @@ def ai_classify_unknowns(store: Dict[str, Any], batch_size: int = 60) -> int:
 
 def renormalize_store(store: Dict[str, Any]) -> int:
     """Re-derive every stored item's norm + tags from its verbatim raw text
-    using the CURRENT rules (and the AI cache). Run after editing the rules
-    file — nothing is re-downloaded or re-parsed. Returns the item count."""
+    (and details) using the CURRENT rules + the AI cache. Run after editing
+    the rules file — nothing is re-downloaded or re-parsed. Returns the item
+    count."""
     rules = load_rules(refresh=True)
     n = 0
     for rec in (store.get("jobs") or {}).values():
         for it in rec.get("items") or []:
             body, qty = split_lead(it.get("raw", ""))
             body, price = split_price_tail(body)
+            body, ptype, mark = split_type_tail(body)
             it["norm"] = normalize_text(body, rules)
-            it["tags"] = tag_item(it["norm"], rules)
+            it["tags"] = tag_item(_taggable_text(it, rules), rules)
             if qty and not it.get("qty"):
                 it["qty"] = qty
-            if price and not it.get("price"):
-                it["price"] = price
+            if (price or mark) and not it.get("price"):
+                it["price"] = price or mark
+            if ptype and not it.get("ptype"):
+                it["ptype"] = ptype
             n += 1
         apply_ai_cache(rec.get("items") or [], store)
     return n
