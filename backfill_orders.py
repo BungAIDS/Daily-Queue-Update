@@ -246,6 +246,7 @@ def process_one(page, context, job: str, folder: str = "") -> Dict[str, Any]:
         runs = _run_docs(docs)
         if runs:
             rec["has_drive_run"] = True
+            rec["drive_run_count"] = len(runs)
             for href, doc in runs:
                 got = _download(context, page.url, href, DRIVE_RUN_DIR / job / _run_filename(job, doc))
                 if got and not dr_pdf:
@@ -259,6 +260,7 @@ def process_one(page, context, job: str, folder: str = "") -> Dict[str, Any]:
             hits = _run_files_in_folder(Path(folder))
             if hits:
                 rec["has_drive_run"] = True
+                rec["drive_run_count"] = len(hits)
                 rec["drive_run_pdf"] = str(hits[0])
 
         # "ok" only when every document we found actually downloaded — a found-
@@ -311,6 +313,7 @@ def write_workbook(records: Dict[str, Dict[str, Any]], dwg: Dict[str, Dict[str, 
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
     from openpyxl.utils import get_column_letter
+    from excel_writer import _drive_run_label
 
     header_fill = PatternFill("solid", fgColor="305496")
     header_font = Font(color="FFFFFF", bold=True)
@@ -347,7 +350,7 @@ def write_workbook(records: Dict[str, Dict[str, Any]], dwg: Dict[str, Dict[str, 
             r.get("so_arrangement", ""), r.get("so_motor_pos", ""), r.get("so_class", ""),
             r.get("so_rotation", ""), r.get("so_discharge", ""), r.get("so_pct_width", ""),
             r.get("so_special_temp", ""), (f"CO#{r['co_number']}" if r.get("co_number") else ""),
-            "YES" if r.get("has_drive_run") else "", r.get("drive_run_summary", ""),
+            _drive_run_label(r), r.get("drive_run_summary", ""),
             "", r.get("status", ""),  # "" = Folder placeholder (hyperlinked below)
         ]
         for c, v in enumerate(vals, start=1):

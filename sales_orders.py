@@ -19,6 +19,8 @@ For every job on the board this:
     has_drive_run  bool  (True = a quote/construction run exists -> highly custom fan)
     drive_run_pdf  str   (path to the run file: archived download, or the file
                           in the job's AutoCAD folder; .pdf/.txt/.xlsx; or "")
+    drive_run_count int  (how many files matched; >1 -> report shows "YES (X)"
+                          so someone reviews which is the real run)
     drive_run      dict  (parsed drive-run fields, pdf runs only; see drive_run.py)
     drive_run_summary str (compact one-liner of the drive-run fields)
     job_type       str   (e.g. "AXIAL" / "GENERAL LINE", or "")
@@ -457,6 +459,7 @@ async def _process_job(page, context, job: str, args_js: str) -> Dict[str, Any]:
     runs = _run_docs(docs)
     if runs:
         res["dr_rev"] = runs[0][1]["rev"]
+        res["dr_count"] = len(runs)
         for href, doc in runs:
             got = await _download(context, page.url, href, DRIVE_RUN_DIR / job / _run_filename(job, doc))
             if got and not res["dr_pdf_path"]:
@@ -573,7 +576,8 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
                     or (v.get("no_so") and not _terminal(old)):
                 # Don't lose an earlier pass's drive run if this result missed it.
                 if old and old.get("dr_pdf_path") and not v.get("dr_pdf_path"):
-                    v = {**v, "dr_pdf_path": old["dr_pdf_path"], "dr_rev": old.get("dr_rev")}
+                    v = {**v, "dr_pdf_path": old["dr_pdf_path"], "dr_rev": old.get("dr_rev"),
+                         "dr_count": old.get("dr_count")}
                 so_results[k] = v
         todo = [k for k in by_job if not _terminal(so_results.get(k) or {})]
         if not todo:
@@ -622,7 +626,10 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
             j["dwg_missing_std"] = False
 
         # Construction / quote run: presence alone flags a highly-custom fan.
+        # More than one match (drive_run_count > 1) means someone should review
+        # which file is the real run — the report flags it.
         dr_pdf = r.get("dr_pdf_path")
+        dr_count = r.get("dr_count") or 0
         j["has_drive_run"] = bool(dr_pdf or r.get("dr_rev") is not None)
         if not j["has_drive_run"] and info:
             # Not attached to the order's documents — some runs only live in
@@ -630,9 +637,11 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
             hits = _run_files_in_folder(info["path"])
             if hits:
                 dr_pdf = str(hits[0])
+                dr_count = len(hits)
                 j["has_drive_run"] = True
                 n_dr_folder += 1
         j["drive_run_pdf"] = dr_pdf or ""
+        j["drive_run_count"] = dr_count if j["has_drive_run"] else 0
         j["drive_run_rev"] = r.get("dr_rev")
         dparsed = parse_drive_run_pdf(dr_pdf) if dr_pdf and str(dr_pdf).lower().endswith(".pdf") else {}
         j["drive_run"] = dparsed.get("fields", {})

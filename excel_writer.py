@@ -322,6 +322,15 @@ def _co_label(j: Dict[str, Any]) -> str:
     return f"CO#{co}" if co else ""
 
 
+def _drive_run_label(j: Dict[str, Any]) -> str:
+    """"YES" when the job has a quote run; "YES (X)" when X > 1 files matched,
+    so someone knows to review which one is the real run."""
+    if not j.get("has_drive_run"):
+        return ""
+    n = j.get("drive_run_count") or 0
+    return f"YES ({n})" if n > 1 else "YES"
+
+
 def _write_job_row(ws, row: int, j: Dict[str, Any], co_changed: bool = False) -> None:
     linked_cols = set()  # hyperlink cells keep their link style, not red
     for col, (_header, key) in enumerate(COLUMNS, start=1):
@@ -344,9 +353,10 @@ def _write_job_row(ws, row: int, j: Dict[str, Any], co_changed: bool = False) ->
         elif key == "co":
             ws.cell(row=row, column=col, value=_co_label(j))
         elif key == "drive_run":
-            # YES for a highly-custom fan, linked to the archived drive-run pdf.
+            # YES for a highly-custom fan, linked to the quote-run file. More
+            # than one match -> "YES (X)" so someone reviews which is the run.
             dr_pdf = (j.get("drive_run_pdf") or "").strip()
-            cell = ws.cell(row=row, column=col, value="YES" if j.get("has_drive_run") else "")
+            cell = ws.cell(row=row, column=col, value=_drive_run_label(j))
             if dr_pdf:
                 cell.hyperlink = dr_pdf
                 cell.font = DRIVE_RUN_LINK_FONT
