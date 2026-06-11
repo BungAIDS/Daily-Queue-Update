@@ -121,6 +121,15 @@ AUTOCAD_JOBS_DIR = _expand_path(
     (os.environ.get("AUTOCAD_JOBS_DIR") or r"Z:\AUTOCAD\CURRENT\JOBS").strip()
 )
 
+# Where the per-job sales-order line items live (one JSON store, fed by the
+# daily run, the backfill, and line_items_scan.py; searched by find_orders.py).
+# Defaults under BACKLOG_DIR; created on first save.
+_li_store_raw = (os.environ.get("LINE_ITEMS_STORE") or "").strip()
+LINE_ITEMS_STORE = _expand_path(_li_store_raw) if _li_store_raw else None
+# Optional JSON file that EXTENDS the built-in line-item rules (abbreviations,
+# skip patterns, tag patterns) with site-specific wording — see line_items.py.
+LINE_ITEM_RULES = (os.environ.get("LINE_ITEM_RULES") or "").strip()
+
 # Email is sent through your local Outlook desktop app — no password needed.
 # These are just the destination addresses (an address alone isn't sensitive).
 EMAIL_TO = os.environ.get("EMAIL_TO", "")

@@ -59,6 +59,7 @@ COLUMNS = [
     ("Design Temp", "so_design_temp"),
     ("Max Temp", "so_max_temp"),
     ("Special Temp", "so_special_temp"),
+    ("Features", "line_item_tags"),
     ("Customer", "customer"),
     ("Primary Rep", "primary_rep"),
     ("Assigned To", "assigned_to"),
