@@ -15,8 +15,12 @@ says "SS SHAFT SLEEVE".
     python find_orders.py --job 421314         # one job's stored items
     python find_orders.py --list-tags          # live tag vocabulary + counts
     python find_orders.py shaft seal --xlsx    # ...write matches to Excel too
-    python find_orders.py --xlsx               # full inventory workbook, one
-                                               # row per item, AutoFilter on
+    python find_orders.py --xlsx               # full inventory workbook:
+                                               # "Line Items" (row per item,
+                                               # AutoFilter) + "Feature Matrix"
+                                               # (jobs x tags, green ✓ = has
+                                               # it / red = doesn't — like the
+                                               # AutoCAD DWG matrix)
 
 Terms are case-insensitive substrings (multi-word terms must appear as a
 phrase in the normalized text; separate words are separate ANDed terms)."""
@@ -61,10 +65,16 @@ def _print_hits(hits: List[Dict[str, Any]], terms: List[str] | None = None,
                     print(f"        · {d}")
 
 
-def write_xlsx(hits: List[Dict[str, Any]], path: Path) -> Path:
-    """One row per (job, item) with AutoFilter — the filter-in-Excel view."""
+def write_xlsx(hits: List[Dict[str, Any]], path: Path,
+               store: Dict[str, Any] | None = None) -> Path:
+    """Two sheets: "Line Items" — one row per (job, item) with AutoFilter, the
+    filter-in-Excel view — and "Feature Matrix" — one row per job, one column
+    per canonical tag, green ✓ when the order has that feature and red when it
+    doesn't (same look as the AutoCAD DWG matrix). When `store` is given the
+    matrix shows each job's FULL feature profile even if the hits were
+    filtered by a search."""
     from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill
+    from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
 
     header_fill = PatternFill("solid", fgColor="305496")
@@ -109,6 +119,65 @@ def write_xlsx(hits: List[Dict[str, Any]], path: Path) -> Path:
         width = max((len(str(c.value)) for c in ws[letter] if c.value is not None), default=8)
         ws.column_dimensions[letter].width = min(max(width + 2, 6), 70)
 
+    # ---- Feature Matrix: jobs x tags, green ✓ / red (like the DWG matrix) --
+    has_fill = PatternFill("solid", fgColor="C6EFCE")  # green: order HAS the feature
+    no_fill = PatternFill("solid", fgColor="FFC7CE")   # red: it doesn't
+    center = Alignment(horizontal="center")
+
+    # Each job's full item set — from the store when given, so a search-
+    # filtered workbook still shows the whole feature profile per matched job.
+    items_by_job: Dict[str, List[Dict[str, Any]]] = {}
+    for h in hits:
+        rec = (store or {}).get("jobs", {}).get(h["job"]) or {}
+        items_by_job[h["job"]] = rec.get("items") or h["matches"]
+    tags_by_job = {job: {t for it in items for t in it.get("tags") or []}
+                   for job, items in items_by_job.items()}
+    counts: Dict[str, int] = {}
+    for tags in tags_by_job.values():
+        for t in tags:
+            counts[t] = counts.get(t, 0) + 1
+    all_tags = sorted(counts, key=lambda t: (-counts[t], t))  # most common left
+
+    mx = wb.create_sheet("Feature Matrix")
+    fixed = ["Job #", "Customer", "CO#", "Items"]
+    for c, h in enumerate(fixed, start=1):
+        cell = mx.cell(1, c, h)
+        cell.font = header_font
+        cell.fill = header_fill
+    for k, t in enumerate(all_tags, start=len(fixed) + 1):
+        cell = mx.cell(1, k, t)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="bottom", text_rotation=90)
+    if all_tags:  # rotated headers keep the tag columns narrow
+        mx.row_dimensions[1].height = min(150, 14 + 5.4 * max(len(t) for t in all_tags))
+
+    for i, h in enumerate(hits, start=2):
+        cell = mx.cell(i, 1, h["job"])
+        if h.get("so_pdf"):
+            cell.hyperlink = h["so_pdf"]
+            cell.font = link_font
+        mx.cell(i, 2, h.get("customer", ""))
+        mx.cell(i, 3, f"CO#{h['co_number']}" if h.get("co_number") else "")
+        mx.cell(i, 4, len(items_by_job[h["job"]]))
+        job_tags = tags_by_job[h["job"]]
+        for k, t in enumerate(all_tags, start=len(fixed) + 1):
+            cell = mx.cell(i, k)
+            if t in job_tags:
+                cell.value, cell.fill, cell.alignment = "✓", has_fill, center
+            else:
+                cell.fill = no_fill
+
+    if hits:
+        mx.auto_filter.ref = f"A1:{get_column_letter(len(fixed) + len(all_tags))}{len(hits) + 1}"
+    mx.freeze_panes = "B2"
+    for c in range(1, len(fixed) + 1):
+        letter = get_column_letter(c)
+        width = max((len(str(cell.value)) for cell in mx[letter] if cell.value is not None), default=8)
+        mx.column_dimensions[letter].width = min(max(width + 2, 6), 40)
+    for k in range(len(fixed) + 1, len(fixed) + len(all_tags) + 1):
+        mx.column_dimensions[get_column_letter(k)].width = 4.5
+
     path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(path)
     return path
@@ -125,7 +194,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--job", default="", help="Show the stored items for one job number.")
     ap.add_argument("--list-tags", action="store_true", help="List the tag vocabulary with counts.")
     ap.add_argument("--xlsx", nargs="?", const=str(XLSX_DEFAULT), default="", metavar="PATH",
-                    help=f"Write the result (or, with no filters, the full inventory) to Excel "
+                    help=f"Write the result (or, with no filters, the full inventory) to Excel: "
+                         f"a per-item sheet + a green-✓/red jobs-x-features matrix "
                          f"(default {XLSX_DEFAULT}).")
     args = ap.parse_args(sys.argv[1:] if argv is None else argv)
 
@@ -170,9 +240,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     if args.xlsx:
-        out = write_xlsx(hits, Path(args.xlsx))
+        out = write_xlsx(hits, Path(args.xlsx), store)
         n = sum(len(h["matches"]) for h in hits)
-        print(f"\nWrote {n} item row(s) across {len(hits)} order(s) -> {out}")
+        print(f"\nWrote {n} item row(s) across {len(hits)} order(s) "
+              f"(+ the green-✓/red Feature Matrix tab) -> {out}")
     return 0
 
 

@@ -275,6 +275,13 @@ python find_orders.py --xlsx           # full inventory workbook (AutoFilter) �
                                        # filter line items straight in Excel
 ```
 
+`--xlsx` writes two tabs: **Line Items** (one row per item) and a **Feature
+Matrix** — one row per order, one column per feature tag, **green ✓** when the
+order has that feature and **red** when it doesn't, exactly like the AutoCAD
+DWG matrix. Searching first (`python find_orders.py shaft seal --xlsx`) limits
+the matrix to the matching orders, but each row still shows that order's full
+feature profile.
+
 **Normalizing the long tail.** Order entry is free text, so plenty of lines
 won't match any built-in rule at first. Three levers, in order:
 

@@ -428,6 +428,40 @@ def test_inventory_xlsx(tmp: Path):
     assert ws.max_row == 1 + sum(len(h["matches"]) for h in hits)
 
 
+def test_feature_matrix_sheet(tmp: Path):
+    import find_orders
+    from openpyxl import load_workbook
+    store = _seeded_store()
+    out = find_orders.write_xlsx(li.search(store, []), tmp / "inv.xlsx", store)
+    ws = load_workbook(out)["Feature Matrix"]
+    headers = [c.value for c in ws[1]]
+    rows = {ws.cell(r, 1).value: r for r in range(2, ws.max_row + 1)}
+    assert {"421314", "421999"} <= set(rows)
+    # Green ✓ where the order has the feature, red (blank) where it doesn't.
+    seal = headers.index("SHAFT SEAL") + 1
+    spark = headers.index("SPARK RESISTANT") + 1
+    assert ws.cell(rows["421314"], seal).value == "✓"
+    assert ws.cell(rows["421999"], seal).value == "✓"
+    assert ws.cell(rows["421314"], spark).value == "✓"
+    assert ws.cell(rows["421999"], spark).value is None
+    assert str(ws.cell(rows["421999"], spark).fill.start_color.rgb).endswith("FFC7CE")
+    assert str(ws.cell(rows["421999"], seal).fill.start_color.rgb).endswith("C6EFCE")
+
+
+def test_feature_matrix_full_profile_when_filtered(tmp: Path):
+    # A search narrows the hits, but each matched job's matrix row still shows
+    # its WHOLE feature profile (from the store), not just the matched items.
+    import find_orders
+    from openpyxl import load_workbook
+    store = _seeded_store()
+    hits = li.search(store, ["spark"])           # only 421314, one matched item
+    out = find_orders.write_xlsx(hits, tmp / "f.xlsx", store)
+    ws = load_workbook(out)["Feature Matrix"]
+    headers = [c.value for c in ws[1]]
+    assert ws.max_row == 2 and ws.cell(2, 1).value == "421314"
+    assert ws.cell(2, headers.index("SHAFT SEAL") + 1).value == "✓"  # not the spark item
+
+
 def _mini_pdf(lines: list, path: Path) -> None:
     """A minimal one-page text PDF (Helvetica, one string per line) — just
     enough for pdfplumber to extract real words back out, so the whole

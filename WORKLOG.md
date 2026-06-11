@@ -66,6 +66,13 @@ to the actual CBC SO anatomy and the two dumps live verbatim in
 - New tags/abbrevs from the dumps: HEAVY DUTY, 3D STEP DRAWINGS,
   `grease fitting` → EXTENDED LUBE, `drive set` → V-BELT DRIVE, IVD.
 
+**Feature Matrix (2026-06-11, per DG)** — `find_orders.py --xlsx` now writes a
+second tab styled like the AutoCAD DWG matrix: one row per order, one column
+per canonical tag (most-common first, rotated headers), green ✓ = the order
+has that feature, red = it doesn't, Job # linked to the SO pdf, AutoFilter on.
+With search terms the matrix covers only the matching orders but each row
+shows the job's FULL profile from the store.
+
 Remaining steps on the work machine:
 
 1. `python line_items_scan.py` once over the archive (builds the store from
