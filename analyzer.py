@@ -16,7 +16,7 @@ from typing import Any, Dict, List
 import anthropic
 
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
-from operations import operations_glossary, route_owner, routing_glossary
+from operations import OPERATIONS, operations_glossary, route_owner, routing_glossary
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +75,45 @@ def _ensure_penalty_flagged(result: Dict[str, Any], penalty: List[Dict[str, Any]
     return result
 
 
+# Words drawn from the glossary's operation names. The reader already knows
+# what every op is, so a parenthetical right after an op number whose words
+# overlap these is a re-explanation ("Op 200 (straight-to-shop drafting)") and
+# gets stripped. Non-explanatory parentheticals like "Op 20 (4 total)" survive.
+_OP_STOPWORDS = {"the", "and", "for", "path", "order", "orders", "only"}
+_OP_EXPLANATION_WORDS = {
+    w for info in OPERATIONS.values()
+    for w in re.findall(r"[a-z]+", info["name"].lower())
+    if len(w) >= 3 and w not in _OP_STOPWORDS
+}
+
+_OP_PAREN_RE = re.compile(r"([Oo]p(?:eration)?s?\.?\s*#?\d{1,4})\s*\(([^)]*)\)")
+
+
+def _strip_op_explanations(text: str) -> str:
+    """Drop 'Op NNN (what the op means)' glosses the model sometimes adds
+    despite the prompt — the reader knows the operations cold, and spelling
+    them out every time makes the briefing read like AI filler."""
+    def _repl(m: re.Match) -> str:
+        words = set(re.findall(r"[a-z]+", m.group(2).lower()))
+        return m.group(1) if words & _OP_EXPLANATION_WORDS else m.group(0)
+    return _OP_PAREN_RE.sub(_repl, text)
+
+
+def _sanitize_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Scrub op-explanation parentheticals from every text field the reader sees."""
+    if isinstance(result.get("briefing"), str):
+        result["briefing"] = _strip_op_explanations(result["briefing"])
+    if isinstance(result.get("anomalies"), list):
+        result["anomalies"] = [
+            _strip_op_explanations(a) if isinstance(a, str) else a
+            for a in result["anomalies"]
+        ]
+    for item in result.get("action_items") or []:
+        if isinstance(item, dict) and isinstance(item.get("reason"), str):
+            item["reason"] = _strip_op_explanations(item["reason"])
+    return result
+
+
 def _trim(job: Dict[str, Any]) -> Dict[str, Any]:
     """Keep only the whitelisted fields the AI is allowed to reason about, plus
     the sales-order enrichment (CO history, fan type/size/arrangement)."""
@@ -106,7 +145,7 @@ __OPERATIONS_GLOSSARY__
 
 __ROUTING_GLOSSARY__
 
-Refer to operations by their NUMBER ONLY in the briefing (e.g. "Op 200"). Do NOT spell out, translate, or explain what an operation means — no parenthetical like "(straight-to-shop drafting)". Use the glossary above only for your own understanding. Operation is a first-class grouping signal: spotting which operations are loaded heaviest, where bottlenecks may form on a workflow path, and which new orders enter which step are all valuable.
+Refer to operations by their NUMBER ONLY (e.g. "Op 200") — everywhere: briefing, anomalies, and action-item reasons. The reader is the team lead, who knows exactly what every operation is. NEVER spell out, translate, or explain what an operation means, and NEVER follow an op number with a parenthetical gloss like "(straight-to-shop drafting)" or "(manager prep)" — not even once. Re-explaining operations the reader already knows is the fastest way to make the briefing read like it was written by an AI. Use the glossary above only for your own understanding. Operation is a first-class grouping signal: spotting which operations are loaded heaviest, where bottlenecks may form on a workflow path, and which new orders enter which step are all valuable.
 
 Each day you receive:
   - new orders (never seen before)
@@ -133,7 +172,7 @@ TIMING — two dates matter, weigh them together:
 
 Output STRICT JSON only, no prose outside the JSON, matching this schema:
 {
-  "briefing": "3-5 sentence summary of what is NEW on the board today: how many new/returning orders, which customers and reps, which designs and operations, notable End Date / FanNet timing (and any orders already past their End Date), and any ship-with groupings. When a new order joins an existing design / operation / customer cluster on the board, note how many total there are now. ALSO summarize any change orders that landed today (from change_orders_today, and returning orders flagged returned_due_to_change_order) — name the job and what changed in plain language. Conversational but specific. If nothing is new, say so plainly rather than padding.",
+  "briefing": "3-5 sentence summary of what is NEW on the board today: how many new/returning orders, which customers and reps, which designs and operations, notable End Date / FanNet timing (and any orders already past their End Date), and any ship-with groupings. When a new order joins an existing design / operation / customer cluster on the board, note how many total there are now. ALSO summarize any change orders that landed today (from change_orders_today, and returning orders flagged returned_due_to_change_order) — name the job and what changed in plain language. Conversational but specific. Operations strictly as 'Op ###' with no explanation of what the op is. If nothing is new, say so plainly rather than padding.",
   "anomalies": ["Short bullets about the NEW/returning orders worth a look: orders at or past their End Date (note how far out their FanNet date is); soonest deadlines; a new order that joins an existing cluster of the same design, operation, or customer (say how many total are now on the board); a new order whose ship_with partner is already on the board; or possible duplicate new orders (same customer + design + oper + FanNet). Use only the allowed fields."],
   "action_items": [
     {"rank": 1, "job": "######", "reason": "Why this new order needs attention, framed by End Date vs FanNet urgency / customer / design / operation / ship-with (existing partners on the board are fair game as context)"},
@@ -240,6 +279,6 @@ def analyze(diff: Dict[str, Any], today: date, all_jobs: list | None = None) -> 
         log.error("Claude response was not valid JSON. Raw text:\n%s", text)
         raise RuntimeError(f"Failed to parse Claude JSON output: {e}")
 
-    # Belt-and-suspenders: never let a penalty job slip through, even if the
-    # model overlooked it.
-    return _ensure_penalty_flagged(result, penalty_orders)
+    # Belt-and-suspenders: strip any op-explanation parentheticals the model
+    # added despite the prompt, and never let a penalty job slip through.
+    return _ensure_penalty_flagged(_sanitize_result(result), penalty_orders)
