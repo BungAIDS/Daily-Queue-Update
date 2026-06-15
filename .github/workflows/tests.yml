@@ -20,6 +20,7 @@ jobs:
           python-version: "3.13"
       # Just what the tested modules import (playwright = pip package only;
       # no browsers are downloaded).
-      - run: pip install playwright openpyxl python-dotenv
+      - run: pip install playwright openpyxl python-dotenv pdfplumber
       - run: python test_autocad_scan.py
       - run: python test_quote_runs.py
+      - run: python test_line_items.py

@@ -49,6 +49,7 @@ from config import (
 from drive_run import parse_drive_run_pdf
 from scraper import CONTAINER_SELECTOR
 import autocad_scan
+import line_items
 
 log = logging.getLogger(__name__)
 
@@ -210,7 +211,7 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
     res = {"design_desc": "", "size": "", "arrangement": "", "motor_pos": "", "fan_class": "",
            "rotation": "", "discharge": "", "pct_width": "", "wheel_type": "", "temp": "",
            "design_temp": "", "max_temp": "", "special_temp": "0",
-           "header_co": None, "co_history": []}
+           "header_co": None, "co_history": [], "line_items": []}
     try:
         import pdfplumber
     except ImportError:
@@ -247,10 +248,16 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
                     res["design_temp"] = spec.get("DesignTemp", "")
                     res["max_temp"] = spec.get("MaxTemp", "")
                     break
+            recon_all: List[str] = []
             for page in pdf.pages:
-                for ln in _recon_lines(page):
-                    if CO_START.match(ln):
-                        res["co_history"].append(ln.strip())
+                recon_all.extend(_recon_lines(page))
+            for ln in recon_all:
+                if CO_START.match(ln):
+                    res["co_history"].append(ln.strip())
+            # Every line item on the order — the priced item/accessory rows and
+            # the "Additional Features"-style lines — normalized + tagged so
+            # orders can be looked up by what's on them (see line_items.py).
+            res["line_items"] = line_items.extract_items(recon_all)
             # Special temperature rating from the "Suitable for <temp>" phrase.
             raw_all = "\n".join((page.extract_text() or "") for page in pdf.pages)
             mt = TEMP_RE.search(raw_all)
@@ -585,7 +592,12 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
         if p < max_passes:
             log.info("  %d job(s) still incomplete; retrying those.", len(todo))
 
-    n_co = n_dl = n_dr = n_dr_folder = 0
+    # One line-items store shared across the loop: AI-cached tags are applied
+    # to each job's items, and every parsed order is recorded for lookup
+    # (find_orders.py). load_store never raises — a bad store starts fresh.
+    li_store = line_items.load_store()
+
+    n_co = n_dl = n_dr = n_dr_folder = n_items = 0
     for jn, j in by_job.items():
         r = so_results.get(jn, {})
         rev = r.get("rev")
@@ -611,6 +623,17 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
         j["so_pdf"] = pdf or ""
         if pdf:
             n_dl += 1
+
+        # Line items: tag (rules + AI cache), surface on the job for the report
+        # and snapshot, and record in the lookup store.
+        items = parsed.get("line_items") or []
+        line_items.apply_ai_cache(items, li_store)
+        if pdf:
+            line_items.record_job(li_store, jn, items, customer=j.get("customer", ""),
+                                  co_number=j["co_number"], so_pdf=pdf)
+            n_items += len(items)
+        j["line_items"] = items
+        j["line_item_tags"] = line_items.tags_label(items)
 
         info = index.get(jn)
         if info:
@@ -650,6 +673,13 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
         j["drive_run_summary"] = dparsed.get("summary", "")
         if j["has_drive_run"]:
             n_dr += 1
+
+    try:
+        line_items.save_store(li_store)
+        log.info("Line items: %d captured across %d parsed order(s) -> %s",
+                 n_items, n_dl, line_items.store_path())
+    except OSError as e:  # never let the lookup store sink the daily run
+        log.warning("Could not save the line-items store (%s)", e)
 
     log.info("Sales orders: %d jobs have a SO, %d at a change order, %d still missing a SO.",
              n_dl, n_co, len(by_job) - n_dl)

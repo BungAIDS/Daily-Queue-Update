@@ -163,6 +163,9 @@ Daily-Queue-Update/
 ├── config.py           # Loads .env
 ├── autocad_scan.py     # Backlog tool — sweep AutoCAD folders, record each fan's custom DWGs
 ├── backfill_orders.py  # Backlog tool — look up old orders 1-by-1 (resumable)
+├── line_items.py       # SO line items — capture/normalize/tag logic + the lookup store
+├── line_items_scan.py  # Build the line-items store from archived SO PDFs; tune the rules
+├── find_orders.py      # Search orders by their line items (CLI + Excel inventory)
 ├── discover_documents.py  # Discovery — list a job's docs; probe how to reach old orders
 ├── requirements.txt
 ├── .env.example
@@ -233,6 +236,76 @@ the run scans each board job's AutoCAD folder live (reusing the folder lookup it
 already does) and adds a column for each custom suffix found. History keeps it
 per archived order too, so it builds into a complete per-order log over time
 (orders archived once the scan went live carry their DWG data).
+
+### Sales-order line items — capture, normalize, search
+
+Every time a Sales Order is parsed (daily run, backfill, or the archive scan
+below), **every line item on it** — the priced item/accessory rows and the
+"Additional Features"-style lines — is captured into one lookup store
+(`backlog/line_items.json`). The same option is rarely written the same way
+twice ("SS SHAFT SLEEVE" / "Stainless Steel Shaft Sleeve" / "316SS sleeve"),
+so each line is kept three ways:
+
+- **raw** — exactly as printed on the SO (never altered, so rules can be
+  re-tuned later without re-downloading anything),
+- **normalized** — uppercased, the price columns and `L`/`C`/`N` type letter
+  stripped, abbreviations expanded (`W/`→`WITH`, `SS`→`STAINLESS STEEL`,
+  `IVD`→`INLET VANE DAMPER`, …) so variants converge,
+- **details** — the unpriced continuation lines printed under an item
+  (vendor, motor HP/enclosure, `Product: Damper`, …) — searchable, and they
+  contribute to the item's tags,
+- **tags** — canonical features (SHAFT SEAL, SPARK RESISTANT, COATING, …)
+  matched by a rules table.
+
+The daily report's **Full Queue / History tabs gain a "Features" column** with
+each job's tags, and the AI briefing weaves notable features into its summary.
+
+**Build the store from what's already archived** (no login, no browser — it
+reads the PDFs under `SALES_ORDER_DIR`), then search:
+
+```bash
+python line_items_scan.py              # one local pass over the whole archive
+python find_orders.py shaft seal       # orders whose SO matches BOTH terms
+python find_orders.py --any teflon viton
+python find_orders.py --tag "SHAFT SEAL"     # by canonical tag
+python find_orders.py cermic felt --fuzzy    # typo-tolerant
+python find_orders.py --job 421314     # what's stored for one job
+python find_orders.py --list-tags      # the live tag vocabulary + counts
+python find_orders.py --xlsx           # full inventory workbook (AutoFilter) —
+                                       # filter line items straight in Excel
+```
+
+`--xlsx` writes two tabs: **Line Items** (one row per item) and a **Feature
+Matrix** — one row per order, one column per feature tag, **green ✓** when the
+order has that feature and **red** when it doesn't, exactly like the AutoCAD
+DWG matrix. Searching first (`python find_orders.py shaft seal --xlsx`) limits
+the matrix to the matching orders, but each row still shows that order's full
+feature profile.
+
+**Normalizing the long tail.** Order entry is free text, so plenty of lines
+won't match any built-in rule at first. Three levers, in order:
+
+1. **See what the extractor is doing** on a few real orders and paste the
+   output back to get the capture/skip rules tuned:
+   ```bash
+   python line_items_scan.py --dump 421314 421473
+   ```
+   Each line is marked `ITEM $` (priced row), `ITEM +` (feature-section line),
+   `skip [rule]`, or `.` (ignored), followed by the captured items with their
+   normalized form and tags.
+2. **Extend the rules** without touching code: point `LINE_ITEM_RULES` in
+   `.env` at a small JSON file of site wording (extra abbreviations, skip
+   patterns, tag patterns — see `.env.example`), then re-apply to everything
+   already stored (raw text is kept verbatim, so this is instant and lossless):
+   ```bash
+   python line_items_scan.py --renorm
+   ```
+3. **Let Claude classify the rest.** Sends each still-untagged *unique* item
+   to the API once (pennies on haiku), caches the answer forever in the store,
+   and folds the tags in:
+   ```bash
+   python line_items_scan.py --ai
+   ```
 
 ### Backfill old orders
 

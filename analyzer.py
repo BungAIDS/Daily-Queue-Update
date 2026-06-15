@@ -133,6 +133,10 @@ def _trim(job: Dict[str, Any]) -> Dict[str, Any]:
         out["arrangement"] = job["so_arrangement"]
     if job.get("so_design_desc"):
         out["fan_type"] = job["so_design_desc"]
+    # Real feature tags only — tags_label's "(N items)" placeholder (items
+    # captured but none tagged yet) is meaningless to the briefing.
+    if job.get("line_item_tags") and not job["line_item_tags"].startswith("("):
+        out["features"] = job["line_item_tags"]
     if job.get("_co_returned"):
         out["returned_due_to_change_order"] = job["_co_returned"]
     return out
@@ -157,7 +161,7 @@ plus aggregate counts.
 
 PENALTY ORDERS are the highest-priority signal. A penalty job carries a contractual late-delivery penalty, so it must NEVER be missed. ALWAYS call out every order in penalty_orders_on_board — name the job and customer — in the briefing AND as an anomaly, even if it is not new today. This is the one deliberate exception to the new-orders-only scope below. If a penalty order is also late (at/past its End Date), say so emphatically.
 
-CHANGE ORDERS are a priority signal. Orders carry "co_number" (how many change orders the sales order has had) and "change_orders" (the actual notes — what each CO changed, who, when). When an order is new/returning with change orders, or appears in change_orders_today, call it out and summarize WHAT changed in plain language (from the notes). Some orders also carry "fan_type", "size", and "arrangement" from the sales order — weave those in when describing an order.
+CHANGE ORDERS are a priority signal. Orders carry "co_number" (how many change orders the sales order has had) and "change_orders" (the actual notes — what each CO changed, who, when). When an order is new/returning with change orders, or appears in change_orders_today, call it out and summarize WHAT changed in plain language (from the notes). Some orders also carry "fan_type", "size", "arrangement", and "features" (the notable line items on the sales order — seals, coatings, spark construction, ...) from the sales order — weave those in when describing an order.
 
 Your briefing is ONLY about what is newly on the board today (new + returning). Do not editorialize about the rest of the queue. BUT use full_queue_for_context to judge whether each new order is part of something bigger: a new order may join an existing cluster of the same design, operation, or customer, or its ship-with partner may already be on the board even if that partner is not new. Call those connections out.
 

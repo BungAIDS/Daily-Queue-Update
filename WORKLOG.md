@@ -3,6 +3,94 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-11 — Sales-order LINE ITEMS: capture, normalize, search
+
+New capability per DG's request: record **every line item** on each Sales
+Order, store them per job, and make orders findable by what's on them. The
+line items are free text and rarely written identically, so the end goal is
+normalization for easy lookup.
+
+What was built (all tested; 18 new tests in `test_line_items.py`, CI updated):
+
+- **`line_items.py`** — pure logic + the store. Two capture signals (a line
+  ending in a price/`N/C` column is an item anywhere; every line inside an
+  "Additional Features"/"Accessories"-style section is an item even unpriced),
+  conservative skip rules for totals/freight/footers/CO-history. Each item is
+  stored as verbatim `raw` + normalized `norm` (qty/price stripped,
+  abbreviations expanded: `W/`→WITH, `SS`→STAINLESS STEEL, `316SS`→`316
+  STAINLESS STEEL`, …) + canonical `tags` (seeded fan vocabulary: SHAFT SEAL,
+  SPARK RESISTANT, COATING, VIBRATION ISOLATION, …). Store:
+  `BACKLOG_DIR/line_items.json` (`LINE_ITEMS_STORE` to move), atomic writes.
+- **Wired into every parse path**: the daily run (`sales_orders.py` — also
+  sets `j["line_items"]`/`j["line_item_tags"]`, so snapshots/history carry
+  them), `backfill_orders.py`, and a new no-browser bootstrap
+  **`line_items_scan.py`** that walks the already-archived PDFs under
+  `SALES_ORDER_DIR` (latest CO# revision per job, resumable).
+- **Search**: **`find_orders.py`** — AND/`--any` terms over raw+norm+tags,
+  `--tag`, `--fuzzy` (typo-tolerant), `--job`, `--list-tags`, `--xlsx`
+  inventory workbook (one row per item, AutoFilter). Term+tag AND at the JOB
+  level (they may sit on different items).
+- **Report**: Full Queue + History tabs gain a **Features** column (the job's
+  tags, or `(N items)` when captured-but-untagged); the AI briefing receives
+  `features` for new/returning orders.
+- **Normalization levers** (raw is never lost, so all are lossless re-passes):
+  `--dump <job>` shows per-line capture/skip decisions for tuning;
+  `LINE_ITEM_RULES` (.env) points at a JSON that EXTENDS the built-in rules;
+  `--renorm` re-applies current rules to the whole store; `--ai` classifies
+  still-untagged unique items via the Claude API once (cached forever in
+  `ai_tags`, pennies on haiku).
+
+**Tuned against real documents (2026-06-11, dumps of jobs 421314 + 421473)** —
+DG ran `--dump` on both and pasted the output back; the rules are now fitted
+to the actual CBC SO anatomy and the two dumps live verbatim in
+`test_line_items.py` (`REAL_LINES_*`) as the regression base:
+
+- Item rows are `<description> <L|C|N> <Price Freight Markup Net Comm.>` —
+  the type letter, then up to five money columns, **or `STD` / `INC` in the
+  price column, or nothing at all** (`Weights on drawing ... L`). All
+  captured now; the type letter is stripped from the norm (stored as
+  `ptype`), and the LEFTMOST money column (Price) is kept, not Comm.
+- **Unpriced continuation lines under an item are its `details`** (vendor,
+  motor HP/enclosure/frame, `VFD Suitable`, `Product: Damper`): captured per
+  item, searchable, and they contribute tags — the Ruskin `IVD C ...` row
+  tags DAMPER + INLET VANES via the abbreviation (IVD → INLET VANE DAMPER)
+  AND its `Product: Damper` detail. Page furniture interleaving a detail
+  block at page breaks (`Chicago Blower ... (cont.)`, `v1.8.1.5 -1-`,
+  ref-number rows) is excluded.
+- New skips from the dumps: `List Total`, `Lead Time`, `Type Price Freight`
+  header, commission/deduction lines, `Customs Invoice`, the
+  drawings-distribution checklist (`Fan Drawings`, `O & M X`, ...), version
+  footers, `^chicago blower`, `^order #`. The all-numeric CFM/RPM
+  performance row and the spec-table row are rejected structurally. The
+  email skip is now `\w@\w` so `Door Location: @9:00` stays a detail.
+- New tags/abbrevs from the dumps: HEAVY DUTY, 3D STEP DRAWINGS,
+  `grease fitting` → EXTENDED LUBE, `drive set` → V-BELT DRIVE, IVD.
+
+**Feature Matrix (2026-06-11, per DG)** — `find_orders.py --xlsx` now writes a
+second tab styled like the AutoCAD DWG matrix: one row per order, one column
+per canonical tag (most-common first, rotated headers), green ✓ = the order
+has that feature, red = it doesn't, Job # linked to the SO pdf, AutoFilter on.
+With search terms the matrix covers only the matching orders but each row
+shows the job's FULL profile from the store.
+
+Remaining steps on the work machine:
+
+1. `python line_items_scan.py` once over the archive (builds the store from
+   every already-downloaded SO), then `python find_orders.py --list-tags` to
+   see the vocabulary land.
+2. `python line_items_scan.py --ai` to classify the long tail (MOUNTING
+   CHARGE, WHEEL STEEL, CASH IN ADVANCE, ... — whatever the rules left
+   untagged), cached forever.
+3. If another order layout turns up (multi-fan orders?), `--dump` it and
+   paste back.
+
+Deferred:
+- A wheel-type spec row that happens to end in a bare `L`/`C`/`N` could
+  sneak past the structural guard (needs a ≥3-letter word, so most can't);
+  revisit if a junk spec-row item ever shows up in the store.
+- `qty` stays a guess (leading enumeration number) — the real dumps show
+  item rows don't carry one (Qty lives in the spec table).
+
 ## 2026-06-09 — full-codebase review pass: bug fixes + archiving
 
 Whole-repo bug/optimization review, fixes applied (model stays **haiku**):

@@ -54,6 +54,7 @@ from sales_orders import (
 )
 from scraper import CONTAINER_SELECTOR
 import autocad_scan
+import line_items
 
 log = logging.getLogger("backfill")
 
@@ -215,10 +216,13 @@ def _close_modal(page) -> None:
         pass
 
 
-def process_one(page, context, job: str, folder: str = "") -> Dict[str, Any]:
+def process_one(page, context, job: str, folder: str = "",
+                li_store: Dict[str, Any] | None = None) -> Dict[str, Any]:
     """Open one order via the search box, download + parse its SO and quote run.
     `folder` (the job's AutoCAD folder, when known from the DWG scan) is checked
-    for a quote-run file if the order's documents don't carry one."""
+    for a quote-run file if the order's documents don't carry one. `li_store`
+    (the shared line-items store) gets the order's parsed line items — the
+    caller saves it alongside the progress file."""
     rec: Dict[str, Any] = {"job": job, "status": "", "scanned_at": datetime.now().isoformat(timespec="seconds")}
     try:
         if not open_order_detail(page, job):
@@ -242,6 +246,12 @@ def process_one(page, context, job: str, folder: str = "") -> Dict[str, Any]:
                     "so_wheel_type": p.get("wheel_type", ""), "so_special_temp": p.get("special_temp", ""),
                     "so_pdf": so_pdf,
                 })
+                items = p.get("line_items") or []
+                rec["line_item_count"] = len(items)
+                if li_store is not None:
+                    line_items.apply_ai_cache(items, li_store)
+                    line_items.record_job(li_store, job, items,
+                                          co_number=rec.get("co_number"), so_pdf=so_pdf)
 
         runs = _run_docs(docs)
         dr_count = 0
@@ -430,6 +440,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     targets = _resolve_jobs(args)
     log.info("Backfill target set: %d job(s).", len(targets))
     records = {} if args.rescan else load_progress()
+    li_store = line_items.load_store()  # shared lookup store; saved with progress
     dwg = autocad_scan.load_progress()  # read-only merge of the DWG scan, if it's been run
     if dwg:
         log.info("Merging AutoCAD DWG scan for %d job(s).", len(dwg))
@@ -462,17 +473,20 @@ def main(argv: Optional[List[str]] = None) -> int:
                     break
                 if not args.rescan and _is_done(records.get(job, {})):
                     continue
-                records[job] = process_one(page, context, job, dwg.get(job, {}).get("folder", ""))
+                records[job] = process_one(page, context, job, dwg.get(job, {}).get("folder", ""),
+                                           li_store=li_store)
                 processed += 1
                 log.info("  %d  %s -> %s", processed, job, records[job].get("status"))
                 if processed % 25 == 0:
                     save_progress(records)
+                    line_items.save_store(li_store)
                 if args.delay:
                     time.sleep(args.delay)
 
         browser.close()
 
     save_progress(records)
+    line_items.save_store(li_store)
     out = write_workbook(records, dwg, Path(args.out))
     by_status: Dict[str, int] = {}
     for r in records.values():
