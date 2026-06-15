@@ -154,6 +154,7 @@ Daily-Queue-Update/
 ├── pipeline.py         # Shared stage logic the four scripts above call into
 ├── scraper.py          # Reuses saved session + dispatch parser (per-order container, job+detail rows)
 ├── sales_orders.py     # Per-job enrichment: Sales Order + construction/drive run + folder
+├── check_orders.py     # Hand it order numbers — pulls each quote run, shows the matched template + fields
 ├── templates.py        # Quote-run TEMPLATE collection — match a run by design#/format, pull its fields
 ├── drive_run.py        # PDF quote-run reader (the .pdf template in templates.py)
 ├── compare.py          # Diff today vs the most recent prior run; persistence tracking
@@ -217,13 +218,17 @@ resilient best-effort `Label: value` extraction, so unknown labels are still
 captured. Inspect a job's docs and see which template matched:
 
 ```bash
+python check_orders.py 421473 421492 420410   # check out specific orders: pull each run, show the matched template + fields
 python discover_documents.py <a-custom-job#>   # lists docs + pid types, downloads SO + run(s)
 python templates.py "<path to a quote run>" [design#]  # shows the matched template + fields it pulled
 python dump_pdf.py "<path to a pdf run>"       # dumps a pdf run's raw text/tables
 ```
 
-Paste that back and the matching template's fields get pinned down. Until then
-the report still shows the `YES` flag and a best-effort summary.
+`check_orders.py` is the one you'll usually want: hand it a list of order
+numbers and it opens each (from the board, or via the search box if it's an old
+order), downloads the quote run, and prints which template matched and the
+fields it pulled — all in one headless pass (`--show` to watch). Paste a block
+back and the matching template's fields get pinned down.
 
 ### AutoCAD DWG scan
 

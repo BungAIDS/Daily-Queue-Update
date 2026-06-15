@@ -94,7 +94,7 @@ def _report_docs(jn: str, docs: list[dict]) -> None:
         log.info("  %-26s %-7s  %s%s", d["type"], rev, (d["fn"] or "")[:48], flag)
 
 
-def _download(context, page, doc: dict, label: str) -> None:
+def _download(context, page, doc: dict, label: str) -> Path | None:
     OUT.mkdir(parents=True, exist_ok=True)
     # Keep the document's own extension — quote runs come as .txt/.xlsx/.rtf too.
     ext = Path(doc.get("fn") or "").suffix or ".pdf"
@@ -103,8 +103,10 @@ def _download(context, page, doc: dict, label: str) -> None:
         resp = context.request.get(urljoin(page.url, doc["href"]))
         dest.write_bytes(resp.body())
         log.info("  downloaded %-12s -> %s (%d bytes)", label, dest, len(resp.body()))
+        return dest
     except Exception as e:  # noqa: BLE001
         log.info("  %s download failed: %s", label, e)
+        return None
 
 
 def run_list(want_job: str | None) -> None:

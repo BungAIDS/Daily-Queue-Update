@@ -39,11 +39,20 @@ design/ext/name, text + rtf + xlsx extraction, and the safe fallbacks. PDF
 extraction isn't re-tested here (it just delegates to drive_run), so pdfplumber
 isn't needed to run the suite.
 
+**`check_orders.py` (same day, per DG: "I want to give you order numbers and
+you check those out").** Hand it a list of order numbers; it opens each (board
+or search-box), downloads the quote run, and runs it through the templates,
+printing the matched template + per-template scores + fields + summary + first
+raw lines. Headless/unattended (`--show` to watch); reuses the
+`discover_documents` plumbing (refactored `_download` to return the saved
+path). This is the loop for pinning formats down: run it on real orders, paste
+a block back.
+
 **Open (needs real samples on the work machine):** run
-`python templates.py "<a real Qt Run.txt>"` and a real D64 `.xlsx`, paste the
-output back, and pin the exact field headings into those two templates'
-`extract`. Add a template per new design # as its format turns up. Best-effort
-`Label: value` capture runs until then.
+`python check_orders.py <order#> ...` (or `python templates.py "<a run file>"`)
+on real orders, paste the output back, and pin the exact field headings into
+the matching template's `extract`. Add a template per new design # as its
+format turns up. Best-effort `Label: value` capture runs until then.
 
 ## 2026-06-11 — Sales-order LINE ITEMS: capture, normalize, search
 
