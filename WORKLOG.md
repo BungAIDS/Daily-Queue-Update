@@ -70,6 +70,22 @@ search that navigated away can't wedge the next lookup. Old/off-board orders
 (419624, 420990) go through the search-box path; if that can't surface them the
 order is skipped with a message instead of stalling the batch.
 
+**CB parser tuned on 4 real runs (2026-06-15, `check_orders.py 421579 421237
+419624 420990`).** The batch ran clean after the hardening. Four GL/PFD runs
+(designs 6195 / 1904 / 1904 / 1910B) refined the parser:
+- Wheel-construction gauge column is a fraction **or** a decimal with the GA in
+  parens (`0.048 (18)`, `0.179 ( 7)`), and blades carry a descriptor
+  (`BLADES/2 RIB`). The fraction-only pattern was dropping Blade/Sideplate
+  materials on the PFD fans — now handled (`_GA` sub-pattern + descriptor).
+- Some runs have **no `SN#`** (order # on a bare line) — Serial now falls back
+  to a bare-number header line. Added **Fan Type** (the `PACKAGED FORCED DRAFT
+  FAN`-style descriptor after the spec line), **Hub** (`19-5-1056`),
+  **Coupling** (`FALK T10`), and flags **FEA Analysis** / **Factory Run Test**.
+  Direct drive is inferred from a `COUPLING` line when there's no `BELT DRIVEN`.
+- Second real run (421237) locked in as `REAL_CBC_QT_RUN_421237` in the tests.
+- Note: 420990 listed the same Qt-run doc twice → downloaded as `_1`/`_2`
+  (the `drive_run_count > 1` "review" case); not a parser issue.
+
 **Open (needs real samples on the work machine):** run
 `python check_orders.py <order#> ...` (or `python templates.py "<a run file>"`)
 on real orders, paste the output back, and pin the exact field headings into

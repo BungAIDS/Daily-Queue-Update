@@ -225,6 +225,9 @@ class _TextLineMixin:
 # spec line, a performance line, a wheel-construction table); the rest is a
 # dimension table that a generic key/value sweep turns into noise. So pull the
 # known fields by targeted pattern and leave the dimension tables out.
+# A wheel-construction row's thickness column is a fraction ("1/4"), a decimal
+# ("0.179"), or a decimal with the gauge in parens ("0.048 (18)", "0.179 ( 7)").
+_GA = r"[\d./]+(?:\s*\(\s*\d+\s*\))?"
 # (label, regex) — first match in the whole text wins; group(1) is the value.
 _CB_PATTERNS = [
     ("Serial", r"SN#\s*(\d+)"),
@@ -249,13 +252,17 @@ _CB_PATTERNS = [
     ("Shaft Dia", r"SHAFT DIA\s+([\d /]+?)\s*,"),
     ("Brg Centers", r"BRG CENTERS\s+([\d.]+)"),
     ("Critical Speed RPM", r"CRITICAL SPEED\s+([\d.]+)"),
-    ("Blade Material", r"\bBLADES?\b\s+[\d/]+\s+([A-Z][A-Z0-9 .\-]+?)\s+\d"),
-    ("Sideplate Material", r"\bSIDEPL\S*\s+[\d/]+\s+([A-Z][A-Z0-9 .\-]+?)\s+\d"),
-    ("Backplate Material", r"\bBACKPLATE\b\s+[\d/]+\s+([A-Z][A-Z0-9 .\-]+?)\s+\d"),
+    # Wheel-construction rows: <component> <gauge> <MATERIAL> <WR2> <weight>.
+    # Component can carry a descriptor ("BLADES/2 RIB", "SIDEPL,SPUN").
+    ("Blade Material", r"\bBLADES(?:/\d+\s*RIB)?\s+" + _GA + r"\s+([A-Z][A-Z0-9 .\-]+?)\s+\d+\s+\d"),
+    ("Sideplate Material", r"\bSIDEPL\S*\s+" + _GA + r"\s+([A-Z][A-Z0-9 .\-]+?)\s+\d+\s+\d"),
+    ("Backplate Material", r"\bBACKPLATE\b\s+" + _GA + r"\s+([A-Z][A-Z0-9 .\-]+?)\s+\d+\s+\d"),
+    ("Hub", r"\bHUB\s+([0-9][0-9\-]+)"),
+    ("Coupling", r"\bCOUPLING\s+([A-Z][A-Z0-9 ]+?)\s*,\s*SIZE"),
 ]
 # Compact summary, in engineering-useful order (only the present fields show).
 _CB_SUMMARY_ORDER = [
-    "Size", "Design", "Arrangement", "% Width", "Discharge", "Rotation",
+    "Size", "Design", "Fan Type", "Arrangement", "% Width", "Discharge", "Rotation",
     "CFM", "SP", "BHP", "RPM", "Max Temp F", "Effective Wheel Dia", "Blade Material",
 ]
 
@@ -266,17 +273,41 @@ def _parse_chicago_blower(text: str) -> Dict[str, str]:
         m = re.search(pat, text, re.I | re.M)
         if m and m.group(1).strip():
             fields[label] = re.sub(r"\s{2,}", " ", m.group(1).strip())
+
+    lines = [ln.rstrip() for ln in text.splitlines()]
+    # Serial: prefer "SN#NNNN"; some runs print the order number on a bare line.
+    if "Serial" not in fields:
+        for ln in lines[:8]:
+            m = re.match(r"\s*(\d{5,7})\s*$", ln)
+            if m:
+                fields["Serial"] = m.group(1)
+                break
+    # Fan type: a descriptor line (e.g. "PACKAGED FORCED DRAFT FAN") right after
+    # the SIZE/DESIGN spec line — letters only, so data/dimension lines are out.
+    for i, ln in enumerate(lines):
+        if re.search(r"\bSIZE\b.*\bDESIGN\b", ln, re.I):
+            for nxt in lines[i + 1:i + 3]:
+                s = nxt.strip()
+                if re.fullmatch(r"[A-Z][A-Z ]{4,40}", s) and "WHEEL" not in s and s != "CONFIDENTIAL":
+                    fields["Fan Type"] = s
+                    break
+            break
+
     up = text.upper()
     if "BELT DRIVEN" in up:
         fields["Drive"] = "Belt"
-    elif "DIRECT" in up and "DRIV" in up:
+    elif "COUPLING" in up or ("DIRECT" in up and "DRIV" in up):
         fields["Drive"] = "Direct"
     if "ENGINEERING APPROVAL" in up:
         fields["Engineering Approval"] = "Required"
+    if "FEA ANALYSIS REQUIRED" in up:
+        fields["FEA Analysis"] = "Required"
     if "NON STD WHEEL MATERIAL" in up:
         fields["Non-Std Wheel Materials"] = "Yes"
     if "SHRINK FIT" in up:
         fields["Shrink Fit"] = "Yes"
+    if "RUN TEST AT FACTORY" in up:
+        fields["Factory Run Test"] = "Yes"
     return fields
 
 

@@ -107,9 +107,53 @@ def test_design_breaks_a_tie_toward_d64():
     assert D64WheelConstruction().score(d64) > D64WheelConstruction().score(plain)
 
 
+# A second real CB run (job 421237): ribbed blades + decimal/gauge thickness, a
+# bare order-number header (no SN#), a "PACKAGED FORCED DRAFT FAN" descriptor, a
+# coupling (direct drive), and an FEA flag — the variations the first sample lacked.
+REAL_CBC_QT_RUN_421237 = """\
+---------------------------------------
+CONFIDENTIAL
+               MON APR 27 07:51:38 CST 2026
+               CHICAGO BLOWER CORP.
+ 421237
+ SIZE  2412,DESIGN 1904 ,ARR 8S , 90.0 PCT,DISCH UB ,ROT CW
+ PACKAGED FORCED DRAFT FAN
+ EFFECTIVE WHEEL DIA.  26 15/16
+   14000 CFM, 28.00 SP,  80.8 BHP, 3550 RPM,  70 DEG F, DENSITY 0.0750
+ MAX HP  100.0, MAX RPM 3600, MAX TEMP   70 F, AMBIENT TEMP  90 F
+ TIP SPEED 25400 FPM, EQ. TS  23091 RE SK-9-105         WEIGHT   PRICE
+ WHEEL         THICK.(GA)    MATERIAL        WR2 WEIGHT
+  BLADES/2 RIB 0.048 (18) ASTM A1011-HSLAS    13    15
+  SIDEPL,SPUN  0.179 ( 7) ASTM A1011-HSLAS    22    24
+  BACKPLATE       1/4     ASTM CQ HRS A36     29    43
+  HUB 19-5-1056, Q1 BUSHING 1 15/16, C. IRON   3    25     107
+    FEA ANALYSIS REQUIRED                                         7044
+ COUPLING   FALK T10, SIZE 1060T, BORE  1.938 NOT INCL.     16
+"""
+
+
+def test_chicago_blower_ribbed_blades_and_descriptor():
+    f = _parse_chicago_blower(REAL_CBC_QT_RUN_421237)
+    assert f["Serial"] == "421237"          # bare-number header (no SN#)
+    assert f["Fan Type"] == "PACKAGED FORCED DRAFT FAN"
+    assert f["Size"] == "2412" and f["Design"] == "1904"
+    assert f["Arrangement"] == "8S" and f["% Width"] == "90.0"
+    assert f["Discharge"] == "UB" and f["Rotation"] == "CW"
+    # The materials the fraction-only gauge pattern used to miss:
+    assert f["Blade Material"] == "ASTM A1011-HSLAS"
+    assert f["Sideplate Material"] == "ASTM A1011-HSLAS"
+    assert f["Backplate Material"] == "ASTM CQ HRS A36"
+    assert f["Hub"] == "19-5-1056"
+    assert f["Coupling"] == "FALK T10"
+    assert f["Drive"] == "Direct"           # coupling, not belt
+    assert f["FEA Analysis"] == "Required"
+
+
 def test_chicago_blower_fields():
     f = _parse_chicago_blower(REAL_CBC_QT_RUN)
     assert f["Serial"] == "421579"
+    assert f.get("Fan Type") is None        # this run has no descriptor line
+    assert f["Hub"] == "19-5-16"
     assert f["Size"] == "3300"
     assert f["Design"] == "6195"
     assert f["Arrangement"] == "9H"
