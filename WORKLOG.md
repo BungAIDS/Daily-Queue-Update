@@ -3,6 +3,23 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-15 — Whole-backlog quote-run sweep (`quote_run_scan.py`)
+
+DG: "check everything in history for quote runs." Chose (with DG) a **pure Z:
+AutoCAD folder sweep** (no login, fast, resumable) over the slow online
+backfill. New `quote_run_scan.py` mirrors `autocad_scan.py`: enumerates every
+`<type>/<intermediate>/<job>` folder (reuses `iter_job_folders`), finds run
+files recursively with `_run_files_in_folder` (catches `ENG REF\` + `history\`
+copies), parses each through `parse_quote_run`, and writes
+`backlog/quote_runs.xlsx` — one row per run with the matched template, the core
+fields, an "Other" catch-all (so new template fields are never dropped), and a
+**Status** column (OK / NO FIELDS / UNRECOGNIZED FORMAT / PDF-no-text) that
+surfaces which formats still need a template. Resumable JSON store; same
+`--min-job/--max-job/--limit` plus `--range` and `--list FILE`. Pure logic
+(status, row-flatten core/Other split, recursive scan_one) tested in
+`test_quote_run_scan.py` (5 tests, added to CI). Can't see runs that live only
+in an order's online documents — that's still `backfill_orders.py`'s job.
+
 ## 2026-06-15 — Quote-run TEMPLATE collection (`templates.py`)
 
 Per DG: start a collection of templates that quote runs match so the program

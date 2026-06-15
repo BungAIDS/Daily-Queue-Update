@@ -155,6 +155,7 @@ Daily-Queue-Update/
 ├── scraper.py          # Reuses saved session + dispatch parser (per-order container, job+detail rows)
 ├── sales_orders.py     # Per-job enrichment: Sales Order + construction/drive run + folder
 ├── check_orders.py     # Hand it order numbers — pulls each quote run, shows the matched template + fields
+├── quote_run_scan.py   # Sweep ALL AutoCAD job folders for quote runs, parse each, write an inventory
 ├── templates.py        # Quote-run TEMPLATE collection — match a run by design#/format, pull its fields
 ├── drive_run.py        # PDF quote-run reader (the .pdf template in templates.py)
 ├── compare.py          # Diff today vs the most recent prior run; persistence tracking
@@ -229,6 +230,27 @@ numbers and it opens each (from the board, or via the search box if it's an old
 order), downloads the quote run, and prints which template matched and the
 fields it pulled — all in one headless pass (`--show` to watch). Paste a block
 back and the matching template's fields get pinned down.
+
+**Scan the whole backlog for quote runs.** To inventory *every* job's quote run
+at once, `quote_run_scan.py` does a pure-filesystem sweep of the AutoCAD job
+folders (no login) — it finds every run file (including the copies in `ENG REF\`
+and `history\` subfolders), parses each through the templates, and writes
+`backlog/quote_runs.xlsx`: one row per run with the matched template, the key
+fields (Size, Design, CFM/SP/RPM, materials, flags, …), and a **Status** column
+that flags anything it couldn't read (an unrecognized format, or a PDF that's
+really a drawing) so you can see which formats still need a template.
+
+```bash
+python quote_run_scan.py                  # every job folder, resumable
+python quote_run_scan.py 421473 421572    # just these jobs
+python quote_run_scan.py --range 420000 421999
+python quote_run_scan.py --list jobs.txt
+```
+
+It's resumable (progress saved after every batch) and the same `--min-job` /
+`--max-job` / `--limit` flags as `autocad_scan.py` apply. It can't see a run
+that lives only in an order's online documents (never saved to the folder) —
+`backfill_orders.py` covers those — but most runs are in the folder.
 
 ### AutoCAD DWG scan
 

@@ -24,4 +24,5 @@ jobs:
       - run: python test_autocad_scan.py
       - run: python test_quote_runs.py
       - run: python test_templates.py
+      - run: python test_quote_run_scan.py
       - run: python test_line_items.py
