@@ -3,6 +3,33 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-15 — First full backlog sweep + refinements
+
+DG ran `quote_run_scan.py` over the whole Z: tree: **12,873 jobs in ~22 min,
+365 with a run, 554 runs**. Templates: cbc_qt_run_text 250, pdf 219 (146 of
+them text-less drawings), unknown 55, d64 30. The log surfaced three fixes
+(all done + tested):
+
+- **CAD false positives** — HDX layout files named `QT RUN-...`
+  (`.dwg/.sldasm/.slddrw/.dwl2/.bak`) were matching as "runs". Restricted the
+  folder finder (`sales_orders._run_files_in_folder`) to document extensions
+  (`RUN_DOC_EXTS`) so drawings are ignored. This also helps the daily run.
+- **Office temp/lock files** (`~$...`) were parsed and errored ("not a zip");
+  now skipped in the folder finder.
+- **`.docx` is the biggest real gap** (`QT RUN.docx`, `quote run.docx`,
+  `MARKUP PER FEA.docx`). Added stdlib `.docx` text extraction
+  (`templates._docx_to_text`, zip→word/document.xml, no python-docx dep) and
+  put `.docx` on the text templates, so a CB run saved as Word routes to the CB
+  parser by content marker (markup versions fall to generic KV).
+
+Deferred: `.doc` (old-binary Word — many are *damper* quote runs, needs a
+heavier extractor) and `.msg` (Outlook) stay UNRECOGNIZED for now. D64 `.xlsx`
+parses via the best-effort cell sweep (30 found) — refine when a real sheet is
+pasted back.
+
+**Re-run with `--rescan`** to re-evaluate the stored jobs against the new
+extension filter + `.docx` support (the progress store holds the first pass).
+
 ## 2026-06-15 — Whole-backlog quote-run sweep (`quote_run_scan.py`)
 
 DG: "check everything in history for quote runs." Chose (with DG) a **pure Z:

@@ -94,7 +94,7 @@ def test_match_generic_and_unknown_fallbacks():
     # A plain .txt with no quote-run marker still gets read as generic text.
     assert match_template(QuoteRunContext("420410 notes.txt")).key == "generic_text"
     # An extension no template reads -> the Unknown last resort (never crashes).
-    assert match_template(QuoteRunContext("run.docx")).key == "unknown"
+    assert match_template(QuoteRunContext("run.doc")).key == "unknown"   # old-binary Word: no reader yet
     assert match_template(QuoteRunContext("run.zip")).key == "unknown"
 
 
@@ -252,6 +252,39 @@ def test_chicago_blower_matches_and_parses_end_to_end(tmp: Path):
     assert "CFM=22500" in r["summary"]
 
 
+def _write_docx(path: Path, text: str) -> None:
+    """Minimal .docx: a zip whose word/document.xml holds one <w:p> per line."""
+    import zipfile
+    paras = "".join(
+        f"<w:p><w:r><w:t xml:space=\"preserve\">{ln}</w:t></w:r></w:p>"
+        for ln in text.splitlines())
+    doc = ("<?xml version=\"1.0\"?><w:document xmlns:w=\"http://x\"><w:body>"
+           f"{paras}</w:body></w:document>")
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("word/document.xml", doc)
+
+
+def test_chicago_blower_in_a_docx(tmp: Path):
+    # A CB run saved as Word (e.g. "QT RUN.docx") — text is pulled from the zip
+    # and routed to the CB template by its content marker.
+    p = tmp / "421237 QT RUN.docx"
+    _write_docx(p, REAL_CBC_QT_RUN_421237)
+    ctx = QuoteRunContext(p)
+    assert "CHICAGO BLOWER" in ctx.text()
+    assert match_template(ctx).key == "cbc_qt_run_text"
+    r = parse_quote_run(p)
+    assert r["template"] == "cbc_qt_run_text"
+    assert r["fields"]["Size"] == "2412"
+    assert r["fields"]["Blade Material"] == "ASTM A1011-HSLAS"
+
+
+def test_docx_without_cb_marker_falls_to_generic(tmp: Path):
+    p = tmp / "quote run.docx"
+    _write_docx(p, "Coating: epoxy\nFlange: ANSI 150\n")
+    assert match_template(QuoteRunContext(p)).key == "qt_run_text"
+    assert parse_quote_run(p)["fields"]["Coating"] == "epoxy"
+
+
 def test_non_cbc_text_run_falls_to_generic_qt_template(tmp: Path):
     # A quote-run-named .txt WITHOUT the CB marker stays on qt_run_text.
     p = tmp / "421473 Qt Run.txt"
@@ -323,11 +356,19 @@ def test_parse_d64_xlsx_end_to_end(tmp: Path):
 
 
 def test_parse_unknown_format_is_safe(tmp: Path):
-    p = tmp / "run.docx"
-    p.write_bytes(b"not really a docx")
+    p = tmp / "run.xyz"
+    p.write_bytes(b"some bytes")
     r = parse_quote_run(p)
     assert r["template"] == "unknown"
     assert r["fields"] == {} and r["summary"] == ""
+
+
+def test_corrupt_docx_is_safe(tmp: Path):
+    # A .docx that isn't a valid zip must not raise — it just yields no fields.
+    p = tmp / "421000 qt run.docx"
+    p.write_bytes(b"not really a docx")
+    r = parse_quote_run(p)
+    assert r["fields"] == {} and r["template"] in {"qt_run_text", "generic_text"}
 
 
 def test_parse_missing_file_never_raises():

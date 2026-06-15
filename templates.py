@@ -77,6 +77,8 @@ class QuoteRunContext:
         return self._text
 
     def _read_text(self) -> str:
+        if self.ext == ".docx":
+            return _docx_to_text(self.path)
         if self.ext not in (".txt", ".rtf", ".csv", ""):
             return ""
         try:
@@ -85,6 +87,25 @@ class QuoteRunContext:
             log.warning("Could not read quote-run text %s: %s", self.path, e)
             return ""
         return _rtf_to_text(data) if self.ext == ".rtf" else data
+
+
+def _docx_to_text(path: Path) -> str:
+    """Extract the visible text from a .docx (a zip of XML) with the stdlib only
+    — no python-docx dependency. Paragraph and tab markers become newlines/tabs
+    so labeled lines survive; all other tags are stripped."""
+    import html
+    import zipfile
+    try:
+        with zipfile.ZipFile(path) as z:
+            xml = z.read("word/document.xml").decode("utf-8", "replace")
+    except (OSError, KeyError, zipfile.BadZipFile) as e:
+        log.warning("Could not read .docx %s: %s", path, e)
+        return ""
+    xml = re.sub(r"<w:tab\b[^>]*/>", "\t", xml)
+    xml = re.sub(r"</w:p>", "\n", xml)            # paragraph end -> newline
+    xml = re.sub(r"<w:br\b[^>]*/>", "\n", xml)
+    xml = re.sub(r"<[^>]+>", "", xml)             # drop the remaining tags
+    return html.unescape(xml)
 
 
 def _rtf_to_text(data: str) -> str:
@@ -327,7 +348,7 @@ class ChicagoBlowerQtRun(_TextLineMixin, QuoteRunTemplate):
     — the generic key/value sweep mis-reads its dimension tables."""
     key = "cbc_qt_run_text"
     label = "Chicago Blower Qt Run (text)"
-    extensions = frozenset({".txt", ".rtf"})
+    extensions = frozenset({".txt", ".rtf", ".docx"})
     name_patterns = (r"qt\s*run", r"quote\s*run")
     content_markers = ("CHICAGO BLOWER", "SN#")
 
@@ -343,7 +364,7 @@ class QtRunText(_TextLineMixin, QuoteRunTemplate):
     Best-effort key/value until a real dump of that format pins its headings."""
     key = "qt_run_text"
     label = "Qt Run (text, generic)"
-    extensions = frozenset({".txt", ".rtf"})
+    extensions = frozenset({".txt", ".rtf", ".docx"})
     name_patterns = (r"qt\s*run", r"quote\s*run")
     requires_signal = True  # plain .txt belongs to GenericTextRun
 
@@ -410,7 +431,7 @@ class GenericTextRun(_TextLineMixin, QuoteRunTemplate):
     """Fallback for any text-shaped run that didn't match a named template."""
     key = "generic_text"
     label = "Quote run (text, generic)"
-    extensions = frozenset({".txt", ".rtf", ".csv", ""})
+    extensions = frozenset({".txt", ".rtf", ".csv", ".docx", ""})
 
     def extract(self, ctx: QuoteRunContext) -> Dict[str, Any]:
         return self._from_text(ctx)

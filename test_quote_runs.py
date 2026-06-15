@@ -139,6 +139,11 @@ def test_folder_scan_recursive(tmp: Path):
     (jobdir / "420410-01A.dwg").write_text("x")
     (jobdir / "420410-51B.pdf").write_text("x")
     (jobdir / "notes.txt").write_text("x")
+    # A CAD file named like a run is NOT a run document; nor is an Office temp
+    # file (~$...). Both must be excluded even though the name matches.
+    (jobdir / "qt run-70 HDX LAYOUT.dwg").write_text("x")
+    (jobdir / "qt run.SLDASM").write_text("x")
+    (jobdir / "~$420410 qt run.docx").write_text("x")
     assert [h.name for h in _run_files_in_folder(jobdir)] == ["420410 qt  run.txt"]
     # A folder with no run files (or a vanished folder) yields [] quietly.
     assert _run_files_in_folder(tmp / "420410" / "ENG REF") != []  # sanity: scan works on subdirs

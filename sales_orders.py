@@ -64,6 +64,11 @@ PID_RE = re.compile(r"^(?P<type>.+?)-(?P<id>\d+)-(?P<rev>\d+)-(?P<tag>[A-Za-z0-9
 # (config.DRIVE_RUN_NAME_PATTERNS).
 SO_TYPE = "CBC_SalesOrder"
 RUN_NAME_RES = [re.compile(p, re.I) for p in DRIVE_RUN_NAME_PATTERNS]
+# A quote run is a *document*. Plenty of CAD files (HDX layouts) are named
+# "QT RUN-..." (.dwg/.sldasm/.slddrw/.dwl2/.bak); those are drawings, not runs,
+# so the folder scan only accepts document-like extensions. (Document matching
+# by pid type is unaffected — that path doesn't go through here.)
+RUN_DOC_EXTS = {".txt", ".pdf", ".rtf", ".xlsx", ".xlsm", ".xls", ".doc", ".docx", ".csv", ".md"}
 CO_START = re.compile(r"^\s*C\s*/?\s*O\s*#?\s*\d", re.I)
 DESIGN_HDR = re.compile(r"^\s*Design\s+(\S+)\s*(.*)$")
 # Spec-row cells look like "Label value" (e.g. "Size M2", "WheelType BI").
@@ -105,7 +110,12 @@ def _run_files_in_folder(folder: Path) -> List[Path]:
     orders never get the run attached to their cbcinsider documents at all,
     so the folder is the only place it lives."""
     try:
-        return sorted(f for f in folder.rglob("*") if f.is_file() and _is_run_name(f.name))
+        return sorted(
+            f for f in folder.rglob("*")
+            if f.is_file() and not f.name.startswith("~$")   # Office lock/temp files
+            and f.suffix.lower() in RUN_DOC_EXTS              # a document, not a CAD drawing
+            and _is_run_name(f.name)
+        )
     except OSError as e:
         log.warning("  could not scan %s for quote-run files (%s)", folder, e)
         return []
