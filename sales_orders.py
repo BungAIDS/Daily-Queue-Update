@@ -21,8 +21,9 @@ For every job on the board this:
                           in the job's AutoCAD folder; .pdf/.txt/.xlsx; or "")
     drive_run_count int  (how many files matched; >1 -> report shows "YES (X)"
                           so someone reviews which is the real run)
-    drive_run      dict  (parsed drive-run fields, pdf runs only; see drive_run.py)
-    drive_run_summary str (compact one-liner of the drive-run fields)
+    drive_run      dict  (parsed quote-run fields, any format; see templates.py)
+    drive_run_summary str (compact one-liner of the quote-run fields)
+    drive_run_template str (which templates.py template read the run)
     job_type       str   (e.g. "AXIAL" / "GENERAL LINE", or "")
     job_folder     str   (AutoCAD folder if found, else the SO archive folder)
 
@@ -46,7 +47,7 @@ from config import (
     SALES_ORDER_DIR, DRIVE_RUN_DIR, DRIVE_RUN_TYPES, DRIVE_RUN_NAME_PATTERNS,
     SO_CONCURRENCY, AUTOCAD_JOBS_DIR,
 )
-from drive_run import parse_drive_run_pdf
+from templates import parse_quote_run
 from scraper import CONTAINER_SELECTOR
 import autocad_scan
 import line_items
@@ -668,9 +669,13 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
         j["drive_run_pdf"] = dr_pdf or ""
         j["drive_run_count"] = dr_count if j["has_drive_run"] else 0
         j["drive_run_rev"] = r.get("dr_rev")
-        dparsed = parse_drive_run_pdf(dr_pdf) if dr_pdf and str(dr_pdf).lower().endswith(".pdf") else {}
+        # Read the run with whichever template matches its format — keyed mostly
+        # by design # (Design 64 -> wheel-construction xlsx, HDX -> Qt Run text,
+        # others -> pdf). Handles every run extension, not just .pdf.
+        dparsed = parse_quote_run(dr_pdf, design=j.get("design")) if dr_pdf else {}
         j["drive_run"] = dparsed.get("fields", {})
         j["drive_run_summary"] = dparsed.get("summary", "")
+        j["drive_run_template"] = dparsed.get("template", "")
         if j["has_drive_run"]:
             n_dr += 1
 

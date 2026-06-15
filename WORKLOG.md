@@ -3,6 +3,48 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-15 — Quote-run TEMPLATE collection (`templates.py`)
+
+Per DG: start a collection of templates that quote runs match so the program
+knows how to pull info from each format. DG's steer: formats vary **mostly by
+design #** (some real samples in hand, full variance unknown yet).
+
+Built `templates.py` — a registry of `QuoteRunTemplate`s. Each declares what it
+recognizes (design #, file extension, file-name markers) and how to extract
+fields from that one shape; `parse_quote_run(path, design=None)` scores every
+template and uses the best match. Return shape is a **superset** of the old
+`drive_run.parse_drive_run_pdf` (`template`, `design`, `fields`, `raw_lines`,
+`summary`), so it's a drop-in.
+
+Seeded templates (the collection):
+- **`d64_wheel_construction`** — Design 64, the `.xlsx` "D64 Wheel
+  Construction" sheet (openpyxl, read-only; best-effort cell sweep).
+- **`qt_run_text`** — HDX-style `.txt`/`.rtf` named "Qt Run"/"Quote Run"
+  (requires the name marker so a plain `.txt` falls to the generic reader).
+- **`pdf`** — any `.pdf` run; delegates to the existing `drive_run.py`.
+- **`generic_text`** / **`unknown`** — fallbacks so something always matches
+  and an unreadable format is named (not crashed) for adding later.
+
+Scoring: handled extension = 1, design-# match +2, name-marker match +3, so
+the most specific template wins (first wins a tie). `requires_signal` keeps
+shared-extension templates (`.txt`) from grabbing files that lack their marker.
+
+Wiring: `sales_orders.py` and `backfill_orders.py` now call `parse_quote_run`
+for **every** run extension (was `.pdf`-only) and pass the job's design #;
+jobs gain `drive_run_template`. `drive_run.parse_drive_run_pdf` stays as the
+PDF reader the `pdf` template calls.
+
+Tests: `test_templates.py` (14, in CI) — design parsing, matching by
+design/ext/name, text + rtf + xlsx extraction, and the safe fallbacks. PDF
+extraction isn't re-tested here (it just delegates to drive_run), so pdfplumber
+isn't needed to run the suite.
+
+**Open (needs real samples on the work machine):** run
+`python templates.py "<a real Qt Run.txt>"` and a real D64 `.xlsx`, paste the
+output back, and pin the exact field headings into those two templates'
+`extract`. Add a template per new design # as its format turns up. Best-effort
+`Label: value` capture runs until then.
+
 ## 2026-06-11 — Sales-order LINE ITEMS: capture, normalize, search
 
 New capability per DG's request: record **every line item** on each Sales

@@ -154,7 +154,8 @@ Daily-Queue-Update/
 ├── pipeline.py         # Shared stage logic the four scripts above call into
 ├── scraper.py          # Reuses saved session + dispatch parser (per-order container, job+detail rows)
 ├── sales_orders.py     # Per-job enrichment: Sales Order + construction/drive run + folder
-├── drive_run.py        # Parse a construction/drive-run ("CBC_DriveRun") PDF
+├── templates.py        # Quote-run TEMPLATE collection — match a run by design#/format, pull its fields
+├── drive_run.py        # PDF quote-run reader (the .pdf template in templates.py)
 ├── compare.py          # Diff today vs the most recent prior run; persistence tracking
 ├── analyzer.py         # Claude API call — briefing + anomalies + action items
 ├── excel_writer.py     # Two-tab .xlsx report with AutoFilter and date highlights
@@ -200,18 +201,29 @@ a run, so its presence is a signal in itself: the Full Queue tab gains a
 **Quote Run** column — `YES`, hyperlinked straight to the run file; it shows a
 plain `YES` only if the flag is set but no file was reachable.
 
-The exact fields inside a quote run depend on your documents (the D64 Excel
-wheel-construction sheets will need their own parser). Inspect a job's docs:
+**The quote-run "template" collection.** A quote run is not one format — which
+one you get is mostly a function of the fan's **design number** (Design 64 →
+a "D64 Wheel Construction" `.xlsx`, HDX → a plain-text "Qt Run", others → a
+`.pdf`/`.rtf`). So reading them is a *collection of templates* in
+`templates.py`: each template declares which runs it recognizes (by design #,
+file extension, and/or file-name marker) and how to pull fields from that one
+shape. The daily run calls `parse_quote_run(file, design=...)`, which picks the
+best-matching template and returns its fields + a compact summary (shown next
+to the `YES` flag). Adding a new fan format is just one more
+`QuoteRunTemplate` in `templates.py` — see the "Adding a template" note there.
+
+Until a real sample pins a format's exact headings down, each template does
+resilient best-effort `Label: value` extraction, so unknown labels are still
+captured. Inspect a job's docs and see which template matched:
 
 ```bash
 python discover_documents.py <a-custom-job#>   # lists docs + pid types, downloads SO + run(s)
-python dump_pdf.py "<path to a pdf run>"       # dumps a pdf run's text/tables
-# or: python drive_run.py "<path to the quote run pdf>"
+python templates.py "<path to a quote run>" [design#]  # shows the matched template + fields it pulled
+python dump_pdf.py "<path to a pdf run>"       # dumps a pdf run's raw text/tables
 ```
 
-Paste that back and the specific fields get wired into `drive_run.py` /
-the report. Until then the report still shows the `YES` flag and a best-effort
-summary of whatever labels the PDF carries.
+Paste that back and the matching template's fields get pinned down. Until then
+the report still shows the `YES` flag and a best-effort summary.
 
 ### AutoCAD DWG scan
 
