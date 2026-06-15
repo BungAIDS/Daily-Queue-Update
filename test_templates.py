@@ -20,9 +20,38 @@ from pathlib import Path
 
 from templates import (
     QuoteRunContext, _design_num, _rtf_to_text, match_template, parse_quote_run,
-    kv_from_lines, kv_from_rows, summarize,
-    D64WheelConstruction, QtRunText, PdfQuoteRun, GenericTextRun, UnknownRun,
+    kv_from_lines, kv_from_rows, summarize, _parse_chicago_blower,
+    D64WheelConstruction, ChicagoBlowerQtRun, QtRunText, PdfQuoteRun,
+    GenericTextRun, UnknownRun,
 )
+
+
+# A real Chicago Blower "Qt Run" text (job 421579, captured 2026-06-15). The
+# leading spaces and column spacing are exactly as the selection program emits.
+REAL_CBC_QT_RUN = """\
+---------------------------------------
+CONFIDENTIAL
+               FRI JUN  5 15:25:02 CST 2026
+               CHICAGO BLOWER CORP.
+ SN#421579
+ SIZE  3300,DESIGN 6195 ,ARR 9H ,100.0 PCT,DISCH TH ,ROT CCW
+ EFFECTIVE WHEEL DIA.  31  3/8
+   22500 CFM, 18.00 SP,  78.3 BHP, 2465 RPM,  70 DEG F, DENSITY 0.0714
+ MAX HP  100.0, MAX RPM 2585, MAX TEMP   95 F, AMBIENT TEMP  41 F
+ ENGINEERING APPROVAL REQUIRED
+ TIP SPEED 21216 FPM, EQ. TS  22372 RE SK-9-105         WEIGHT   PRICE
+ WHEEL         THICK.(GA)    MATERIAL        WR2 WEIGHT
+  BLADES          1/4     ASTM A572 X-TEN     81    54
+  SIDEPL,SPUN     1/4     ASTM A572 X-TEN     72    50
+  BACKPLATE       3/8     ASTM CQ HRS A36    108   105
+  HUB 19-5-16   BORE 2 11/16 CAST IRON         7    62     270    9071
+    SHRINK FIT PRICE INCLUDED
+    ***NON STD WHEEL MATERIALS, CHECK FOR CORRECT WELD WIRE***
+     WHEEL HUB NOMINAL BORE = 2.6875
+ BELT DRIVEN.  FAN SHEAVE   ASSUMED PD  6.2 IN, 4000 FPM    25
+ SHAFT DIA  2 15/16, BRG CENTERS 12, CRITICAL SPEED  5148 RPM
+  ROTOR WR2   267 LB-FT2, ROTOR MAX RPM 2860, MTL. 1045 STEEL
+"""
 
 
 def test_design_num():
@@ -76,6 +105,65 @@ def test_design_breaks_a_tie_toward_d64():
     d64 = QuoteRunContext("wheel.xlsx", design="64")
     assert match_template(plain).key == "d64_wheel_construction"
     assert D64WheelConstruction().score(d64) > D64WheelConstruction().score(plain)
+
+
+def test_chicago_blower_fields():
+    f = _parse_chicago_blower(REAL_CBC_QT_RUN)
+    assert f["Serial"] == "421579"
+    assert f["Size"] == "3300"
+    assert f["Design"] == "6195"
+    assert f["Arrangement"] == "9H"
+    assert f["% Width"] == "100.0"
+    assert f["Discharge"] == "TH"
+    assert f["Rotation"] == "CCW"
+    assert f["Effective Wheel Dia"] == "31 3/8"
+    assert f["CFM"] == "22500"
+    assert f["SP"] == "18.00"
+    assert f["BHP"] == "78.3"
+    assert f["RPM"] == "2465"          # operating RPM, not MAX RPM 2585
+    assert f["Air Temp F"] == "70"
+    assert f["Density"] == "0.0714"
+    assert f["Max HP"] == "100.0"
+    assert f["Max RPM"] == "2585"
+    assert f["Max Temp F"] == "95"
+    assert f["Ambient Temp F"] == "41"
+    assert f["Tip Speed FPM"] == "21216"
+    assert f["Shaft Dia"] == "2 15/16"
+    assert f["Brg Centers"] == "12"
+    assert f["Critical Speed RPM"] == "5148"
+    assert f["Blade Material"] == "ASTM A572 X-TEN"
+    assert f["Sideplate Material"] == "ASTM A572 X-TEN"
+    assert f["Backplate Material"] == "ASTM CQ HRS A36"
+    assert f["Drive"] == "Belt"
+    assert f["Engineering Approval"] == "Required"
+    assert f["Non-Std Wheel Materials"] == "Yes"
+    assert f["Shrink Fit"] == "Yes"
+    # The dimension-table noise the generic sweep produced must NOT appear.
+    assert "DA" not in f and "DK" not in f and "A" not in f
+
+
+def test_chicago_blower_matches_and_parses_end_to_end(tmp: Path):
+    # Even named just "QT RUN.txt" (the AutoCAD-folder copy), the CB content
+    # marker routes it to the CB template over the generic qt_run_text.
+    p = tmp / "QT RUN.txt"
+    p.write_text(REAL_CBC_QT_RUN)
+    ctx = QuoteRunContext(p)
+    assert match_template(ctx).key == "cbc_qt_run_text"
+    assert ChicagoBlowerQtRun().score(ctx) > QtRunText().score(ctx)
+    r = parse_quote_run(p)
+    assert r["template"] == "cbc_qt_run_text"
+    assert r["fields"]["Size"] == "3300"
+    # CB supplies its own engineering-ordered summary (size first, not material).
+    assert r["summary"].startswith("Size=3300")
+    assert "CFM=22500" in r["summary"]
+
+
+def test_non_cbc_text_run_falls_to_generic_qt_template(tmp: Path):
+    # A quote-run-named .txt WITHOUT the CB marker stays on qt_run_text.
+    p = tmp / "421473 Qt Run.txt"
+    p.write_text("Construction: welded\nWheel Material: 316 SS\n")
+    assert match_template(QuoteRunContext(p)).key == "qt_run_text"
+    assert parse_quote_run(p)["fields"]["Wheel Material"] == "316 SS"
 
 
 def test_kv_helpers():

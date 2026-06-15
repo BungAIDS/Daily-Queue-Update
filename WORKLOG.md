@@ -48,6 +48,28 @@ raw lines. Headless/unattended (`--show` to watch); reuses the
 path). This is the loop for pinning formats down: run it on real orders, paste
 a block back.
 
+**Chicago Blower Qt Run parser (2026-06-15, DG ran `check_orders.py 421579`).**
+First real sample in hand: job 421579's run is a Chicago Blower selection-program
+text dump (`Z:\...\421579\ENG REF\QT RUN.txt`), and the generic `Label: value`
+sweep mangled it (turning the outlet dimension table — `A`, `DA`, `DK`, … — into
+junk fields). Added a dedicated **`cbc_qt_run_text`** template that matches by
+content marker (`CHICAGO BLOWER` / `SN#`, so it beats `qt_run_text` even when the
+file is just named `QT RUN.txt`) and pulls 29 real fields by targeted pattern:
+serial, size/design/arr/%width/disch/rot, duty (CFM/SP/BHP/RPM/temp/density),
+max HP/RPM/temp + ambient, tip speed, effective wheel dia, wheel construction
+materials (blade/sideplate/backplate), shaft dia / brg centers / critical speed,
+drive type, and the engineering-approval / non-std-materials / shrink-fit flags.
+The dimension tables are deliberately left out. Verified against the real text in
+`test_templates.py` (`REAL_CBC_QT_RUN`). NOTE: the run's `DESIGN 6195` is the CB
+engineering design code, not the queue's design column.
+
+**`check_orders.py` hardening (same run — it crawled / hung on later orders):**
+the Z: AutoCAD-tree sweep now runs ONCE for all requested jobs (was per-order),
+and the board page is reloaded between orders so a left-over detail modal or a
+search that navigated away can't wedge the next lookup. Old/off-board orders
+(419624, 420990) go through the search-box path; if that can't surface them the
+order is skipped with a message instead of stalling the batch.
+
 **Open (needs real samples on the work machine):** run
 `python check_orders.py <order#> ...` (or `python templates.py "<a run file>"`)
 on real orders, paste the output back, and pin the exact field headings into

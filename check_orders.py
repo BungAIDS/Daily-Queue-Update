@@ -61,7 +61,7 @@ def _print_run(jn: str, path: Path, design: str | None) -> None:
             log.info("      %s", ln)
 
 
-def _check_one(context, page, board: dict, jn: str) -> None:
+def _check_one(context, page, board: dict, jn: str, folder_info: dict | None) -> None:
     log.info("\n%s\n=== Order %s ===", "=" * 72, jn)
     if jn in board:
         if not _open_detail(page, jn, board[jn]):
@@ -87,14 +87,15 @@ def _check_one(context, page, board: dict, jn: str) -> None:
     else:
         log.info("  no quote run in the documents.")
 
-    # Some orders keep the run only in their AutoCAD folder — check there too.
+    # Some orders keep the run only in their AutoCAD folder. The folder lookup
+    # was done ONCE up front (sweeping the Z: tree per order is what made this
+    # crawl), so here it's just a cheap rglob of the one known folder.
     try:
-        info = _find_autocad_folders([jn]).get(jn)
-        hits = _run_files_in_folder(info["path"]) if info else []
+        hits = _run_files_in_folder(folder_info["path"]) if folder_info else []
         for f in hits:
             log.info("  quote run (AutoCAD folder): %s", f)
             _print_run(jn, Path(f), None)
-        if info and not hits and not runs:
+        if folder_info and not hits and not runs:
             log.info("  (no run-named files in the AutoCAD folder either.)")
     except Exception as e:  # noqa: BLE001 - one order's folder miss shouldn't stop the batch
         log.info("  (AutoCAD folder check failed: %s)", e)
@@ -113,9 +114,24 @@ def check_orders(jobs: list[str], headless: bool = True) -> None:
         board = dict(_board_args(page))
         log.info("Board has %d orders; checking %d requested: %s",
                  len(board), len(jobs), ", ".join(jobs))
+
+        # Sweep the Z: AutoCAD tree ONCE for all requested jobs (it's the slow
+        # part; doing it per order is what made the run crawl). Off-board orders
+        # whose run only lives in the folder are still covered.
+        try:
+            folders = _find_autocad_folders(jobs)
+        except Exception as e:  # noqa: BLE001 - folder lookup is best-effort
+            log.info("AutoCAD folder sweep failed (%s) — continuing without it.", e)
+            folders = {}
+
+        board_url = CBC_QUEUE_URL or CBC_URL
         for jn in jobs:
             try:
-                _check_one(context, page, board, jn)
+                # Reload the board between orders so a left-over detail modal or a
+                # search that navigated away can't wedge the next lookup.
+                page.goto(board_url, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_selector(CONTAINER_SELECTOR, timeout=30000)
+                _check_one(context, page, board, jn, folders.get(jn))
             except Exception as e:  # noqa: BLE001 - keep the batch going
                 log.info("  error checking %s: %s", jn, e)
 

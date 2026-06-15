@@ -171,6 +171,10 @@ class QuoteRunTemplate:
     extensions: frozenset = frozenset()
     # Case-insensitive regexes matched against the file NAME.
     name_patterns: tuple = ()
+    # Case-insensitive substrings that must appear in the file's TEXT for this
+    # template to apply (e.g. "CHICAGO BLOWER" for a CB engineering run). When
+    # set, the template ONLY matches if a marker is present — it reads content.
+    content_markers: tuple = ()
     # True when a shared extension means this template may ONLY claim a file if
     # its design # or name marker also matches (e.g. .txt is shared with the
     # generic text fallback, so a plain .txt must not be grabbed as a Qt Run).
@@ -185,13 +189,21 @@ class QuoteRunTemplate:
             return 0
         design_hit = bool(self.designs and ctx.design in self.designs)
         name_hit = any(r.search(ctx.filename) for r in self._name_res)
-        if self.requires_signal and not (design_hit or name_hit):
+        content_hit = False
+        if self.content_markers:
+            up = ctx.text().upper()
+            content_hit = any(m.upper() in up for m in self.content_markers)
+            if not content_hit:
+                return 0  # a content-keyed template requires its marker
+        if self.requires_signal and not (design_hit or name_hit or content_hit):
             return 0
         s = 1  # handled extension
         if design_hit:
             s += 2
         if name_hit:
             s += 3
+        if content_hit:
+            s += 4
         return s
 
     def extract(self, ctx: QuoteRunContext) -> Dict[str, Any]:
@@ -208,12 +220,94 @@ class _TextLineMixin:
         return {"fields": kv_from_lines(lines), "raw_lines": lines[:40]}
 
 
+# Chicago Blower engineering "Qt Run" text — the selection-program dump. The
+# useful data sits on a handful of consistent labeled lines (a comma-delimited
+# spec line, a performance line, a wheel-construction table); the rest is a
+# dimension table that a generic key/value sweep turns into noise. So pull the
+# known fields by targeted pattern and leave the dimension tables out.
+# (label, regex) — first match in the whole text wins; group(1) is the value.
+_CB_PATTERNS = [
+    ("Serial", r"SN#\s*(\d+)"),
+    ("Size", r"\bSIZE\s+([0-9A-Za-z./\-]+)"),
+    ("Design", r"\bDESIGN\s+([0-9A-Za-z./\-]+)"),
+    ("Arrangement", r"\bARR\s+([0-9A-Za-z./\-]+)"),
+    ("% Width", r"([\d.]+)\s*PCT\b"),
+    ("Discharge", r"\bDISCH\s+([0-9A-Za-z./\-]+)"),
+    ("Rotation", r"\bROT\s+([0-9A-Za-z./\-]+)"),
+    ("Effective Wheel Dia", r"EFFECTIVE WHEEL DIA\.?\s+([\d /]+?)\s*$"),
+    ("CFM", r"([\d.,]+)\s*CFM\b"),
+    ("SP", r"([\d.]+)\s*SP\b"),
+    ("BHP", r"([\d.]+)\s*BHP\b"),
+    ("RPM", r"([\d.]+)\s*RPM\b"),
+    ("Air Temp F", r"([\d.]+)\s*DEG F\b"),
+    ("Density", r"DENSITY\s+([\d.]+)"),
+    ("Max HP", r"MAX HP\s+([\d.]+)"),
+    ("Max RPM", r"MAX RPM\s+([\d.]+)"),
+    ("Max Temp F", r"MAX TEMP\s+([\d.]+)"),
+    ("Ambient Temp F", r"AMBIENT TEMP\s+([\d.]+)"),
+    ("Tip Speed FPM", r"TIP SPEED\s+([\d.]+)\s*FPM"),
+    ("Shaft Dia", r"SHAFT DIA\s+([\d /]+?)\s*,"),
+    ("Brg Centers", r"BRG CENTERS\s+([\d.]+)"),
+    ("Critical Speed RPM", r"CRITICAL SPEED\s+([\d.]+)"),
+    ("Blade Material", r"\bBLADES?\b\s+[\d/]+\s+([A-Z][A-Z0-9 .\-]+?)\s+\d"),
+    ("Sideplate Material", r"\bSIDEPL\S*\s+[\d/]+\s+([A-Z][A-Z0-9 .\-]+?)\s+\d"),
+    ("Backplate Material", r"\bBACKPLATE\b\s+[\d/]+\s+([A-Z][A-Z0-9 .\-]+?)\s+\d"),
+]
+# Compact summary, in engineering-useful order (only the present fields show).
+_CB_SUMMARY_ORDER = [
+    "Size", "Design", "Arrangement", "% Width", "Discharge", "Rotation",
+    "CFM", "SP", "BHP", "RPM", "Max Temp F", "Effective Wheel Dia", "Blade Material",
+]
+
+
+def _parse_chicago_blower(text: str) -> Dict[str, str]:
+    fields: Dict[str, str] = {}
+    for label, pat in _CB_PATTERNS:
+        m = re.search(pat, text, re.I | re.M)
+        if m and m.group(1).strip():
+            fields[label] = re.sub(r"\s{2,}", " ", m.group(1).strip())
+    up = text.upper()
+    if "BELT DRIVEN" in up:
+        fields["Drive"] = "Belt"
+    elif "DIRECT" in up and "DRIV" in up:
+        fields["Drive"] = "Direct"
+    if "ENGINEERING APPROVAL" in up:
+        fields["Engineering Approval"] = "Required"
+    if "NON STD WHEEL MATERIAL" in up:
+        fields["Non-Std Wheel Materials"] = "Yes"
+    if "SHRINK FIT" in up:
+        fields["Shrink Fit"] = "Yes"
+    return fields
+
+
+def _cb_summary(fields: Dict[str, str]) -> str:
+    parts = [f"{k}={fields[k]}" for k in _CB_SUMMARY_ORDER if k in fields]
+    return "; ".join(parts)
+
+
+class ChicagoBlowerQtRun(_TextLineMixin, QuoteRunTemplate):
+    """The Chicago Blower selection-program "Qt Run" text (header: CHICAGO
+    BLOWER CORP. / SN#...). Pulls the fan spec, duty/performance, wheel
+    construction materials, drive, and shaft/bearing data by targeted pattern
+    — the generic key/value sweep mis-reads its dimension tables."""
+    key = "cbc_qt_run_text"
+    label = "Chicago Blower Qt Run (text)"
+    extensions = frozenset({".txt", ".rtf"})
+    name_patterns = (r"qt\s*run", r"quote\s*run")
+    content_markers = ("CHICAGO BLOWER", "SN#")
+
+    def extract(self, ctx: QuoteRunContext) -> Dict[str, Any]:
+        text = ctx.text()
+        fields = _parse_chicago_blower(text)
+        lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
+        return {"fields": fields, "raw_lines": lines[:40], "summary": _cb_summary(fields)}
+
+
 class QtRunText(_TextLineMixin, QuoteRunTemplate):
-    """The HDX-style plain-text "Qt Run" (e.g. `421473_909-26-1604 Qt Run.txt`),
-    and any `.rtf`/`.txt` run named like a quote run. Fields TBD — best-effort
-    key/value until a real dump pins the headings."""
+    """Any other `.txt`/`.rtf` run named like a quote run (non-Chicago-Blower).
+    Best-effort key/value until a real dump of that format pins its headings."""
     key = "qt_run_text"
-    label = "Qt Run (text)"
+    label = "Qt Run (text, generic)"
     extensions = frozenset({".txt", ".rtf"})
     name_patterns = (r"qt\s*run", r"quote\s*run")
     requires_signal = True  # plain .txt belongs to GenericTextRun
@@ -306,6 +400,7 @@ class UnknownRun(QuoteRunTemplate):
 # wins a tie), so list the specific formats before the generic fallbacks.
 TEMPLATES: List[QuoteRunTemplate] = [
     D64WheelConstruction(),
+    ChicagoBlowerQtRun(),
     QtRunText(),
     PdfQuoteRun(),
     GenericTextRun(),
@@ -335,7 +430,9 @@ def parse_quote_run(path: str | Path, design: Any = None) -> Dict[str, Any]:
         out = template.extract(ctx) or {}
         res["fields"] = out.get("fields", {}) or {}
         res["raw_lines"] = out.get("raw_lines", []) or []
-        res["summary"] = summarize(res["fields"])
+        # A template may supply its own summary (its fields have a natural order);
+        # otherwise rank the fields generically.
+        res["summary"] = out.get("summary") or summarize(res["fields"])
     except Exception as e:  # noqa: BLE001 - belt-and-suspenders; extract already guards
         log.warning("Could not parse quote run %s: %s", path, e)
     return res
