@@ -149,6 +149,56 @@ def test_chicago_blower_ribbed_blades_and_descriptor():
     assert f["FEA Analysis"] == "Required"
 
 
+# A third real CB run (job 421572): a space-delimited spec line (no commas), an
+# LS-class wheel with a LINER row whose material is "PLAIN FIRMEX", and a fan
+# CLASS — the variations the comma-delimited PFD samples lacked.
+REAL_CBC_QT_RUN_421572 = """\
+---------------------------------------
+CONFIDENTIAL
+               MON JUN  8 09:46:44 CST 2026
+               CHICAGO BLOWER CORP.
+ 421572
+ SIZE   19 DESIGN 16A LS   ARR 9H  100.0 PCT DISCH UB  ROT CW
+ EFFECTIVE WHEEL DIA.  33
+   12500 CFM, 12.00 SP,  45.7 BHP, 1673 RPM, 103 DEG F, DENSITY 0.0690
+ MAX HP   50.0, MAX RPM 1673, MAX TEMP  103 F, AMBIENT TEMP  90 F
+ TIP SPEED 14454 FPM, EQ. TS  14648 RE SK-9-105         WEIGHT   PRICE
+ NEW DESIGN LS CLASS 4
+ WHEEL         THICK.(GA)    MATERIAL        WR2 WEIGHT
+  BLADES          3/8     ASTM A572 X-TEN     91   108
+    CHECK AVAILBILITY OF FIRMEX BEFORE QUOTING FAN
+  LINER,WELDED    1/4          PLAIN FIRMEX   61    72
+  GUSSETS         5/8     ASTM CQ HRS A36     16    37
+  HUB BORE 2 11/16, HUB OD   7.00                          255
+ BELT DRIVEN.  FAN SHEAVE   ASSUMED PD  9.1 IN, 4000 FPM    26
+ SHAFT DIA  2 11/16, BRG CENTERS 26, CRITICAL SPEED  2214 RPM
+"""
+
+
+def test_chicago_blower_space_delimited_and_liner():
+    f = _parse_chicago_blower(REAL_CBC_QT_RUN_421572)
+    # Space-delimited spec line parses the same as the comma-delimited one.
+    assert f["Size"] == "19" and f["Design"] == "16A"   # "16A LS" -> 16A
+    assert f["Arrangement"] == "9H" and f["% Width"] == "100.0"
+    assert f["Discharge"] == "UB" and f["Rotation"] == "CW"
+    assert f["Effective Wheel Dia"] == "33"
+    assert f["Blade Material"] == "ASTM A572 X-TEN"
+    assert f["Liner Material"] == "PLAIN FIRMEX"          # the notable wear liner
+    assert f["Class"] == "4"
+    assert f["Drive"] == "Belt"
+
+
+def test_chicago_blower_wheel_material_fallback():
+    # A run with no construction table, just a single wheel-material line.
+    txt = ("CHICAGO BLOWER CORP.\n SN#421473\n"
+           " SIZE   37 DESIGN 16A LS   ARR 9H  100.0 PCT DISCH TH  ROT CW\n"
+           " WHEEL MATERIAL A569 HRS\n CLASS 3   HRS  WHEEL, WR2  1144 LB-FT2\n")
+    f = _parse_chicago_blower(txt)
+    assert f["Wheel Material"] == "A569 HRS"
+    assert f["Class"] == "3"
+    assert "Blade Material" not in f   # no table -> no blade row
+
+
 def test_chicago_blower_fields():
     f = _parse_chicago_blower(REAL_CBC_QT_RUN)
     assert f["Serial"] == "421579"

@@ -86,6 +86,23 @@ order is skipped with a message instead of stalling the batch.
 - Note: 420990 listed the same Qt-run doc twice → downloaded as `_1`/`_2`
   (the `drive_run_count > 1` "review" case); not a parser issue.
 
+**More CB runs (2026-06-15, `check_orders.py 421473 421572`):**
+- Confirmed the spec line also comes **space-delimited** (`SIZE 37 DESIGN 16A
+  LS  ARR 9H  100.0 PCT ...`), not just comma-delimited — the field-by-field
+  patterns already handle both.
+- LS-class wheels have richer tables (LINER / GUSSETS / HUB TUBE). Added
+  **Liner Material** (captures e.g. `PLAIN FIRMEX`, a notable wear liner), a
+  **Wheel Material** fallback for runs with no construction table (just
+  `WHEEL MATERIAL A569 HRS`), and fan **Class** (`CLASS 4`). Locked job 421572
+  in as `REAL_CBC_QT_RUN_421572`.
+- Jobs can have **several differing runs** (quote vs production vs history copy,
+  different revisions/materials) across the documents + ENG REF + history
+  folders. `check_orders` surfaces all of them — useful, and the daily run's
+  `_run_docs` still picks the documents' run as primary.
+- A PDF run can be a **drawing with no text layer** (421572's "Inlet Box Liners
+  ONLY.pdf" yielded nothing); `check_orders` now says so instead of implying a
+  missing template.
+
 **Open (needs real samples on the work machine):** run
 `python check_orders.py <order#> ...` (or `python templates.py "<a run file>"`)
 on real orders, paste the output back, and pin the exact field headings into

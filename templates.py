@@ -257,6 +257,10 @@ _CB_PATTERNS = [
     ("Blade Material", r"\bBLADES(?:/\d+\s*RIB)?\s+" + _GA + r"\s+([A-Z][A-Z0-9 .\-]+?)\s+\d+\s+\d"),
     ("Sideplate Material", r"\bSIDEPL\S*\s+" + _GA + r"\s+([A-Z][A-Z0-9 .\-]+?)\s+\d+\s+\d"),
     ("Backplate Material", r"\bBACKPLATE\b\s+" + _GA + r"\s+([A-Z][A-Z0-9 .\-]+?)\s+\d+\s+\d"),
+    ("Liner Material", r"\bLINER\S*\s+" + _GA + r"\s+([A-Z][A-Z0-9 .\-]+?)\s+\d+\s+\d"),
+    # Some runs have no construction table — just a single wheel-material line.
+    ("Wheel Material", r"^\s*WHEEL MATERIAL\s+([A-Z0-9][A-Z0-9 .\-]+?)\s*$"),
+    ("Class", r"\bCLASS\s+(\d+)\b"),
     ("Hub", r"\bHUB\s+([0-9][0-9\-]+)"),
     ("Coupling", r"\bCOUPLING\s+([A-Z][A-Z0-9 ]+?)\s*,\s*SIZE"),
 ]

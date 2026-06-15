@@ -52,6 +52,9 @@ def _print_run(jn: str, path: Path, design: str | None) -> None:
         for k, v in r["fields"].items():
             log.info("      %-26s %s", k, v)
         log.info("    summary: %s", r["summary"])
+    elif ctx.ext == ".pdf" and not r["raw_lines"]:
+        log.info("    no text in this PDF — likely a drawing/scanned run (no text layer), "
+                 "not a parsing gap. Confirm with: python dump_pdf.py \"%s\"", path)
     else:
         log.info("    no fields pulled yet — this format needs a template (or its "
                  "fields pinned down). Raw lines below:")
