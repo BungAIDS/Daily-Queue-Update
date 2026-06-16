@@ -141,7 +141,14 @@ def _render_master(master: dict, now: datetime) -> None:
     snapshot from the master log, and push them into the workbook."""
     today = now.date()
     lq_jobs = live_master.on_queue(master)
-    lq_ops = _plan(master, live_sheets.live_queue_records(lq_jobs, today, ref=now),
+    # "New today" = on the board but NOT in the most recent prior daily snapshot
+    # (same notion the daily report uses), so it survives across watcher restarts.
+    prev, _prev_date = load_latest_snapshot(today)
+    prev_ids = {str(j.get("job")) for j in (prev or []) if j.get("job")}
+    new_today = {str(j.get("job")) for j in lq_jobs
+                 if str(j.get("job")) and str(j.get("job")) not in prev_ids}
+
+    lq_ops = _plan(master, live_sheets.live_queue_records(lq_jobs, today, new_ids=new_today, ref=now),
                    "lq_sig", allow_delete=True)
     oh_ops = _plan(master, live_sheets.order_history_records(live_master.ordered(master), today),
                    "oh_sig", allow_delete=False)

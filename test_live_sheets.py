@@ -143,16 +143,28 @@ def test_line_items_whole_backlog_default():
     assert sum(1 for r in sh.grid[1:] if r) == 3        # 1 + 2 items
 
 
-def test_live_queue_records_keyed_with_dwg_text():
-    j = _job("421000", end_date="06/10/2026", dwg_extras={"51": "x", "35": "x"},
+def test_live_queue_records_no_dwg_and_new_today_fill():
+    j = _job("421000", end_date="12/31/2026", dwg_extras={"51": "x", "35": "x"},
              _carried_over=False, _first_seen="2026-06-16T09:14:00")
-    recs = ls.live_queue_records([j], TODAY)
+    recs = ls.live_queue_records([j], TODAY, new_ids={"421000"})
     assert len(recs) == 1
     key, cells = recs[0]
     assert key == "421000"
     # Job # sits at the key column (1-based) — confirm the index lines up.
     assert cells[ls.LIVE_QUEUE_KEY_COL - 1].value == "421000"
-    assert cells[-1].value == "-35, -51"          # compact DWG column, numeric order
+    # Custom DWGs is no longer on Live Queue (Order History only).
+    assert "Custom DWGs" not in ls.LIVE_QUEUE_HEADERS
+    assert len(cells) == len(ls.LIVE_QUEUE_HEADERS)
+    # new_ids drives the new-today highlight (no urgency on a far-future date).
+    assert any(c.fill == FILL_NEW for c in cells)
+
+
+def test_order_history_still_has_custom_dwgs():
+    orders = [("421000", {"on_queue": True, "added": "2026-06-16T09:00:00",
+                          "left": None, "job": _job("421000", dwg_extras={"51": "x"})})]
+    recs = ls.order_history_records(orders, TODAY)
+    assert ls.ORDER_HISTORY_HEADERS[-1] == "Custom DWGs"
+    assert recs[0][1][-1].value == "-51"
 
 
 def test_order_history_records_flag_and_dates():

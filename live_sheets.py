@@ -345,7 +345,7 @@ LINE_ITEM_HEADERS = ["Job #", "Customer", "CO#", "Tags", "Item (as printed)",
 # report). A record is (order#, [Cell, ...]); the renderer writes/append/      #
 # updates the row whose key matches.                                          #
 # --------------------------------------------------------------------------- #
-LIVE_QUEUE_HEADERS = ["Added"] + list(QUEUE_HEADERS) + ["Custom DWGs"]
+LIVE_QUEUE_HEADERS = ["Added"] + list(QUEUE_HEADERS)          # Custom DWGs lives on Order History only
 LIVE_QUEUE_KEY_COL = 2 + QUEUE_HEADERS.index("Job #")          # 1-based col of Job # (Added is col 1)
 ORDER_HISTORY_HEADERS = ["On Queue", "Added", "Left"] + list(QUEUE_HEADERS) + ["Custom DWGs"]
 ORDER_HISTORY_KEY_COL = 4 + QUEUE_HEADERS.index("Job #")        # 1-based col of Job # (3 lead cols)
@@ -379,18 +379,21 @@ def row_sig(cells: List[Cell]) -> str:
 
 
 def live_queue_records(jobs: List[Dict[str, Any]], today: date,
+                       new_ids: Optional[set] = None,
                        ref: Optional[datetime] = None) -> List:
-    """(order#, cells) per on-board order: Added + every Full Queue column + a
-    compact Custom DWGs column, with urgency/new row fills and hyperlinks."""
+    """(order#, cells) per on-board order: Added + every Full Queue column, with
+    urgency / new-today row fills and hyperlinks. `new_ids` is the set of order
+    numbers that are new today (not in the previous snapshot)."""
+    new_ids = new_ids or set()
     out = []
     for j in jobs:
         added = Cell(added_label(j, ref=ref))
         std = _job_value_cells(j, co_changed=False)
-        fill = _row_fill(j, today, is_new=not j.get("_carried_over", False))
-        cells = [added] + std + [Cell(_dwg_text(j))]
+        fill = _row_fill(j, today, is_new=str(j.get("job") or "") in new_ids)
+        cells = [added] + std
         if fill:
             for c in cells:
-                if c.fill is None:  # don't clobber the DWG/None cells' own intent
+                if c.fill is None:
                     c.fill = fill
         out.append((str(j.get("job") or ""), cells))
     return out
