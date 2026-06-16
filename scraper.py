@@ -186,18 +186,33 @@ def scrape_queue(headless: bool = True) -> List[Dict[str, Any]]:
             raise RuntimeError("Queue list never appeared (no order rows found)." + hint)
 
         containers = page.locator(CONTAINER_SELECTOR).all()
-        log.info("Found %d order rows", len(containers))
 
+        # Diagnostics only — every container is still parsed (behavior
+        # unchanged). The dispatch board is an ASP.NET AJAX list that can leave
+        # previous rows in the DOM (display:none) after a Work Center/filter
+        # change, and a single order can show on more than one operation row.
+        # Logging the visible/hidden split, the page's own "Results" label, and
+        # the distinct-job-number count makes it easy to tell a real over-count
+        # from natural queue churn when a count ever looks off.
+        hidden = sum(1 for c in containers if not c.is_visible())
         expected = _expected_count(page)
+        log.info("Order containers in DOM: %d (visible %d, hidden %d); "
+                 "page 'Results' label: %s",
+                 len(containers), len(containers) - hidden, hidden,
+                 expected if expected is not None else "n/a")
         if expected is not None and expected != len(containers):
-            log.warning("Page reports %d results but parsed %d order rows", expected, len(containers))
+            log.warning("Page reports %d results but parsed %d order rows",
+                        expected, len(containers))
 
         jobs: List[Dict[str, Any]] = []
+        seen: set[str] = set()
         for c in containers:
             job = _parse_container(c)
             if job and job.get("job"):
                 jobs.append(job)
+                seen.add(job["job"])
 
-        log.info("Parsed %d jobs from queue", len(jobs))
+        log.info("Parsed %d jobs from queue (%d distinct job numbers)",
+                 len(jobs), len(seen))
         browser.close()
         return jobs
