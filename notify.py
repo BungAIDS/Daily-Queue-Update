@@ -116,9 +116,13 @@ def _messagecard(title: str, summary: str, jobs: List[Dict[str, Any]]) -> Dict[s
     }
 
 
-def _workflow_card(title: str, jobs: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _workflow_card(title: str, summary: str, jobs: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Adaptive Card wrapped for the Workflows ('Post to a channel when a webhook
-    request is received') trigger — Microsoft's replacement for the connector."""
+    request is received') trigger — Microsoft's replacement for the connector.
+
+    `summary` is also set as the message-level `text`/`summary` so Teams has real
+    text to show in the pop-up banner — a card alone leaves the banner generic
+    (it just shows the channel/flow name)."""
     body: List[Dict[str, Any]] = [
         {"type": "TextBlock", "text": title, "weight": "Bolder", "size": "Medium", "wrap": True}
     ]
@@ -134,6 +138,8 @@ def _workflow_card(title: str, jobs: List[Dict[str, Any]]) -> Dict[str, Any]:
         "body": body,
     }
     return {"type": "message",
+            "summary": summary,
+            "text": summary,
             "attachments": [{"contentType": "application/vnd.microsoft.card.adaptive",
                              "content": card}]}
 
@@ -153,7 +159,7 @@ def teams_post(title: str, summary: str, jobs: List[Dict[str, Any]]) -> None:
     if not TEAMS_WEBHOOK_URL:
         return
     workflow = _is_workflow_url(TEAMS_WEBHOOK_URL)
-    card = _workflow_card(title, jobs) if workflow else _messagecard(title, summary, jobs)
+    card = _workflow_card(title, summary, jobs) if workflow else _messagecard(title, summary, jobs)
     req = urllib.request.Request(
         TEAMS_WEBHOOK_URL, data=json.dumps(card).encode("utf-8"),
         headers={"Content-Type": "application/json"},
@@ -183,16 +189,20 @@ def notify_new_orders(jobs: List[Dict[str, Any]]) -> None:
     if n == 1:
         j = jobs[0]
         title = f"New order {j.get('job', '')}"
-        line = " — ".join(
+        tail = " — ".join(
             p for p in (j.get("customer", ""), j.get("so_design_desc") or j.get("design", "")) if p
         )
-        toast(title, line or "New order on the queue")
+        # One-liner reused for the toast body, the Teams banner, and the header
+        # line above the card.
+        summary = f"New order {j.get('job', '')}" + (f" — {tail}" if tail else "")
+        toast(title, tail or "New order on the queue")
     else:
         title = f"{n} new orders"
+        summary = f"{n} new orders: " + ", ".join(str(j.get("job", "")) for j in jobs)
         toast(title, ", ".join(str(j.get("job", "")) for j in jobs))
 
     teams_post(
         title=f"{n} new order{'s' if n != 1 else ''} on the queue",
-        summary=f"{n} new order(s)",
+        summary=summary,
         jobs=jobs,
     )
