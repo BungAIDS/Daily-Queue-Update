@@ -95,8 +95,12 @@ def _summarize(fields: Dict[str, str]) -> str:
 
 
 def parse_drive_run_pdf(path: str | Path) -> Dict[str, Any]:
-    """Best-effort, never-raises extraction of a drive-run PDF."""
-    res: Dict[str, Any] = {"fields": {}, "raw_lines": [], "summary": ""}
+    """Best-effort, never-raises extraction of a drive-run PDF.
+
+    Returns generic key/value `fields`, the first `raw_lines`, a `summary`, and
+    `text` — the FULL reconstructed text, so a caller can recognize a structured
+    layout (e.g. the selection-program Qt Run) and parse it properly."""
+    res: Dict[str, Any] = {"fields": {}, "raw_lines": [], "summary": "", "text": ""}
     try:
         import pdfplumber
     except ImportError:
@@ -104,18 +108,18 @@ def parse_drive_run_pdf(path: str | Path) -> Dict[str, Any]:
         return res
     try:
         fields: Dict[str, str] = {}
-        raw_lines: List[str] = []
+        all_lines: List[str] = []
         with pdfplumber.open(str(path)) as pdf:
             for page in pdf.pages:
                 lines = _recon_lines(page)
-                if len(raw_lines) < 40:
-                    raw_lines.extend(lines[: 40 - len(raw_lines)])
+                all_lines.extend(lines)
                 for k, v in _kv_from_lines(lines).items():
                     fields.setdefault(k, v)
                 for k, v in _kv_from_tables(page.extract_tables()).items():
                     fields.setdefault(k, v)
         res["fields"] = fields
-        res["raw_lines"] = raw_lines
+        res["raw_lines"] = all_lines[:40]
+        res["text"] = "\n".join(all_lines)
         res["summary"] = _summarize(fields)
     except Exception as e:  # noqa: BLE001 - never let a bad pdf fail the run
         log.warning("Could not parse drive-run pdf %s: %s", path, e)

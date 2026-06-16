@@ -341,6 +341,20 @@ def _cb_summary(fields: Dict[str, str]) -> str:
     return "; ".join(parts)
 
 
+# The header that marks the CBC selection-program "Qt Run" layout — the
+# structured dump the parser above understands. It shows up the same whether the
+# run was saved as .txt, .docx, or .pdf, so any of those can route to that
+# parser. (It does NOT mean "is this Chicago Blower" — every run here is; it
+# means "is this the selection-program output" vs. some other doc that merely
+# matched the file name, like a vendor quote or a markup.)
+SELECTION_PROGRAM_MARKERS = ("CHICAGO BLOWER", "SN#")
+
+
+def is_selection_program(text: str) -> bool:
+    up = (text or "").upper()
+    return any(m in up for m in SELECTION_PROGRAM_MARKERS)
+
+
 class ChicagoBlowerQtRun(_TextLineMixin, QuoteRunTemplate):
     """The Chicago Blower selection-program "Qt Run" text (header: CHICAGO
     BLOWER CORP. / SN#...). Pulls the fan spec, duty/performance, wheel
@@ -350,7 +364,7 @@ class ChicagoBlowerQtRun(_TextLineMixin, QuoteRunTemplate):
     label = "Chicago Blower Qt Run (text)"
     extensions = frozenset({".txt", ".rtf", ".docx", ".md"})
     name_patterns = (r"qt\s*run", r"quote\s*run")
-    content_markers = ("CHICAGO BLOWER", "SN#")
+    content_markers = SELECTION_PROGRAM_MARKERS
 
     def extract(self, ctx: QuoteRunContext) -> Dict[str, Any]:
         text = ctx.text()
@@ -415,8 +429,10 @@ class D64WheelConstruction(QuoteRunTemplate):
 
 
 class PdfQuoteRun(QuoteRunTemplate):
-    """Any `.pdf` run (HDX and others file the construction run as a PDF). Reuses
-    the position-aware PDF extraction in `drive_run.py`."""
+    """Any `.pdf` run. The same selection-program Qt Run is sometimes saved as a
+    PDF, so if the extracted text carries the Qt Run header we parse it with the
+    full Qt Run field set; otherwise we fall back to generic key/value (a vendor
+    quote, a markup, etc.). Uses the position-aware extraction in `drive_run.py`."""
     key = "pdf"
     label = "Quote run (pdf)"
     extensions = frozenset({".pdf"})
@@ -424,6 +440,12 @@ class PdfQuoteRun(QuoteRunTemplate):
     def extract(self, ctx: QuoteRunContext) -> Dict[str, Any]:
         from drive_run import parse_drive_run_pdf
         r = parse_drive_run_pdf(ctx.path)
+        text = r.get("text", "")
+        if is_selection_program(text):
+            fields = _parse_chicago_blower(text)
+            if fields:
+                return {"fields": fields, "raw_lines": r.get("raw_lines", []),
+                        "summary": _cb_summary(fields)}
         return {"fields": r.get("fields", {}), "raw_lines": r.get("raw_lines", [])}
 
 

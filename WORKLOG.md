@@ -3,6 +3,24 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-16 — Text PDFs parse as Qt Runs
+
+After the rescan (unknown 55→18, CB text 250→265), the ~85 text-bearing PDF
+runs were still going through the *generic* key/value sweep. But they're the
+same CBC selection-program Qt Run, just saved as PDF (DG: "these are all
+technically chicago blower runs" — the `CHICAGO BLOWER`/`SN#` header marks the
+*selection-program layout*, not a CB-vs-other distinction). So:
+
+- `drive_run.parse_drive_run_pdf` now also returns the FULL extracted `text`.
+- `PdfQuoteRun.extract`: if that text carries the Qt Run header
+  (`is_selection_program`, shared `SELECTION_PROGRAM_MARKERS`), parse it with
+  the full `_parse_chicago_blower` field set; otherwise keep generic key/value
+  (vendor quotes, markups, etc.). Routing tested by stubbing the PDF text
+  extraction (pdfplumber can't run in the sandbox) — 2 new tests.
+
+So the same Qt Run now yields the same fields whether it's `.txt`, `.docx`, or
+`.pdf`. Re-run `quote_run_scan.py --rescan` to upgrade the stored PDF rows.
+
 ## 2026-06-15 — First full backlog sweep + refinements
 
 DG ran `quote_run_scan.py` over the whole Z: tree: **12,873 jobs in ~22 min,

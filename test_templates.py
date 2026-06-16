@@ -84,8 +84,50 @@ def test_match_qt_run_text():
     assert match_template(QuoteRunContext("123 Quote Run.rtf")).key == "qt_run_text"
 
 
+def test_pdf_selection_program_routes_to_qt_run_parser(tmp: Path):
+    # A selection-program Qt Run saved as PDF: the PDF reader hands us the text,
+    # and (because the header is present) we parse it with the full Qt Run field
+    # set, not the generic key/value sweep. pdfplumber can't run here, so stub
+    # the PDF text extraction and check the routing + parse.
+    import drive_run
+    p = tmp / "421572_300-25-3241 QT Run.pdf"
+    p.write_bytes(b"%PDF-1.7 stub")
+    orig = drive_run.parse_drive_run_pdf
+    drive_run.parse_drive_run_pdf = lambda path: {
+        "fields": {"Stray": "generic"}, "raw_lines": REAL_CBC_QT_RUN_421572.splitlines()[:40],
+        "summary": "", "text": REAL_CBC_QT_RUN_421572,
+    }
+    try:
+        r = parse_quote_run(p)
+    finally:
+        drive_run.parse_drive_run_pdf = orig
+    assert r["template"] == "pdf"                      # matched by extension
+    assert r["fields"]["Size"] == "19"                 # but parsed as a Qt Run
+    assert r["fields"]["Liner Material"] == "PLAIN FIRMEX"
+    assert "Stray" not in r["fields"]                  # generic KV not used
+    assert r["summary"].startswith("Size=19")
+
+
+def test_pdf_non_selection_program_keeps_generic(tmp: Path):
+    # A PDF that isn't the Qt Run layout (no header) keeps the generic fields.
+    import drive_run
+    p = tmp / "vendor quote run.pdf"
+    p.write_bytes(b"%PDF-1.7 stub")
+    orig = drive_run.parse_drive_run_pdf
+    drive_run.parse_drive_run_pdf = lambda path: {
+        "fields": {"Vendor": "Acme", "Total": "$5"}, "raw_lines": ["Vendor: Acme"],
+        "summary": "Vendor=Acme", "text": "VENDOR QUOTE\nVendor: Acme\nTotal: $5\n",
+    }
+    try:
+        r = parse_quote_run(p)
+    finally:
+        drive_run.parse_drive_run_pdf = orig
+    assert r["template"] == "pdf"
+    assert r["fields"] == {"Vendor": "Acme", "Total": "$5"}   # generic KV preserved
+
+
 def test_match_pdf_wins_for_pdf():
-    # Any .pdf run is read by the PDF template (delegates to drive_run).
+    # Any .pdf run is read by the PDF template (matched by extension).
     assert match_template(QuoteRunContext("421473_Quote-34592.pdf")).key == "pdf"
     assert match_template(QuoteRunContext("some construction run.pdf")).key == "pdf"
 
