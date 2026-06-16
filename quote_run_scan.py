@@ -21,6 +21,7 @@ Usage:
     python quote_run_scan.py --range 420000 421999
     python quote_run_scan.py --list jobs.txt     # job numbers from a file
     python quote_run_scan.py --rescan            # ignore saved progress, redo all
+    python quote_run_scan.py --reparse-attention # redo only jobs flagged "needs attention"
     python quote_run_scan.py --limit 500
 
 Outputs (under BACKLOG_DIR):
@@ -240,6 +241,9 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ap.add_argument("--root", default=str(AUTOCAD_JOBS_DIR), help="AutoCAD jobs root.")
     ap.add_argument("--out", default=str(WORKBOOK_PATH), help="Excel output path.")
     ap.add_argument("--rescan", action="store_true", help="Ignore saved progress; redo every job.")
+    ap.add_argument("--reparse-attention", action="store_true",
+                    help="Re-parse only the jobs whose saved results currently need attention "
+                         "(any run not flagged OK). Fast way to re-check failures after a parser fix.")
     ap.add_argument("--limit", type=int, default=0,
                     help="Stop after scanning N folders this run (0 = no limit).")
     ap.add_argument("--min-job", type=int, default=DEFAULT_MIN_JOB,
@@ -265,6 +269,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         except OSError as e:
             log.error("Could not read --list file %s (%s)", args.list, e)
             return 1
+    if args.reparse_attention:
+        attention = sorted({
+            rec.get("job", "") for rec in records.values()
+            if any(run.get("status") != "OK" for run in rec.get("runs", []))
+        } - {""})
+        if attention:
+            log.info("Re-parsing %d job(s) flagged as needing attention.", len(attention))
+            jobs += attention
+        elif not jobs:
+            log.info("Nothing currently needs attention — no jobs to re-parse.")
+            return 0
+    jobs = list(dict.fromkeys(jobs))  # dedupe, keep order
+
     min_job, max_job = args.min_job, args.max_job
     if args.range:
         min_job, max_job = args.range
