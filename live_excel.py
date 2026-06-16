@@ -56,7 +56,9 @@ _FONT = {
     "red": ("C00000", True, False, None),
 }
 
-SHEET_ORDER = ["Live Queue", "Changes", "History", "Line Items"]
+# "History" is a RESERVED worksheet name in Excel (shared-workbook change
+# tracking), so the archived-orders tab is "Order History".
+SHEET_ORDER = ["Live Queue", "Changes", "Order History", "Line Items"]
 
 # Last-rendered fingerprint per sheet, so a tab is only repainted when its
 # content actually changed — otherwise a coworker's active filter/scroll on that
@@ -89,7 +91,13 @@ def _get_excel():
         app = win32com.client.GetActiveObject("Excel.Application")
     except Exception:  # noqa: BLE001 - not running; launch it
         app = win32com.client.Dispatch("Excel.Application")
-    app.Visible = True
+    # Best-effort: when Excel is busy (co-authoring sync, a dialog, you typing in
+    # a cell) setting Visible is rejected. It's only a nicety, so never let it
+    # abort the update — Excel is already visible if it was running.
+    try:
+        app.Visible = True
+    except Exception:  # noqa: BLE001
+        pass
     return app
 
 
@@ -113,7 +121,16 @@ def _get_or_make_sheet(wb, name: str):
         if s.Name == name:
             return s
     ws = wb.Worksheets.Add(After=wb.Worksheets(wb.Worksheets.Count))
-    ws.Name = name
+    try:
+        ws.Name = name
+    except Exception:  # noqa: BLE001 - invalid/reserved name; don't leave a stray
+        try:
+            ws.Application.DisplayAlerts = False
+            ws.Delete()
+            ws.Application.DisplayAlerts = True
+        except Exception:  # noqa: BLE001
+            pass
+        raise
     return ws
 
 

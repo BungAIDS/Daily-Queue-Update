@@ -182,7 +182,8 @@ the daily report does, kept current all day:
 - **Changes** — two date-labeled groups: **since this morning** (intraday: new
   arrivals with their Added time, removed/completed, field changes vs the frozen
   start-of-day baseline) and **vs yesterday** (the previous run's date).
-- **History** — archived orders (dropped off the queue), newest first, + the DWG matrix.
+- **Order History** — archived orders (dropped off the queue), newest first, +
+  the DWG matrix. (Named "Order History" because Excel reserves the name "History".)
 - **Line Items** — one row per order × **normalized** Sales-Order line item,
   across the **whole backlog** (every order in the line-items store, not just
   today's board); AutoFilter the **Normalized** column by an item name ("shaft

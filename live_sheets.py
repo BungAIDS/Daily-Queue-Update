@@ -303,7 +303,7 @@ def changes_sheet(
 # --------------------------------------------------------------------------- #
 # History                                                                      #
 # --------------------------------------------------------------------------- #
-def history_sheet(history: Dict[str, Any], name: str = "History") -> Sheet:
+def history_sheet(history: Dict[str, Any], name: str = "Order History") -> Sheet:
     """Archived orders (left the queue, not yet returned), newest departure
     first, with the DWG matrix appended like the Full Queue."""
     entries = sorted((history or {}).values(),
