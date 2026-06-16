@@ -187,6 +187,23 @@ LIVE_TOAST_ENABLED = (os.environ.get("LIVE_TOAST", "1").strip().lower()
 LIVE_MORNING_SNAPSHOT = (os.environ.get("LIVE_MORNING_SNAPSHOT", "1").strip().lower()
                          not in ("0", "false", "no", "off", ""))
 
+# The shareable WEB link to the live co-authored workbook (OneDrive/SharePoint
+# "Copy link"). The daily 5 AM email sends this as an active link so the team
+# opens the live sheet rather than a stale attachment. Blank = the email falls
+# back to attaching the dated report.
+LIVE_WORKBOOK_LINK = (os.environ.get("LIVE_WORKBOOK_LINK") or "").strip()
+
+# Whether the daily email still attaches the dated .xlsx report. Default off when
+# a live link is set (the link is the point); on otherwise so you still get the
+# file. Set EMAIL_ATTACH_REPORT=1/0 to force it either way.
+_attach_raw = (os.environ.get("EMAIL_ATTACH_REPORT") or "").strip().lower()
+if _attach_raw in ("1", "true", "yes", "on"):
+    EMAIL_ATTACH_REPORT = True
+elif _attach_raw in ("0", "false", "no", "off"):
+    EMAIL_ATTACH_REPORT = False
+else:
+    EMAIL_ATTACH_REPORT = not LIVE_WORKBOOK_LINK
+
 
 def validate_runtime_config() -> None:
     """Fail fast for the daily run if required settings are missing.

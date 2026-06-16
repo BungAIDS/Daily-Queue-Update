@@ -1,0 +1,143 @@
+"""Tests for the live master workbook's pure sheet model (live_sheets.py).
+
+No pytest — run directly:
+
+    python test_live_sheets.py
+
+Checks the content/formatting intent of each tab (Live Queue, Changes, History,
+Line Items) without any Excel/COM dependency.
+"""
+from __future__ import annotations
+
+import sys
+from datetime import date
+
+import live_sheets as ls
+from live_sheets import (FILL_DWG_NO, FILL_DWG_YES, FILL_NEW, FILL_OVERDUE,
+                         F_LINK, F_SECTION)
+
+TODAY = date(2026, 6, 16)
+
+
+def _job(num, **kw):
+    j = {"job": num, "item": "47-0-0000", "design": "47", "customer": "ACME CORP",
+         "end_date": "06/20/2026", "total_price": "$1,000.00", "so_pdf": "",
+         "dwg_extras": {}, "job_folder": ""}
+    j.update(kw)
+    return j
+
+
+def _find(sheet, text):
+    for r, row in enumerate(sheet.grid):
+        for c, cell in enumerate(row):
+            if str(cell.value).startswith(text):
+                return r, c
+    return None
+
+
+def test_full_queue_headers_and_added_column():
+    sh = ls.full_queue_sheet([_job("421000")], TODAY)
+    assert sh.grid[0][0].value == "Added"
+    assert sh.grid[0][1].value == "Job #"          # first standard column
+    assert sh.name == "Live Queue"
+    assert sh.autofilter_a1 and sh.freeze == "C2"
+
+
+def test_full_queue_overdue_fill_and_job_link():
+    j = _job("421000", end_date="06/10/2026", so_pdf="Z:\\SO\\421000.pdf")
+    sh = ls.full_queue_sheet([j], TODAY)
+    job_cell = sh.grid[1][1]                        # Added is col0, Job# is col1
+    assert job_cell.value == "421000"
+    assert job_cell.link == "Z:\\SO\\421000.pdf" and job_cell.font == F_LINK
+    # End Date in the past -> overdue fill on the standard cells.
+    assert sh.grid[1][1].fill == FILL_OVERDUE
+
+
+def test_full_queue_new_fill_and_added_label():
+    j = _job("421001", end_date="12/31/2026",
+             _carried_over=False, _first_seen="2026-06-16T09:14:00")
+    sh = ls.full_queue_sheet([j], TODAY, new_ids={"421001"})
+    assert sh.grid[1][0].value.endswith("AM") or sh.grid[1][0].value.endswith("PM")
+    assert sh.grid[1][1].fill == FILL_NEW          # new, no urgency
+
+
+def test_full_queue_dwg_matrix():
+    a = _job("421000", dwg_extras={"51": "x"})
+    b = _job("421001", dwg_extras={})
+    sh = ls.full_queue_sheet([a, b], TODAY)
+    # Header has a "-51" column at the end; rows show ✓/green and blank/red.
+    pos = _find(sh, "-51")
+    assert pos is not None and pos[0] == 0
+    col = pos[1]
+    assert sh.grid[1][col].value == "✓" and sh.grid[1][col].fill == FILL_DWG_YES
+    assert sh.grid[2][col].value == "" and sh.grid[2][col].fill == FILL_DWG_NO
+
+
+def test_full_queue_footer_total():
+    sh = ls.full_queue_sheet([_job("421000", total_price="$1,000.00"),
+                              _job("421001", total_price="$2,500.00")], TODAY)
+    pos = _find(sh, "Total jobs: 2")
+    assert pos is not None and sh.grid[pos[0]][pos[1]].font == F_SECTION
+    # The money total lives on the footer row at the Total Price column.
+    total_cells = [c for c in sh.grid[pos[0]] if isinstance(c.value, (int, float)) and c.value]
+    assert any(abs(c.value - 3500.0) < 0.001 for c in total_cells)
+
+
+def test_changes_both_groups_and_added():
+    intraday = {"new": [_job("421001", _carried_over=False,
+                             _first_seen="2026-06-16T09:14:00")],
+                "returning": [], "removed": [], "changed": []}
+    yesterday = {"new": [], "returning": [], "removed": [_job("420900")],
+                 "changed": [{"job": "420800", "customer": "X",
+                              "changes": [("end_date", "06/01/2026", "06/05/2026")]}]}
+    sh = ls.changes_sheet(intraday, "2026-06-16 (this morning)", yesterday, "2026-06-15")
+    assert _find(sh, "Changes since this morning — baseline 2026-06-16") is not None
+    assert _find(sh, "Changes vs yesterday — 2026-06-15") is not None
+    assert _find(sh, "New orders (1)") is not None
+    assert _find(sh, "Removed / completed (1)") is not None
+    assert _find(sh, "Orders that changed (1)") is not None
+
+
+def test_history_sheet():
+    hist = {"420000": {"last_seen": "2026-06-10",
+                       "snapshot": _job("420000", dwg_extras={"35": "x"})}}
+    sh = ls.history_sheet(hist)
+    assert sh.grid[0][0].value == "Job #"
+    assert "Last Seen" in [c.value for c in sh.grid[0]]
+    assert sh.grid[1][0].value == "420000"
+
+
+def test_line_items_sheet_search_rows():
+    store = {"jobs": {"421000": {
+        "customer": "ACME CORP", "co_number": 1, "so_pdf": "Z:\\SO\\421000.pdf",
+        "items": [
+            {"raw": "SS SHAFT SLEEVE", "norm": "STAINLESS STEEL SHAFT SLEEVE",
+             "tags": ["SHAFT SEAL"], "details": ["VENDOR X"], "qty": "1",
+             "price": "$5", "section": "ACCESSORIES"},
+            {"raw": "TEFLON SEAL", "norm": "TEFLON SEAL", "tags": ["SHAFT SEAL"],
+             "details": [], "qty": "1", "price": "$3", "section": ""},
+        ]}}}
+    sh = ls.line_items_sheet(store, order_nums=["421000"])
+    assert sh.grid[0] == sh.grid[0]  # header present
+    assert sh.grid[0][5].value == "Normalized"          # the searchable column
+    # Two item rows for the one order.
+    body = [r for r in sh.grid[1:] if r and r[0].value == "421000"]
+    assert len(body) == 2
+    assert body[0][5].value == "STAINLESS STEEL SHAFT SLEEVE"
+    assert sh.grid[1][10].font == F_LINK                 # SO PDF link
+    assert sh.autofilter_a1 is not None
+
+
+def main() -> int:
+    passed = 0
+    for name, fn in sorted(globals().items()):
+        if name.startswith("test_") and callable(fn):
+            fn()
+            print(f"  ok  {name}")
+            passed += 1
+    print(f"\n{passed} tests passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

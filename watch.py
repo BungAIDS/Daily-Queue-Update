@@ -34,13 +34,16 @@ import sys
 import time
 from datetime import date, datetime, time as dtime, timedelta
 
+import line_items
+import live_sheets
 import live_state
 import notify
-from compare import load_latest_snapshot, load_snapshot
+from compare import diff_queues, load_history, load_latest_snapshot, load_snapshot
 from config import (LIVE_MORNING_SNAPSHOT, LIVE_WORKBOOK_PATH, OUTPUT_DIR,
                     POLL_INTERVAL_SECONDS, WATCH_END, WATCH_START,
                     validate_runtime_config)
-from live_excel import added_label, save_morning_copy, update_live_sheet
+from live_excel import save_morning_copy, update_workbook
+from live_sheets import added_label
 from sales_orders import enrich_with_sales_orders
 from scraper import scrape_queue
 
@@ -96,8 +99,36 @@ def _enrich_pending(state: dict) -> list:
     return pending
 
 
+def _build_sheets(state: dict, present: list, today: date, now: datetime) -> list:
+    """Assemble the four master tabs from the current board + on-disk baselines.
+    All present orders are already enriched, so the full Full-Queue data is in
+    hand — these builders just shape it (live_sheets is pure/tested)."""
+    # Highlight every order that arrived during today's watch (not carried over).
+    new_ids = {jn for jn, e in state.items()
+               if e.get("present") and not e.get("carried_over")}
+
+    # Changes since this morning's frozen baseline, and vs the previous run.
+    baseline = live_state.load_baseline(today)
+    intraday = diff_queues(present, baseline, today, persist_history=False, prev_date=today)
+    yest, yest_date = load_latest_snapshot(today)
+    yesterday = diff_queues(present, yest, today, persist_history=False, prev_date=yest_date)
+    co_changed_ids = ({c["job"] for c in intraday.get("co_changed", [])}
+                      | {c["job"] for c in yesterday.get("co_changed", [])})
+
+    store = line_items.load_store()
+    return [
+        live_sheets.full_queue_sheet(present, today, new_ids=new_ids,
+                                     co_changed_ids=co_changed_ids, ref=now),
+        live_sheets.changes_sheet(
+            intraday, f"{today.isoformat()} (start of day)",
+            yesterday, yest_date.isoformat() if yest_date else "no prior run"),
+        live_sheets.history_sheet(load_history()),
+        live_sheets.line_items_sheet(store, order_nums=[j.get("job") for j in present]),
+    ]
+
+
 def poll_once(state: dict, now: datetime, baseline: bool, announce: bool) -> dict:
-    """One cycle: scrape -> record -> enrich new -> write live sheet -> notify.
+    """One cycle: scrape -> record -> enrich new -> write the master tabs -> notify.
     Mutates `state`; returns the deltas dict from record_poll."""
     board = scrape_queue(headless=True)
     if not board:
@@ -110,16 +141,21 @@ def poll_once(state: dict, now: datetime, baseline: bool, announce: bool) -> dic
              len(deltas["new"]), len(deltas["returning"]), len(deltas["removed"]))
 
     _enrich_pending(state)
+    present = live_state.present_jobs(state)
 
-    rows = live_state.present_jobs(state)
+    # Freeze the start-of-day baseline (enriched) on the first poll, so the
+    # 'changes since this morning' view has stable morning values to diff against.
+    if baseline:
+        live_state.save_baseline(present, today=now.date())
+
     if LIVE_WORKBOOK_PATH:
-        update_live_sheet(rows, LIVE_WORKBOOK_PATH)
+        update_workbook(_build_sheets(state, present, now.date(), now), LIVE_WORKBOOK_PATH)
     else:
         log.warning("LIVE_WORKBOOK_PATH not set — live workbook not updated. "
                     "Set it in .env to the co-authored workbook's local path.")
 
     if announce and deltas["new"]:
-        fresh = [j for j in rows if j.get("job") in set(deltas["new"])]
+        fresh = [j for j in present if j.get("job") in set(deltas["new"])]
         for j in fresh:
             j["_added_label"] = added_label(j, ref=now)
         notify.notify_new_orders(fresh)

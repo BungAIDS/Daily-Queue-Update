@@ -3,6 +3,37 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-16 — Live workbook becomes the master (4 tabs) + email link
+
+DG wants the live co-authored workbook to be the team's master sheet, not a
+stripped board. Built the full multi-tab master, all written through Excel COM:
+
+- **`live_sheets.py`** — a PURE model layer (`Cell`/`Sheet` with named style
+  intents) that builds each tab, reusing `excel_writer`'s COLUMNS + label helpers
+  and `compare.diff_queues` so the live master and the daily report can't drift.
+  Tabs: **Live Queue** (Added col + every Full Queue column + DWG matrix + date/
+  new fills + hyperlinks + totals + AutoFilter), **Changes** (two date-labeled
+  groups — since this morning's frozen baseline, and vs yesterday), **History**,
+  **Line Items** (one row per order×normalized item; AutoFilter the Normalized
+  column to find orders — the in-workbook `find_orders`). 8 tests in
+  `test_live_sheets.py` (added to CI).
+- **`live_excel.py`** — rewritten as a GENERIC renderer: bulk-write values, then
+  map named fills/fonts to Excel BGR colors, add hyperlinks, freeze, AutoFilter,
+  autofit. A per-tab fingerprint cache repaints a tab only when its content
+  changed, so a coworker's active filter/scroll isn't reset every cycle.
+- **`watch.py`** — each cycle builds all four sheet models and calls
+  `update_workbook`. Freezes an enriched start-of-day baseline
+  (`live_baseline_<date>.json`) on the first poll for the intraday diff.
+- **Email** — `emailer` now leads with an active `LIVE_WORKBOOK_LINK` and writes
+  dates in full ("Tuesday, June 16, 2026" / "vs Monday, June 15, 2026"). The
+  dated `queue_<date>.xlsx` is still saved for the archive; attach it only with
+  `EMAIL_ATTACH_REPORT=1`. `compare.diff_queues` now returns `prev_date`.
+
+Still Windows-only for the COM/notify paths (untestable in the sandbox); the
+pure sheet model + diff are what's tested. NOTE: the "Features" column on the
+board is kept as a quick tag summary; the real per-item detail is the new Line
+Items tab.
+
 ## 2026-06-16 — Live intraday watcher (queue stays fresh all day)
 
 The queue went stale between 5 AM runs. New `watch.py` keeps a **co-authored

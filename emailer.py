@@ -10,7 +10,10 @@ import logging
 from pathlib import Path
 from typing import Any, Dict
 
-from config import EMAIL_TO, EMAIL_ALERT_TO
+from datetime import date
+
+from config import (EMAIL_TO, EMAIL_ALERT_TO, EMAIL_ATTACH_REPORT,
+                   LIVE_WORKBOOK_LINK)
 
 log = logging.getLogger(__name__)
 
@@ -32,17 +35,33 @@ def _send(to_addr: str, subject: str, body: str, attachment: Path | None = None)
     log.info("Sent email via Outlook to %s: %s", to_addr, subject)
 
 
+def _pretty_date(iso: str) -> str:
+    """'2026-06-16' -> 'Tuesday, June 16, 2026'; pass anything else through."""
+    try:
+        return date.fromisoformat(iso).strftime("%A, %B %d, %Y")
+    except (ValueError, TypeError):
+        return iso
+
+
 def send_daily_briefing(
     briefing: Dict[str, Any],
     diff: Dict[str, Any],
     excel_path: Path,
     today_str: str,
 ) -> None:
-    lines = []
+    today_pretty = _pretty_date(today_str)
+    prev_pretty = _pretty_date(diff.get("prev_date", "")) if diff.get("prev_date") else ""
+
+    lines = [f"Queue briefing for {today_pretty}.", ""]
+    # The live sheet is the headline: an always-current, co-authored workbook.
+    if LIVE_WORKBOOK_LINK:
+        lines.append(f"LIVE queue (updates all day): {LIVE_WORKBOOK_LINK}")
+        lines.append("")
     lines.append(briefing.get("briefing", "(no briefing available)"))
     lines.append("")
+    vs = f" (vs {prev_pretty})" if prev_pretty else ""
     lines.append(
-        f"Counts:  new={len(diff['new'])}  returning={len(diff.get('returning', []))}  "
+        f"Changes{vs}:  new={len(diff['new'])}  returning={len(diff.get('returning', []))}  "
         f"removed={len(diff['removed'])}  changed={len(diff['changed'])}  "
         f"lingering(3+ days)={len(diff['persistent'])}"
     )
@@ -65,9 +84,15 @@ def send_daily_briefing(
             lines.append(f"  - {a}")
         lines.append("")
 
-    lines.append(f"Excel report (also attached): {excel_path}")
+    # The dated .xlsx is always saved to disk for the archive; attach it only
+    # when configured (default: off once a live link is set — the link is the
+    # point), but always note where the archived copy lives.
+    attachment = excel_path if EMAIL_ATTACH_REPORT else None
+    label = "attached; archived at" if EMAIL_ATTACH_REPORT else "archived at"
+    lines.append(f"Dated report ({label}): {excel_path}")
 
-    _send(EMAIL_TO, f"Daily Queue Briefing — {today_str}", "\n".join(lines), attachment=excel_path)
+    _send(EMAIL_TO, f"Daily Queue Briefing — {today_pretty}", "\n".join(lines),
+          attachment=attachment)
 
 
 def send_alert(subject_suffix: str, error_text: str) -> None:

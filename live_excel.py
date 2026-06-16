@@ -1,117 +1,88 @@
-"""Write the live queue into your co-authored Excel workbook by driving the
-desktop Excel app through COM — the same no-password, use-the-signed-in-app
-trick emailer.py uses for Outlook.
+"""Render the live master workbook by driving the desktop Excel app through COM —
+the same no-password, use-the-signed-in-app trick emailer.py uses for Outlook.
 
 Why COM and not openpyxl: the daily report (excel_writer.py) is written with
-openpyxl, which *replaces the whole file*. That can't touch a Microsoft 365
-co-authored workbook without kicking everyone out / conflicting. Driving the
-real Excel application means edits flow through Excel itself — it syncs them to
-OneDrive/SharePoint, so coworkers see them appear live (cursors and all), and
-there's no file-lock fight because we're not writing the file out of band.
+openpyxl, which *replaces the whole file* — that can't touch a Microsoft 365
+co-authored workbook without kicking everyone out / conflicting. Driving the real
+Excel application means edits flow through Excel itself, which syncs them to
+OneDrive/SharePoint so coworkers see them live (cursors and all).
 
-Requirements (Windows): Excel installed and signed into the same Microsoft 365
-account, with the workbook stored in OneDrive/SharePoint. The watcher PC keeps
-Excel running 5am-5pm; this module attaches to that running instance (opening
-the workbook if it isn't already).
+What it writes: one worksheet per `live_sheets.Sheet` model (Live Queue, Changes,
+History, Line Items). The *content* lives in live_sheets.py (pure, tested); this
+module is the generic renderer — bulk-write the values, then map each cell's
+named fill/font to real Excel colors, add hyperlinks, freeze panes, and
+AutoFilter. The named styles mirror excel_writer so the live master and the daily
+report look the same.
 
 Everything is lazy-imported and best-effort: a failed Excel update logs and the
-poll cycle carries on (the state + notifications still happen).
+poll cycle carries on (state + notifications still happen).
 """
 from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional
 
-# These are plain helpers (no Excel/openpyxl side effects at call time); reuse
-# them so the live sheet labels match the daily report exactly.
-from excel_writer import _co_label, _drive_run_label, _flags_str, _parse_money
+from live_sheets import Sheet
 
 log = logging.getLogger(__name__)
 
-# Live-sheet columns: (header, key). "Added" leads so the newest arrivals — which
-# present_jobs sorts to the top — are read first. A handful of special keys are
-# rendered below in _cell_value; the rest print the job field verbatim.
-LIVE_COLUMNS: List[Tuple[str, str]] = [
-    ("Added", "_added"),
-    ("Job #", "job"),
-    ("CO#", "_co"),
-    ("Quote Run", "_drive_run"),
-    ("Oper", "oper"),
-    ("Design", "design"),
-    ("Description", "so_design_desc"),
-    ("Size", "so_size"),
-    ("Arrangement", "so_arrangement"),
-    ("Features", "line_item_tags"),
-    ("Customer", "customer"),
-    ("Primary Rep", "primary_rep"),
-    ("Assigned To", "assigned_to"),
-    ("Checker", "checker"),
-    ("Start Date", "start_date"),
-    ("End Date", "end_date"),
-    ("FanNet Date", "fannet_date"),
-    ("Plan Hrs", "plan_hrs"),
-    ("Total Price", "_money"),
-    ("Ship With", "ship_with"),
-    ("Note", "status_note"),
-    ("Flags", "_flags"),
-    ("Status", "status"),
-]
-
-SHEET_NAME = "Live Queue"
-_HEADER_BG = 0x965430   # excel_writer's header blue (305496) as Excel BGR
-_NEW_BG = 0xCEF0C6      # light green for orders added during today's watch (BGR)
-_WHITE = 0xFFFFFF
+_XL_UNDERLINE_SINGLE = 2  # xlUnderlineStyleSingle
 
 
-def added_label(job: Dict[str, Any], ref: datetime | None = None) -> str:
-    """Human-friendly 'time it was added'. Carried-over orders (already in the
-    queue when the watch began) show a plain marker rather than a fake time."""
-    if job.get("_carried_over"):
-        return "before watch"
-    iso = job.get("_first_seen") or ""
-    try:
-        dt = datetime.fromisoformat(iso)
-    except ValueError:
-        return iso
-    ref = ref or datetime.now()
-    if dt.date() == ref.date():
-        return dt.strftime("%-I:%M %p") if os.name != "nt" else dt.strftime("%#I:%M %p")
-    return dt.strftime("%b %-d %-I:%M %p") if os.name != "nt" else dt.strftime("%b %#d %#I:%M %p")
+def _bgr(rgb_hex: str) -> int:
+    """Excel COM colors are BGR longs; convert an 'RRGGBB' hex string."""
+    r, g, b = int(rgb_hex[0:2], 16), int(rgb_hex[2:4], 16), int(rgb_hex[4:6], 16)
+    return (b << 16) | (g << 8) | r
 
 
-def _cell_value(job: Dict[str, Any], key: str) -> Any:
-    if key == "_added":
-        return added_label(job)
-    if key == "_co":
-        return _co_label(job)
-    if key == "_drive_run":
-        return _drive_run_label(job)
-    if key == "_flags":
-        return _flags_str(job)
-    if key == "_money":
-        raw = (job.get("total_price") or "").strip()
-        return _parse_money(raw) if raw else ""
-    return job.get(key, "")
+# Named fills -> Excel BGR (same RGB values as excel_writer's PatternFills).
+_FILL_RGB = {
+    "header": "305496",
+    "overdue": "FFC7CE", "soon": "FFEB9C", "new": "D9D9D9",
+    "overdue_new": "F4A5A8", "soon_new": "F5D750",
+    "dwg_yes": "C6EFCE", "dwg_no": "FFC7CE",
+}
+_FILL = {k: _bgr(v) for k, v in _FILL_RGB.items()}
+
+# Named fonts -> (rgb color or None, bold, underline, size or None).
+_FONT = {
+    "header": ("FFFFFF", True, False, None),
+    "section": (None, True, False, 12),
+    "link": ("0563C1", False, True, None),
+    "drive_run": ("C55A11", True, False, None),
+    "drive_run_link": ("C55A11", True, True, None),
+    "red": ("C00000", True, False, None),
+}
+
+SHEET_ORDER = ["Live Queue", "Changes", "History", "Line Items"]
+
+# Last-rendered fingerprint per sheet, so a tab is only repainted when its
+# content actually changed — otherwise a coworker's active filter/scroll on that
+# tab would be reset every poll. Reset on process start (re-renders once).
+_RENDER_CACHE: Dict[str, int] = {}
 
 
-def _values_grid(rows: List[Dict[str, Any]]) -> List[List[Any]]:
-    """Header row + one row per order, as a plain 2D grid for a single bulk
-    write to the sheet (one Excel edit, not thousands of cell pokes)."""
-    grid: List[List[Any]] = [[h for h, _ in LIVE_COLUMNS]]
-    for j in rows:
-        grid.append([_cell_value(j, key) for _, key in LIVE_COLUMNS])
-    return grid
+def _fingerprint(sheet: Sheet) -> int:
+    parts = [sheet.name, sheet.freeze or "", sheet.autofilter_a1 or ""]
+    for row in sheet.grid:
+        for cell in row:
+            parts.append(f"{cell.value}|{cell.fill}|{cell.font}|{cell.link}|"
+                         f"{cell.number_format}|{cell.center}")
+        parts.append(";")
+    return hash("\n".join(parts))
 
 
+# --------------------------------------------------------------------------- #
+# COM plumbing                                                                 #
+# --------------------------------------------------------------------------- #
 def _get_excel():
     """Attach to a running Excel, or start one. Lazy COM import (Windows-only)."""
     import win32com.client  # type: ignore
     try:
         app = win32com.client.GetActiveObject("Excel.Application")
-    except Exception:  # noqa: BLE001 - not currently running; launch it
+    except Exception:  # noqa: BLE001 - not running; launch it
         app = win32com.client.Dispatch("Excel.Application")
     app.Visible = True
     return app
@@ -119,15 +90,15 @@ def _get_excel():
 
 def _find_workbook(app, path: Path):
     """The already-open workbook matching `path`, or open it. Co-authored files
-    live in OneDrive/SharePoint, so FullName may be a URL — match on the file
-    name first, full path second."""
+    live in OneDrive/SharePoint, so FullName may be a URL — match on file name
+    first, full path second."""
     name = path.name
     target = os.path.normcase(str(path))
     for w in app.Workbooks:
         try:
             if w.Name == name or os.path.normcase(w.FullName) == target:
                 return w
-        except Exception:  # noqa: BLE001 - a workbook can be in a weird state; skip it
+        except Exception:  # noqa: BLE001
             continue
     return app.Workbooks.Open(str(path))
 
@@ -135,86 +106,152 @@ def _find_workbook(app, path: Path):
 def _get_or_make_sheet(wb, name: str):
     for s in wb.Worksheets:
         if s.Name == name:
-            return s, False
-    ws = wb.Worksheets.Add()
+            return s
+    ws = wb.Worksheets.Add(After=wb.Worksheets(wb.Worksheets.Count))
     ws.Name = name
-    return ws, True
+    return ws
 
 
-def update_live_sheet(rows: List[Dict[str, Any]], workbook_path: str | Path) -> bool:
-    """Write the current board into the live workbook's 'Live Queue' sheet via
-    Excel COM. Returns True on success. Best-effort: any COM error is logged and
-    swallowed so the poll cycle continues."""
+# --------------------------------------------------------------------------- #
+# Styling                                                                      #
+# --------------------------------------------------------------------------- #
+def _apply_font(rng, font_name: Optional[str]) -> None:
+    spec = _FONT.get(font_name or "")
+    if not spec:
+        return
+    color, bold, underline, size = spec
+    f = rng.Font
+    f.Bold = bool(bold)
+    if color:
+        f.Color = _bgr(color)
+    f.Underline = _XL_UNDERLINE_SINGLE if underline else False
+    if size:
+        f.Size = size
+
+
+def _apply_run(ws, r: int, c1: int, c2: int, fill: Optional[str],
+               font: Optional[str], center: bool) -> None:
+    rng = ws.Range(ws.Cells(r, c1), ws.Cells(r, c2))
+    if fill and fill in _FILL:
+        rng.Interior.Color = _FILL[fill]
+    if font:
+        _apply_font(rng, font)
+    if center:
+        rng.HorizontalAlignment = -4108  # xlCenter
+
+
+def _style_row(ws, r: int, cells: List) -> None:
+    """Style one model row: collapse adjacent cells that share (fill, font,
+    center) into a single Range (few COM calls), then add hyperlinks and number
+    formats per cell."""
+    n = len(cells)
+    c = 0
+    while c < n:
+        key = (cells[c].fill, cells[c].font, cells[c].center)
+        if key == (None, None, False):
+            c += 1
+            continue
+        c2 = c
+        while c2 + 1 < n and (cells[c2 + 1].fill, cells[c2 + 1].font,
+                              cells[c2 + 1].center) == key:
+            c2 += 1
+        _apply_run(ws, r, c + 1, c2 + 1, *key)
+        c = c2 + 1
+    for i, cell in enumerate(cells, start=1):
+        if cell.link:
+            try:
+                ws.Hyperlinks.Add(Anchor=ws.Cells(r, i), Address=str(cell.link))
+                _apply_font(ws.Cells(r, i), cell.font)  # keep our link style
+            except Exception:  # noqa: BLE001 - a bad path shouldn't stop the row
+                pass
+        if cell.number_format:
+            ws.Cells(r, i).NumberFormat = cell.number_format
+
+
+def _pad(row: List, ncols: int) -> List[Any]:
+    vals = [(cell.value if cell.value is not None else "") for cell in row]
+    return vals + [""] * (ncols - len(vals))
+
+
+def render_sheet(app, wb, sheet: Sheet) -> None:
+    """Write one Sheet model into its worksheet: clear, bulk-write values, style,
+    freeze, AutoFilter, autofit."""
+    ws = _get_or_make_sheet(wb, sheet.name)
+    nrows, ncols = sheet.nrows, sheet.ncols
+    try:
+        if ws.AutoFilterMode:
+            ws.AutoFilterMode = False
+    except Exception:  # noqa: BLE001
+        pass
+    ws.Cells.Clear()  # bot-owned sheet — full repaint keeps it correct
+    if nrows == 0 or ncols == 0:
+        return
+
+    ws.Range(ws.Cells(1, 1), ws.Cells(nrows, ncols)).Value = [
+        _pad(row, ncols) for row in sheet.grid
+    ]
+    for r, row in enumerate(sheet.grid, start=1):
+        if row:
+            _style_row(ws, r, row)
+
+    if sheet.autofilter_a1:
+        try:
+            ws.Range(sheet.autofilter_a1).AutoFilter()
+        except Exception:  # noqa: BLE001
+            pass
+
+    try:
+        ws.UsedRange.Columns.AutoFit()
+        for col in range(1, ncols + 1):
+            if ws.Columns(col).ColumnWidth > 60:
+                ws.Columns(col).ColumnWidth = 60
+    except Exception:  # noqa: BLE001
+        pass
+
+    if sheet.freeze:
+        try:
+            ws.Activate()
+            app.ActiveWindow.FreezePanes = False
+            ws.Range(sheet.freeze).Select()
+            app.ActiveWindow.FreezePanes = True
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def update_workbook(sheets: List[Sheet], workbook_path: str | Path) -> bool:
+    """Render all sheet models into the live workbook via Excel COM. Returns True
+    on success. Best-effort: any COM error is logged and swallowed so the poll
+    cycle continues."""
     path = Path(workbook_path)
     try:
         app = _get_excel()
     except Exception as e:  # noqa: BLE001
-        log.warning("Could not reach Excel via COM (%s); live sheet not updated. "
+        log.warning("Could not reach Excel via COM (%s); live workbook not updated. "
                     "On Windows, ensure Excel is installed and signed in.", e)
         return False
-
-    grid = _values_grid(rows)
-    nrows, ncols = len(grid), len(LIVE_COLUMNS)
     try:
         wb = _find_workbook(app, path)
-        ws, created = _get_or_make_sheet(wb, SHEET_NAME)
-
-        # One bulk write of the whole grid — a single co-authoring edit.
-        rng = ws.Range(ws.Cells(1, 1), ws.Cells(nrows, ncols))
-        rng.Value = grid
-
-        # Clear any rows left over from a previous, longer board.
-        try:
-            used = ws.UsedRange.Rows.Count
-            if used > nrows:
-                ws.Range(ws.Cells(nrows + 1, 1), ws.Cells(used, ncols)).ClearContents()
-        except Exception:  # noqa: BLE001 - cosmetic cleanup, never fatal
-            pass
-
-        _format_sheet(ws, app, nrows, ncols, rows, created)
-
-        # Persist. On a OneDrive AutoSave workbook this is effectively a no-op,
-        # but it makes the non-AutoSave case (local share) flush each cycle.
-        try:
-            wb.Save()
-        except Exception as e:  # noqa: BLE001
-            log.debug("wb.Save() raised (likely AutoSave-managed): %s", e)
-        log.info("Live sheet updated: %d orders -> %s [%s]", len(rows), path.name, SHEET_NAME)
+        order = {n: i for i, n in enumerate(SHEET_ORDER)}
+        rendered = []
+        for sheet in sorted(sheets, key=lambda s: order.get(s.name, 99)):
+            fp = _fingerprint(sheet)
+            if _RENDER_CACHE.get(sheet.name) == fp:
+                continue  # unchanged — leave it alone so filters/scroll persist
+            render_sheet(app, wb, sheet)
+            _RENDER_CACHE[sheet.name] = fp
+            rendered.append(sheet.name)
+        if rendered:
+            try:
+                wb.Save()
+            except Exception as e:  # noqa: BLE001
+                log.debug("wb.Save() raised (likely AutoSave-managed): %s", e)
+            log.info("Live workbook updated: %s [%s]", path.name, ", ".join(rendered))
+        else:
+            log.info("Live workbook unchanged this cycle — nothing repainted.")
         return True
     except Exception as e:  # noqa: BLE001
-        log.warning("Live Excel update failed (%s); state + alerts still recorded.", e)
+        log.warning("Live workbook update failed (%s); state + alerts still recorded.", e)
         return False
-
-
-def _format_sheet(ws, app, nrows: int, ncols: int, rows: List[Dict[str, Any]], created: bool) -> None:
-    """Light, stable formatting only — header styling, a freeze pane, autofit,
-    and a green tint on orders added during today's watch. Kept idempotent
-    (same result every cycle) so it doesn't churn the co-authored file."""
-    try:
-        header = ws.Range(ws.Cells(1, 1), ws.Cells(1, ncols))
-        header.Font.Bold = True
-        header.Font.Color = _WHITE
-        header.Interior.Color = _HEADER_BG
-        if created:
-            ws.Application.ActiveWindow.FreezePanes = False
-            ws.Cells(2, 2).Select()
-            app.ActiveWindow.FreezePanes = True
-    except Exception:  # noqa: BLE001
-        pass
-
-    # Tint rows for orders that arrived during the watch (not carried over), so
-    # the genuinely-new work stands out. Stable per order -> no co-author churn.
-    try:
-        for i, j in enumerate(rows, start=2):
-            color = _WHITE if j.get("_carried_over") else _NEW_BG
-            ws.Range(ws.Cells(i, 1), ws.Cells(i, ncols)).Interior.Color = color
-    except Exception:  # noqa: BLE001
-        pass
-
-    try:
-        ws.Range(ws.Cells(1, 1), ws.Cells(max(nrows, 1), ncols)).Columns.AutoFit()
-    except Exception:  # noqa: BLE001
-        pass
 
 
 def save_morning_copy(workbook_path: str | Path, dest: str | Path) -> bool:

@@ -171,6 +171,30 @@ python watch.py --once   # one poll cycle now, then exit (for testing)
 python watch.py --now    # ignore the time window; start polling immediately
 ```
 
+**The workbook is the team's master sheet — four live tabs**, carrying everything
+the daily report does, kept current all day:
+
+- **Live Queue** — the full board: an **Added** time column, every Full Queue
+  column (SO design/size/arrangement, temps, CO#, quote-run link, …), the
+  green-✓/red **AutoCAD DWG matrix**, date highlights (red overdue / yellow due
+  soon), new-order shading, hyperlinks (Job # → SO pdf, Folder, Quote Run), a
+  totals footer, AutoFilter. Newest arrivals on top.
+- **Changes** — two date-labeled groups: **since this morning** (intraday: new
+  arrivals with their Added time, removed/completed, field changes vs the frozen
+  start-of-day baseline) and **vs yesterday** (the previous run's date).
+- **History** — archived orders (dropped off the queue), newest first, + the DWG matrix.
+- **Line Items** — one row per order × **normalized** Sales-Order line item;
+  AutoFilter the **Normalized** column by an item name ("shaft seal") and the
+  matching orders populate — the in-workbook version of `find_orders.py`.
+
+Each cycle only repaints a tab whose content actually **changed**, so a
+coworker's active filter/scroll on a tab isn't reset every couple of minutes.
+
+**The 5 AM email becomes a live link.** The 5 AM run still **saves** the dated
+`queue_<date>.xlsx` for the archive, but the **email** now leads with an active
+link to the live sheet (`LIVE_WORKBOOK_LINK` = the workbook's Share → Copy link),
+and writes dates out in full. Set `EMAIL_ATTACH_REPORT=1` to also attach the file.
+
 **A day, start to finish.** The first poll establishes the start-of-day baseline
 *silently* — seeded from the morning daily-run snapshot when there is one, so the
 whole board isn't re-enriched or announced — and saves a dated **morning
@@ -183,8 +207,10 @@ resumes without re-enriching or re-announcing what it already saw.
 
 1. **Make the workbook.** Create an Excel file in OneDrive/SharePoint (so it can
    be co-authored), share it with your coworkers, and put its **local synced
-   path** in `LIVE_WORKBOOK_PATH` in `.env`. The watcher writes a sheet named
-   `Live Queue` inside it; leave your own tabs alone and they're untouched.
+   path** in `LIVE_WORKBOOK_PATH` in `.env`. The watcher manages the **Live
+   Queue / Changes / History / Line Items** tabs; any other tabs you add are
+   left untouched. For the 5 AM email link, also set `LIVE_WORKBOOK_LINK` to the
+   workbook's **Share → Copy link** URL.
 2. **Teams alerts (optional).** Put a Teams webhook URL in `TEAMS_WEBHOOK_URL` and
    everyone in that channel gets a desktop + phone notification per new order,
    nothing to install. Both webhook types are auto-detected — use **Workflows**
@@ -232,7 +258,8 @@ Daily-Queue-Update/
 ├── compare.py          # Diff today vs the most recent prior run; persistence tracking
 ├── watch.py            # Live intraday watcher — poll the board, enrich only new orders all day
 ├── live_state.py       # The watcher's per-day memory: first-seen times, what's new/enriched
-├── live_excel.py       # Writes the live queue into the co-authored workbook via Excel COM
+├── live_sheets.py      # Pure model for the master tabs (Live Queue/Changes/History/Line Items)
+├── live_excel.py       # Renders the master tabs into the co-authored workbook via Excel COM
 ├── notify.py           # New-order notifications — Windows toast + Microsoft Teams card
 ├── analyzer.py         # Claude API call — briefing + anomalies + action items
 ├── excel_writer.py     # Two-tab .xlsx report with AutoFilter and date highlights
