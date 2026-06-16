@@ -7,14 +7,17 @@ cycle, so every function swallows its own errors and logs rather than raising.
 - Toast: the little corner pop-up (like a new-Outlook-email alert). Fires only on
   the machine running the watcher. Uses the `winotify` package if installed, else
   falls back to a PowerShell BurntToast/legacy balloon, else logs and moves on.
-- Teams: posts a MessageCard to an Incoming Webhook URL (TEAMS_WEBHOOK_URL).
-  Every member of that channel gets a desktop + phone notification, with nothing
-  to install on their machines. Uses urllib so there's no extra dependency.
+- Teams: posts to TEAMS_WEBHOOK_URL. Supports BOTH webhook flavors, auto-detected
+  from the URL — the new **Workflows** (Power Automate) webhook (Adaptive Card),
+  which is Microsoft's replacement for the retiring connector, and the legacy
+  **Incoming Webhook** connector (MessageCard). Every member of the channel gets
+  a desktop + phone notification, nothing to install. Uses urllib (no extra dep).
 """
 from __future__ import annotations
 
 import json
 import logging
+import urllib.error
 import urllib.request
 from typing import Any, Dict, List
 
@@ -75,28 +78,34 @@ def toast(title: str, message: str) -> None:
     log.info("Toast not shown (no winotify and PowerShell unavailable): %s — %s", title, message)
 
 
-def _teams_card(title: str, summary: str, jobs: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """A legacy MessageCard (the format Incoming Webhooks accept) with one
-    'section' of facts per new order."""
-    sections = []
-    for j in jobs:
-        facts = [
-            {"name": "Order", "value": str(j.get("job", ""))},
-            {"name": "Customer", "value": j.get("customer", "") or "—"},
-            {"name": "Design", "value": j.get("design", "") or "—"},
-            {"name": "Description", "value": j.get("so_design_desc", "") or "—"},
-            {"name": "Added", "value": j.get("_added_label", "") or "—"},
-        ]
-        flags = []
-        if j.get("unapproved"):
-            flags.append("UNAPPROVED")
-        if j.get("credit_hold"):
-            flags.append("CREDIT HOLD")
-        if j.get("has_drive_run"):
-            flags.append("QUOTE RUN")
-        if flags:
-            facts.append({"name": "Flags", "value": ", ".join(flags)})
-        sections.append({"activityTitle": f"Order {j.get('job', '')}", "facts": facts})
+def _order_facts(j: Dict[str, Any]) -> List[tuple]:
+    """The (label, value) rows shown for one order — shared by both card formats."""
+    facts = [
+        ("Order", str(j.get("job", ""))),
+        ("Customer", j.get("customer", "") or "—"),
+        ("Design", j.get("design", "") or "—"),
+        ("Description", j.get("so_design_desc", "") or "—"),
+        ("Added", j.get("_added_label", "") or "—"),
+    ]
+    flags = []
+    if j.get("unapproved"):
+        flags.append("UNAPPROVED")
+    if j.get("credit_hold"):
+        flags.append("CREDIT HOLD")
+    if j.get("has_drive_run"):
+        flags.append("QUOTE RUN")
+    if flags:
+        facts.append(("Flags", ", ".join(flags)))
+    return facts
+
+
+def _messagecard(title: str, summary: str, jobs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Legacy MessageCard — the format the (retiring) Incoming Webhook accepts."""
+    sections = [
+        {"activityTitle": f"Order {j.get('job', '')}",
+         "facts": [{"name": n, "value": v} for n, v in _order_facts(j)]}
+        for j in jobs
+    ]
     return {
         "@type": "MessageCard",
         "@context": "http://schema.org/extensions",
@@ -107,20 +116,60 @@ def _teams_card(title: str, summary: str, jobs: List[Dict[str, Any]]) -> Dict[st
     }
 
 
+def _workflow_card(title: str, jobs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Adaptive Card wrapped for the Workflows ('Post to a channel when a webhook
+    request is received') trigger — Microsoft's replacement for the connector."""
+    body: List[Dict[str, Any]] = [
+        {"type": "TextBlock", "text": title, "weight": "Bolder", "size": "Medium", "wrap": True}
+    ]
+    for j in jobs:
+        body.append({"type": "TextBlock", "text": f"Order {j.get('job', '')}",
+                     "weight": "Bolder", "wrap": True, "spacing": "Medium"})
+        body.append({"type": "FactSet",
+                     "facts": [{"title": n, "value": v} for n, v in _order_facts(j)]})
+    card = {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": body,
+    }
+    return {"type": "message",
+            "attachments": [{"contentType": "application/vnd.microsoft.card.adaptive",
+                             "content": card}]}
+
+
+def _is_workflow_url(url: str) -> bool:
+    """True for a Workflows/Power Automate webhook URL (Adaptive Card), False for
+    a legacy Incoming Webhook connector URL (MessageCard)."""
+    u = (url or "").lower()
+    return ("logic.azure.com" in u or "powerautomate" in u
+            or "/workflows/" in u or "azure-apihub" in u)
+
+
 def teams_post(title: str, summary: str, jobs: List[Dict[str, Any]]) -> None:
-    """Post a new-orders card to the configured Teams Incoming Webhook."""
+    """Post a new-orders card to the configured Teams webhook, in whichever format
+    that webhook expects (Workflows Adaptive Card vs legacy MessageCard)."""
     if not TEAMS_WEBHOOK_URL:
         return
-    payload = json.dumps(_teams_card(title, summary, jobs)).encode("utf-8")
+    workflow = _is_workflow_url(TEAMS_WEBHOOK_URL)
+    card = _workflow_card(title, jobs) if workflow else _messagecard(title, summary, jobs)
     req = urllib.request.Request(
-        TEAMS_WEBHOOK_URL, data=payload, headers={"Content-Type": "application/json"}
+        TEAMS_WEBHOOK_URL, data=json.dumps(card).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
     )
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            body = resp.read().decode("utf-8", "replace").strip()
-            # Teams replies "1" on success; anything else is worth logging.
-            if body and body != "1":
-                log.warning("Teams webhook returned: %s", body[:200])
+            status = getattr(resp, "status", None) or resp.getcode()
+            reply = resp.read().decode("utf-8", "replace").strip()
+        # Workflows returns 202 with an empty body; the legacy connector returns
+        # 200 with "1". Treat any 2xx as success; only the legacy "not 1" is odd.
+        if not workflow and reply and reply != "1":
+            log.warning("Teams webhook returned: %s", reply[:200])
+        else:
+            log.debug("Teams post ok (HTTP %s, %s)", status, "workflow" if workflow else "connector")
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")[:200] if hasattr(e, "read") else ""
+        log.warning("Teams notification failed (HTTP %s) %s", e.code, detail)
     except Exception as e:  # noqa: BLE001
         log.warning("Teams notification failed (%s)", e)
 

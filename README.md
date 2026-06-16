@@ -185,10 +185,13 @@ resumes without re-enriching or re-announcing what it already saw.
    be co-authored), share it with your coworkers, and put its **local synced
    path** in `LIVE_WORKBOOK_PATH` in `.env`. The watcher writes a sheet named
    `Live Queue` inside it; leave your own tabs alone and they're untouched.
-2. **Teams alerts (optional).** In the target Teams channel: **··· → Connectors →
-   Incoming Webhook → Create**, copy the URL into `TEAMS_WEBHOOK_URL`. Everyone
-   in that channel then gets a desktop + phone notification per new order, with
-   nothing to install. Leave it blank to skip Teams.
+2. **Teams alerts (optional).** Put a Teams webhook URL in `TEAMS_WEBHOOK_URL` and
+   everyone in that channel gets a desktop + phone notification per new order,
+   nothing to install. Both webhook types are auto-detected — use **Workflows**
+   (Microsoft's replacement for the retiring connector): channel **··· →
+   Workflows → "Post to a channel when a webhook request is received"** → pick the
+   channel → copy the URL. (The old **··· → Connectors → Incoming Webhook** still
+   works too, but it's being retired.) Leave blank to skip Teams.
 3. **Nicer toast (optional).** `pip install winotify` for a real toast; without
    it the watcher falls back to a PowerShell tray balloon.
 4. **Interval / window (optional).** Defaults are every 2 minutes, 05:00–17:00.
