@@ -3,8 +3,9 @@
 A pure-filesystem pass over every job folder under AUTOCAD_JOBS_DIR (no login,
 no browser): it finds every quote/construction-run file (the same name patterns
 the daily run uses — `*qt run*`, `*quote run*`, `*d64 wheel construction*`,
-searched recursively, so the copies tucked in `ENG REF\\` and `history\\`
-subfolders are caught), runs each through the template collection in
+searched recursively, so copies tucked in subfolders like `ENG REF\\` are
+caught, while superseded `history\\` / `hist\\` copies are skipped), runs
+each through the template collection in
 `templates.py`, and writes an inventory of what was pulled.
 
 Because it only reads the filesystem it's fast and fully resumable — progress is
@@ -80,7 +81,7 @@ def classify_status(template: str, fields: Dict[str, Any], raw_lines: List[str],
 
 def run_rows(records: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Flatten the per-job store into one row per run (a job can have several:
-    the quote, the production run, a superseded `history\\` copy)."""
+    e.g. the quote and the production run; `history\\` copies are not swept)."""
     rows: List[Dict[str, Any]] = []
     for rec in sorted(records.values(), key=lambda r: r.get("job", "")):
         for run in rec.get("runs", []):

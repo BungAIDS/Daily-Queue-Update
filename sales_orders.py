@@ -104,16 +104,32 @@ def _special_temp(design_temp: str, max_temp: str, suitable: str) -> str:
 # --------------------------------------------------------------------------- #
 # AutoCAD folder / job-type lookup                                            #
 # --------------------------------------------------------------------------- #
+# A subfolder named "history" or "hist" (any case, e.g. "Qt History", "RUN HIST")
+# holds superseded copies of the run — never the live one, so the sweep skips it.
+_HISTORY_DIR = re.compile(r"(?i)\bhist(ory)?\b")
+
+
+def _in_history_dir(f: Path, root: Path) -> bool:
+    """True if any subfolder between *root* and *f* is a history/hist folder."""
+    try:
+        parts = f.relative_to(root).parts[:-1]  # directories only, drop the filename
+    except ValueError:
+        parts = f.parts[:-1]
+    return any(_HISTORY_DIR.search(p) for p in parts)
+
+
 def _run_files_in_folder(folder: Path) -> List[Path]:
     """Quote-run files in a job's AutoCAD folder, searched recursively — they
     are often tucked in a subfolder (e.g. ENG REF\\420410 qt  run.txt). Some
     orders never get the run attached to their cbcinsider documents at all,
-    so the folder is the only place it lives."""
+    so the folder is the only place it lives. Superseded copies under a
+    `history\\` / `hist\\` subfolder are skipped — they are not the live run."""
     try:
         return sorted(
             f for f in folder.rglob("*")
             if f.is_file() and not f.name.startswith("~$")   # Office lock/temp files
             and f.suffix.lower() in RUN_DOC_EXTS              # a document, not a CAD drawing
+            and not _in_history_dir(f, folder)               # not a superseded history copy
             and _is_run_name(f.name)
         )
     except OSError as e:

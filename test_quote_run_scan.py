@@ -73,7 +73,7 @@ def test_scan_one_finds_runs_recursively(tmp: Path):
         "CHICAGO BLOWER CORP.\n 421473\n"
         " SIZE   37 DESIGN 16A LS   ARR 9H  100.0 PCT DISCH TH  ROT CW\n"
         " WHEEL MATERIAL A569 HRS\n BELT DRIVEN.\n")
-    (job / "history" / "quote run.txt").write_text(
+    (job / "history" / "quote run.txt").write_text(    # superseded copy: must be skipped
         "CHICAGO BLOWER CORP.\n 421473\n SIZE   37 DESIGN 16A LS   ARR 9H\n")
     (job / "421473-01A.dwg").write_text("not a run")     # must be ignored
     (job / "notes.txt").write_text("not a run either")   # must be ignored
@@ -81,7 +81,7 @@ def test_scan_one_finds_runs_recursively(tmp: Path):
     rec = scan_one("421473", "GENERAL LINE", job)
     assert rec["job"] == "421473" and rec["type"] == "GENERAL LINE"
     files = sorted(r["file"] for r in rec["runs"])
-    assert files == ["421473 quote run.txt", "quote run.txt"]   # both runs, no dwg/notes
+    assert files == ["421473 quote run.txt"]   # live run only — history copy, dwg, notes excluded
     eng = next(r for r in rec["runs"] if r["file"] == "421473 quote run.txt")
     assert eng["template"] == "cbc_qt_run_text"
     assert eng["status"] == "OK"
