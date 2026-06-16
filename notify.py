@@ -116,13 +116,27 @@ def _messagecard(title: str, summary: str, jobs: List[Dict[str, Any]]) -> Dict[s
     }
 
 
+def _html_body(title: str, jobs: List[Dict[str, Any]]) -> str:
+    """An HTML message body for the flow's 'Post message' action — a bold title
+    then each order's fields. Sent as the message-level `text` so (a) Teams shows
+    a real banner preview and (b) a 'Post message as User' flow renders it nicely
+    (with your photo/name) instead of a preview-less card."""
+    blocks = [f"<b>{title}</b>"]
+    for j in jobs:
+        rows = [f"<b>Order {j.get('job', '')}</b>"]
+        rows += [f"{n}: {v}" for n, v in _order_facts(j) if n != "Order"]
+        blocks.append("<br>".join(rows))
+    return "<br><br>".join(blocks)
+
+
 def _workflow_card(title: str, summary: str, jobs: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Adaptive Card wrapped for the Workflows ('Post to a channel when a webhook
     request is received') trigger — Microsoft's replacement for the connector.
 
-    `summary` is also set as the message-level `text`/`summary` so Teams has real
-    text to show in the pop-up banner — a card alone leaves the banner generic
-    (it just shows the channel/flow name)."""
+    The message also carries `text` (a formatted HTML body) and `summary` so Teams
+    has real text to preview in the banner — a card alone leaves the banner
+    generic ('Workflows posted a new message'). A flow set to post `text` as a
+    User message uses this body and shows the user's photo/name."""
     body: List[Dict[str, Any]] = [
         {"type": "TextBlock", "text": title, "weight": "Bolder", "size": "Medium", "wrap": True}
     ]
@@ -139,7 +153,7 @@ def _workflow_card(title: str, summary: str, jobs: List[Dict[str, Any]]) -> Dict
     }
     return {"type": "message",
             "summary": summary,
-            "text": summary,
+            "text": _html_body(title, jobs),
             "attachments": [{"contentType": "application/vnd.microsoft.card.adaptive",
                              "content": card}]}
 
