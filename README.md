@@ -171,28 +171,28 @@ python watch.py --once   # one poll cycle now, then exit (for testing)
 python watch.py --now    # ignore the time window; start polling immediately
 ```
 
-**The workbook is the team's master sheet — four live tabs**, carrying everything
-the daily report does, kept current all day:
+**The workbook is the team's master sheet**, built as a **chronological log that
+updates by upsert, not repaint** — each poll checks every board order against
+the master list and **appends new ones / updates changed rows in place**, so a
+coworker's filter, sort, and scroll survive (a filter only shifts when rows are
+actually added or removed). Tabs:
 
-- **Live Queue** — the full board: an **Added** time column, every Full Queue
-  column (SO design/size/arrangement, temps, CO#, quote-run link, …), the
-  green-✓/red **AutoCAD DWG matrix**, date highlights (red overdue / yellow due
-  soon), new-order shading, hyperlinks (Job # → SO pdf, Folder, Quote Run), a
-  totals footer, AutoFilter. Newest arrivals on top.
-- **Changes** — two date-labeled groups: **since this morning** (intraday: new
-  arrivals with their Added time, removed/completed, field changes vs the frozen
-  start-of-day baseline) and **vs yesterday** (the previous run's date).
-- **Order History** — archived orders (dropped off the queue), newest first, +
-  the DWG matrix. (Named "Order History" because Excel reserves the name "History".)
-- **Line Items** — one row per order × **normalized** Sales-Order line item,
-  across the **whole backlog** (every order in the line-items store, not just
-  today's board); AutoFilter the **Normalized** column by an item name ("shaft
-  seal") and the matching orders populate — the in-workbook `find_orders.py`.
-  (It's empty until the store is populated — `python line_items_scan.py` builds
-  it from the archived Sales Orders; it then grows as the daily run parses more.)
+- **Order History** — the **master log**: one row per order *ever seen*, newest
+  appended at the bottom, never wiped, with **On Queue (YES/NO)**, **Added**, and
+  **Left** columns plus every Full Queue column. This is the source of truth.
+- **Live Queue** — the orders **currently on the board** (the On-Queue subset),
+  same incremental upsert (append / update in place / delete when an order
+  leaves), keeping the clickable links (Job # → SO pdf, Folder, Quote Run) and
+  the red/yellow date highlights.
+- **Changes** — two date-labeled groups: **since this morning** (vs the frozen
+  start-of-day baseline) and **vs yesterday** (the previous run's date). This tab
+  is a snapshot, so it does repaint when it changes.
 
-Each cycle only repaints a tab whose content actually **changed**, so a
-coworker's active filter/scroll on a tab isn't reset every couple of minutes.
+The full green-✓/red **DWG matrix** is collapsed to one compact **Custom DWGs**
+column here (e.g. `-35, -51`) to keep the log's columns stable; the full matrix
+still lives in the archived daily report. The upsert tabs are wiped and rebuilt
+**once per process start** (so a 5 AM launch starts clean), then run incrementally
+all day.
 
 **The 5 AM email becomes a live link.** The 5 AM run still **saves** the dated
 `queue_<date>.xlsx` for the archive, but the **email** now leads with an active
@@ -262,8 +262,9 @@ Daily-Queue-Update/
 ├── compare.py          # Diff today vs the most recent prior run; persistence tracking
 ├── watch.py            # Live intraday watcher — poll the board, enrich only new orders all day
 ├── live_state.py       # The watcher's per-day memory: first-seen times, what's new/enriched
-├── live_sheets.py      # Pure model for the master tabs (Live Queue/Changes/History/Line Items)
-├── live_excel.py       # Renders the master tabs into the co-authored workbook via Excel COM
+├── live_master.py      # The all-time master log (one row per order ever; On Queue/Added/Left)
+├── live_sheets.py      # Pure models + the keyed upsert planner for the master tabs
+├── live_excel.py       # Renders the master tabs into the co-authored workbook via Excel COM (upsert)
 ├── notify.py           # New-order notifications — Windows toast + Microsoft Teams card
 ├── analyzer.py         # Claude API call — briefing + anomalies + action items
 ├── excel_writer.py     # Two-tab .xlsx report with AutoFilter and date highlights

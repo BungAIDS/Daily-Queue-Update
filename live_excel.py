@@ -70,6 +70,14 @@ _RENDER_CACHE: Dict[str, int] = {}
 # coworker's view to that tab — so we only ever do it once per sheet.
 _FROZEN: set = set()
 
+# Upsert tabs (Live Queue, Order History) whose header row + initial autofit are
+# already done this process, so we don't rewrite the header every cycle.
+_HEADER_DONE: set = set()
+
+_XL_UP = -4162           # xlUp
+_XL_NONE = -4142         # xlColorIndexNone
+_XL_AUTO = -4105         # xlColorIndexAutomatic
+
 
 def _fingerprint(sheet: Sheet) -> int:
     parts = [sheet.name, sheet.freeze or "", sheet.autofilter_a1 or ""]
@@ -241,6 +249,174 @@ def render_sheet(app, wb, sheet: Sheet) -> None:
             _FROZEN.add(sheet.name)
         except Exception:  # noqa: BLE001
             pass
+
+
+# --------------------------------------------------------------------------- #
+# Incremental upsert renderer (Live Queue + Order History)                     #
+#                                                                             #
+# Rows are keyed on the order number: append new ones, update changed ones in  #
+# place, delete departed ones (Live Queue). No Cells.Clear(), so a coworker's  #
+# filter/sort/scroll survives — only an add/remove shifts an active filter.    #
+# --------------------------------------------------------------------------- #
+def _norm_key(v: Any) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, float) and v == int(v):
+        return str(int(v))
+    return str(v).strip()
+
+
+def _write_header(ws, headers: List[str]) -> None:
+    ncols = len(headers)
+    ws.Range(ws.Cells(1, 1), ws.Cells(1, ncols)).Value = [list(headers)]
+    _apply_run(ws, 1, 1, ncols, "header", "header", False)
+
+
+def _read_keymap(ws, key_col: int):
+    """{order# -> row} for the data rows, by reading the key column. Robust to a
+    coworker sorting the sheet (we find rows by key, not a remembered index)."""
+    last = ws.Cells(ws.Rows.Count, key_col).End(_XL_UP).Row
+    keymap: Dict[str, int] = {}
+    if last >= 2:
+        data = ws.Range(ws.Cells(2, key_col), ws.Cells(last, key_col)).Value
+        if not isinstance(data, tuple):       # single cell -> scalar
+            data = ((data,),)
+        for i, row in enumerate(data, start=2):
+            v = row[0] if isinstance(row, (list, tuple)) else row
+            k = _norm_key(v)
+            if k:
+                keymap[k] = i
+    return keymap, last
+
+
+def _write_row(ws, r: int, cells: List, ncols: int) -> None:
+    """Overwrite one row's values + styling in place. Clears the row's prior
+    fill/font/links first so a cleared style doesn't linger."""
+    vals = [(c.value if c.value is not None else "") for c in cells]
+    if len(vals) < ncols:
+        vals += [""] * (ncols - len(vals))
+    rng = ws.Range(ws.Cells(r, 1), ws.Cells(r, ncols))
+    rng.Value = [vals]
+    try:
+        rng.Interior.ColorIndex = _XL_NONE
+        rng.Font.Bold = False
+        rng.Font.Underline = False
+        rng.Font.ColorIndex = _XL_AUTO
+        rng.Hyperlinks.Delete()
+    except Exception:  # noqa: BLE001
+        pass
+    _style_row(ws, r, cells)
+
+
+def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
+                  key_col: int, allow_delete: bool, freeze: str | None = None) -> int:
+    """Apply append/update/delete ops to a keyed sheet. Returns rows touched."""
+    ws = _get_or_make_sheet(wb, name)
+    ncols = len(headers)
+    first_time = name not in _HEADER_DONE
+    if first_time:
+        # Once per process: wipe the sheet so a previous run's (possibly
+        # different-schema) content can't collide with the keyed upsert. The
+        # watcher resets the stored sigs at startup to match, so this cycle
+        # rebuilds the tab; every later cycle is incremental.
+        ws.Cells.Clear()
+        _write_header(ws, headers)
+        _HEADER_DONE.add(name)
+
+    keymap, last_row = _read_keymap(ws, key_col)
+    deletes = [k for kind, k, _ in ops if kind == "delete"]
+    updates = [(k, c) for kind, k, c in ops if kind == "update"]
+    appends = [(k, c) for kind, k, c in ops if kind == "append"]
+    rowcount_changed = bool(deletes or appends)
+
+    for r in sorted((keymap[k] for k in deletes if k in keymap), reverse=True):
+        try:
+            ws.Rows(r).Delete()
+        except Exception:  # noqa: BLE001
+            pass
+    if deletes:
+        keymap, last_row = _read_keymap(ws, key_col)
+
+    for k, cells in updates:
+        r = keymap.get(k)
+        if r:
+            _write_row(ws, r, cells, ncols)
+        else:
+            appends.append((k, cells))   # vanished from the sheet — re-add it
+    for k, cells in appends:
+        last_row += 1
+        _write_row(ws, last_row, cells, ncols)
+
+    # Re-extend AutoFilter only when the row count changed (so a value-only cycle
+    # never disturbs a coworker's active filter).
+    if rowcount_changed and last_row >= 2:
+        try:
+            if ws.AutoFilterMode:
+                ws.AutoFilterMode = False
+            ws.Range(ws.Cells(1, 1), ws.Cells(last_row, ncols)).AutoFilter()
+        except Exception:  # noqa: BLE001
+            pass
+
+    if first_time:
+        try:
+            ws.UsedRange.Columns.AutoFit()
+            for col in range(1, ncols + 1):
+                if ws.Columns(col).ColumnWidth > 60:
+                    ws.Columns(col).ColumnWidth = 60
+        except Exception:  # noqa: BLE001
+            pass
+
+    if freeze and name not in _FROZEN:
+        try:
+            ws.Activate()
+            app.ActiveWindow.FreezePanes = False
+            ws.Range(freeze).Select()
+            app.ActiveWindow.FreezePanes = True
+            _FROZEN.add(name)
+        except Exception:  # noqa: BLE001
+            pass
+
+    return len(updates) + len(appends) + len(deletes)
+
+
+def update_master_workbook(workbook_path: str | Path, payloads: List[Dict[str, Any]],
+                           changes_sheet: Sheet | None = None) -> bool:
+    """Render the master workbook: incremental upserts for the keyed tabs
+    (payloads), and a full repaint for the Changes snapshot (only when changed).
+    Best-effort — any COM error is logged and swallowed."""
+    path = Path(workbook_path)
+    try:
+        app = _get_excel()
+    except Exception as e:  # noqa: BLE001
+        log.warning("Could not reach Excel via COM (%s); live workbook not updated. "
+                    "On Windows, ensure Excel is installed and signed in.", e)
+        return False
+    try:
+        wb = _find_workbook(app, path)
+        touched = []
+        for p in payloads:
+            n = apply_upserts(app, wb, p["name"], p["headers"], p["ops"],
+                              p["key_col"], p["allow_delete"], p.get("freeze"))
+            if n:
+                touched.append(f"{p['name']}(+{n})")
+        if changes_sheet is not None:
+            fp = _fingerprint(changes_sheet)
+            if _RENDER_CACHE.get(changes_sheet.name) != fp:
+                render_sheet(app, wb, changes_sheet)
+                _RENDER_CACHE[changes_sheet.name] = fp
+                touched.append(changes_sheet.name)
+        if touched:
+            try:
+                wb.Save()
+            except Exception as e:  # noqa: BLE001
+                log.debug("wb.Save() raised (likely AutoSave-managed): %s", e)
+            log.info("Live workbook updated: %s [%s]", path.name, ", ".join(touched))
+        else:
+            log.info("Live workbook unchanged this cycle — nothing written.")
+        return True
+    except Exception as e:  # noqa: BLE001
+        log.warning("Live workbook update failed (%s); state + alerts still recorded.", e)
+        return False
 
 
 def update_workbook(sheets: List[Sheet], workbook_path: str | Path) -> bool:

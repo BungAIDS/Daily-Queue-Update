@@ -143,6 +143,47 @@ def test_line_items_whole_backlog_default():
     assert sum(1 for r in sh.grid[1:] if r) == 3        # 1 + 2 items
 
 
+def test_live_queue_records_keyed_with_dwg_text():
+    j = _job("421000", end_date="06/10/2026", dwg_extras={"51": "x", "35": "x"},
+             _carried_over=False, _first_seen="2026-06-16T09:14:00")
+    recs = ls.live_queue_records([j], TODAY)
+    assert len(recs) == 1
+    key, cells = recs[0]
+    assert key == "421000"
+    # Job # sits at the key column (1-based) — confirm the index lines up.
+    assert cells[ls.LIVE_QUEUE_KEY_COL - 1].value == "421000"
+    assert cells[-1].value == "-35, -51"          # compact DWG column, numeric order
+
+
+def test_order_history_records_flag_and_dates():
+    orders = [("421000", {"on_queue": True, "added": "2026-06-16T09:00:00",
+                          "left": None, "job": _job("421000")}),
+              ("420900", {"on_queue": False, "added": "2026-06-15T08:00:00",
+                          "left": "2026-06-16T07:30:00", "job": _job("420900")})]
+    recs = ls.order_history_records(orders, TODAY)
+    assert recs[0][1][0].value == "YES"
+    assert recs[1][1][0].value == "NO"
+    assert recs[1][1][2].value == "2026-06-16 07:30"     # 'Left' formatted
+    assert recs[0][1][ls.ORDER_HISTORY_KEY_COL - 1].value == "421000"
+
+
+def test_plan_upsert_append_update_delete():
+    a = ("100", "sigA", ["cellsA"])
+    b = ("200", "sigB", ["cellsB"])
+    # 100 unchanged, 200 changed, 300 new, 400 only in existing (-> delete).
+    desired = [("100", "sigA", "x"), ("200", "sigB2", "y"), ("300", "sigC", "z")]
+    existing = {"100": "sigA", "200": "sigB", "400": "sigD"}
+    ops = ls.plan_upsert(desired, existing, allow_delete=True)
+    kinds = {(o[0], o[1]) for o in ops}
+    assert ("update", "200") in kinds
+    assert ("append", "300") in kinds
+    assert ("delete", "400") in kinds
+    assert not any(o[1] == "100" for o in ops)           # unchanged -> no op
+    # Without allow_delete, 400 is left alone.
+    ops2 = ls.plan_upsert(desired, existing, allow_delete=False)
+    assert not any(o[0] == "delete" for o in ops2)
+
+
 def main() -> int:
     passed = 0
     for name, fn in sorted(globals().items()):

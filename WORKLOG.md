@@ -3,6 +3,36 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-16 — Master log: incremental upsert instead of repaint
+
+DG: stop repainting the whole tab every cycle (it reset filters). New model is a
+chronological master log updated by **upsert keyed on order #**:
+
+- **`live_master.py`** — the all-time log (`live_master.json`), one entry per
+  order ever seen: `added` (set once), `left`, `on_queue`, latest `job`. Unlike
+  history.json it's append-only (never pops a returning order). 3 tests.
+- **`live_sheets.py`** — added stable-schema record builders
+  (`live_queue_records`, `order_history_records`) keyed on order #, a compact
+  **Custom DWGs** text column (the variable-width matrix fought the fixed
+  schema; full matrix stays in the daily report), `row_sig` (md5 hex so it
+  survives a JSON round-trip), and a pure `plan_upsert` (append/update/delete;
+  unchanged rows -> no op). Order History gains On Queue/Added/Left columns.
+- **`live_excel.py`** — `apply_upserts`: reads the key column for row positions
+  (robust to a coworker sorting), writes/append/updates rows in place, deletes
+  departed ones (Live Queue), re-extends AutoFilter only when the row count
+  changed. No Cells.Clear() per cycle, so filters/sort/scroll persist. Each
+  upsert tab is wiped+rebuilt once per process start (clean slate vs the old
+  full-grid content; sigs reset to match via watch `_force_rebuild`).
+- **`watch.py`** — maintains the master each cycle, plans upserts (storing sigs
+  in the master so change-detection survives restarts), renders Live Queue
+  (delete-on-leave) + Order History (append-only) incrementally, keeps Changes
+  as a full-repaint snapshot. **Line Items tab dropped** (multiple rows/order
+  was confusing).
+
+Verified the op-planning end-to-end across cycles (unchanged->no-op,
+changed->update, new->append, left->delete from Live Queue / stays in Order
+History). COM apply still needs the on-PC smoke test.
+
 ## 2026-06-16 — Live workbook becomes the master (4 tabs) + email link
 
 DG wants the live co-authored workbook to be the team's master sheet, not a

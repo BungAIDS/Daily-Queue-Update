@@ -28,3 +28,4 @@ jobs:
       - run: python test_line_items.py
       - run: python test_live_state.py
       - run: python test_live_sheets.py
+      - run: python test_live_master.py

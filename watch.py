@@ -34,15 +34,15 @@ import sys
 import time
 from datetime import date, datetime, time as dtime, timedelta
 
-import line_items
+import live_master
 import live_sheets
 import live_state
 import notify
-from compare import diff_queues, load_history, load_latest_snapshot, load_snapshot
+from compare import diff_queues, load_latest_snapshot, load_snapshot
 from config import (LIVE_MORNING_SNAPSHOT, LIVE_WORKBOOK_PATH, OUTPUT_DIR,
                     POLL_INTERVAL_SECONDS, WATCH_END, WATCH_START,
                     validate_runtime_config)
-from live_excel import save_morning_copy, update_workbook
+from live_excel import save_morning_copy, update_master_workbook
 from live_sheets import added_label
 from sales_orders import enrich_with_sales_orders
 from scraper import scrape_queue
@@ -99,38 +99,64 @@ def _enrich_pending(state: dict) -> list:
     return pending
 
 
-def _build_sheets(state: dict, present: list, today: date, now: datetime) -> list:
-    """Assemble the four master tabs from the current board + on-disk baselines.
-    All present orders are already enriched, so the full Full-Queue data is in
-    hand — these builders just shape it (live_sheets is pure/tested)."""
-    # Highlight every order that arrived during today's watch (not carried over).
-    new_ids = {jn for jn, e in state.items()
-               if e.get("present") and not e.get("carried_over")}
+def _force_rebuild(master: dict) -> None:
+    """Drop the per-tab row signatures so the first cycle of this process
+    re-appends every order — matching the renderer, which wipes each upsert tab
+    once at process start (clean slate vs any prior-schema content)."""
+    for e in master.get("orders", {}).values():
+        e.pop("lq_sig", None)
+        e.pop("oh_sig", None)
 
-    # Changes since this morning's frozen baseline, and vs the previous run.
+
+def _plan(master: dict, records: list, sig_key: str, allow_delete: bool) -> list:
+    """Turn (key, cells) records into upsert ops vs what we last wrote (the sig
+    stored per order in the master), and update those stored sigs. The sig is
+    persisted in the master store, so change detection survives restarts."""
+    desired = [(key, live_sheets.row_sig(cells), cells) for key, cells in records]
+    existing = {k: e.get(sig_key) for k, e in master["orders"].items() if e.get(sig_key)}
+    ops = live_sheets.plan_upsert(desired, existing, allow_delete=allow_delete)
+    sig_by = {key: sig for key, sig, _ in desired}
+    for kind, key, _ in ops:
+        e = master["orders"].get(key)
+        if e is None:
+            continue
+        e[sig_key] = sig_by.get(key) if kind in ("append", "update") else None
+    return ops
+
+
+def _changes_sheet(present: list, today: date) -> "live_sheets.Sheet":
+    """The Changes snapshot: since this morning's frozen baseline, and vs the
+    previous run (both date-labeled). Full-repaint tab (kept as-is)."""
     baseline = live_state.load_baseline(today)
     intraday = diff_queues(present, baseline, today, persist_history=False, prev_date=today)
     yest, yest_date = load_latest_snapshot(today)
     yesterday = diff_queues(present, yest, today, persist_history=False, prev_date=yest_date)
-    co_changed_ids = ({c["job"] for c in intraday.get("co_changed", [])}
-                      | {c["job"] for c in yesterday.get("co_changed", [])})
+    return live_sheets.changes_sheet(
+        intraday, f"{today.isoformat()} (start of day)",
+        yesterday, yest_date.isoformat() if yest_date else "no prior run")
 
-    store = line_items.load_store()
-    return [
-        live_sheets.full_queue_sheet(present, today, new_ids=new_ids,
-                                     co_changed_ids=co_changed_ids, ref=now),
-        live_sheets.changes_sheet(
-            intraday, f"{today.isoformat()} (start of day)",
-            yesterday, yest_date.isoformat() if yest_date else "no prior run"),
-        live_sheets.history_sheet(load_history()),
-        # Whole backlog, so the item search spans all history, not just the board.
-        live_sheets.line_items_sheet(store),
+
+def _render_master(master: dict, now: datetime) -> None:
+    """Build the upsert payloads (Live Queue, Order History) + the Changes
+    snapshot from the master log, and push them into the workbook."""
+    today = now.date()
+    lq_jobs = live_master.on_queue(master)
+    lq_ops = _plan(master, live_sheets.live_queue_records(lq_jobs, today, ref=now),
+                   "lq_sig", allow_delete=True)
+    oh_ops = _plan(master, live_sheets.order_history_records(live_master.ordered(master), today),
+                   "oh_sig", allow_delete=False)
+    payloads = [
+        {"name": "Live Queue", "headers": live_sheets.LIVE_QUEUE_HEADERS, "ops": lq_ops,
+         "key_col": live_sheets.LIVE_QUEUE_KEY_COL, "allow_delete": True, "freeze": "C2"},
+        {"name": "Order History", "headers": live_sheets.ORDER_HISTORY_HEADERS, "ops": oh_ops,
+         "key_col": live_sheets.ORDER_HISTORY_KEY_COL, "allow_delete": False, "freeze": "B2"},
     ]
+    update_master_workbook(LIVE_WORKBOOK_PATH, payloads, changes_sheet=_changes_sheet(lq_jobs, today))
 
 
-def poll_once(state: dict, now: datetime, baseline: bool, announce: bool) -> dict:
-    """One cycle: scrape -> record -> enrich new -> write the master tabs -> notify.
-    Mutates `state`; returns the deltas dict from record_poll."""
+def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce: bool) -> dict:
+    """One cycle: scrape -> record -> enrich new -> upsert the master tabs -> notify.
+    Mutates `state` and `master`; returns the deltas dict from record_poll."""
     board = scrape_queue(headless=True)
     if not board:
         log.warning("Board scrape returned 0 orders — skipping this cycle (site/session issue?).")
@@ -143,6 +169,7 @@ def poll_once(state: dict, now: datetime, baseline: bool, announce: bool) -> dic
 
     _enrich_pending(state)
     present = live_state.present_jobs(state)
+    live_master.update(master, present, now)        # fold the board into the all-time log
 
     # Freeze the start-of-day baseline (enriched) on the first poll, so the
     # 'changes since this morning' view has stable morning values to diff against.
@@ -150,7 +177,7 @@ def poll_once(state: dict, now: datetime, baseline: bool, announce: bool) -> dic
         live_state.save_baseline(present, today=now.date())
 
     if LIVE_WORKBOOK_PATH:
-        update_workbook(_build_sheets(state, present, now.date(), now), LIVE_WORKBOOK_PATH)
+        _render_master(master, now)
     else:
         log.warning("LIVE_WORKBOOK_PATH not set — live workbook not updated. "
                     "Set it in .env to the co-authored workbook's local path.")
@@ -162,6 +189,7 @@ def poll_once(state: dict, now: datetime, baseline: bool, announce: bool) -> dic
         notify.notify_new_orders(fresh)
 
     live_state.save_state(state, now.date())
+    live_master.save_master(master)
     return deltas
 
 
@@ -196,13 +224,15 @@ def run_watch(ignore_window: bool = False) -> int:
             return 0
 
     state = live_state.load_state(today)
+    master = live_master.load_master()
+    _force_rebuild(master)            # process start -> rebuild the upsert tabs once
     first = not state
     if first:
         _seed_baseline(state, datetime.now())
 
-    log.info("=== Live watch start: %s  window %s-%s  every %ds ===",
+    log.info("=== Live watch start: %s  window %s-%s  every %ds  (%d orders in master log) ===",
              today.isoformat(), start.strftime("%H:%M"), end.strftime("%H:%M"),
-             POLL_INTERVAL_SECONDS)
+             POLL_INTERVAL_SECONDS, len(master.get("orders", {})))
 
     cycle = 0
     try:
@@ -214,7 +244,7 @@ def run_watch(ignore_window: bool = False) -> int:
             baseline = first and cycle == 0
             t0 = time.monotonic()
             try:
-                poll_once(state, now, baseline=baseline, announce=not baseline)
+                poll_once(state, master, now, baseline=baseline, announce=not baseline)
             except Exception:  # noqa: BLE001 - one bad cycle must not end the watch
                 log.exception("Poll cycle failed; continuing to the next one")
             if baseline:
@@ -225,6 +255,7 @@ def run_watch(ignore_window: bool = False) -> int:
     except KeyboardInterrupt:
         log.info("Interrupted — saving state and exiting.")
         live_state.save_state(state, today)
+        live_master.save_master(master)
     log.info("=== Live watch done (%d cycles) ===", cycle)
     return 0
 
@@ -242,10 +273,12 @@ def main() -> int:
         validate_runtime_config()
         today = date.today()
         state = live_state.load_state(today)
+        master = live_master.load_master()
+        _force_rebuild(master)
         first = not state
         if first:
             _seed_baseline(state, datetime.now())
-        poll_once(state, datetime.now(), baseline=first, announce=not first)
+        poll_once(state, master, datetime.now(), baseline=first, announce=not first)
         if first and LIVE_MORNING_SNAPSHOT:
             _morning_snapshot(datetime.now())
         return 0

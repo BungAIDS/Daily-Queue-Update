@@ -14,6 +14,8 @@ excel_writer so the look matches the daily report.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -331,6 +333,116 @@ def history_sheet(history: Dict[str, Any], name: str = "Order History") -> Sheet
 # --------------------------------------------------------------------------- #
 LINE_ITEM_HEADERS = ["Job #", "Customer", "CO#", "Tags", "Item (as printed)",
                      "Normalized", "Details", "Qty", "Price", "Section", "SO PDF"]
+
+
+# --------------------------------------------------------------------------- #
+# Incremental "master log" tabs (Live Queue + Order History)                   #
+#                                                                             #
+# These are upserted row-by-row (keyed on the order number) instead of being   #
+# repainted, so a coworker's filter/sort/scroll survives. That needs a STABLE  #
+# column schema, so the variable-width DWG matrix is collapsed to one compact  #
+# "Custom DWGs" text column here (the full green/red matrix stays in the daily #
+# report). A record is (order#, [Cell, ...]); the renderer writes/append/      #
+# updates the row whose key matches.                                          #
+# --------------------------------------------------------------------------- #
+LIVE_QUEUE_HEADERS = ["Added"] + list(QUEUE_HEADERS) + ["Custom DWGs"]
+LIVE_QUEUE_KEY_COL = 2 + QUEUE_HEADERS.index("Job #")          # 1-based col of Job # (Added is col 1)
+ORDER_HISTORY_HEADERS = ["On Queue", "Added", "Left"] + list(QUEUE_HEADERS) + ["Custom DWGs"]
+ORDER_HISTORY_KEY_COL = 4 + QUEUE_HEADERS.index("Job #")        # 1-based col of Job # (3 lead cols)
+
+
+def _dwg_text(j: Dict[str, Any]) -> str:
+    """The job's custom-DWG suffixes as one compact cell, e.g. '-35, -51'."""
+    extras = j.get("dwg_extras") or {}
+    if not extras:
+        return ""
+    order = sorted(extras, key=lambda s: (int(s), s) if s.isdigit() else (10**9, s))
+    return ", ".join(f"-{s}" for s in order)
+
+
+def _fmt_dt(iso: Optional[str]) -> str:
+    if not iso:
+        return ""
+    try:
+        return datetime.fromisoformat(iso).strftime("%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        return iso
+
+
+def row_sig(cells: List[Cell]) -> str:
+    """A stable string signature of a row's content+style, so the renderer can
+    tell whether a row actually changed and skip writing it if not. Returned as a
+    hex digest (not a tuple) so it survives a JSON round-trip in the master store
+    — change detection has to work across watcher restarts."""
+    payload = [[c.value, c.fill, c.font, c.link, c.number_format, c.center] for c in cells]
+    return hashlib.md5(json.dumps(payload, default=str, sort_keys=True).encode()).hexdigest()
+
+
+def live_queue_records(jobs: List[Dict[str, Any]], today: date,
+                       ref: Optional[datetime] = None) -> List:
+    """(order#, cells) per on-board order: Added + every Full Queue column + a
+    compact Custom DWGs column, with urgency/new row fills and hyperlinks."""
+    out = []
+    for j in jobs:
+        added = Cell(added_label(j, ref=ref))
+        std = _job_value_cells(j, co_changed=False)
+        fill = _row_fill(j, today, is_new=not j.get("_carried_over", False))
+        cells = [added] + std + [Cell(_dwg_text(j))]
+        if fill:
+            for c in cells:
+                if c.fill is None:  # don't clobber the DWG/None cells' own intent
+                    c.fill = fill
+        out.append((str(j.get("job") or ""), cells))
+    return out
+
+
+def order_history_records(orders: List, today: date) -> List:
+    """(order#, cells) per logged order, from live_master.ordered() entries:
+    On Queue / Added / Left, then every Full Queue column + Custom DWGs. On-board
+    rows get the urgency fill; off-board rows stay plain."""
+    out = []
+    for jn, entry in orders:
+        j = entry.get("job", {})
+        onq = bool(entry.get("on_queue"))
+        lead = [Cell("YES" if onq else "NO"),
+                Cell(_fmt_dt(entry.get("added"))), Cell(_fmt_dt(entry.get("left")))]
+        std = _job_value_cells(j, co_changed=False)
+        cells = lead + std + [Cell(_dwg_text(j))]
+        if onq:
+            fill = _row_fill(j, today, is_new=False)
+            if fill:
+                for c in cells:
+                    if c.fill is None:
+                        c.fill = fill
+        out.append((str(jn), cells))
+    return out
+
+
+def plan_upsert(desired: List, existing_sigs: Dict[str, tuple],
+                allow_delete: bool = False) -> List:
+    """Diff desired rows against what's already on the sheet (by key) and return
+    the minimal op list: ('append', key, cells) for keys not present,
+    ('update', key, cells) for keys whose signature changed, and (with
+    allow_delete) ('delete', key, None) for keys no longer desired. Unchanged
+    rows produce no op — so they're never rewritten and filters/scroll persist.
+
+    `desired` is a list of (key, sig, cells); `existing_sigs` is {key: sig}.
+    """
+    ops, seen = [], set()
+    for key, sig, cells in desired:
+        if not key:
+            continue
+        seen.add(key)
+        prev = existing_sigs.get(key)
+        if prev is None:
+            ops.append(("append", key, cells))
+        elif prev != sig:
+            ops.append(("update", key, cells))
+    if allow_delete:
+        for key in existing_sigs:
+            if key not in seen:
+                ops.append(("delete", key, None))
+    return ops
 
 
 def line_items_sheet(
