@@ -123,7 +123,8 @@ def _build_sheets(state: dict, present: list, today: date, now: datetime) -> lis
             intraday, f"{today.isoformat()} (start of day)",
             yesterday, yest_date.isoformat() if yest_date else "no prior run"),
         live_sheets.history_sheet(load_history()),
-        live_sheets.line_items_sheet(store, order_nums=[j.get("job") for j in present]),
+        # Whole backlog, so the item search spans all history, not just the board.
+        live_sheets.line_items_sheet(store),
     ]
 
 

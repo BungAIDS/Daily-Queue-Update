@@ -34,6 +34,12 @@ pure sheet model + diff are what's tested. NOTE: the "Features" column on the
 board is kept as a quick tag summary; the real per-item detail is the new Line
 Items tab.
 
+DG: Line Items tab covers the WHOLE backlog (every order in the line-items
+store), not just the board, so the item search spans all history. Empty until
+the store is built (`line_items_scan.py`). Perf note: a large backlog makes that
+tab's repaint heavier, but the fingerprint cache only repaints it when the store
+changes (a few new orders/day) — revisit if it ever drags.
+
 ## 2026-06-16 — Live intraday watcher (queue stays fresh all day)
 
 The queue went stale between 5 AM runs. New `watch.py` keeps a **co-authored

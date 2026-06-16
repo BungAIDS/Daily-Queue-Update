@@ -340,8 +340,9 @@ def line_items_sheet(
 ) -> Sheet:
     """One row per (order, normalized line item) so you can AutoFilter the
     'Normalized' column by an item name and have the matching orders populate.
-    Limited to `order_nums` (the current board) when given, else every stored
-    order. Mirrors find_orders.write_xlsx's Line Items sheet."""
+    Covers every stored order by default (the whole backlog, so the search spans
+    all history); pass `order_nums` to restrict it (e.g. just the board). Mirrors
+    find_orders.write_xlsx's Line Items sheet."""
     jobs_store = (store or {}).get("jobs", {})
     keys = [k for k in (order_nums if order_nums is not None else jobs_store)
             if k in jobs_store]

@@ -128,6 +128,21 @@ def test_line_items_sheet_search_rows():
     assert sh.autofilter_a1 is not None
 
 
+def test_line_items_whole_backlog_default():
+    store = {"jobs": {
+        "421000": {"customer": "A", "co_number": 0, "so_pdf": "",
+                   "items": [{"raw": "X", "norm": "X", "tags": []}]},
+        "419000": {"customer": "B", "co_number": 0, "so_pdf": "",
+                   "items": [{"raw": "Y", "norm": "Y", "tags": []},
+                             {"raw": "Z", "norm": "Z", "tags": []}]},
+    }}
+    # No order_nums -> every stored order (whole backlog), not just the board.
+    sh = ls.line_items_sheet(store)
+    jobs_in_rows = {r[0].value for r in sh.grid[1:] if r}
+    assert jobs_in_rows == {"421000", "419000"}
+    assert sum(1 for r in sh.grid[1:] if r) == 3        # 1 + 2 items
+
+
 def main() -> int:
     passed = 0
     for name, fn in sorted(globals().items()):

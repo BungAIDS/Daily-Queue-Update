@@ -183,9 +183,12 @@ the daily report does, kept current all day:
   arrivals with their Added time, removed/completed, field changes vs the frozen
   start-of-day baseline) and **vs yesterday** (the previous run's date).
 - **History** — archived orders (dropped off the queue), newest first, + the DWG matrix.
-- **Line Items** — one row per order × **normalized** Sales-Order line item;
-  AutoFilter the **Normalized** column by an item name ("shaft seal") and the
-  matching orders populate — the in-workbook version of `find_orders.py`.
+- **Line Items** — one row per order × **normalized** Sales-Order line item,
+  across the **whole backlog** (every order in the line-items store, not just
+  today's board); AutoFilter the **Normalized** column by an item name ("shaft
+  seal") and the matching orders populate — the in-workbook `find_orders.py`.
+  (It's empty until the store is populated — `python line_items_scan.py` builds
+  it from the archived Sales Orders; it then grows as the daily run parses more.)
 
 Each cycle only repaints a tab whose content actually **changed**, so a
 coworker's active filter/scroll on a tab isn't reset every couple of minutes.
