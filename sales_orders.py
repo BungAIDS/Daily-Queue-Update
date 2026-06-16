@@ -21,8 +21,9 @@ For every job on the board this:
                           in the job's AutoCAD folder; .pdf/.txt/.xlsx; or "")
     drive_run_count int  (how many files matched; >1 -> report shows "YES (X)"
                           so someone reviews which is the real run)
-    drive_run      dict  (parsed drive-run fields, pdf runs only; see drive_run.py)
-    drive_run_summary str (compact one-liner of the drive-run fields)
+    drive_run      dict  (parsed quote-run fields, any format; see templates.py)
+    drive_run_summary str (compact one-liner of the quote-run fields)
+    drive_run_template str (which templates.py template read the run)
     job_type       str   (e.g. "AXIAL" / "GENERAL LINE", or "")
     job_folder     str   (AutoCAD folder if found, else the SO archive folder)
 
@@ -46,7 +47,7 @@ from config import (
     SALES_ORDER_DIR, DRIVE_RUN_DIR, DRIVE_RUN_TYPES, DRIVE_RUN_NAME_PATTERNS,
     SO_CONCURRENCY, AUTOCAD_JOBS_DIR,
 )
-from drive_run import parse_drive_run_pdf
+from templates import parse_quote_run
 from scraper import CONTAINER_SELECTOR
 import autocad_scan
 import line_items
@@ -63,6 +64,11 @@ PID_RE = re.compile(r"^(?P<type>.+?)-(?P<id>\d+)-(?P<rev>\d+)-(?P<tag>[A-Za-z0-9
 # (config.DRIVE_RUN_NAME_PATTERNS).
 SO_TYPE = "CBC_SalesOrder"
 RUN_NAME_RES = [re.compile(p, re.I) for p in DRIVE_RUN_NAME_PATTERNS]
+# A quote run is a *document*. Plenty of CAD files (HDX layouts) are named
+# "QT RUN-..." (.dwg/.sldasm/.slddrw/.dwl2/.bak); those are drawings, not runs,
+# so the folder scan only accepts document-like extensions. (Document matching
+# by pid type is unaffected — that path doesn't go through here.)
+RUN_DOC_EXTS = {".txt", ".pdf", ".rtf", ".xlsx", ".xlsm", ".xls", ".doc", ".docx", ".csv", ".md"}
 CO_START = re.compile(r"^\s*C\s*/?\s*O\s*#?\s*\d", re.I)
 DESIGN_HDR = re.compile(r"^\s*Design\s+(\S+)\s*(.*)$")
 # Spec-row cells look like "Label value" (e.g. "Size M2", "WheelType BI").
@@ -98,13 +104,34 @@ def _special_temp(design_temp: str, max_temp: str, suitable: str) -> str:
 # --------------------------------------------------------------------------- #
 # AutoCAD folder / job-type lookup                                            #
 # --------------------------------------------------------------------------- #
+# A subfolder named "history" or "hist" (any case, e.g. "Qt History", "RUN HIST")
+# holds superseded copies of the run — never the live one, so the sweep skips it.
+_HISTORY_DIR = re.compile(r"(?i)\bhist(ory)?\b")
+
+
+def _in_history_dir(f: Path, root: Path) -> bool:
+    """True if any subfolder between *root* and *f* is a history/hist folder."""
+    try:
+        parts = f.relative_to(root).parts[:-1]  # directories only, drop the filename
+    except ValueError:
+        parts = f.parts[:-1]
+    return any(_HISTORY_DIR.search(p) for p in parts)
+
+
 def _run_files_in_folder(folder: Path) -> List[Path]:
     """Quote-run files in a job's AutoCAD folder, searched recursively — they
     are often tucked in a subfolder (e.g. ENG REF\\420410 qt  run.txt). Some
     orders never get the run attached to their cbcinsider documents at all,
-    so the folder is the only place it lives."""
+    so the folder is the only place it lives. Superseded copies under a
+    `history\\` / `hist\\` subfolder are skipped — they are not the live run."""
     try:
-        return sorted(f for f in folder.rglob("*") if f.is_file() and _is_run_name(f.name))
+        return sorted(
+            f for f in folder.rglob("*")
+            if f.is_file() and not f.name.startswith("~$")   # Office lock/temp files
+            and f.suffix.lower() in RUN_DOC_EXTS              # a document, not a CAD drawing
+            and not _in_history_dir(f, folder)               # not a superseded history copy
+            and _is_run_name(f.name)
+        )
     except OSError as e:
         log.warning("  could not scan %s for quote-run files (%s)", folder, e)
         return []
@@ -668,9 +695,13 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
         j["drive_run_pdf"] = dr_pdf or ""
         j["drive_run_count"] = dr_count if j["has_drive_run"] else 0
         j["drive_run_rev"] = r.get("dr_rev")
-        dparsed = parse_drive_run_pdf(dr_pdf) if dr_pdf and str(dr_pdf).lower().endswith(".pdf") else {}
+        # Read the run with whichever template matches its format — keyed mostly
+        # by design # (Design 64 -> wheel-construction xlsx, HDX -> Qt Run text,
+        # others -> pdf). Handles every run extension, not just .pdf.
+        dparsed = parse_quote_run(dr_pdf, design=j.get("design")) if dr_pdf else {}
         j["drive_run"] = dparsed.get("fields", {})
         j["drive_run_summary"] = dparsed.get("summary", "")
+        j["drive_run_template"] = dparsed.get("template", "")
         if j["has_drive_run"]:
             n_dr += 1
 

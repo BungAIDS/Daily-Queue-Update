@@ -3,6 +3,174 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-16 — Text PDFs parse as Qt Runs
+
+After the rescan (unknown 55→18, CB text 250→265), the ~85 text-bearing PDF
+runs were still going through the *generic* key/value sweep. But they're the
+same CBC selection-program Qt Run, just saved as PDF (DG: "these are all
+technically chicago blower runs" — the `CHICAGO BLOWER`/`SN#` header marks the
+*selection-program layout*, not a CB-vs-other distinction). So:
+
+- `drive_run.parse_drive_run_pdf` now also returns the FULL extracted `text`.
+- `PdfQuoteRun.extract`: if that text carries the Qt Run header
+  (`is_selection_program`, shared `SELECTION_PROGRAM_MARKERS`), parse it with
+  the full `_parse_chicago_blower` field set; otherwise keep generic key/value
+  (vendor quotes, markups, etc.). Routing tested by stubbing the PDF text
+  extraction (pdfplumber can't run in the sandbox) — 2 new tests.
+
+So the same Qt Run now yields the same fields whether it's `.txt`, `.docx`, or
+`.pdf`. Re-run `quote_run_scan.py --rescan` to upgrade the stored PDF rows.
+
+## 2026-06-15 — First full backlog sweep + refinements
+
+DG ran `quote_run_scan.py` over the whole Z: tree: **12,873 jobs in ~22 min,
+365 with a run, 554 runs**. Templates: cbc_qt_run_text 250, pdf 219 (146 of
+them text-less drawings), unknown 55, d64 30. The log surfaced three fixes
+(all done + tested):
+
+- **CAD false positives** — HDX layout files named `QT RUN-...`
+  (`.dwg/.sldasm/.slddrw/.dwl2/.bak`) were matching as "runs". Restricted the
+  folder finder (`sales_orders._run_files_in_folder`) to document extensions
+  (`RUN_DOC_EXTS`) so drawings are ignored. This also helps the daily run.
+- **Office temp/lock files** (`~$...`) were parsed and errored ("not a zip");
+  now skipped in the folder finder.
+- **`.docx` is the biggest real gap** (`QT RUN.docx`, `quote run.docx`,
+  `MARKUP PER FEA.docx`). Added stdlib `.docx` text extraction
+  (`templates._docx_to_text`, zip→word/document.xml, no python-docx dep) and
+  put `.docx` on the text templates, so a CB run saved as Word routes to the CB
+  parser by content marker (markup versions fall to generic KV).
+
+Deferred: `.doc` (old-binary Word — many are *damper* quote runs, needs a
+heavier extractor) and `.msg` (Outlook) stay UNRECOGNIZED for now. D64 `.xlsx`
+parses via the best-effort cell sweep (30 found) — refine when a real sheet is
+pasted back.
+
+**Re-run with `--rescan`** to re-evaluate the stored jobs against the new
+extension filter + `.docx` support (the progress store holds the first pass).
+
+## 2026-06-15 — Whole-backlog quote-run sweep (`quote_run_scan.py`)
+
+DG: "check everything in history for quote runs." Chose (with DG) a **pure Z:
+AutoCAD folder sweep** (no login, fast, resumable) over the slow online
+backfill. New `quote_run_scan.py` mirrors `autocad_scan.py`: enumerates every
+`<type>/<intermediate>/<job>` folder (reuses `iter_job_folders`), finds run
+files recursively with `_run_files_in_folder` (catches `ENG REF\` + `history\`
+copies), parses each through `parse_quote_run`, and writes
+`backlog/quote_runs.xlsx` — one row per run with the matched template, the core
+fields, an "Other" catch-all (so new template fields are never dropped), and a
+**Status** column (OK / NO FIELDS / UNRECOGNIZED FORMAT / PDF-no-text) that
+surfaces which formats still need a template. Resumable JSON store; same
+`--min-job/--max-job/--limit` plus `--range` and `--list FILE`. Pure logic
+(status, row-flatten core/Other split, recursive scan_one) tested in
+`test_quote_run_scan.py` (5 tests, added to CI). Can't see runs that live only
+in an order's online documents — that's still `backfill_orders.py`'s job.
+
+## 2026-06-15 — Quote-run TEMPLATE collection (`templates.py`)
+
+Per DG: start a collection of templates that quote runs match so the program
+knows how to pull info from each format. DG's steer: formats vary **mostly by
+design #** (some real samples in hand, full variance unknown yet).
+
+Built `templates.py` — a registry of `QuoteRunTemplate`s. Each declares what it
+recognizes (design #, file extension, file-name markers) and how to extract
+fields from that one shape; `parse_quote_run(path, design=None)` scores every
+template and uses the best match. Return shape is a **superset** of the old
+`drive_run.parse_drive_run_pdf` (`template`, `design`, `fields`, `raw_lines`,
+`summary`), so it's a drop-in.
+
+Seeded templates (the collection):
+- **`d64_wheel_construction`** — Design 64, the `.xlsx` "D64 Wheel
+  Construction" sheet (openpyxl, read-only; best-effort cell sweep).
+- **`qt_run_text`** — HDX-style `.txt`/`.rtf` named "Qt Run"/"Quote Run"
+  (requires the name marker so a plain `.txt` falls to the generic reader).
+- **`pdf`** — any `.pdf` run; delegates to the existing `drive_run.py`.
+- **`generic_text`** / **`unknown`** — fallbacks so something always matches
+  and an unreadable format is named (not crashed) for adding later.
+
+Scoring: handled extension = 1, design-# match +2, name-marker match +3, so
+the most specific template wins (first wins a tie). `requires_signal` keeps
+shared-extension templates (`.txt`) from grabbing files that lack their marker.
+
+Wiring: `sales_orders.py` and `backfill_orders.py` now call `parse_quote_run`
+for **every** run extension (was `.pdf`-only) and pass the job's design #;
+jobs gain `drive_run_template`. `drive_run.parse_drive_run_pdf` stays as the
+PDF reader the `pdf` template calls.
+
+Tests: `test_templates.py` (14, in CI) — design parsing, matching by
+design/ext/name, text + rtf + xlsx extraction, and the safe fallbacks. PDF
+extraction isn't re-tested here (it just delegates to drive_run), so pdfplumber
+isn't needed to run the suite.
+
+**`check_orders.py` (same day, per DG: "I want to give you order numbers and
+you check those out").** Hand it a list of order numbers; it opens each (board
+or search-box), downloads the quote run, and runs it through the templates,
+printing the matched template + per-template scores + fields + summary + first
+raw lines. Headless/unattended (`--show` to watch); reuses the
+`discover_documents` plumbing (refactored `_download` to return the saved
+path). This is the loop for pinning formats down: run it on real orders, paste
+a block back.
+
+**Chicago Blower Qt Run parser (2026-06-15, DG ran `check_orders.py 421579`).**
+First real sample in hand: job 421579's run is a Chicago Blower selection-program
+text dump (`Z:\...\421579\ENG REF\QT RUN.txt`), and the generic `Label: value`
+sweep mangled it (turning the outlet dimension table — `A`, `DA`, `DK`, … — into
+junk fields). Added a dedicated **`cbc_qt_run_text`** template that matches by
+content marker (`CHICAGO BLOWER` / `SN#`, so it beats `qt_run_text` even when the
+file is just named `QT RUN.txt`) and pulls 29 real fields by targeted pattern:
+serial, size/design/arr/%width/disch/rot, duty (CFM/SP/BHP/RPM/temp/density),
+max HP/RPM/temp + ambient, tip speed, effective wheel dia, wheel construction
+materials (blade/sideplate/backplate), shaft dia / brg centers / critical speed,
+drive type, and the engineering-approval / non-std-materials / shrink-fit flags.
+The dimension tables are deliberately left out. Verified against the real text in
+`test_templates.py` (`REAL_CBC_QT_RUN`). NOTE: the run's `DESIGN 6195` is the CB
+engineering design code, not the queue's design column.
+
+**`check_orders.py` hardening (same run — it crawled / hung on later orders):**
+the Z: AutoCAD-tree sweep now runs ONCE for all requested jobs (was per-order),
+and the board page is reloaded between orders so a left-over detail modal or a
+search that navigated away can't wedge the next lookup. Old/off-board orders
+(419624, 420990) go through the search-box path; if that can't surface them the
+order is skipped with a message instead of stalling the batch.
+
+**CB parser tuned on 4 real runs (2026-06-15, `check_orders.py 421579 421237
+419624 420990`).** The batch ran clean after the hardening. Four GL/PFD runs
+(designs 6195 / 1904 / 1904 / 1910B) refined the parser:
+- Wheel-construction gauge column is a fraction **or** a decimal with the GA in
+  parens (`0.048 (18)`, `0.179 ( 7)`), and blades carry a descriptor
+  (`BLADES/2 RIB`). The fraction-only pattern was dropping Blade/Sideplate
+  materials on the PFD fans — now handled (`_GA` sub-pattern + descriptor).
+- Some runs have **no `SN#`** (order # on a bare line) — Serial now falls back
+  to a bare-number header line. Added **Fan Type** (the `PACKAGED FORCED DRAFT
+  FAN`-style descriptor after the spec line), **Hub** (`19-5-1056`),
+  **Coupling** (`FALK T10`), and flags **FEA Analysis** / **Factory Run Test**.
+  Direct drive is inferred from a `COUPLING` line when there's no `BELT DRIVEN`.
+- Second real run (421237) locked in as `REAL_CBC_QT_RUN_421237` in the tests.
+- Note: 420990 listed the same Qt-run doc twice → downloaded as `_1`/`_2`
+  (the `drive_run_count > 1` "review" case); not a parser issue.
+
+**More CB runs (2026-06-15, `check_orders.py 421473 421572`):**
+- Confirmed the spec line also comes **space-delimited** (`SIZE 37 DESIGN 16A
+  LS  ARR 9H  100.0 PCT ...`), not just comma-delimited — the field-by-field
+  patterns already handle both.
+- LS-class wheels have richer tables (LINER / GUSSETS / HUB TUBE). Added
+  **Liner Material** (captures e.g. `PLAIN FIRMEX`, a notable wear liner), a
+  **Wheel Material** fallback for runs with no construction table (just
+  `WHEEL MATERIAL A569 HRS`), and fan **Class** (`CLASS 4`). Locked job 421572
+  in as `REAL_CBC_QT_RUN_421572`.
+- Jobs can have **several differing runs** (quote vs production vs history copy,
+  different revisions/materials) across the documents + ENG REF + history
+  folders. `check_orders` surfaces all of them — useful, and the daily run's
+  `_run_docs` still picks the documents' run as primary.
+- A PDF run can be a **drawing with no text layer** (421572's "Inlet Box Liners
+  ONLY.pdf" yielded nothing); `check_orders` now says so instead of implying a
+  missing template.
+
+**Open (needs real samples on the work machine):** run
+`python check_orders.py <order#> ...` (or `python templates.py "<a run file>"`)
+on real orders, paste the output back, and pin the exact field headings into
+the matching template's `extract`. Add a template per new design # as its
+format turns up. Best-effort `Label: value` capture runs until then.
+
 ## 2026-06-11 — Sales-order LINE ITEMS: capture, normalize, search
 
 New capability per DG's request: record **every line item** on each Sales

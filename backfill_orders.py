@@ -47,7 +47,7 @@ from config import (
     SALES_ORDER_DIR, DRIVE_RUN_DIR, BACKLOG_DIR, AUTOCAD_JOBS_DIR,
     CBC_SEARCH_SELECTOR, CBC_SEARCH_BUTTON,
 )
-from drive_run import parse_drive_run_pdf
+from templates import parse_quote_run
 from sales_orders import (
     _parse_doc, _latest_of_type, _run_docs, _run_filename, _run_files_in_folder,
     _trigger_js, _so_filename, _download_error, SO_TYPE, parse_sales_order_pdf,
@@ -263,8 +263,10 @@ def process_one(page, context, job: str, folder: str = "",
                 if got and not dr_pdf:
                     dr_pdf = got
             rec["drive_run_pdf"] = dr_pdf or ""
-            rec["drive_run_summary"] = (parse_drive_run_pdf(dr_pdf).get("summary", "")
-                                        if dr_pdf and dr_pdf.lower().endswith(".pdf") else "")
+            if dr_pdf:
+                qr = parse_quote_run(dr_pdf, design=rec.get("design"))
+                rec["drive_run_summary"] = qr.get("summary", "")
+                rec["drive_run_template"] = qr.get("template", "")
         if folder:
             # Always scan the AutoCAD folder — cheap rglob, catches runs that
             # only live there and any folder copies alongside document ones.
