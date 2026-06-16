@@ -3,6 +3,39 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-16 — Live intraday watcher (queue stays fresh all day)
+
+The queue went stale between 5 AM runs. New `watch.py` keeps a **co-authored
+Excel workbook** live all day without re-paying the slow enrichment. The insight:
+the cheap part of a run is the board scrape (`scrape_queue` — order numbers + row
+data, no modals); the slow part is per-order enrichment (`enrich_with_sales_orders`).
+So the watcher polls the board every couple of minutes and runs enrichment **only
+for order numbers it hasn't seen yet today**, stamping each with its first-seen
+("added") time. New modules:
+
+- **`live_state.py`** — pure, unit-tested per-day memory (`live_state_<date>.json`):
+  detects new/returning/removed orders, stamps a stable `first_seen`, refreshes
+  volatile board fields each poll without clobbering enrichment, seeds the
+  start-of-day baseline from the morning daily snapshot, sorts present orders
+  newest-first. 8 tests in `test_live_state.py` (added to CI).
+- **`live_excel.py`** — writes the live board into the co-authored workbook by
+  driving the **desktop Excel app via COM** (mirrors `emailer.py`'s Outlook
+  automation) so co-authoring/cursors sync to coworkers; openpyxl can't do this
+  (it replaces the whole file). One bulk `Range.Value` write per cycle, light
+  stable formatting, `SaveCopyAs` for the dated morning snapshot.
+- **`notify.py`** — per-new-order **Windows toast** (winotify, PowerShell
+  fallback) + **Microsoft Teams** Incoming-Webhook card (stdlib urllib, no dep)
+  so coworkers + phones get pinged. Both best-effort.
+- **`watch.py`** — the loop: 5am–5pm window (configurable), default 2-min
+  interval, first poll = silent baseline + morning snapshot, restart-safe.
+  `--once` / `--now` flags. Own lightweight logging (doesn't drag in anthropic).
+
+Config in `.env`: `LIVE_WORKBOOK_PATH`, `POLL_INTERVAL_SECONDS`, `WATCH_START`/
+`WATCH_END`, `TEAMS_WEBHOOK_URL`, `LIVE_TOAST`, `LIVE_MORNING_SNAPSHOT`. Can't be
+exercised from the sandbox (Excel COM / Teams / toast are all on the Windows
+box) — the pure state logic is what's tested; the COM/notify paths follow the
+established lazy-import, best-effort pattern and need a smoke test on the PC.
+
 ## 2026-06-16 — Text PDFs parse as Qt Runs
 
 After the rescan (unknown 55→18, CB text 250→265), the ~85 text-bearing PDF

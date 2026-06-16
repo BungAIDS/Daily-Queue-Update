@@ -142,6 +142,74 @@ re-running `brief.py`/`send.py` is safe and never double-counts.
 4. Save and exit. Verify with `crontab -l`.
 5. Mac users: macOS may need to grant cron Full Disk Access under **System Settings → Privacy & Security → Full Disk Access** so it can write to your output folder.
 
+## Live intraday watcher (keep the queue fresh all day)
+
+The 5 AM run is a once-a-day photo. The problem: the queue changes through the
+day, so by mid-afternoon the report is stale. `watch.py` fixes that — it keeps a
+**live, co-authored Excel workbook** current all day, and does it cheaply.
+
+**How it stays cheap.** The slow part of a run isn't reading the board, it's the
+per-order enrichment (open the order, download + parse the Sales Order and quote
+run, scan the AutoCAD folder). So the watcher splits the two:
+
+- Every couple of minutes it does the **cheap board scrape** (order numbers + row
+  data — no clicking into anything).
+- It compares the order numbers to what it saw last time, and runs the **slow
+  enrichment only for orders that are new**. Each new order is stamped with the
+  time it was added (the first poll it appeared on).
+
+The current board is written into your **Microsoft 365 co-authored workbook by
+driving the desktop Excel app through COM** — the same no-password trick the
+email step uses for Outlook — so edits flow through Excel and your coworkers see
+them appear live (cursors and all), with no file-lock fights. New orders pop a
+**Windows toast** on the watcher PC and post a **Microsoft Teams card** so
+coworkers (and their phones) get notified too.
+
+```bash
+python watch.py          # run the daytime watch loop (5am–5pm by default)
+python watch.py --once   # one poll cycle now, then exit (for testing)
+python watch.py --now    # ignore the time window; start polling immediately
+```
+
+**A day, start to finish.** The first poll establishes the start-of-day baseline
+*silently* — seeded from the morning daily-run snapshot when there is one, so the
+whole board isn't re-enriched or announced — and saves a dated **morning
+snapshot** copy of the workbook (`OUTPUT_DIR\live_snapshots\`). Every poll after
+that announces only genuinely new arrivals. State lives in
+`SNAPSHOT_DIR\live_state_<date>.json`, so if the watcher restarts mid-day it
+resumes without re-enriching or re-announcing what it already saw.
+
+### One-time setup
+
+1. **Make the workbook.** Create an Excel file in OneDrive/SharePoint (so it can
+   be co-authored), share it with your coworkers, and put its **local synced
+   path** in `LIVE_WORKBOOK_PATH` in `.env`. The watcher writes a sheet named
+   `Live Queue` inside it; leave your own tabs alone and they're untouched.
+2. **Teams alerts (optional).** In the target Teams channel: **··· → Connectors →
+   Incoming Webhook → Create**, copy the URL into `TEAMS_WEBHOOK_URL`. Everyone
+   in that channel then gets a desktop + phone notification per new order, with
+   nothing to install. Leave it blank to skip Teams.
+3. **Nicer toast (optional).** `pip install winotify` for a real toast; without
+   it the watcher falls back to a PowerShell tray balloon.
+4. **Interval / window (optional).** Defaults are every 2 minutes, 05:00–17:00.
+   Override with `POLL_INTERVAL_SECONDS`, `WATCH_START`, `WATCH_END` in `.env`.
+
+### Scheduling it (Windows Task Scheduler)
+
+Add a second task alongside the 5 AM one, with the same **"Run only when user is
+logged on"** setting (it needs your interactive desktop session for Excel COM and
+toasts):
+
+- **Trigger:** Daily at **5:00 AM** (it self-stops at `WATCH_END`).
+- **Program/script:** the venv's `python.exe`. **Arguments:** `watch.py`.
+  **Start in:** the project folder.
+- If launched before `WATCH_START` it sleeps until the window opens; launched
+  after `WATCH_END` it exits immediately.
+
+> Like the daily run, this is Windows + your logged-in session: Excel must be
+> installed and signed into the same Microsoft 365 account, and the workbook must
+> live in OneDrive/SharePoint for co-authoring to sync to your coworkers.
+
 ## File layout
 
 ```
@@ -159,6 +227,10 @@ Daily-Queue-Update/
 ├── templates.py        # Quote-run TEMPLATE collection — match a run by design#/format, pull its fields
 ├── drive_run.py        # PDF quote-run reader (the .pdf template in templates.py)
 ├── compare.py          # Diff today vs the most recent prior run; persistence tracking
+├── watch.py            # Live intraday watcher — poll the board, enrich only new orders all day
+├── live_state.py       # The watcher's per-day memory: first-seen times, what's new/enriched
+├── live_excel.py       # Writes the live queue into the co-authored workbook via Excel COM
+├── notify.py           # New-order notifications — Windows toast + Microsoft Teams card
 ├── analyzer.py         # Claude API call — briefing + anomalies + action items
 ├── excel_writer.py     # Two-tab .xlsx report with AutoFilter and date highlights
 ├── emailer.py          # Plain-text email + failure alert email
