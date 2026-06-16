@@ -79,7 +79,7 @@ class QuoteRunContext:
     def _read_text(self) -> str:
         if self.ext == ".docx":
             return _docx_to_text(self.path)
-        if self.ext not in (".txt", ".rtf", ".csv", ""):
+        if self.ext not in (".txt", ".rtf", ".csv", ".md", ""):
             return ""
         try:
             data = self.path.read_text(encoding="utf-8", errors="replace")
@@ -348,7 +348,7 @@ class ChicagoBlowerQtRun(_TextLineMixin, QuoteRunTemplate):
     — the generic key/value sweep mis-reads its dimension tables."""
     key = "cbc_qt_run_text"
     label = "Chicago Blower Qt Run (text)"
-    extensions = frozenset({".txt", ".rtf", ".docx"})
+    extensions = frozenset({".txt", ".rtf", ".docx", ".md"})
     name_patterns = (r"qt\s*run", r"quote\s*run")
     content_markers = ("CHICAGO BLOWER", "SN#")
 
@@ -364,7 +364,7 @@ class QtRunText(_TextLineMixin, QuoteRunTemplate):
     Best-effort key/value until a real dump of that format pins its headings."""
     key = "qt_run_text"
     label = "Qt Run (text, generic)"
-    extensions = frozenset({".txt", ".rtf", ".docx"})
+    extensions = frozenset({".txt", ".rtf", ".docx", ".md"})
     name_patterns = (r"qt\s*run", r"quote\s*run")
     requires_signal = True  # plain .txt belongs to GenericTextRun
 
@@ -431,7 +431,7 @@ class GenericTextRun(_TextLineMixin, QuoteRunTemplate):
     """Fallback for any text-shaped run that didn't match a named template."""
     key = "generic_text"
     label = "Quote run (text, generic)"
-    extensions = frozenset({".txt", ".rtf", ".csv", ".docx", ""})
+    extensions = frozenset({".txt", ".rtf", ".csv", ".docx", ".md", ""})
 
     def extract(self, ctx: QuoteRunContext) -> Dict[str, Any]:
         return self._from_text(ctx)
@@ -447,8 +447,11 @@ class UnknownRun(QuoteRunTemplate):
         return 1  # always applies, but only as the absolute last choice
 
     def extract(self, ctx: QuoteRunContext) -> Dict[str, Any]:
-        log.info("Quote run %s: no template reads %s files yet — add one to "
-                 "templates.TEMPLATES.", ctx.filename, ctx.ext or "(no ext)")
+        # Debug, not info: a full-backlog sweep hits many of these (.doc/.msg),
+        # and the inventory's Status column + end-of-run summary already report
+        # them. Run with -v / DEBUG logging to see each one.
+        log.debug("Quote run %s: no template reads %s files yet — add one to "
+                  "templates.TEMPLATES.", ctx.filename, ctx.ext or "(no ext)")
         return {"fields": {}, "raw_lines": []}
 
 

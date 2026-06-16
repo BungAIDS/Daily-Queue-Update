@@ -206,8 +206,16 @@ def write_workbook(records: Dict[str, Dict[str, Any]], path: Path) -> Path:
         ws.column_dimensions[letter].width = min(max(width + 2, 6), 40)
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(path)
-    return path
+    try:
+        wb.save(path)
+        return path
+    except PermissionError:
+        # The usual cause: the workbook is still open in Excel (Windows locks
+        # it). Don't throw away the whole scan — write a timestamped copy.
+        alt = path.with_name(f"{path.stem}_{datetime.now():%Y%m%d_%H%M%S}{path.suffix}")
+        wb.save(alt)
+        log.warning("%s is locked (close it in Excel) — wrote %s instead.", path, alt)
+        return alt
 
 
 # --------------------------------------------------------------------------- #
