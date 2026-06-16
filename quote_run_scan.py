@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 import time
 from collections import Counter
@@ -68,6 +69,18 @@ CORE_FIELDS = [
 # --------------------------------------------------------------------------- #
 # Pure logic (no I/O — unit-tested)                                           #
 # --------------------------------------------------------------------------- #
+_DAMPER = re.compile(r"(?i)damper")
+
+
+def is_damper(filename: str, raw_lines: List[str]) -> bool:
+    """Flag a damper run. Dampers are a separate product line with their own
+    quote-run format (often a .docx) that nothing else here recognises yet — so
+    just mark it. Triggered by 'damper' in the file name or anywhere in the text."""
+    if _DAMPER.search(filename):
+        return True
+    return any(_DAMPER.search(ln) for ln in raw_lines)
+
+
 def classify_status(template: str, fields: Dict[str, Any], raw_lines: List[str], ext: str) -> str:
     """A one-word health flag per run, so the unreadable ones are easy to spot."""
     if fields:
@@ -91,6 +104,7 @@ def run_rows(records: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "job": rec.get("job", ""),
                 "type": rec.get("type", ""),
                 "status": run.get("status", ""),
+                "damper": run.get("damper", False),
                 "template": run.get("template", ""),
                 "file": run.get("file", ""),
                 "path": run.get("path", ""),
@@ -117,6 +131,7 @@ def scan_one(job: str, jtype: str, folder: Path) -> Dict[str, Any]:
             "fields": r["fields"],
             "summary": r["summary"],
             "status": classify_status(r["template"], r["fields"], r["raw_lines"], f.suffix.lower()),
+            "damper": is_damper(f.name, r["raw_lines"]),
         })
     return {
         "job": job,
@@ -165,7 +180,7 @@ def write_workbook(records: Dict[str, Dict[str, Any]], path: Path) -> Path:
     bad_fill = PatternFill("solid", fgColor="FFC7CE")    # red: unrecognized / no text
 
     rows = run_rows(records)
-    fixed = ["Job #", "Type", "Status", "Template", "Run File"]
+    fixed = ["Job #", "Type", "Status", "Template", "Run File", "Damper"]
     headers = fixed + CORE_FIELDS + ["Other", "Summary", "Folder"]
 
     wb = Workbook()
@@ -188,6 +203,7 @@ def write_workbook(records: Dict[str, Dict[str, Any]], path: Path) -> Path:
         if row["path"]:
             fcell.hyperlink = row["path"]
             fcell.font = link_font
+        ws.cell(i, 6, "DAMPER" if row["damper"] else "")
         for k, name in enumerate(CORE_FIELDS, start=len(fixed) + 1):
             ws.cell(i, k, row["core"].get(name, ""))
         base = len(fixed) + len(CORE_FIELDS)

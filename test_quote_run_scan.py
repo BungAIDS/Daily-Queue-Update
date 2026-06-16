@@ -15,7 +15,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from quote_run_scan import classify_status, run_rows, scan_one, CORE_FIELDS
+from quote_run_scan import classify_status, is_damper, run_rows, scan_one, CORE_FIELDS
 
 
 def test_classify_status():
@@ -95,6 +95,24 @@ def test_scan_one_no_runs(tmp: Path):
     (job / "400111-01A.dwg").write_text("drawing only")
     rec = scan_one("400111", "GL", job)
     assert rec["runs"] == []   # job recorded (so resume skips it) but no runs
+
+
+def test_is_damper():
+    assert is_damper("420848 damper quote run.docx", [])          # name
+    assert is_damper("420848 DAMPER RUN.txt", [])                 # any case
+    assert is_damper("quote run.txt", ["...", "BACKDRAFT DAMPER"])  # in the text
+    assert not is_damper("421311 qt run.txt", ["SIZE 37 ARR 9H"])  # ordinary fan run
+
+
+def test_scan_one_flags_damper(tmp: Path):
+    job = tmp / "420848"
+    job.mkdir()
+    (job / "420848 qt run.txt").write_text("CHICAGO BLOWER\n SIZE 37 ARR 9H\n")  # fan
+    (job / "420848 damper quote run.txt").write_text("DAMPER QUOTE\n MODEL CBD\n")  # damper
+    rec = scan_one("420848", "GL", job)
+    flags = {r["file"]: r["damper"] for r in rec["runs"]}
+    assert flags["420848 qt run.txt"] is False
+    assert flags["420848 damper quote run.txt"] is True
 
 
 def main() -> int:
