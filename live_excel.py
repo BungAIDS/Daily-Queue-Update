@@ -63,6 +63,11 @@ SHEET_ORDER = ["Live Queue", "Changes", "History", "Line Items"]
 # tab would be reset every poll. Reset on process start (re-renders once).
 _RENDER_CACHE: Dict[str, int] = {}
 
+# Sheets whose freeze pane is already set this process. Freeze panes persist in
+# the workbook and setting one requires Activating the sheet — which would yank a
+# coworker's view to that tab — so we only ever do it once per sheet.
+_FROZEN: set = set()
+
 
 def _fingerprint(sheet: Sheet) -> int:
     parts = [sheet.name, sheet.freeze or "", sheet.autofilter_a1 or ""]
@@ -208,12 +213,15 @@ def render_sheet(app, wb, sheet: Sheet) -> None:
     except Exception:  # noqa: BLE001
         pass
 
-    if sheet.freeze:
+    # Freeze panes persist in the workbook and setting one steals focus to this
+    # tab, so do it only once per sheet (not every repaint).
+    if sheet.freeze and sheet.name not in _FROZEN:
         try:
             ws.Activate()
             app.ActiveWindow.FreezePanes = False
             ws.Range(sheet.freeze).Select()
             app.ActiveWindow.FreezePanes = True
+            _FROZEN.add(sheet.name)
         except Exception:  # noqa: BLE001
             pass
 
