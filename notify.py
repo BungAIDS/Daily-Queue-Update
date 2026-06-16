@@ -140,9 +140,10 @@ def _workflow_card(title: str, jobs: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def _is_workflow_url(url: str) -> bool:
     """True for a Workflows/Power Automate webhook URL (Adaptive Card), False for
-    a legacy Incoming Webhook connector URL (MessageCard)."""
+    a legacy Incoming Webhook connector URL (MessageCard). Covers both the
+    logic.azure.com and the newer Power Platform (powerplatform.com) hosts."""
     u = (url or "").lower()
-    return ("logic.azure.com" in u or "powerautomate" in u
+    return ("logic.azure.com" in u or "powerautomate" in u or "powerplatform" in u
             or "/workflows/" in u or "azure-apihub" in u)
 
 
