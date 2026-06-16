@@ -98,10 +98,10 @@ def test_scan_one_no_runs(tmp: Path):
 
 
 def test_is_damper():
-    assert is_damper("420848 damper quote run.docx", [])          # name
-    assert is_damper("420848 DAMPER RUN.txt", [])                 # any case
-    assert is_damper("quote run.txt", ["...", "BACKDRAFT DAMPER"])  # in the text
-    assert not is_damper("421311 qt run.txt", ["SIZE 37 ARR 9H"])  # ordinary fan run
+    assert is_damper("420848 damper quote run.docx")    # in-house damper quote (name)
+    assert is_damper("420848 DAMPER RUN.txt")           # any case
+    # A fan run that only *mentions* a damper accessory is NOT a damper quote.
+    assert not is_damper("421311 qt run.txt")
 
 
 def test_scan_one_flags_damper(tmp: Path):

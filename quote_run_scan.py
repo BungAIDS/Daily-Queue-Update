@@ -72,13 +72,13 @@ CORE_FIELDS = [
 _DAMPER = re.compile(r"(?i)damper")
 
 
-def is_damper(filename: str, raw_lines: List[str]) -> bool:
-    """Flag a damper run. Dampers are a separate product line with their own
-    quote-run format (often a .docx) that nothing else here recognises yet — so
-    just mark it. Triggered by 'damper' in the file name or anywhere in the text."""
-    if _DAMPER.search(filename):
-        return True
-    return any(_DAMPER.search(ln) for ln in raw_lines)
+def is_damper(filename: str) -> bool:
+    """Flag an in-house damper quote run — a dedicated damper run document
+    (e.g. '420848 damper quote run.docx'), a separate product line we design.
+    Keyed on 'damper' in the *file name* only: the file is already a quote/run
+    doc, so a damper-named one is a damper quote. We deliberately ignore the
+    body text, since plenty of fan runs merely list a damper as an accessory."""
+    return bool(_DAMPER.search(filename))
 
 
 def classify_status(template: str, fields: Dict[str, Any], raw_lines: List[str], ext: str) -> str:
@@ -131,7 +131,7 @@ def scan_one(job: str, jtype: str, folder: Path) -> Dict[str, Any]:
             "fields": r["fields"],
             "summary": r["summary"],
             "status": classify_status(r["template"], r["fields"], r["raw_lines"], f.suffix.lower()),
-            "damper": is_damper(f.name, r["raw_lines"]),
+            "damper": is_damper(f.name),
         })
     return {
         "job": job,
