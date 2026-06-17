@@ -355,6 +355,16 @@ LIVE_QUEUE_END_DATE_COL = 2 + QUEUE_HEADERS.index("End Date")  # 1-based col of 
 _END_DATE_IDX = QUEUE_HEADERS.index("End Date")               # its index within the standard cells
 
 
+_EXCEL_EPOCH = date(1899, 12, 30)   # Excel's day 0 (1900 date system)
+
+
+def _excel_serial(d: date) -> int:
+    """An Excel date serial (days since 1899-12-30). Written as a plain int with a
+    date number-format so the cell sorts chronologically and shows as a date —
+    avoids passing a Python date through COM (pywin32 won't marshal a bare date)."""
+    return (d - _EXCEL_EPOCH).days
+
+
 def _fmt_dt(iso: Optional[str]) -> str:
     if not iso:
         return ""
@@ -388,7 +398,7 @@ def live_queue_records(jobs: List[Dict[str, Any]], today: date,
         # first -> red at the top); blanks sort to the bottom.
         ed = _parse_date(j.get("end_date", ""))
         if ed is not None:
-            std[_END_DATE_IDX].value = ed
+            std[_END_DATE_IDX].value = _excel_serial(ed)
             std[_END_DATE_IDX].number_format = "mm/dd/yyyy"
         fill = _row_fill(j, today, is_new=str(j.get("job") or "") in new_ids)
         cells = [added] + std

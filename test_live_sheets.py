@@ -159,6 +159,21 @@ def test_live_queue_records_no_dwg_and_new_today_fill():
     assert any(c.fill == FILL_NEW for c in cells)
 
 
+def test_live_queue_end_date_is_sortable_serial():
+    from datetime import date, timedelta
+    j = _job("421000", end_date="06/10/2026")
+    cells = ls.live_queue_records([j], TODAY)[0][1]
+    ed = cells[ls.LIVE_QUEUE_END_DATE_COL - 1]
+    # An Excel date serial (int), not a Python date (COM can't marshal a date),
+    # formatted as a date and round-tripping to 2026-06-10.
+    assert isinstance(ed.value, int)
+    assert ed.number_format == "mm/dd/yyyy"
+    assert date(1899, 12, 30) + timedelta(days=ed.value) == date(2026, 6, 10)
+    # A blank End Date stays empty (sorts to the bottom), not a serial.
+    blank = ls.live_queue_records([_job("421001", end_date="")], TODAY)[0][1]
+    assert blank[ls.LIVE_QUEUE_END_DATE_COL - 1].value == ""
+
+
 def test_order_history_build_matrices_flags_and_separator():
     orders = [
         ("421000", {"on_queue": True, "added": "2026-06-16T09:00:00", "left": None,
