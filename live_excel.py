@@ -24,11 +24,14 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from openpyxl.utils import get_column_letter
+
 from live_sheets import Sheet
 
 log = logging.getLogger(__name__)
 
 _XL_UNDERLINE_SINGLE = 2  # xlUnderlineStyleSingle
+_XL_EXPRESSION = 2        # xlExpression (conditional formatting)
 
 
 def _bgr(rgb_hex: str) -> int:
@@ -43,6 +46,7 @@ _FILL_RGB = {
     "overdue": "FFC7CE", "soon": "FFEB9C", "new": "D9D9D9",
     "overdue_new": "F4A5A8", "soon_new": "F5D750",
     "dwg_yes": "C6EFCE", "dwg_no": "FFC7CE",
+    "sep": "808080",   # the vertical divider column between the two matrices
 }
 _FILL = {k: _bgr(v) for k, v in _FILL_RGB.items()}
 
@@ -379,11 +383,126 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
     return len(updates) + len(appends) + len(deletes)
 
 
-def update_master_workbook(workbook_path: str | Path, payloads: List[Dict[str, Any]],
+def reset_sheet(name: str) -> None:
+    """Forget that a sheet's header/freeze are done, so the next render rebuilds
+    it from scratch — used when its column schema changed (e.g. a new DWG suffix
+    or feature tag appeared in the Order History matrices)."""
+    _HEADER_DONE.discard(name)
+    _FROZEN.discard(name)
+
+
+def _cell_to_value(cell) -> Any:
+    """A bulk-writable value for a cell. A hyperlink becomes a =HYPERLINK()
+    formula so thousands of links go in one Range write (Hyperlinks.Add per cell
+    would crawl over a 12K-row tab)."""
+    if cell.link:
+        url = str(cell.link).replace('"', '""')
+        disp = str(cell.value if cell.value is not None else "").replace('"', '""')
+        return f'=HYPERLINK("{url}","{disp}")'
+    return cell.value if cell.value is not None else ""
+
+
+def _write_oh_row(ws, r: int, cells: List, ncols: int) -> None:
+    vals = [_cell_to_value(c) for c in cells]
+    if len(vals) < ncols:
+        vals += [""] * (ncols - len(vals))
+    ws.Range(ws.Cells(r, 1), ws.Cells(r, ncols)).Value = [vals]
+
+
+def _apply_matrix_cf(ws, key_col: int, c0: int, c1: int) -> None:
+    """Color a ✓/blank matrix block by conditional formatting — green for ✓, red
+    for blank — but only on rows that actually have an order number (the key
+    column guard), so the empty area below the data isn't painted. Applied over
+    the whole columns so appended rows are colored automatically."""
+    if c1 < c0:
+        return
+    key = get_column_letter(key_col)
+    tl = get_column_letter(c0)            # top-left of the CF range, for the relative formula
+    rng = ws.Range(ws.Cells(2, c0), ws.Cells(ws.Rows.Count, c1))
+    try:
+        rng.FormatConditions.Delete()
+        green = rng.FormatConditions.Add(Type=_XL_EXPRESSION,
+                                         Formula1=f'=AND(${key}2<>"",{tl}2="✓")')
+        green.Interior.Color = _FILL["dwg_yes"]
+        red = rng.FormatConditions.Add(Type=_XL_EXPRESSION,
+                                       Formula1=f'=AND(${key}2<>"",{tl}2="")')
+        red.Interior.Color = _FILL["dwg_no"]
+    except Exception as e:  # noqa: BLE001 - values still readable without color
+        log.debug("Matrix conditional formatting failed (%s)", e)
+
+
+def _draw_separator(ws, sep_col: int) -> None:
+    try:
+        col = ws.Columns(sep_col)
+        col.Interior.Color = _FILL["sep"]
+        col.ColumnWidth = 2
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def apply_order_history(app, wb, name: str, spec: Dict[str, Any], ops: List,
+                        key_col: int, freeze: str | None = None) -> int:
+    """Render the Order History log. On the first touch this process: clear, write
+    the header, BULK-write every row at once, color the two matrices via
+    conditional formatting, and draw the divider. After that: append/update only
+    the few changed rows (a stable presence log, so this is rare)."""
+    ws = _get_or_make_sheet(wb, name)
+    headers = spec["headers"]
+    ncols = len(headers)
+    if name not in _HEADER_DONE:
+        ws.Cells.Clear()
+        _write_header(ws, headers)
+        _HEADER_DONE.add(name)
+        records = spec["records"]
+        if records:
+            grid = [[_cell_to_value(c) for c in cells] + [""] * (ncols - len(cells))
+                    for _, cells in records]
+            ws.Range(ws.Cells(2, 1), ws.Cells(1 + len(grid), ncols)).Value = grid
+        _apply_matrix_cf(ws, key_col, *spec["dwg_range"])
+        _apply_matrix_cf(ws, key_col, *spec["feat_range"])
+        _draw_separator(ws, spec["sep_col"])
+        try:
+            ws.UsedRange.Columns.AutoFit()
+            for col in range(1, ncols + 1):
+                if col == spec["sep_col"]:
+                    continue
+                if ws.Columns(col).ColumnWidth > 40:
+                    ws.Columns(col).ColumnWidth = 40
+        except Exception:  # noqa: BLE001
+            pass
+        if freeze and name not in _FROZEN:
+            try:
+                ws.Activate()
+                app.ActiveWindow.FreezePanes = False
+                ws.Range(freeze).Select()
+                app.ActiveWindow.FreezePanes = True
+                _FROZEN.add(name)
+            except Exception:  # noqa: BLE001
+                pass
+        return len(spec["records"])
+
+    # Incremental: append new orders / update the few whose flags changed.
+    keymap, last_row = _read_keymap(ws, key_col)
+    updates = [(k, c) for kind, k, c in ops if kind == "update"]
+    appends = [(k, c) for kind, k, c in ops if kind == "append"]
+    for k, cells in updates:
+        r = keymap.get(k)
+        if r:
+            _write_oh_row(ws, r, cells, ncols)
+        else:
+            appends.append((k, cells))
+    for k, cells in appends:
+        last_row += 1
+        _write_oh_row(ws, last_row, cells, ncols)
+    return len(updates) + len(appends)
+
+
+def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any],
+                           oh_payload: Dict[str, Any],
                            changes_sheet: Sheet | None = None) -> bool:
-    """Render the master workbook: incremental upserts for the keyed tabs
-    (payloads), and a full repaint for the Changes snapshot (only when changed).
-    Best-effort — any COM error is logged and swallowed."""
+    """Render the master workbook: an incremental upsert for Live Queue, the
+    matrix log for Order History, and a full repaint for the Changes snapshot
+    (only when changed). Best-effort — any COM error is logged and swallowed."""
     path = Path(workbook_path)
     try:
         app = _get_excel()
@@ -394,11 +513,14 @@ def update_master_workbook(workbook_path: str | Path, payloads: List[Dict[str, A
     try:
         wb = _find_workbook(app, path)
         touched = []
-        for p in payloads:
-            n = apply_upserts(app, wb, p["name"], p["headers"], p["ops"],
-                              p["key_col"], p["allow_delete"], p.get("freeze"))
-            if n:
-                touched.append(f"{p['name']}(+{n})")
+        n = apply_upserts(app, wb, lq_payload["name"], lq_payload["headers"], lq_payload["ops"],
+                          lq_payload["key_col"], lq_payload["allow_delete"], lq_payload.get("freeze"))
+        if n:
+            touched.append(f"{lq_payload['name']}(+{n})")
+        n = apply_order_history(app, wb, oh_payload["name"], oh_payload["spec"],
+                                oh_payload["ops"], oh_payload["key_col"], oh_payload.get("freeze"))
+        if n:
+            touched.append(f"{oh_payload['name']}(+{n})")
         if changes_sheet is not None:
             fp = _fingerprint(changes_sheet)
             if _RENDER_CACHE.get(changes_sheet.name) != fp:

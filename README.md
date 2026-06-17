@@ -177,22 +177,28 @@ the master list and **appends new ones / updates changed rows in place**, so a
 coworker's filter, sort, and scroll survive (a filter only shifts when rows are
 actually added or removed). Tabs:
 
-- **Order History** — the **master log**: one row per order *ever seen*, newest
-  appended at the bottom, never wiped, with **On Queue (YES/NO)**, **Added**, and
-  **Left** columns plus every Full Queue column. This is the source of truth.
-- **Live Queue** — the orders **currently on the board** (the On-Queue subset),
-  same incremental upsert (append / update in place / delete when an order
-  leaves), keeping the clickable links (Job # → SO pdf, Folder, Quote Run) and
-  the red/yellow date highlights.
+- **Order History** — the **master log**: one row per order, covering both the
+  orders the watcher has seen live AND the whole **line-items backlog** (~12K
+  orders from `backlog/line_items.json`, once `line_items_scan.py` has run). It's
+  a *stable presence log* — **On Queue (YES/NO)**, **Added**, **Left**, the
+  order's identity/SO-spec columns, then two green-✓/red matrices side by side
+  with a vertical divider: the **AutoCAD DWG matrix** (a column per drawing
+  suffix) and the **line-item Feature matrix** (a column per feature tag). A row
+  changes only when an order is added or its On Queue/Left flag flips — the churny
+  board fields (dates, price, assignee) are NOT here, so the big log isn't
+  rewritten on every tick. The matrices are colored by conditional formatting and
+  bulk-written, so ~12K rows render fast.
+- **Live Queue** — the orders **currently on the board**, incremental upsert
+  (append / update in place / delete when an order leaves), keeping the clickable
+  links (Job # → SO pdf, Folder, Quote Run) and the red/yellow date highlights.
+  "New today" shading is judged against **this morning's** frozen baseline.
 - **Changes** — two date-labeled groups: **since this morning** (vs the frozen
   start-of-day baseline) and **vs yesterday** (the previous run's date). This tab
   is a snapshot, so it does repaint when it changes.
 
-The full green-✓/red **DWG matrix** is collapsed to one compact **Custom DWGs**
-column here (e.g. `-35, -51`) to keep the log's columns stable; the full matrix
-still lives in the archived daily report. The upsert tabs are wiped and rebuilt
-**once per process start** (so a 5 AM launch starts clean), then run incrementally
-all day.
+The tabs are wiped and rebuilt **once per process start** (so a 5 AM launch
+starts clean), then run incrementally all day. Order History rebuilds itself if
+its matrix columns change (a brand-new drawing suffix or feature tag appears).
 
 **The 5 AM email becomes a live link.** The 5 AM run still **saves** the dated
 `queue_<date>.xlsx` for the archive, but the **email** now leads with an active

@@ -159,24 +159,39 @@ def test_live_queue_records_no_dwg_and_new_today_fill():
     assert any(c.fill == FILL_NEW for c in cells)
 
 
-def test_order_history_still_has_custom_dwgs():
-    orders = [("421000", {"on_queue": True, "added": "2026-06-16T09:00:00",
-                          "left": None, "job": _job("421000", dwg_extras={"51": "x"})})]
-    recs = ls.order_history_records(orders, TODAY)
-    assert ls.ORDER_HISTORY_HEADERS[-1] == "Custom DWGs"
-    assert recs[0][1][-1].value == "-51"
+def test_order_history_build_matrices_flags_and_separator():
+    orders = [
+        ("421000", {"on_queue": True, "added": "2026-06-16T09:00:00", "left": None,
+                    "job": _job("421000", dwg_extras={"51": "x"},
+                               line_items=[{"tags": ["SHAFT SEAL"]}, {"tags": ["COATING"]}])}),
+        ("420900", {"on_queue": False, "added": "2026-06-15T08:00:00",
+                    "left": "2026-06-16T07:30:00",
+                    "job": _job("420900", dwg_extras={}, line_items=[{"tags": ["SHAFT SEAL"]}])}),
+    ]
+    spec = ls.order_history_build(orders, TODAY)
+    h = spec["headers"]
+    assert h[0] == "On Queue"
+    assert h[ls.ORDER_HISTORY_KEY_COL - 1] == "Job #"
+    assert "-51" in h and "SHAFT SEAL" in h and "COATING" in h and ls.OH_SEP_HEADER in h
+    r0 = dict(zip(h, spec["records"][0][1]))
+    assert r0["On Queue"].value == "YES" and r0["-51"].value == "✓" and r0["SHAFT SEAL"].value == "✓"
+    r1 = dict(zip(h, spec["records"][1][1]))
+    assert r1["On Queue"].value == "NO" and r1["Left"].value == "2026-06-16 07:30"
+    assert r1["-51"].value == ""                          # 420900 lacks that drawing
+    ds, de = spec["dwg_range"]
+    fs, fe = spec["feat_range"]
+    assert spec["sep_col"] == de + 1 and fs == spec["sep_col"] + 1 and fe >= fs
 
 
-def test_order_history_records_flag_and_dates():
-    orders = [("421000", {"on_queue": True, "added": "2026-06-16T09:00:00",
-                          "left": None, "job": _job("421000")}),
-              ("420900", {"on_queue": False, "added": "2026-06-15T08:00:00",
-                          "left": "2026-06-16T07:30:00", "job": _job("420900")})]
-    recs = ls.order_history_records(orders, TODAY)
-    assert recs[0][1][0].value == "YES"
-    assert recs[1][1][0].value == "NO"
-    assert recs[1][1][2].value == "2026-06-16 07:30"     # 'Left' formatted
-    assert recs[0][1][ls.ORDER_HISTORY_KEY_COL - 1].value == "421000"
+def test_order_history_row_sig_stable_across_churny_fields():
+    base = {"on_queue": True, "added": "2026-06-16T09:00:00", "left": None}
+    e1 = ("421000", {**base, "job": _job("421000", end_date="06/20/2026", total_price="$1,000.00")})
+    e2 = ("421000", {**base, "job": _job("421000", end_date="07/01/2026", total_price="$9,999.00")})
+    s1 = ls.order_history_build([e1], TODAY)
+    s2 = ls.order_history_build([e2], TODAY)
+    # Churny board fields aren't on Order History, so the row signature is stable
+    # -> the 12K log isn't rewritten when a date/price ticks.
+    assert ls.row_sig(s1["records"][0][1]) == ls.row_sig(s2["records"][0][1])
 
 
 def test_plan_upsert_append_update_delete():

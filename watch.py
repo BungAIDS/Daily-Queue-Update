@@ -34,6 +34,8 @@ import sys
 import time
 from datetime import date, datetime, time as dtime, timedelta
 
+import line_items
+import live_excel
 import live_master
 import live_sheets
 import live_state
@@ -100,28 +102,44 @@ def _enrich_pending(state: dict) -> list:
 
 
 def _force_rebuild(master: dict) -> None:
-    """Drop the per-tab row signatures so the first cycle of this process
-    re-appends every order — matching the renderer, which wipes each upsert tab
-    once at process start (clean slate vs any prior-schema content)."""
-    for e in master.get("orders", {}).values():
-        e.pop("lq_sig", None)
-        e.pop("oh_sig", None)
+    """Drop the row signatures so the first cycle of this process re-writes every
+    tab — matching the renderer, which wipes each tab once at process start (clean
+    slate vs any prior-schema content)."""
+    master["lq_sigs"] = {}
+    master["oh_sigs"] = {}
 
 
-def _plan(master: dict, records: list, sig_key: str, allow_delete: bool) -> list:
-    """Turn (key, cells) records into upsert ops vs what we last wrote (the sig
-    stored per order in the master), and update those stored sigs. The sig is
-    persisted in the master store, so change detection survives restarts."""
+def _plan(records: list, sig_store: dict, allow_delete: bool) -> list:
+    """Turn (key, cells) records into upsert ops vs what we last wrote (the sigs
+    in `sig_store`, a flat {order#: sig} persisted in the master), and update the
+    store. Flat (not per-order) so backlog orders that live only in the line-items
+    store are tracked too. Change detection survives restarts."""
     desired = [(key, live_sheets.row_sig(cells), cells) for key, cells in records]
-    existing = {k: e.get(sig_key) for k, e in master["orders"].items() if e.get(sig_key)}
-    ops = live_sheets.plan_upsert(desired, existing, allow_delete=allow_delete)
+    ops = live_sheets.plan_upsert(desired, dict(sig_store), allow_delete=allow_delete)
     sig_by = {key: sig for key, sig, _ in desired}
     for kind, key, _ in ops:
-        e = master["orders"].get(key)
-        if e is None:
-            continue
-        e[sig_key] = sig_by.get(key) if kind in ("append", "update") else None
+        if kind in ("append", "update"):
+            sig_store[key] = sig_by[key]
+        elif kind == "delete":
+            sig_store.pop(key, None)
     return ops
+
+
+def _oh_orders(master: dict, store: dict) -> list:
+    """Every order for the Order History log: the live master entries, plus the
+    backlog orders that exist only in the line-items store (~12K once
+    line_items_scan.py has run). Chronological by when first seen."""
+    merged = dict(master.get("orders", {}))
+    for jn, rec in (store.get("jobs") or {}).items():
+        if jn in merged:
+            continue
+        merged[jn] = {
+            "on_queue": False, "added": rec.get("scanned_at"), "left": rec.get("scanned_at"),
+            "job": {"job": jn, "customer": rec.get("customer", ""),
+                    "co_number": rec.get("co_number") or 0, "so_pdf": rec.get("so_pdf", ""),
+                    "line_items": rec.get("items") or []},
+        }
+    return sorted(merged.items(), key=lambda kv: (str(kv[1].get("added") or ""), kv[0]))
 
 
 def _changes_sheet(present: list, today: date) -> "live_sheets.Sheet":
@@ -137,28 +155,37 @@ def _changes_sheet(present: list, today: date) -> "live_sheets.Sheet":
 
 
 def _render_master(master: dict, now: datetime) -> None:
-    """Build the upsert payloads (Live Queue, Order History) + the Changes
-    snapshot from the master log, and push them into the workbook."""
+    """Build Live Queue (incremental upsert) + Order History (matrix log) +
+    the Changes snapshot from the master log + line-items store, and push them in."""
     today = now.date()
     lq_jobs = live_master.on_queue(master)
-    # "New today" = on the board but NOT in the most recent prior daily snapshot
-    # (same notion the daily report uses), so it survives across watcher restarts.
-    prev, _prev_date = load_latest_snapshot(today)
-    prev_ids = {str(j.get("job")) for j in (prev or []) if j.get("job")}
-    new_today = {str(j.get("job")) for j in lq_jobs
-                 if str(j.get("job")) and str(j.get("job")) not in prev_ids}
 
-    lq_ops = _plan(master, live_sheets.live_queue_records(lq_jobs, today, new_ids=new_today, ref=now),
-                   "lq_sig", allow_delete=True)
-    oh_ops = _plan(master, live_sheets.order_history_records(live_master.ordered(master), today),
-                   "oh_sig", allow_delete=False)
-    payloads = [
-        {"name": "Live Queue", "headers": live_sheets.LIVE_QUEUE_HEADERS, "ops": lq_ops,
-         "key_col": live_sheets.LIVE_QUEUE_KEY_COL, "allow_delete": True, "freeze": "C2"},
-        {"name": "Order History", "headers": live_sheets.ORDER_HISTORY_HEADERS, "ops": oh_ops,
-         "key_col": live_sheets.ORDER_HISTORY_KEY_COL, "allow_delete": False, "freeze": "B2"},
-    ]
-    update_master_workbook(LIVE_WORKBOOK_PATH, payloads, changes_sheet=_changes_sheet(lq_jobs, today))
+    # "New today" = on the board but NOT in THIS MORNING's frozen baseline (what
+    # arrived since the watch began), robust across restarts.
+    base_ids = {str(j.get("job")) for j in live_state.load_baseline(today) if j.get("job")}
+    new_today = {str(j.get("job")) for j in lq_jobs
+                 if str(j.get("job")) and str(j.get("job")) not in base_ids}
+
+    lq_sigs = master.setdefault("lq_sigs", {})
+    lq_ops = _plan(live_sheets.live_queue_records(lq_jobs, today, new_ids=new_today, ref=now),
+                   lq_sigs, allow_delete=True)
+    lq_payload = {"name": "Live Queue", "headers": live_sheets.LIVE_QUEUE_HEADERS, "ops": lq_ops,
+                  "key_col": live_sheets.LIVE_QUEUE_KEY_COL, "allow_delete": True, "freeze": "C2"}
+
+    # Order History: live master + the whole line-items backlog, as a matrix log.
+    spec = live_sheets.order_history_build(_oh_orders(master, line_items.load_store()), today)
+    if master.get("oh_headers") != spec["headers"]:
+        # Column set changed (new DWG suffix / feature tag) -> rebuild the tab.
+        live_excel.reset_sheet("Order History")
+        master["oh_sigs"] = {}
+        master["oh_headers"] = spec["headers"]
+    oh_sigs = master.setdefault("oh_sigs", {})
+    oh_ops = _plan(spec["records"], oh_sigs, allow_delete=False)
+    oh_payload = {"name": "Order History", "spec": spec, "ops": oh_ops,
+                  "key_col": live_sheets.ORDER_HISTORY_KEY_COL, "freeze": "D2"}
+
+    update_master_workbook(LIVE_WORKBOOK_PATH, lq_payload, oh_payload,
+                           changes_sheet=_changes_sheet(lq_jobs, today))
 
 
 def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce: bool) -> dict:

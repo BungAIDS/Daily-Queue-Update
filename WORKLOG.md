@@ -3,6 +3,34 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-16 — Order History = stable 12K log with DWG + Feature matrices
+
+Refined the master log per DG:
+
+- **Custom DWGs**: removed the text column from Live Queue; Order History now
+  carries the full green-✓/red **AutoCAD DWG matrix** AND a new **line-item
+  Feature matrix** (one column per tag, from `line_items` store tags), side by
+  side with a **vertical divider** (a thin gray column).
+- **12K backlog**: Order History merges the live master with the *whole*
+  line-items store (`_oh_orders`), so it shows ~1 row per order ever (live +
+  backlog), using the data we already gathered.
+- **Stable log**: Order History shows only identity + SO-spec + the matrices +
+  presence flags — NOT churny board fields — so a row's signature changes only on
+  add / On-Queue flip. The 12K log isn't rewritten when a date/price ticks.
+- **Efficient render**: `apply_order_history` bulk-writes all rows once, colors
+  the matrices by **conditional formatting** (green ✓ / red blank, key-column
+  guarded so the empty area isn't painted), draws the divider, and uses
+  `=HYPERLINK()` formulas so 12K links go in the bulk write. Rebuilds the tab if
+  the matrix column set grows (`reset_sheet` + sig reset).
+- **Sigs**: moved to flat `lq_sigs` / `oh_sigs` maps in the master (so
+  backlog-only orders are tracked, not just live ones).
+- **"New today"**: now judged vs **this morning's** frozen baseline (not the
+  previous day).
+
+Smoke-tested the merge + matrix spec + sig planning across cycles (append all
+once, no-op when unchanged, single update on an On-Queue flip). COM render needs
+the on-PC smoke test.
+
 ## 2026-06-16 — Master log: incremental upsert instead of repaint
 
 DG: stop repainting the whole tab every cycle (it reset filters). New model is a

@@ -40,6 +40,7 @@ FILL_OVERDUE_NEW = "overdue_new"
 FILL_SOON_NEW = "soon_new"
 FILL_DWG_YES = "dwg_yes"      # green ✓
 FILL_DWG_NO = "dwg_no"        # red (missing)
+FILL_SEP = "sep"              # the vertical divider column between the two matrices
 
 
 @dataclass
@@ -113,12 +114,15 @@ def _money_cell(raw: str) -> Cell:
     return Cell(_parse_money(raw), number_format=MONEY_FMT)
 
 
-def _job_value_cells(j: Dict[str, Any], co_changed: bool) -> List[Cell]:
-    """The standard COLUMNS cells for one job — mirrors excel_writer._write_job_row
-    (hyperlinks, CO#, drive-run label, money, flags), as style-tagged Cells."""
+def _job_value_cells(j: Dict[str, Any], columns: Optional[List] = None,
+                     co_changed: bool = False) -> List[Cell]:
+    """The cells for one job across `columns` (defaults to the full COLUMNS) —
+    mirrors excel_writer._write_job_row (hyperlinks, CO#, drive-run label, money,
+    flags), as style-tagged Cells."""
+    columns = COLUMNS if columns is None else columns
     cells: List[Cell] = []
     linked_idx = set()
-    for idx, (_h, key) in enumerate(COLUMNS):
+    for idx, (_h, key) in enumerate(columns):
         if key == "job":
             c = Cell(j.get("job", ""))
             so = (j.get("so_pdf") or "").strip()
@@ -339,25 +343,14 @@ LINE_ITEM_HEADERS = ["Job #", "Customer", "CO#", "Tags", "Item (as printed)",
 # Incremental "master log" tabs (Live Queue + Order History)                   #
 #                                                                             #
 # These are upserted row-by-row (keyed on the order number) instead of being   #
-# repainted, so a coworker's filter/sort/scroll survives. That needs a STABLE  #
-# column schema, so the variable-width DWG matrix is collapsed to one compact  #
-# "Custom DWGs" text column here (the full green/red matrix stays in the daily #
-# report). A record is (order#, [Cell, ...]); the renderer writes/append/      #
-# updates the row whose key matches.                                          #
+# repainted, so a coworker's filter/sort/scroll survives. Live Queue is the     #
+# on-board board (churny fields, full formatting); Order History is the stable  #
+# log of every order with its two ✓/red matrices (built below). A record is     #
+# (order#, [Cell, ...]); the renderer writes/append/updates the row whose key   #
+# matches.                                                                     #
 # --------------------------------------------------------------------------- #
-LIVE_QUEUE_HEADERS = ["Added"] + list(QUEUE_HEADERS)          # Custom DWGs lives on Order History only
+LIVE_QUEUE_HEADERS = ["Added"] + list(QUEUE_HEADERS)          # the DWG/feature matrices live on Order History
 LIVE_QUEUE_KEY_COL = 2 + QUEUE_HEADERS.index("Job #")          # 1-based col of Job # (Added is col 1)
-ORDER_HISTORY_HEADERS = ["On Queue", "Added", "Left"] + list(QUEUE_HEADERS) + ["Custom DWGs"]
-ORDER_HISTORY_KEY_COL = 4 + QUEUE_HEADERS.index("Job #")        # 1-based col of Job # (3 lead cols)
-
-
-def _dwg_text(j: Dict[str, Any]) -> str:
-    """The job's custom-DWG suffixes as one compact cell, e.g. '-35, -51'."""
-    extras = j.get("dwg_extras") or {}
-    if not extras:
-        return ""
-    order = sorted(extras, key=lambda s: (int(s), s) if s.isdigit() else (10**9, s))
-    return ", ".join(f"-{s}" for s in order)
 
 
 def _fmt_dt(iso: Optional[str]) -> str:
@@ -399,26 +392,78 @@ def live_queue_records(jobs: List[Dict[str, Any]], today: date,
     return out
 
 
-def order_history_records(orders: List, today: date) -> List:
-    """(order#, cells) per logged order, from live_master.ordered() entries:
-    On Queue / Added / Left, then every Full Queue column + Custom DWGs. On-board
-    rows get the urgency fill; off-board rows stay plain."""
-    out = []
-    for jn, entry in orders:
-        j = entry.get("job", {})
-        onq = bool(entry.get("on_queue"))
-        lead = [Cell("YES" if onq else "NO"),
-                Cell(_fmt_dt(entry.get("added"))), Cell(_fmt_dt(entry.get("left")))]
-        std = _job_value_cells(j, co_changed=False)
-        cells = lead + std + [Cell(_dwg_text(j))]
-        if onq:
-            fill = _row_fill(j, today, is_new=False)
-            if fill:
-                for c in cells:
-                    if c.fill is None:
-                        c.fill = fill
-        out.append((str(jn), cells))
+# Order History is a stable *log*: only the order's identity + SO spec + the two
+# matrices + the presence flags — NOT the churny board fields (dates, price,
+# assignee, status), which live on Live Queue. Keeping only stable columns means
+# a row's signature changes solely when the order is added or its On Queue/Left
+# flags flip, so the 12K-row log isn't rewritten on every field tick.
+OH_LEAD_HEADERS = ["On Queue", "Added", "Left"]
+OH_DATA_COLUMNS = [
+    ("Job #", "job"), ("Folder", "folder"), ("Quote Run", "drive_run"), ("CO#", "co"),
+    ("Design", "design"), ("Description", "so_design_desc"), ("Size", "so_size"),
+    ("Arrangement", "so_arrangement"), ("Motor Pos", "so_motor_pos"), ("Class", "so_class"),
+    ("Rotation", "so_rotation"), ("Discharge", "so_discharge"), ("% Width", "so_pct_width"),
+    ("Wheel Type", "so_wheel_type"), ("Design Temp", "so_design_temp"),
+    ("Max Temp", "so_max_temp"), ("Special Temp", "so_special_temp"),
+    ("Customer", "customer"), ("Primary Rep", "primary_rep"), ("Item", "item"),
+]
+OH_SEP_HEADER = "│"
+ORDER_HISTORY_KEY_COL = len(OH_LEAD_HEADERS) + 1   # Job # is the first data column
+
+
+def _order_tags(j: Dict[str, Any]) -> set:
+    """The canonical feature tags on an order, from its captured line items."""
+    out = set()
+    for it in j.get("line_items") or []:
+        for t in it.get("tags") or []:
+            out.add(t)
     return out
+
+
+def order_history_build(orders: List, today: date) -> Dict[str, Any]:
+    """Build the Order History tab: one row per order with the lead flags, the
+    stable data columns, the AutoCAD **DWG matrix** (green ✓ / red), a vertical
+    divider, and the line-item **Feature matrix** (green ✓ / red). The matrix
+    columns are the union of DWG suffixes / feature tags across `orders`, so they
+    grow only when a brand-new suffix or tag appears.
+
+    `orders` is a list of (job#, entry) with entry = {on_queue, added, left, job}.
+    Returns a dict: headers, records [(key, cells)], and the 1-based column ranges
+    of each matrix + the separator (the renderer colors the matrices via
+    conditional formatting and draws the divider)."""
+    jobs = [e.get("job", {}) for _, e in orders]
+    suffixes = _dwg_suffixes(jobs)
+    tag_count: Dict[str, int] = {}
+    for j in jobs:
+        for t in _order_tags(j):
+            tag_count[t] = tag_count.get(t, 0) + 1
+    tags = sorted(tag_count, key=lambda t: (-tag_count[t], t))   # most common first
+
+    headers = (OH_LEAD_HEADERS + [h for h, _ in OH_DATA_COLUMNS]
+               + [f"-{s}" for s in suffixes] + [OH_SEP_HEADER] + list(tags))
+    n_lead_data = len(OH_LEAD_HEADERS) + len(OH_DATA_COLUMNS)
+    dwg_range = (n_lead_data + 1, n_lead_data + len(suffixes))
+    sep_col = n_lead_data + len(suffixes) + 1
+    feat_range = (sep_col + 1, sep_col + len(tags))
+
+    records = []
+    for jn, e in orders:
+        j = e.get("job", {})
+        onq = bool(e.get("on_queue"))
+        lead = [Cell("YES" if onq else "NO"),
+                Cell(_fmt_dt(e.get("added"))), Cell(_fmt_dt(e.get("left")))]
+        data = _job_value_cells(j, columns=OH_DATA_COLUMNS)
+        de = j.get("dwg_extras") or {}
+        # Matrix cells carry only the ✓ / blank value; the renderer colors them
+        # via conditional formatting (cheap enough for ~12K rows).
+        dwg = [Cell("✓" if s in de else "", center=True) for s in suffixes]
+        sep = [Cell("", fill=FILL_SEP)]
+        otags = _order_tags(j)
+        feat = [Cell("✓" if t in otags else "", center=True) for t in tags]
+        records.append((str(jn), lead + data + dwg + sep + feat))
+
+    return {"headers": headers, "records": records,
+            "dwg_range": dwg_range, "sep_col": sep_col, "feat_range": feat_range}
 
 
 def plan_upsert(desired: List, existing_sigs: Dict[str, tuple],
