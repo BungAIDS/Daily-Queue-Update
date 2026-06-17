@@ -185,9 +185,11 @@ def test_order_history_build_matrices_flags_and_separator():
     ]
     spec = ls.order_history_build(orders, TODAY)
     h = spec["headers"]
-    assert h[0] == "On Queue"
-    assert h[ls.ORDER_HISTORY_KEY_COL - 1] == "Job #"
-    assert "-51" in h and "SHAFT SEAL" in h and "COATING" in h and ls.OH_SEP_HEADER in h
+    assert h[ls.ORDER_HISTORY_KEY_COL - 1] == "Job #" and ls.ORDER_HISTORY_KEY_COL == 1
+    assert "On Queue" in h and "-51" in h and "SHAFT SEAL" in h and "COATING" in h and ls.OH_SEP_HEADER in h
+    # On Queue / Added / Left sit right before the DWG matrix (Left is the column
+    # immediately before the first '-suffix' matrix column).
+    assert h.index("Left") == spec["dwg_range"][0] - 2
     r0 = dict(zip(h, spec["records"][0][1]))
     assert r0["On Queue"].value == "YES" and r0["-51"].value == "✓" and r0["SHAFT SEAL"].value == "✓"
     r1 = dict(zip(h, spec["records"][1][1]))

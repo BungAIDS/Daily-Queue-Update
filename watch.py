@@ -193,7 +193,7 @@ def _render_master(master: dict, now: datetime) -> None:
                    lq_sigs, allow_delete=True)
     lq_payload = {"name": "Live Queue", "headers": live_sheets.LIVE_QUEUE_HEADERS, "ops": lq_ops,
                   "key_col": live_sheets.LIVE_QUEUE_KEY_COL, "allow_delete": True, "freeze": "C2",
-                  "sort_col": live_sheets.LIVE_QUEUE_END_DATE_COL}
+                  "sort_col": live_sheets.LIVE_QUEUE_END_DATE_COL, "text_cols": [1]}  # Added col -> AM/PM text
 
     # Order History: live master + the whole line-items backlog, as a matrix log.
     spec = live_sheets.order_history_build(_oh_orders(master, line_items.load_store()), today)
@@ -205,7 +205,7 @@ def _render_master(master: dict, now: datetime) -> None:
     oh_sigs = master.setdefault("oh_sigs", {})
     oh_ops = _plan(spec["records"], oh_sigs, allow_delete=False)
     oh_payload = {"name": "Order History", "spec": spec, "ops": oh_ops,
-                  "key_col": live_sheets.ORDER_HISTORY_KEY_COL, "freeze": "D2"}
+                  "key_col": live_sheets.ORDER_HISTORY_KEY_COL, "freeze": "B2"}  # pin Job # only
 
     update_master_workbook(LIVE_WORKBOOK_PATH, lq_payload, oh_payload,
                            changes_sheet=_changes_sheet(lq_jobs, today))

@@ -392,7 +392,9 @@ def live_queue_records(jobs: List[Dict[str, Any]], today: date,
     new_ids = new_ids or set()
     out = []
     for j in jobs:
-        added = Cell(added_label(j, ref=ref))
+        # number_format "@" (Text) keeps the AM/PM label (e.g. "3:53 PM") from
+        # being coerced by Excel into a 24h datetime serial.
+        added = Cell(added_label(j, ref=ref), number_format="@")
         std = _job_value_cells(j, co_changed=False)
         # Write End Date as a real date so Live Queue can sort by it (overdue
         # first -> red at the top); blanks sort to the bottom.
@@ -414,8 +416,9 @@ def live_queue_records(jobs: List[Dict[str, Any]], today: date,
 # matrices + the presence flags — NOT the churny board fields (dates, price,
 # assignee, status), which live on Live Queue. Keeping only stable columns means
 # a row's signature changes solely when the order is added or its On Queue/Left
-# flags flip, so the 12K-row log isn't rewritten on every field tick.
-OH_LEAD_HEADERS = ["On Queue", "Added", "Left"]
+# flags flip, so the 12K-row log isn't rewritten on every field tick. Layout:
+# the data columns first (Job # leads, so it's the pinned column), then the
+# On Queue / Added / Left flags right before the two ✓/red matrices.
 OH_DATA_COLUMNS = [
     ("Job #", "job"), ("Folder", "folder"), ("Quote Run", "drive_run"), ("CO#", "co"),
     ("Design", "design"), ("Description", "so_design_desc"), ("Size", "so_size"),
@@ -425,8 +428,9 @@ OH_DATA_COLUMNS = [
     ("Max Temp", "so_max_temp"), ("Special Temp", "so_special_temp"),
     ("Customer", "customer"), ("Primary Rep", "primary_rep"), ("Item", "item"),
 ]
+OH_FLAG_HEADERS = ["On Queue", "Added", "Left"]
 OH_SEP_HEADER = "│"
-ORDER_HISTORY_KEY_COL = len(OH_LEAD_HEADERS) + 1   # Job # is the first data column
+ORDER_HISTORY_KEY_COL = 1   # Job # is the first column (pinned)
 
 
 def _order_tags(j: Dict[str, Any]) -> set:
@@ -439,11 +443,12 @@ def _order_tags(j: Dict[str, Any]) -> set:
 
 
 def order_history_build(orders: List, today: date) -> Dict[str, Any]:
-    """Build the Order History tab: one row per order with the lead flags, the
-    stable data columns, the AutoCAD **DWG matrix** (green ✓ / red), a vertical
-    divider, and the line-item **Feature matrix** (green ✓ / red). The matrix
-    columns are the union of DWG suffixes / feature tags across `orders`, so they
-    grow only when a brand-new suffix or tag appears.
+    """Build the Order History tab: one row per order with the stable data
+    columns (Job # first), then the On Queue / Added / Left flags, then the
+    AutoCAD **DWG matrix** (green ✓ / red), a vertical divider, and the line-item
+    **Feature matrix** (green ✓ / red). The matrix columns are the union of DWG
+    suffixes / feature tags across `orders`, so they grow only when a brand-new
+    suffix or tag appears.
 
     `orders` is a list of (job#, entry) with entry = {on_queue, added, left, job}.
     Returns a dict: headers, records [(key, cells)], and the 1-based column ranges
@@ -457,20 +462,20 @@ def order_history_build(orders: List, today: date) -> Dict[str, Any]:
             tag_count[t] = tag_count.get(t, 0) + 1
     tags = sorted(tag_count, key=lambda t: (-tag_count[t], t))   # most common first
 
-    headers = (OH_LEAD_HEADERS + [h for h, _ in OH_DATA_COLUMNS]
+    headers = ([h for h, _ in OH_DATA_COLUMNS] + OH_FLAG_HEADERS
                + [f"-{s}" for s in suffixes] + [OH_SEP_HEADER] + list(tags))
-    n_lead_data = len(OH_LEAD_HEADERS) + len(OH_DATA_COLUMNS)
-    dwg_range = (n_lead_data + 1, n_lead_data + len(suffixes))
-    sep_col = n_lead_data + len(suffixes) + 1
+    n_data_flags = len(OH_DATA_COLUMNS) + len(OH_FLAG_HEADERS)
+    dwg_range = (n_data_flags + 1, n_data_flags + len(suffixes))
+    sep_col = n_data_flags + len(suffixes) + 1
     feat_range = (sep_col + 1, sep_col + len(tags))
 
     records = []
     for jn, e in orders:
         j = e.get("job", {})
         onq = bool(e.get("on_queue"))
-        lead = [Cell("YES" if onq else "NO"),
-                Cell(_fmt_dt(e.get("added"))), Cell(_fmt_dt(e.get("left")))]
         data = _job_value_cells(j, columns=OH_DATA_COLUMNS)
+        flags = [Cell("YES" if onq else "NO"),
+                 Cell(_fmt_dt(e.get("added"))), Cell(_fmt_dt(e.get("left")))]
         de = j.get("dwg_extras") or {}
         # Matrix cells carry only the ✓ / blank value; the renderer colors them
         # via conditional formatting (cheap enough for ~12K rows).
@@ -478,7 +483,7 @@ def order_history_build(orders: List, today: date) -> Dict[str, Any]:
         sep = [Cell("", fill=FILL_SEP)]
         otags = _order_tags(j)
         feat = [Cell("✓" if t in otags else "", center=True) for t in tags]
-        records.append((str(jn), lead + data + dwg + sep + feat))
+        records.append((str(jn), data + flags + dwg + sep + feat))
 
     return {"headers": headers, "records": records,
             "dwg_range": dwg_range, "sep_col": sep_col, "feat_range": feat_range}

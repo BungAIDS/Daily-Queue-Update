@@ -314,10 +314,12 @@ def _write_row(ws, r: int, cells: List, ncols: int) -> None:
 
 def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
                   key_col: int, allow_delete: bool, freeze: str | None = None,
-                  sort_col: int | None = None) -> int:
+                  sort_col: int | None = None, text_cols: List[int] | None = None) -> int:
     """Apply append/update/delete ops to a keyed sheet. Returns rows touched.
     When `sort_col` is set, the data is re-sorted ascending by that column after
-    any change (used to keep Live Queue ordered by End Date, overdue at the top)."""
+    any change (used to keep Live Queue ordered by End Date, overdue at the top).
+    `text_cols` are pre-formatted as Text before any data is written so Excel
+    can't coerce a value (e.g. the AM/PM 'Added' label) into a datetime serial."""
     ws = _get_or_make_sheet(wb, name)
     ncols = len(headers)
     first_time = name not in _HEADER_DONE
@@ -328,6 +330,11 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
         # rebuilds the tab; every later cycle is incremental.
         ws.Cells.Clear()
         _write_header(ws, headers)
+        for col in (text_cols or []):
+            try:
+                ws.Columns(col).NumberFormat = "@"   # Text — must precede any write
+            except Exception:  # noqa: BLE001
+                pass
         _HEADER_DONE.add(name)
 
     keymap, last_row = _read_keymap(ws, key_col)
@@ -536,7 +543,7 @@ def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any]
         touched = []
         n = apply_upserts(app, wb, lq_payload["name"], lq_payload["headers"], lq_payload["ops"],
                           lq_payload["key_col"], lq_payload["allow_delete"], lq_payload.get("freeze"),
-                          sort_col=lq_payload.get("sort_col"))
+                          sort_col=lq_payload.get("sort_col"), text_cols=lq_payload.get("text_cols"))
         if n:
             touched.append(f"{lq_payload['name']}(+{n})")
         n = apply_order_history(app, wb, oh_payload["name"], oh_payload["spec"],
