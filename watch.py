@@ -160,11 +160,16 @@ def _render_master(master: dict, now: datetime) -> None:
     today = now.date()
     lq_jobs = live_master.on_queue(master)
 
-    # "New today" = on the board but NOT in THIS MORNING's frozen baseline (what
-    # arrived since the watch began), robust across restarts.
-    base_ids = {str(j.get("job")) for j in live_state.load_baseline(today) if j.get("job")}
-    new_today = {str(j.get("job")) for j in lq_jobs
-                 if str(j.get("job")) and str(j.get("job")) not in base_ids}
+    # "New today" = on the board but NOT in the most recent prior daily snapshot
+    # (yesterday's). If there's no prior snapshot to compare against, flag NOTHING
+    # rather than the whole board.
+    prev, _prev_date = load_latest_snapshot(today)
+    if prev is None:
+        new_today = set()
+    else:
+        prev_ids = {str(j.get("job")) for j in prev if j.get("job")}
+        new_today = {str(j.get("job")) for j in lq_jobs
+                     if str(j.get("job")) and str(j.get("job")) not in prev_ids}
 
     lq_sigs = master.setdefault("lq_sigs", {})
     lq_ops = _plan(live_sheets.live_queue_records(lq_jobs, today, new_ids=new_today, ref=now),

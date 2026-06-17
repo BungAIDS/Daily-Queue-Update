@@ -354,22 +354,17 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
         last_row += 1
         _write_row(ws, last_row, cells, ncols)
 
-    # Keep the tab sorted (Live Queue by End Date — overdue/red at the top). Sort
-    # after any change; blanks fall to the bottom under ascending order.
+    # Keep the tab sorted (Live Queue by End Date — overdue/red at the top) and
+    # re-extend AutoFilter. Sort the DATA ROWS ONLY (row 2 down) so the header
+    # never moves; blanks fall to the bottom under ascending order.
     touched = bool(deletes or updates or appends)
-    if sort_col and touched and last_row >= 3:
-        try:
-            ws.Range(ws.Cells(1, 1), ws.Cells(last_row, ncols)).Sort(
-                Key1=ws.Cells(1, sort_col), Order1=1, Header=1)  # xlAscending, xlYes
-        except Exception:  # noqa: BLE001
-            pass
-
-    # Re-extend AutoFilter only when the row count changed (so a value-only cycle
-    # never disturbs a coworker's active filter).
-    if rowcount_changed and last_row >= 2:
+    if touched and last_row >= 2:
         try:
             if ws.AutoFilterMode:
                 ws.AutoFilterMode = False
+            if sort_col and last_row >= 3:
+                ws.Range(ws.Cells(2, 1), ws.Cells(last_row, ncols)).Sort(
+                    Key1=ws.Cells(2, sort_col), Order1=1, Header=2)  # xlAscending, xlNo
             ws.Range(ws.Cells(1, 1), ws.Cells(last_row, ncols)).AutoFilter()
         except Exception:  # noqa: BLE001
             pass
