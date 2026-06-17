@@ -313,8 +313,11 @@ def _write_row(ws, r: int, cells: List, ncols: int) -> None:
 
 
 def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
-                  key_col: int, allow_delete: bool, freeze: str | None = None) -> int:
-    """Apply append/update/delete ops to a keyed sheet. Returns rows touched."""
+                  key_col: int, allow_delete: bool, freeze: str | None = None,
+                  sort_col: int | None = None) -> int:
+    """Apply append/update/delete ops to a keyed sheet. Returns rows touched.
+    When `sort_col` is set, the data is re-sorted ascending by that column after
+    any change (used to keep Live Queue ordered by End Date, overdue at the top)."""
     ws = _get_or_make_sheet(wb, name)
     ncols = len(headers)
     first_time = name not in _HEADER_DONE
@@ -350,6 +353,16 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
     for k, cells in appends:
         last_row += 1
         _write_row(ws, last_row, cells, ncols)
+
+    # Keep the tab sorted (Live Queue by End Date — overdue/red at the top). Sort
+    # after any change; blanks fall to the bottom under ascending order.
+    touched = bool(deletes or updates or appends)
+    if sort_col and touched and last_row >= 3:
+        try:
+            ws.Range(ws.Cells(1, 1), ws.Cells(last_row, ncols)).Sort(
+                Key1=ws.Cells(1, sort_col), Order1=1, Header=1)  # xlAscending, xlYes
+        except Exception:  # noqa: BLE001
+            pass
 
     # Re-extend AutoFilter only when the row count changed (so a value-only cycle
     # never disturbs a coworker's active filter).
@@ -514,7 +527,8 @@ def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any]
         wb = _find_workbook(app, path)
         touched = []
         n = apply_upserts(app, wb, lq_payload["name"], lq_payload["headers"], lq_payload["ops"],
-                          lq_payload["key_col"], lq_payload["allow_delete"], lq_payload.get("freeze"))
+                          lq_payload["key_col"], lq_payload["allow_delete"], lq_payload.get("freeze"),
+                          sort_col=lq_payload.get("sort_col"))
         if n:
             touched.append(f"{lq_payload['name']}(+{n})")
         n = apply_order_history(app, wb, oh_payload["name"], oh_payload["spec"],

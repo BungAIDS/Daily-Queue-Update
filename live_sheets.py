@@ -351,6 +351,8 @@ LINE_ITEM_HEADERS = ["Job #", "Customer", "CO#", "Tags", "Item (as printed)",
 # --------------------------------------------------------------------------- #
 LIVE_QUEUE_HEADERS = ["Added"] + list(QUEUE_HEADERS)          # the DWG/feature matrices live on Order History
 LIVE_QUEUE_KEY_COL = 2 + QUEUE_HEADERS.index("Job #")          # 1-based col of Job # (Added is col 1)
+LIVE_QUEUE_END_DATE_COL = 2 + QUEUE_HEADERS.index("End Date")  # 1-based col of End Date (for the sort)
+_END_DATE_IDX = QUEUE_HEADERS.index("End Date")               # its index within the standard cells
 
 
 def _fmt_dt(iso: Optional[str]) -> str:
@@ -382,6 +384,12 @@ def live_queue_records(jobs: List[Dict[str, Any]], today: date,
     for j in jobs:
         added = Cell(added_label(j, ref=ref))
         std = _job_value_cells(j, co_changed=False)
+        # Write End Date as a real date so Live Queue can sort by it (overdue
+        # first -> red at the top); blanks sort to the bottom.
+        ed = _parse_date(j.get("end_date", ""))
+        if ed is not None:
+            std[_END_DATE_IDX].value = ed
+            std[_END_DATE_IDX].number_format = "mm/dd/yyyy"
         fill = _row_fill(j, today, is_new=str(j.get("job") or "") in new_ids)
         cells = [added] + std
         if fill:

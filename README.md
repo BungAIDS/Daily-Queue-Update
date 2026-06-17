@@ -191,7 +191,9 @@ actually added or removed). Tabs:
 - **Live Queue** — the orders **currently on the board**, incremental upsert
   (append / update in place / delete when an order leaves), keeping the clickable
   links (Job # → SO pdf, Folder, Quote Run) and the red/yellow date highlights.
-  "New today" shading is judged against **this morning's** frozen baseline.
+  Always **sorted by End Date** (most overdue — the red rows — at the top; blanks
+  at the bottom). "New today" shading is judged against **this morning's** frozen
+  baseline.
 - **Changes** — two date-labeled groups: **since this morning** (vs the frozen
   start-of-day baseline) and **vs yesterday** (the previous run's date). This tab
   is a snapshot, so it does repaint when it changes.

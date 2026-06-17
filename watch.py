@@ -170,7 +170,8 @@ def _render_master(master: dict, now: datetime) -> None:
     lq_ops = _plan(live_sheets.live_queue_records(lq_jobs, today, new_ids=new_today, ref=now),
                    lq_sigs, allow_delete=True)
     lq_payload = {"name": "Live Queue", "headers": live_sheets.LIVE_QUEUE_HEADERS, "ops": lq_ops,
-                  "key_col": live_sheets.LIVE_QUEUE_KEY_COL, "allow_delete": True, "freeze": "C2"}
+                  "key_col": live_sheets.LIVE_QUEUE_KEY_COL, "allow_delete": True, "freeze": "C2",
+                  "sort_col": live_sheets.LIVE_QUEUE_END_DATE_COL}
 
     # Order History: live master + the whole line-items backlog, as a matrix log.
     spec = live_sheets.order_history_build(_oh_orders(master, line_items.load_store()), today)
