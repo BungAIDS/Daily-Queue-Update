@@ -83,6 +83,26 @@ def test_update_tracks_co_and_skips_initial_population():
     assert any(x["field"] == "Size" and x["old"] == "M2" and x["new"] == "M3" for x in ev3)
 
 
+def test_merge_order_adds_and_never_regresses():
+    m = {"orders": {}}
+    # A backlog order we've never seen on the board is created off-queue.
+    assert lm.merge_order(m, "900", {"so_size": "M2", "dwg_extras": {"51": "x"}}) is True
+    e = m["orders"]["900"]
+    assert e["on_queue"] is False and e["job"]["so_size"] == "M2"
+    assert e["job"]["dwg_extras"] == {"51": "x"}
+    # A sparse source must not wipe an existing value with an empty one.
+    assert lm.merge_order(m, "900", {"so_size": "", "customer": "ACME"}) is True
+    assert e["job"]["so_size"] == "M2" and e["job"]["customer"] == "ACME"
+    # No change -> returns False.
+    assert lm.merge_order(m, "900", {"so_size": "M2"}) is False
+    # Merging onto a live (on-queue) order keeps it on-queue.
+    lm.update(m, [_job("900")], T0)
+    assert m["orders"]["900"]["on_queue"] is True
+    lm.merge_order(m, "900", {"so_arrangement": "9"})
+    assert m["orders"]["900"]["on_queue"] is True
+    assert m["orders"]["900"]["job"]["so_arrangement"] == "9"
+
+
 def main() -> int:
     passed = 0
     for name, fn in sorted(globals().items()):

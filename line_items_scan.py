@@ -212,6 +212,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         li.save_store(store)
         log.info("AI pass: %d of %d unknown unique item(s) classified (cached; re-runs are free).",
                  n, before)
+
+    try:   # fold the line items + feature tags into the one master store
+        import master_sync
+        master_sync.run("line_items")
+    except Exception as e:  # noqa: BLE001
+        log.warning("Could not sync line items to the live master (%s)", e)
     return rc
 
 

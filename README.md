@@ -207,13 +207,26 @@ its matrix columns change (a brand-new drawing suffix or feature tag appears).
 
 **The master data model.** One JSON file, `snapshots/live_master.json`, is the
 single source of truth — one entry per order with everything we have on it
-(design, size, arrangement, the AutoCAD DWGs, the line items, and eventually the
-quote run). Every poll, each board order is compared field-by-field against the
-master; **anything that differs updates the master and is appended to the day's
-change log** (`snapshots/change_log_<date>.json`) — which is what feeds the
-Changes tab's "Orders that changed today". (The 12K backlog index,
-`backlog/line_items.json`, is a complementary feeder, merged into Order History
-at render time.)
+(design, size, arrangement, the AutoCAD DWGs, the line items, the quote run, …).
+Every poll, each board order is compared field-by-field against the master;
+**anything that differs updates the master and is appended to the day's change
+log** (`snapshots/change_log_<date>.json`) — which is what feeds the Changes
+tab's "Orders that changed today".
+
+**Every helper feeds the master.** The offline tools each merge what they gather
+into `live_master.json` at the end of their run (`master_sync.py`): the line
+items (`line_items_scan.py`), the custom AutoCAD DWGs (`autocad_scan.py`), the
+parsed quote runs (`quote_run_scan.py`), and the full backfill
+(`backfill_orders.py`). You can also consolidate everything on demand:
+
+```bash
+python master_sync.py          # merge every helper store into the master
+python master_sync.py autocad  # just one source (autocad | quote_runs | line_items | backfill)
+```
+
+The merge never regresses a value (a sparse source won't wipe richer data), and
+an order the watcher hasn't seen on the board is added off-queue. Run the big
+backlog syncs when the watcher isn't also writing the master.
 
 **"New today"** is read from the 5 AM `main.py` run's own output (today's
 snapshot + diff): an order is new today if `main.py` flagged it new/returning
@@ -291,6 +304,7 @@ Daily-Queue-Update/
 ├── live_state.py       # The watcher's per-day memory: first-seen times, what's new/enriched
 ├── live_master.py      # THE master JSON store — every order + all its info; detects field changes
 ├── change_log.py       # Per-day log of field modifications (feeds the Changes tab)
+├── master_sync.py      # Merges every helper's store (DWGs/runs/line items/backfill) into the master
 ├── live_sheets.py      # Pure models + the keyed upsert planner for the master tabs
 ├── live_excel.py       # Renders the master tabs into the co-authored workbook via Excel COM (upsert)
 ├── notify.py           # New-order notifications — Windows toast + Microsoft Teams card

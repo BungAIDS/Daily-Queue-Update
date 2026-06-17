@@ -30,3 +30,4 @@ jobs:
       - run: python test_live_sheets.py
       - run: python test_live_master.py
       - run: python test_change_log.py
+      - run: python test_master_sync.py

@@ -3,6 +3,27 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-17 — Every helper feeds the one master store
+
+DG: incorporate everything we know about each order into live_master, and have
+every helper add what it collects.
+
+- `live_master.merge_order(master, job, fields)` — the single merge primitive:
+  writes only non-empty values, never regresses an existing value to empty, and
+  creates an unseen order off-queue. Tested.
+- `master_sync.py` — reads each helper's store off disk (no heavy imports) and
+  merges via per-source adapters: autocad (`dwg_extras`/type/folder), quote_runs
+  (drive-run fields), line_items (items + tags + customer/co/so_pdf), backfill
+  (full SO spec). `run("<source>")` does load-merge-save; CLI
+  `python master_sync.py [sources]` consolidates on demand.
+- Hooked the end of each helper's main (`autocad_scan`, `quote_run_scan`,
+  `line_items_scan`, `backfill_orders`) to `master_sync.run(...)` — best-effort,
+  so any time a helper runs, its data lands in the master.
+- Tests: `test_master_sync.py` (in CI) + a `merge_order` case in
+  `test_live_master.py`.
+- Note: this can grow live_master.json to the full backlog (~12K). Concurrency:
+  run big syncs off the watcher's clock (both do load-merge-save).
+
 ## 2026-06-17 — Master JSON + change log; Changes-tab rebuild; UI fixes
 
 Big batch from DG:

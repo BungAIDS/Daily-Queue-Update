@@ -158,6 +158,37 @@ def update(master: Dict[str, Any], present: List[Dict[str, Any]],
     return events
 
 
+def merge_order(master: Dict[str, Any], job_num: str, fields: Dict[str, Any],
+                when: datetime | None = None) -> bool:
+    """Merge `fields` into one order's record in the master — the single place
+    every helper (the live enrichment, line_items_scan, autocad_scan,
+    quote_run_scan, backfill_orders, …) folds what it learned about an order.
+
+    Only non-empty incoming values are written, and an existing non-empty value
+    is never regressed to empty, so a sparse source (e.g. the archive scan, which
+    has no board context) never wipes richer data. An order we've never seen is
+    created off-queue (it's not on the board, just known). Returns True if
+    anything actually changed."""
+    jn = str(job_num or "").strip()
+    if not jn:
+        return False
+    orders = master.setdefault("orders", {})
+    now_iso = (when or datetime.now()).isoformat(timespec="seconds")
+    entry = orders.get(jn)
+    if entry is None:
+        entry = orders[jn] = {"added": now_iso, "left": now_iso, "on_queue": False, "job": {"job": jn}}
+    job = entry.setdefault("job", {})
+    job.setdefault("job", jn)
+    changed = False
+    for k, v in (fields or {}).items():
+        if v in (None, "", [], {}):
+            continue                      # don't write/clobber with an empty value
+        if job.get(k) != v:
+            job[k] = v
+            changed = True
+    return changed
+
+
 def ordered(master: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
     """All logged orders as (job#, entry), oldest-added first — the chronological
     order the Order History tab grows in (newest appended at the bottom)."""

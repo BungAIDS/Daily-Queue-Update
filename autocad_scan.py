@@ -319,6 +319,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             log.info("  scanned %d (%d total) ...", scanned, len(records))
 
     save_progress(records)
+    try:   # fold these custom-DWG findings into the one master store
+        import master_sync
+        master_sync.run("autocad")
+    except Exception as e:  # noqa: BLE001
+        log.warning("Could not sync DWGs to the live master (%s)", e)
     out = write_workbook(records, Path(args.out))
     extras = all_extra_suffixes(records)
     missing = sum(1 for r in records.values() if r.get("missing_std"))
