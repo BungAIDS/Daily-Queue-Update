@@ -111,6 +111,12 @@ def _force_rebuild(master: dict) -> None:
     master["lq_sigs"] = {}
     master["oh_sigs"] = {}
     master.pop("below_sig", None)   # force the 'removed' block to redraw on (re)start
+    # One-time cleanup: a backlog order the watcher never saw on the board must
+    # have no 'left' time (earlier merges wrongly stamped one, which made the
+    # whole backlog look "removed today").
+    for e in master.get("orders", {}).values():
+        if not e.get("seen_on_queue"):
+            e["left"] = None
 
 
 def _plan(records: list, sig_store: dict, allow_delete: bool) -> list:
@@ -152,7 +158,7 @@ def _changes_sheet(master: dict, lq_jobs: list, new_today: set, today: date) -> 
     new_today_jobs = [j for j in lq_jobs if str(j.get("job") or "") in new_today]
     events = change_log.load(today)
     removed_today = [e.get("job", {}) for e in master.get("orders", {}).values()
-                     if not e.get("on_queue")
+                     if e.get("seen_on_queue") and not e.get("on_queue")
                      and str(e.get("left") or "")[:10] == today.isoformat()]
     return live_sheets.changes_sheet(new_today_jobs, events, removed_today, today.isoformat())
 
@@ -198,9 +204,11 @@ def _render_master(master: dict, now: datetime) -> None:
                   "sort_col": live_sheets.LIVE_QUEUE_END_DATE_COL, "text_cols": [1]}  # Added col -> AM/PM text
 
     # "Removed since this morning" block below the Live Queue. Render it only when
-    # the set actually changes (a removal/return), not every cycle.
+    # the set actually changes (a removal/return), not every cycle. Only orders
+    # the watcher actually saw on the board count — never the merged backlog.
     removed = [(e.get("job", {}), e.get("left")) for e in master.get("orders", {}).values()
-               if not e.get("on_queue") and str(e.get("left") or "")[:10] == today.isoformat()]
+               if e.get("seen_on_queue") and not e.get("on_queue")
+               and str(e.get("left") or "")[:10] == today.isoformat()]
     removed.sort(key=lambda jl: str(jl[1] or ""), reverse=True)   # most recently removed first
     below = {"title": "Removed from the queue since this morning",
              "headers": ["Job #", "", "Customer", "Design", "Removed"],

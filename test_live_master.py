@@ -103,6 +103,20 @@ def test_merge_order_adds_and_never_regresses():
     assert m["orders"]["900"]["job"]["so_arrangement"] == "9"
 
 
+def test_merged_backlog_is_not_a_removal():
+    m = {"orders": {}}
+    # A merged backlog order was never on the board: off-queue, no left, not seen.
+    lm.merge_order(m, "900", {"so_size": "M2"})
+    e = m["orders"]["900"]
+    assert e["on_queue"] is False and e["left"] is None and not e.get("seen_on_queue")
+    # An order the watcher saw, then it leaves: seen_on_queue True, left stamped.
+    lm.update(m, [_job("800")], T0)
+    assert m["orders"]["800"]["seen_on_queue"] is True
+    lm.update(m, [], T1)                      # 800 drops off the board
+    assert m["orders"]["800"]["on_queue"] is False and m["orders"]["800"]["left"]
+    assert m["orders"]["800"]["seen_on_queue"] is True
+
+
 def main() -> int:
     passed = 0
     for name, fn in sorted(globals().items()):

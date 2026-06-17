@@ -143,13 +143,14 @@ def update(master: Dict[str, Any], present: List[Dict[str, Any]],
             # new arrival, not an order that was already on the board when the
             # watch began — those are carried over with an approximate time).
             orders[jn] = {"added": added, "added_known": not bool(j.get("_carried_over")),
-                          "left": None, "on_queue": True, "job": dict(j)}
+                          "left": None, "on_queue": True, "seen_on_queue": True, "job": dict(j)}
         else:
             for field, old, new in _diffs(entry.get("job") or {}, j):
                 events.append({"time": now_iso, "job": jn, "customer": _norm(j.get("customer")),
                                "field": field, "old": old, "new": new})
             entry["job"] = dict(j)
             entry["on_queue"] = True
+            entry["seen_on_queue"] = True   # the watcher has seen it on the board
             entry["left"] = None
             entry.setdefault("added", added)
 
@@ -180,7 +181,10 @@ def merge_order(master: Dict[str, Any], job_num: str, fields: Dict[str, Any],
     now_iso = (when or datetime.now()).isoformat(timespec="seconds")
     entry = orders.get(jn)
     if entry is None:
-        entry = orders[jn] = {"added": now_iso, "left": now_iso, "on_queue": False, "job": {"job": jn}}
+        # A merged order has never been on the board (the watcher didn't see it
+        # arrive or leave), so left=None — it must NOT look "removed from the
+        # queue". Only live_master.update marks an order on/off the board.
+        entry = orders[jn] = {"added": now_iso, "left": None, "on_queue": False, "job": {"job": jn}}
     job = entry.setdefault("job", {})
     job.setdefault("job", jn)
     changed = False
