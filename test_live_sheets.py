@@ -179,6 +179,29 @@ def test_live_queue_end_date_is_sortable_serial():
     assert blank[ls.LIVE_QUEUE_END_DATE_COL - 1].value == ""
 
 
+def test_added_label_today_older_and_no_data():
+    from datetime import datetime
+    ref = datetime(2026, 6, 17, 12, 0, 0)
+    assert ls.added_label({"_carried_over": True}, ref=ref) == "NO DATA"
+    assert ls.added_label({"_added_known": True, "_added_iso": ""}, ref=ref) == "NO DATA"
+    today = ls.added_label({"_added_known": True, "_added_iso": "2026-06-17T09:14:00"}, ref=ref)
+    assert today.endswith("AM") and "," not in today          # time only
+    older = ls.added_label({"_added_known": True, "_added_iso": "2026-06-16T15:53:00"}, ref=ref)
+    assert "Jun" in older and older.endswith("PM")            # date + time
+
+
+def test_co_comment_most_recent_first_and_live_queue_cell():
+    hist = ["CO#1 06/01 A - first", "CO#3 06/15 C - latest", "CO#2 06/08 B - mid"]
+    cm = ls._co_comment({"co_history": hist})
+    body = cm.splitlines()[1:]
+    assert body[0].startswith("CO#3") and body[1].startswith("CO#2") and body[2].startswith("CO#1")
+    assert ls._co_comment({"co_history": []}) is None
+    # The CO# cell on a Live Queue row carries that hover note.
+    j = _job("421000", co_number=3, co_history=hist)
+    cells = ls.live_queue_records([j], TODAY)[0][1]
+    assert cells[1 + ls._CO_IDX].comment is not None and "CO#3" in cells[1 + ls._CO_IDX].comment
+
+
 def test_order_history_build_matrices_flags_and_separator():
     orders = [
         ("421000", {"on_queue": True, "added": "2026-06-16T09:00:00", "left": None,

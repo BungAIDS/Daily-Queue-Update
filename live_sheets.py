@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -51,6 +52,7 @@ class Cell:
     link: Optional[str] = None
     number_format: Optional[str] = None
     center: bool = False
+    comment: Optional[str] = None   # hover note (e.g. the CO# change-order history)
 
 
 @dataclass
@@ -81,21 +83,24 @@ class Sheet:
 # Shared helpers                                                               #
 # --------------------------------------------------------------------------- #
 def added_label(job: Dict[str, Any], ref: Optional[datetime] = None) -> str:
-    """Human 'time it was added'. Carried-over orders (already in the queue when
-    the watch began) show a marker rather than a fake precise time."""
-    if job.get("_carried_over"):
-        return "before watch"
-    iso = job.get("_first_seen") or ""
+    """The 'Added' label: the AM/PM time if it was added today, the date + time
+    if it was added earlier, or 'NO DATA' when we don't have a real add time (an
+    order that was already on the board when the watch began, or an older entry)."""
+    known = job.get("_added_known")
+    if known is None:                                  # live present-dict fallback
+        known = not job.get("_carried_over", False)
+    if not known:
+        return "NO DATA"
+    iso = job.get("_added_iso") or job.get("_first_seen") or ""
     try:
         dt = datetime.fromisoformat(iso)
-    except ValueError:
-        return iso
+    except (ValueError, TypeError):
+        return "NO DATA"
     ref = ref or datetime.now()
-    fmt_t = "%#I:%M %p" if _is_windows() else "%-I:%M %p"
     if dt.date() == ref.date():
-        return dt.strftime(fmt_t)
-    fmt_d = "%b %#d %#I:%M %p" if _is_windows() else "%b %-d %-I:%M %p"
-    return dt.strftime(fmt_d)
+        return dt.strftime("%#I:%M %p") if _is_windows() else dt.strftime("%-I:%M %p")
+    fmt = "%b %#d, %#I:%M %p" if _is_windows() else "%b %-d, %-I:%M %p"
+    return dt.strftime(fmt)
 
 
 def _is_windows() -> bool:
@@ -264,13 +269,16 @@ def _job_table(sh: Sheet, title: str, jobs: List[Dict[str, Any]],
     sh.blank()
 
 
-def _fmt_time(iso: str) -> str:
+def fmt_time(iso: str) -> str:
     """An ISO timestamp as an AM/PM time, e.g. '3:53 PM'."""
     try:
         dt = datetime.fromisoformat(iso)
     except (ValueError, TypeError):
         return iso or ""
     return dt.strftime("%#I:%M %p") if _is_windows() else dt.strftime("%-I:%M %p")
+
+
+_fmt_time = fmt_time   # internal alias
 
 
 def _events_table(sh: Sheet, title: str, headers: List[str],
@@ -370,6 +378,22 @@ LIVE_QUEUE_HEADERS = ["Added"] + list(QUEUE_HEADERS)          # the DWG/feature 
 LIVE_QUEUE_KEY_COL = 2 + QUEUE_HEADERS.index("Job #")          # 1-based col of Job # (Added is col 1)
 LIVE_QUEUE_END_DATE_COL = 2 + QUEUE_HEADERS.index("End Date")  # 1-based col of End Date (for the sort)
 _END_DATE_IDX = QUEUE_HEADERS.index("End Date")               # its index within the standard cells
+_CO_IDX = [i for i, (_, k) in enumerate(COLUMNS) if k == "co"][0]   # CO# cell index
+
+
+def _co_comment(job: Dict[str, Any]) -> Optional[str]:
+    """A hover note for the CO# cell: the order's change-order history, most
+    recent first, so hovering shows what the latest change order was."""
+    hist = job.get("co_history") or []
+    if not hist:
+        return None
+
+    def _co_num(line: str) -> int:
+        m = re.search(r"C\s*/?\s*O\s*#?\s*(\d+)", line, re.I)
+        return int(m.group(1)) if m else 0
+
+    ordered = sorted(hist, key=_co_num, reverse=True)
+    return "Change orders (most recent first):\n" + "\n".join(ordered)
 
 
 _EXCEL_EPOCH = date(1899, 12, 30)   # Excel's day 0 (1900 date system)
@@ -419,6 +443,8 @@ def live_queue_records(jobs: List[Dict[str, Any]], today: date,
         if ed is not None:
             std[_END_DATE_IDX].value = _excel_serial(ed)
             std[_END_DATE_IDX].number_format = "mm/dd/yyyy"
+        # Hover the CO# cell to see the change-order history (most recent first).
+        std[_CO_IDX].comment = _co_comment(j)
         fill = _row_fill(j, today, is_new=str(j.get("job") or "") in new_ids)
         cells = [added] + std
         if fill:

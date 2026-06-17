@@ -200,6 +200,14 @@ def _style_row(ws, r: int, cells: List) -> None:
                 pass
         if cell.number_format:
             ws.Cells(r, i).NumberFormat = cell.number_format
+        if cell.comment:
+            try:
+                cc = ws.Cells(r, i)
+                if cc.Comment is not None:
+                    cc.Comment.Delete()
+                cc.AddComment(str(cell.comment))
+            except Exception:  # noqa: BLE001 - a hover note is never worth failing on
+                pass
 
 
 def _pad(row: List, ncols: int) -> List[Any]:
@@ -307,19 +315,48 @@ def _write_row(ws, r: int, cells: List, ncols: int) -> None:
         rng.Font.Underline = False
         rng.Font.ColorIndex = _XL_AUTO
         rng.Hyperlinks.Delete()
+        rng.ClearComments()
     except Exception:  # noqa: BLE001
         pass
     _style_row(ws, r, cells)
 
 
+def _render_below(ws, key_col: int, ncols: int, below: Dict[str, Any]) -> None:
+    """Render a small static block below the keyed data (Live Queue's 'Removed
+    since this morning'). The key column is kept blank in the block so the
+    row-keying (which finds the last data row via the key column) ignores it."""
+    live_last = ws.Cells(ws.Rows.Count, key_col).End(_XL_UP).Row
+    try:
+        used = ws.UsedRange
+        used_bottom = used.Row + used.Rows.Count - 1
+    except Exception:  # noqa: BLE001
+        used_bottom = live_last
+    if used_bottom > live_last:                  # wipe the previous block
+        ws.Range(ws.Cells(live_last + 1, 1), ws.Cells(used_bottom, max(ncols, 8))).Clear()
+    rows = below.get("rows") or []
+    headers = below.get("headers") or ["Job #", "", "Customer", "Design", "Removed"]
+    r = live_last + 2                            # one blank gap row
+    title = ws.Cells(r, 1)
+    title.Value = f"{below.get('title', 'Removed')} ({len(rows)})"
+    title.Font.Bold = True
+    title.Font.Size = 12
+    r += 1
+    ws.Range(ws.Cells(r, 1), ws.Cells(r, len(headers))).Value = [headers]
+    _apply_run(ws, r, 1, len(headers), "header", "header", False)
+    for i, row in enumerate(rows, start=r + 1):
+        ws.Range(ws.Cells(i, 1), ws.Cells(i, len(row))).Value = [list(row)]
+
+
 def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
                   key_col: int, allow_delete: bool, freeze: str | None = None,
-                  sort_col: int | None = None, text_cols: List[int] | None = None) -> int:
+                  sort_col: int | None = None, text_cols: List[int] | None = None,
+                  below: Dict[str, Any] | None = None) -> int:
     """Apply append/update/delete ops to a keyed sheet. Returns rows touched.
     When `sort_col` is set, the data is re-sorted ascending by that column after
     any change (used to keep Live Queue ordered by End Date, overdue at the top).
     `text_cols` are pre-formatted as Text before any data is written so Excel
-    can't coerce a value (e.g. the AM/PM 'Added' label) into a datetime serial."""
+    can't coerce a value (e.g. the AM/PM 'Added' label) into a datetime serial.
+    `below` renders a small static section under the data (orders removed today)."""
     ws = _get_or_make_sheet(wb, name)
     ncols = len(headers)
     first_time = name not in _HEADER_DONE
@@ -394,6 +431,12 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
             _FROZEN.add(name)
         except Exception:  # noqa: BLE001
             pass
+
+    if below is not None:   # the 'Removed since this morning' section, best-effort
+        try:
+            _render_below(ws, key_col, ncols, below)
+        except Exception as e:  # noqa: BLE001
+            log.debug("below-block render failed (%s)", e)
 
     return len(updates) + len(appends) + len(deletes)
 
@@ -543,7 +586,8 @@ def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any]
         touched = []
         n = apply_upserts(app, wb, lq_payload["name"], lq_payload["headers"], lq_payload["ops"],
                           lq_payload["key_col"], lq_payload["allow_delete"], lq_payload.get("freeze"),
-                          sort_col=lq_payload.get("sort_col"), text_cols=lq_payload.get("text_cols"))
+                          sort_col=lq_payload.get("sort_col"), text_cols=lq_payload.get("text_cols"),
+                          below=lq_payload.get("below"))
         if n:
             touched.append(f"{lq_payload['name']}(+{n})")
         n = apply_order_history(app, wb, oh_payload["name"], oh_payload["spec"],

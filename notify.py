@@ -82,6 +82,7 @@ def _order_facts(j: Dict[str, Any]) -> List[tuple]:
     """The (label, value) rows shown for one order — shared by both card formats."""
     facts = [
         ("Order", str(j.get("job", ""))),
+        ("Oper", str(j.get("oper", "")) or "—"),
         ("Customer", j.get("customer", "") or "—"),
         ("Design", j.get("design", "") or "—"),
         ("Description", j.get("so_design_desc", "") or "—"),

@@ -139,7 +139,11 @@ def update(master: Dict[str, Any], present: List[Dict[str, Any]],
         entry = orders.get(jn)
         added = j.get("_first_seen") or now_iso
         if entry is None:
-            orders[jn] = {"added": added, "left": None, "on_queue": True, "job": dict(j)}
+            # We only truly KNOW the add time if we watched it arrive (a genuine
+            # new arrival, not an order that was already on the board when the
+            # watch began — those are carried over with an approximate time).
+            orders[jn] = {"added": added, "added_known": not bool(j.get("_carried_over")),
+                          "left": None, "on_queue": True, "job": dict(j)}
         else:
             for field, old, new in _diffs(entry.get("job") or {}, j):
                 events.append({"time": now_iso, "job": jn, "customer": _norm(j.get("customer")),
@@ -198,5 +202,15 @@ def ordered(master: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
 
 
 def on_queue(master: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """The job dicts currently on the board, oldest-added first."""
-    return [e["job"] for _, e in ordered(master) if e.get("on_queue") and e.get("job")]
+    """The job dicts currently on the board, oldest-added first. Each carries the
+    master's all-time add time (`_added_iso`) and whether it's known
+    (`_added_known`) so the Live Queue 'Added' column can show a real time/date or
+    'NO DATA'."""
+    out = []
+    for _, e in ordered(master):
+        if e.get("on_queue") and e.get("job"):
+            j = dict(e["job"])
+            j["_added_iso"] = e.get("added")
+            j["_added_known"] = e.get("added_known", False)
+            out.append(j)
+    return out

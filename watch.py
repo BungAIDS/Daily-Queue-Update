@@ -29,6 +29,7 @@ same place the daily run lives. Configure it in .env (see .env.example).
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import time
@@ -109,6 +110,7 @@ def _force_rebuild(master: dict) -> None:
     slate vs any prior-schema content)."""
     master["lq_sigs"] = {}
     master["oh_sigs"] = {}
+    master.pop("below_sig", None)   # force the 'removed' block to redraw on (re)start
 
 
 def _plan(records: list, sig_store: dict, allow_delete: bool) -> list:
@@ -194,6 +196,21 @@ def _render_master(master: dict, now: datetime) -> None:
     lq_payload = {"name": "Live Queue", "headers": live_sheets.LIVE_QUEUE_HEADERS, "ops": lq_ops,
                   "key_col": live_sheets.LIVE_QUEUE_KEY_COL, "allow_delete": True, "freeze": "C2",
                   "sort_col": live_sheets.LIVE_QUEUE_END_DATE_COL, "text_cols": [1]}  # Added col -> AM/PM text
+
+    # "Removed since this morning" block below the Live Queue. Render it only when
+    # the set actually changes (a removal/return), not every cycle.
+    removed = [(e.get("job", {}), e.get("left")) for e in master.get("orders", {}).values()
+               if not e.get("on_queue") and str(e.get("left") or "")[:10] == today.isoformat()]
+    removed.sort(key=lambda jl: str(jl[1] or ""), reverse=True)   # most recently removed first
+    below = {"title": "Removed from the queue since this morning",
+             "headers": ["Job #", "", "Customer", "Design", "Removed"],
+             "rows": [[j.get("job", ""), "", j.get("customer", ""),
+                       j.get("so_design_desc") or j.get("design", ""),
+                       live_sheets.fmt_time(left)] for j, left in removed]}
+    below_sig = json.dumps(below, default=str, sort_keys=True)
+    if below_sig != master.get("below_sig"):
+        lq_payload["below"] = below
+        master["below_sig"] = below_sig
 
     # Order History: live master + the whole line-items backlog, as a matrix log.
     spec = live_sheets.order_history_build(_oh_orders(master, line_items.load_store()), today)
