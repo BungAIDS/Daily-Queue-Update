@@ -83,19 +83,24 @@ def test_full_queue_footer_total():
     assert any(abs(c.value - 3500.0) < 0.001 for c in total_cells)
 
 
-def test_changes_both_groups_and_added():
-    intraday = {"new": [_job("421001", _carried_over=False,
-                             _first_seen="2026-06-16T09:14:00")],
-                "returning": [], "removed": [], "changed": []}
-    yesterday = {"new": [], "returning": [], "removed": [_job("420900")],
-                 "changed": [{"job": "420800", "customer": "X",
-                              "changes": [("end_date", "06/01/2026", "06/05/2026")]}]}
-    sh = ls.changes_sheet(intraday, "2026-06-16 (this morning)", yesterday, "2026-06-15")
-    assert _find(sh, "Changes since this morning — baseline 2026-06-16") is not None
-    assert _find(sh, "Changes vs yesterday — 2026-06-15") is not None
-    assert _find(sh, "New orders (1)") is not None
-    assert _find(sh, "Removed / completed (1)") is not None
-    assert _find(sh, "Orders that changed (1)") is not None
+def test_changes_today_log_sections():
+    new_today = [_job("421001", _carried_over=False, _first_seen="2026-06-16T09:14:00")]
+    events = [
+        {"time": "2026-06-16T09:30:00", "job": "420800", "customer": "X",
+         "field": "End Date", "old": "06/01/2026", "new": "06/05/2026"},
+        {"time": "2026-06-16T10:00:00", "job": "420800", "customer": "X",
+         "field": "End Date", "old": "06/05/2026", "new": "06/09/2026"},   # same field, 2nd line
+        {"time": "2026-06-16T11:00:00", "job": "420700", "customer": "Y",
+         "field": "CO#", "old": "0", "new": "1"},
+    ]
+    removed_today = [_job("420900")]
+    sh = ls.changes_sheet(new_today, events, removed_today, "2026-06-16")
+    assert _find(sh, "Changes — 2026-06-16") is not None
+    assert _find(sh, "New orders today (1)") is not None
+    assert _find(sh, "Change orders today (1)") is not None          # the CO# event
+    assert _find(sh, "Orders that changed today (2)") is not None    # two End Date lines
+    assert _find(sh, "Removed / completed today (1)") is not None
+    assert _find(sh, "CO#0 -> CO#1") is not None
 
 
 def test_history_sheet():

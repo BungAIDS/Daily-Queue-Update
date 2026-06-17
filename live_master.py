@@ -61,15 +61,75 @@ def _jobnum(j: Dict[str, Any]) -> str:
     return str(j.get("job") or "").strip()
 
 
-def update(master: Dict[str, Any], present: List[Dict[str, Any]], now: datetime) -> None:
-    """Fold the current board into the log: upsert every present order (append if
-    new, refresh its data + mark on_queue), then mark anything that's no longer
-    present as off the board. `added` is set once (prefers the order's first-seen
-    marker), `left` is stamped when an order transitions off the board and cleared
-    when it returns."""
+def _norm(v: Any) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, bool):
+        return "yes" if v else "no"
+    return str(v).strip()
+
+
+# The per-order fields we hold + watch for changes (label shown in the change
+# log). Board fields + the Sales-Order spec; CO#, Drawings and Features are
+# derived below. This is "all the info we have on each order" in one place.
+_TRACKED = [
+    ("oper", "Oper"), ("item", "Item"), ("assigned_to", "Assigned To"),
+    ("checker", "Checker"), ("start_date", "Start Date"), ("end_date", "End Date"),
+    ("plan_hrs", "Plan Hrs"), ("fannet_date", "FanNet Date"), ("total_price", "Total Price"),
+    ("customer", "Customer"), ("primary_rep", "Primary Rep"), ("ship_with", "Ship With"),
+    ("status_note", "Note"), ("unapproved", "Unapproved"), ("credit_hold", "Credit Hold"),
+    ("so_design_desc", "Description"), ("so_size", "Size"), ("so_arrangement", "Arrangement"),
+    ("so_motor_pos", "Motor Pos"), ("so_class", "Class"), ("so_rotation", "Rotation"),
+    ("so_discharge", "Discharge"), ("so_pct_width", "% Width"), ("so_wheel_type", "Wheel Type"),
+    ("so_design_temp", "Design Temp"), ("so_max_temp", "Max Temp"), ("so_special_temp", "Special Temp"),
+]
+
+
+def _suffix_sort(s: str):
+    return (int(s), s) if str(s).isdigit() else (10 ** 9, s)
+
+
+def tracked_values(job: Dict[str, Any]) -> Dict[str, str]:
+    """The watched fields of an order as comparable strings, including the derived
+    CO#, the custom-Drawings set, and the line-item Features set."""
+    vals = {label: _norm(job.get(key)) for key, label in _TRACKED}
+    co = job.get("co_number")
+    vals["CO#"] = str(int(co)) if co else "0"
+    de = job.get("dwg_extras") or {}
+    vals["Drawings"] = ", ".join("-" + s for s in sorted(de, key=_suffix_sort))
+    tags = sorted({t for it in (job.get("line_items") or []) for t in (it.get("tags") or [])})
+    vals["Features"] = ", ".join(tags)
+    return vals
+
+
+def _diffs(old_job: Dict[str, Any], new_job: Dict[str, Any]) -> List[Tuple[str, str, str]]:
+    """(field, old, new) for every watched field that was MODIFIED — i.e. it had a
+    prior value and now differs. Skips initial population (''->value), which is
+    just enrichment filling in, so the change log stays meaningful."""
+    ov, nv = tracked_values(old_job), tracked_values(new_job)
+    out = []
+    for label, new in nv.items():
+        old = ov.get(label, "")
+        if old != new and old != "":
+            out.append((label, old, new))
+    return out
+
+
+def update(master: Dict[str, Any], present: List[Dict[str, Any]],
+           now: datetime) -> List[Dict[str, Any]]:
+    """Fold the current board into the master log: upsert every present order
+    (append if new, refresh its data + mark on_queue), then mark anything no
+    longer present as off the board. `added` is set once; `left` is stamped on
+    departure and cleared on return.
+
+    Returns the list of field-change events detected this poll (one per modified
+    field), so the caller can append them to the day's change log:
+        {time, job, customer, field, old, new}
+    """
     now_iso = now.isoformat(timespec="seconds")
     orders = master.setdefault("orders", {})
     present_nums = set()
+    events: List[Dict[str, Any]] = []
 
     for j in present:
         jn = _jobnum(j)
@@ -81,6 +141,9 @@ def update(master: Dict[str, Any], present: List[Dict[str, Any]], now: datetime)
         if entry is None:
             orders[jn] = {"added": added, "left": None, "on_queue": True, "job": dict(j)}
         else:
+            for field, old, new in _diffs(entry.get("job") or {}, j):
+                events.append({"time": now_iso, "job": jn, "customer": _norm(j.get("customer")),
+                               "field": field, "old": old, "new": new})
             entry["job"] = dict(j)
             entry["on_queue"] = True
             entry["left"] = None
@@ -91,6 +154,8 @@ def update(master: Dict[str, Any], present: List[Dict[str, Any]], now: datetime)
             entry["on_queue"] = False
             if not entry.get("left"):
                 entry["left"] = now_iso
+
+    return events
 
 
 def ordered(master: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:

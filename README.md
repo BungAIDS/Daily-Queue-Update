@@ -180,27 +180,46 @@ actually added or removed). Tabs:
 - **Order History** — the **master log**: one row per order, covering both the
   orders the watcher has seen live AND the whole **line-items backlog** (~12K
   orders from `backlog/line_items.json`, once `line_items_scan.py` has run). It's
-  a *stable presence log* — **On Queue (YES/NO)**, **Added**, **Left**, the
-  order's identity/SO-spec columns, then two green-✓/red matrices side by side
-  with a vertical divider: the **AutoCAD DWG matrix** (a column per drawing
-  suffix) and the **line-item Feature matrix** (a column per feature tag). A row
-  changes only when an order is added or its On Queue/Left flag flips — the churny
-  board fields (dates, price, assignee) are NOT here, so the big log isn't
-  rewritten on every tick. The matrices are colored by conditional formatting and
-  bulk-written, so ~12K rows render fast.
+  a *stable presence log* — **Job #** (the pinned column) and the order's
+  identity/SO-spec columns, then **On Queue (YES/NO)**, **Added**, **Left**,
+  then two green-✓/red matrices side by side with a vertical divider: the
+  **AutoCAD DWG matrix** (a column per drawing suffix) and the **line-item
+  Feature matrix** (a column per feature tag). A row changes only when an order
+  is added or its On Queue/Left flag flips — the churny board fields (dates,
+  price, assignee) are NOT here, so the big log isn't rewritten on every tick.
+  The matrices are colored by conditional formatting and bulk-written (~12K rows
+  render fast), and the tab has AutoFilter so you can sort/filter any column.
 - **Live Queue** — the orders **currently on the board**, incremental upsert
   (append / update in place / delete when an order leaves), keeping the clickable
   links (Job # → SO pdf, Folder, Quote Run) and the red/yellow date highlights.
   Always **sorted by End Date** (most overdue — the red rows — at the top; blanks
-  at the bottom). "New today" shading is judged against **this morning's** frozen
-  baseline.
-- **Changes** — two date-labeled groups: **since this morning** (vs the frozen
-  start-of-day baseline) and **vs yesterday** (the previous run's date). This tab
-  is a snapshot, so it does repaint when it changes.
+  at the bottom). The **Added** column shows the AM/PM time an order first
+  appeared. "New today" shading is judged from the 5 AM `main.py` run's snapshot
+  + diff (see below).
+- **Changes** — today's activity log: **New orders today**, **Change orders
+  today** (CO# increases), **Orders that changed today** (one line per field
+  modification — a field that changes several times in a day is several lines,
+  each time-stamped, newest first), and **Removed / completed today**.
 
 The tabs are wiped and rebuilt **once per process start** (so a 5 AM launch
 starts clean), then run incrementally all day. Order History rebuilds itself if
 its matrix columns change (a brand-new drawing suffix or feature tag appears).
+
+**The master data model.** One JSON file, `snapshots/live_master.json`, is the
+single source of truth — one entry per order with everything we have on it
+(design, size, arrangement, the AutoCAD DWGs, the line items, and eventually the
+quote run). Every poll, each board order is compared field-by-field against the
+master; **anything that differs updates the master and is appended to the day's
+change log** (`snapshots/change_log_<date>.json`) — which is what feeds the
+Changes tab's "Orders that changed today". (The 12K backlog index,
+`backlog/line_items.json`, is a complementary feeder, merged into Order History
+at render time.)
+
+**"New today"** is read from the 5 AM `main.py` run's own output (today's
+snapshot + diff): an order is new today if `main.py` flagged it new/returning
+this morning, or it has appeared on the board since the morning snapshot. So you
+can launch `watch.py` any time after the daily run and it knows what's new —
+without re-flagging the whole board.
 
 **The 5 AM email becomes a live link.** The 5 AM run still **saves** the dated
 `queue_<date>.xlsx` for the archive, but the **email** now leads with an active
@@ -270,7 +289,8 @@ Daily-Queue-Update/
 ├── compare.py          # Diff today vs the most recent prior run; persistence tracking
 ├── watch.py            # Live intraday watcher — poll the board, enrich only new orders all day
 ├── live_state.py       # The watcher's per-day memory: first-seen times, what's new/enriched
-├── live_master.py      # The all-time master log (one row per order ever; On Queue/Added/Left)
+├── live_master.py      # THE master JSON store — every order + all its info; detects field changes
+├── change_log.py       # Per-day log of field modifications (feeds the Changes tab)
 ├── live_sheets.py      # Pure models + the keyed upsert planner for the master tabs
 ├── live_excel.py       # Renders the master tabs into the co-authored workbook via Excel COM (upsert)
 ├── notify.py           # New-order notifications — Windows toast + Microsoft Teams card

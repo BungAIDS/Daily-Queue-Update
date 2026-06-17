@@ -34,13 +34,14 @@ import sys
 import time
 from datetime import date, datetime, time as dtime, timedelta
 
+import change_log
 import line_items
 import live_excel
 import live_master
 import live_sheets
 import live_state
 import notify
-from compare import diff_queues, load_latest_snapshot, load_snapshot
+from compare import load_latest_snapshot, load_snapshot
 from config import (LIVE_MORNING_SNAPSHOT, LIVE_WORKBOOK_PATH, OUTPUT_DIR,
                     POLL_INTERVAL_SECONDS, WATCH_END, WATCH_START,
                     validate_runtime_config)
@@ -143,16 +144,15 @@ def _oh_orders(master: dict, store: dict) -> list:
     return sorted(merged.items(), key=lambda kv: (str(kv[1].get("added") or ""), kv[0]))
 
 
-def _changes_sheet(present: list, today: date) -> "live_sheets.Sheet":
-    """The Changes snapshot: since this morning's frozen baseline, and vs the
-    previous run (both date-labeled). Full-repaint tab (kept as-is)."""
-    baseline = live_state.load_baseline(today)
-    intraday = diff_queues(present, baseline, today, persist_history=False, prev_date=today)
-    yest, yest_date = load_latest_snapshot(today)
-    yesterday = diff_queues(present, yest, today, persist_history=False, prev_date=yest_date)
-    return live_sheets.changes_sheet(
-        intraday, f"{today.isoformat()} (start of day)",
-        yesterday, yest_date.isoformat() if yest_date else "no prior run")
+def _changes_sheet(master: dict, lq_jobs: list, new_today: set, today: date) -> "live_sheets.Sheet":
+    """Today's activity log: new orders today, change orders (CO#), the
+    field-modification log, and orders removed today."""
+    new_today_jobs = [j for j in lq_jobs if str(j.get("job") or "") in new_today]
+    events = change_log.load(today)
+    removed_today = [e.get("job", {}) for e in master.get("orders", {}).values()
+                     if not e.get("on_queue")
+                     and str(e.get("left") or "")[:10] == today.isoformat()]
+    return live_sheets.changes_sheet(new_today_jobs, events, removed_today, today.isoformat())
 
 
 def _new_today_ids(lq_jobs: list, today: date) -> set:
@@ -208,7 +208,7 @@ def _render_master(master: dict, now: datetime) -> None:
                   "key_col": live_sheets.ORDER_HISTORY_KEY_COL, "freeze": "B2"}  # pin Job # only
 
     update_master_workbook(LIVE_WORKBOOK_PATH, lq_payload, oh_payload,
-                           changes_sheet=_changes_sheet(lq_jobs, today))
+                           changes_sheet=_changes_sheet(master, lq_jobs, new_today, today))
 
 
 def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce: bool) -> dict:
@@ -226,7 +226,11 @@ def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce
 
     _enrich_pending(state)
     present = live_state.present_jobs(state)
-    live_master.update(master, present, now)        # fold the board into the all-time log
+    # Fold the board into the master log; log any field modifications it found.
+    events = live_master.update(master, present, now)
+    change_log.append(now.date(), events)
+    if events:
+        log.info("Logged %d field change(s) this poll.", len(events))
 
     # Freeze the start-of-day baseline (enriched) on the first poll, so the
     # 'changes since this morning' view has stable morning values to diff against.

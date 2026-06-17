@@ -264,45 +264,62 @@ def _job_table(sh: Sheet, title: str, jobs: List[Dict[str, Any]],
     sh.blank()
 
 
-def _changed_table(sh: Sheet, title: str, changed: List[Dict[str, Any]]) -> None:
-    sh.row([Cell(f"{title} ({len(changed)})", font=F_SECTION)])
-    if not changed:
+def _fmt_time(iso: str) -> str:
+    """An ISO timestamp as an AM/PM time, e.g. '3:53 PM'."""
+    try:
+        dt = datetime.fromisoformat(iso)
+    except (ValueError, TypeError):
+        return iso or ""
+    return dt.strftime("%#I:%M %p") if _is_windows() else dt.strftime("%-I:%M %p")
+
+
+def _events_table(sh: Sheet, title: str, headers: List[str],
+                  rows: List[List[Any]]) -> None:
+    sh.row([Cell(f"{title} ({len(rows)})", font=F_SECTION)])
+    if not rows:
         sh.row([Cell("(none)")])
         sh.blank()
         return
-    sh.row(_header_cells(["Job #", "Customer", "Field", "Old value", "New value"]))
-    for ch in changed:
-        for (fieldname, old, new) in ch.get("changes", []):
-            sh.row([Cell(ch.get("job", "")), Cell(ch.get("customer", "")),
-                    Cell(fieldname), Cell(old), Cell(new)])
+    sh.row(_header_cells(headers))
+    for r in rows:
+        sh.row([c if isinstance(c, Cell) else Cell(c) for c in r])
     sh.blank()
-
-
-def _group(sh: Sheet, heading: str, diff: Dict[str, Any]) -> None:
-    sh.row([Cell(heading, font=F_SECTION)])
-    sh.blank()
-    _job_table(sh, "New orders", diff.get("new", []),
-               extra_headers=["Added"], extra=lambda j: added_label(j))
-    _job_table(sh, "Returning orders", diff.get("returning", []),
-               extra_headers=["Last seen"], extra=lambda j: j.get("_last_seen", ""))
-    _job_table(sh, "Removed / completed", diff.get("removed", []))
-    _changed_table(sh, "Orders that changed", diff.get("changed", []))
 
 
 def changes_sheet(
-    intraday: Dict[str, Any],
-    intraday_label: str,
-    yesterday: Dict[str, Any],
-    yesterday_label: str,
+    new_today: List[Dict[str, Any]],
+    change_events: List[Dict[str, Any]],
+    removed_today: List[Dict[str, Any]],
+    date_str: str,
     name: str = "Changes",
 ) -> Sheet:
-    """Two stacked, date-labeled groups: changes since this morning's baseline,
-    and changes vs yesterday's run. Each group lists new / returning / removed /
-    changed orders."""
+    """Today's activity log:
+      - New orders today (new as of today, with their Added time).
+      - Change orders today (CO# increases — restored change-order tracking).
+      - Orders that changed today: one line per field modification (a field that
+        changes several times in a day is several lines), newest first.
+      - Removed / completed today.
+    `change_events` is the day's change log (see change_log.py)."""
     sh = Sheet(name, freeze=None)
-    _group(sh, f"Changes since this morning — baseline {intraday_label}", intraday)
+    sh.row([Cell(f"Changes — {date_str}", font=F_SECTION)])
     sh.blank()
-    _group(sh, f"Changes vs yesterday — {yesterday_label}", yesterday)
+
+    _job_table(sh, "New orders today", new_today,
+               extra_headers=["Added"], extra=lambda j: added_label(j))
+
+    newest_first = sorted(change_events, key=lambda e: e.get("time", ""), reverse=True)
+    co_events = [e for e in newest_first if e.get("field") == "CO#"]
+    _events_table(sh, "Change orders today", ["Time", "Job #", "Customer", "Change"],
+                  [[_fmt_time(e.get("time", "")), e.get("job", ""), e.get("customer", ""),
+                    f"CO#{e.get('old', '')} -> CO#{e.get('new', '')}"] for e in co_events])
+
+    field_events = [e for e in newest_first if e.get("field") != "CO#"]
+    _events_table(sh, "Orders that changed today",
+                  ["Time", "Job #", "Customer", "Field", "Old", "New"],
+                  [[_fmt_time(e.get("time", "")), e.get("job", ""), e.get("customer", ""),
+                    e.get("field", ""), e.get("old", ""), e.get("new", "")] for e in field_events])
+
+    _job_table(sh, "Removed / completed today", removed_today)
     return sh
 
 

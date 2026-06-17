@@ -56,6 +56,33 @@ def test_ordered_is_chronological_and_on_queue_filter():
     assert [j["job"] for j in lm.on_queue(m)] == ["300"]
 
 
+def test_update_logs_field_modifications():
+    m = {"orders": {}}
+    lm.update(m, [_job("100", end_date="06/20/2026", total_price="$1,000.00")], T0)
+    # No events on first sight (it's new, not modified).
+    ev = lm.update(m, [_job("100", end_date="06/25/2026", total_price="$1,000.00")], T1)
+    assert len(ev) == 1
+    e = ev[0]
+    assert e["job"] == "100" and e["field"] == "End Date"
+    assert e["old"] == "06/20/2026" and e["new"] == "06/25/2026"
+    assert e["time"] == T1.isoformat(timespec="seconds")
+
+
+def test_update_tracks_co_and_skips_initial_population():
+    m = {"orders": {}}
+    # First sight has no SO size yet; later it's enriched (''-> value): NOT a change.
+    lm.update(m, [_job("100", co_number=0)], T0)
+    ev = lm.update(m, [_job("100", co_number=0, so_size="M2")], T1)
+    assert not any(x["field"] == "Size" for x in ev)        # initial population skipped
+    # A real CO# bump (0 -> 1) is logged.
+    ev2 = lm.update(m, [_job("100", co_number=1, so_size="M2")], T2)
+    co = [x for x in ev2 if x["field"] == "CO#"]
+    assert co and co[0]["old"] == "0" and co[0]["new"] == "1"
+    # And a real Size modification (M2 -> M3) is logged.
+    ev3 = lm.update(m, [_job("100", co_number=1, so_size="M3")], T2)
+    assert any(x["field"] == "Size" and x["old"] == "M2" and x["new"] == "M3" for x in ev3)
+
+
 def main() -> int:
     passed = 0
     for name, fn in sorted(globals().items()):

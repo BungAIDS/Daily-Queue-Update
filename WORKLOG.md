@@ -3,6 +3,32 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-17 — Master JSON + change log; Changes-tab rebuild; UI fixes
+
+Big batch from DG:
+
+- **One master JSON** (`live_master.json`) is the source of truth: per order it
+  holds all the info we have (board fields + SO design/size/arrangement/temps +
+  CO# + DWGs + line-item features). `live_master.update` now compares each scan
+  field-by-field (`tracked_values`/`_diffs`), updates the master, and RETURNS the
+  modifications. Initial population (''->value, i.e. enrichment filling in) is
+  skipped so the log stays meaningful.
+- **`change_log.py`** — per-day `change_log_<date>.json` of field events
+  {time, job, customer, field, old, new}. A field changing N times/day = N
+  events (N lines). Archived with the other dated files (runstate).
+- **Changes tab rebuilt** as a today log: New orders today, **Change orders
+  today (CO# — restored)**, Orders that changed today (one time-stamped line per
+  field modification, newest first), Removed/completed today. Replaces the old
+  this-morning/vs-yesterday snapshot groups (which mis-flagged everything new).
+- **"New today"** now reads main.py's today snapshot + diff (+ arrived-since-
+  morning), so launching watch.py any time after the 5 AM run flags the right
+  orders. Verified end-to-end.
+- **Order History reorder**: data columns first (Job # pinned), then On Queue/
+  Added/Left right before the DWG matrix; AutoFilter added (sortable).
+- **Live Queue Added** written as Text -> shows the AM/PM label, not a 24h serial.
+- Tests: `test_change_log.py` (new, in CI) + change-detection cases in
+  `test_live_master.py`; Changes-tab test rewritten. 80+ pure tests green.
+
 ## 2026-06-16 — Order History = stable 12K log with DWG + Feature matrices
 
 Refined the master log per DG:
