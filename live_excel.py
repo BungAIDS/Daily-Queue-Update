@@ -469,6 +469,12 @@ def apply_order_history(app, wb, name: str, spec: Dict[str, Any], ops: List,
         _apply_matrix_cf(ws, key_col, *spec["dwg_range"])
         _apply_matrix_cf(ws, key_col, *spec["feat_range"])
         _draw_separator(ws, spec["sep_col"])
+        # AutoFilter so it's sortable/filterable by any column, like Live Queue.
+        if records:
+            try:
+                ws.Range(ws.Cells(1, 1), ws.Cells(1 + len(records), ncols)).AutoFilter()
+            except Exception:  # noqa: BLE001
+                pass
         try:
             ws.UsedRange.Columns.AutoFit()
             for col in range(1, ncols + 1):
@@ -502,6 +508,13 @@ def apply_order_history(app, wb, name: str, spec: Dict[str, Any], ops: List,
     for k, cells in appends:
         last_row += 1
         _write_oh_row(ws, last_row, cells, ncols)
+    if appends:   # re-extend AutoFilter to cover the newly appended rows
+        try:
+            if ws.AutoFilterMode:
+                ws.AutoFilterMode = False
+            ws.Range(ws.Cells(1, 1), ws.Cells(last_row, ncols)).AutoFilter()
+        except Exception:  # noqa: BLE001
+            pass
     return len(updates) + len(appends)
 
 

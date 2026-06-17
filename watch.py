@@ -46,6 +46,7 @@ from config import (LIVE_MORNING_SNAPSHOT, LIVE_WORKBOOK_PATH, OUTPUT_DIR,
                     validate_runtime_config)
 from live_excel import save_morning_copy, update_master_workbook
 from live_sheets import added_label
+from runstate import load_diff
 from sales_orders import enrich_with_sales_orders
 from scraper import scrape_queue
 
@@ -154,22 +155,38 @@ def _changes_sheet(present: list, today: date) -> "live_sheets.Sheet":
         yesterday, yest_date.isoformat() if yest_date else "no prior run")
 
 
+def _new_today_ids(lq_jobs: list, today: date) -> set:
+    """Order numbers that are 'new as of today'. Uses the 5 AM main.py run's own
+    output — today's snapshot + diff — so it works whenever you start the watcher
+    later in the day: an order is new today if main.py flagged it new/returning
+    this morning, OR it has appeared on the board since the morning snapshot.
+    Falls back to the most recent prior snapshot if main.py hasn't run today."""
+    board_ids = {str(j.get("job")) for j in lq_jobs if j.get("job")}
+    today_snap = load_snapshot(today)
+    if today_snap is None:
+        prev, _ = load_latest_snapshot(today)
+        if prev is None:
+            return set()
+        prev_ids = {str(j.get("job")) for j in prev if j.get("job")}
+        return {jn for jn in board_ids if jn not in prev_ids}
+
+    ids: set = set()
+    d = load_diff(today)
+    if d:
+        for grp in ("new", "returning"):
+            ids |= {str(j.get("job")) for j in (d.get(grp) or []) if j.get("job")}
+    snap_ids = {str(j.get("job")) for j in today_snap if j.get("job")}
+    ids |= {jn for jn in board_ids if jn not in snap_ids}   # arrived since the morning snapshot
+    return ids & board_ids
+
+
 def _render_master(master: dict, now: datetime) -> None:
     """Build Live Queue (incremental upsert) + Order History (matrix log) +
     the Changes snapshot from the master log + line-items store, and push them in."""
     today = now.date()
     lq_jobs = live_master.on_queue(master)
 
-    # "New today" = on the board but NOT in the most recent prior daily snapshot
-    # (yesterday's). If there's no prior snapshot to compare against, flag NOTHING
-    # rather than the whole board.
-    prev, _prev_date = load_latest_snapshot(today)
-    if prev is None:
-        new_today = set()
-    else:
-        prev_ids = {str(j.get("job")) for j in prev if j.get("job")}
-        new_today = {str(j.get("job")) for j in lq_jobs
-                     if str(j.get("job")) and str(j.get("job")) not in prev_ids}
+    new_today = _new_today_ids(lq_jobs, today)
 
     lq_sigs = master.setdefault("lq_sigs", {})
     lq_ops = _plan(live_sheets.live_queue_records(lq_jobs, today, new_ids=new_today, ref=now),
