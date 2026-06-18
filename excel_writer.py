@@ -349,12 +349,12 @@ def _write_job_row(ws, row: int, j: Dict[str, Any], co_changed: bool = False) ->
     for col, (_header, key) in enumerate(COLUMNS, start=1):
         if key == "job":
             cell = ws.cell(row=row, column=col, value=j.get("job", ""))
-            # Job # links to its Sales Order *folder* on the Z: drive (when we
-            # have one). Linking the folder, not the PDF, keeps the link alive
-            # after a change order renames the SO file.
+            # Job # links to its latest Sales Order pdf on the Z: drive (when we
+            # have one). The daily run downloads the current revision each
+            # morning, so this path is always the newest CO's SO.
             so_pdf = (j.get("so_pdf") or "").strip()
             if so_pdf and j.get("job"):
-                cell.hyperlink = folder_of(so_pdf)
+                cell.hyperlink = so_pdf
                 cell.font = LINK_FONT
                 linked_cols.add(col)
         elif key == "folder":

@@ -44,12 +44,13 @@ def test_full_queue_headers_and_added_column():
 
 
 def test_full_queue_overdue_fill_and_job_link():
-    j = _job("421000", end_date="06/10/2026", so_pdf="Z:\\SO\\421000\\421000 - Sales Order (original).pdf")
+    so = "Z:\\SO\\421000\\421000 - Sales Order CO#1.pdf"
+    j = _job("421000", end_date="06/10/2026", so_pdf=so)
     sh = ls.full_queue_sheet([j], TODAY)
     job_cell = sh.grid[1][1]                        # Added is col0, Job# is col1
     assert job_cell.value == "421000"
-    # Links to the SO *folder* (survives a CO renaming the file), not the PDF.
-    assert job_cell.link == "Z:\\SO\\421000" and job_cell.font == F_LINK
+    # Links straight to the latest SO PDF (the watcher keeps so_pdf current).
+    assert job_cell.link == so and job_cell.font == F_LINK
     # End Date in the past -> overdue fill on the standard cells.
     assert sh.grid[1][1].fill == FILL_OVERDUE
 

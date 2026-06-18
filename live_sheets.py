@@ -126,10 +126,11 @@ def _job_value_cells(j: Dict[str, Any], columns: Optional[List] = None,
             c = Cell(j.get("job", ""))
             so = (j.get("so_pdf") or "").strip()
             if so and j.get("job"):
-                # Link the SO *folder*, not the PDF: a change order renames the
-                # file (… (original).pdf -> … CO#1.pdf), which dead-links a path
-                # captured before the CO. The per-job folder name never changes.
-                c.link, c.font = folder_of(so), F_LINK
+                # Links straight to the latest Sales Order PDF. The watcher keeps
+                # so_pdf pointed at the newest revision (sales_orders
+                # .refresh_sales_orders / a re-fetch on a change order), so a CO
+                # renaming the file (… (original).pdf -> … CO#1.pdf) follows here.
+                c.link, c.font = so, F_LINK
                 linked_idx.add(idx)
         elif key == "folder":
             folder = (j.get("job_folder") or "").strip()

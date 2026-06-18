@@ -49,7 +49,8 @@ from config import (LIVE_MORNING_SNAPSHOT, LIVE_WORKBOOK_PATH, OUTPUT_DIR,
 from live_excel import save_morning_copy, update_master_workbook
 from live_sheets import added_label
 from runstate import load_diff
-from sales_orders import enrich_with_sales_orders, refresh_autocad_folders
+from sales_orders import (enrich_with_sales_orders, refresh_autocad_folders,
+                          refresh_sales_orders)
 from scraper import scrape_queue
 
 log = logging.getLogger("queue-watch")
@@ -274,10 +275,30 @@ def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce
         log.warning("Board scrape returned 0 orders — skipping this cycle (site/session issue?).")
         return {"new": [], "returning": [], "removed": []}
 
+    # Board prices before this poll overwrites them — a change order almost always
+    # moves the order's price, so a shift is our (free) signal to re-fetch the SO.
+    prev_price = {jn: str((e.get("job") or {}).get("total_price") or "")
+                  for jn, e in state.items()}
+
     deltas = live_state.record_poll(state, board, now, baseline=baseline)
     log.info("Poll @ %s: %d on board | new=%d returning=%d removed=%d",
              now.strftime("%H:%M:%S"), len(board),
              len(deltas["new"]), len(deltas["returning"]), len(deltas["removed"]))
+
+    # Re-fetch the Sales Order for any on-board order whose price just changed: a
+    # likely change order, whose new CO sales order needs downloading so the CO#,
+    # line items and the Job# link all follow the newest revision. Clearing
+    # `enriched` makes _enrich_pending pick it up alongside the genuinely new ones.
+    if not baseline:
+        repriced = 0
+        for jn, oldp in prev_price.items():
+            e = state.get(jn)
+            if (e and e.get("present") and e.get("enriched")
+                    and str((e.get("job") or {}).get("total_price") or "") != oldp):
+                e["enriched"] = False
+                repriced += 1
+        if repriced:
+            log.info("%d order(s) changed price (possible change order) — re-fetching their SO.", repriced)
 
     _enrich_pending(state)
     # Re-resolve AutoCAD folders for any on-board order still without one (cheap
@@ -289,6 +310,14 @@ def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce
         resolved = refresh_autocad_folders(unresolved)
         if resolved:
             log.info("Resolved %d AutoCAD folder(s) for order(s) that showed 'Open'.", resolved)
+
+    # Repoint any Job# link whose SO file was superseded/renamed by a change order
+    # at the latest revision on disk (also syncs co_number). Cheap; self-heals
+    # links that broke when a CO renamed the file out from under a stored path.
+    on_board = [e["job"] for e in state.values() if e.get("present") and e.get("job")]
+    repointed = refresh_sales_orders(on_board)
+    if repointed:
+        log.info("Repointed %d Sales Order link(s) to the latest revision on disk.", repointed)
 
     present = live_state.present_jobs(state)
     # Fold the board into the master log; log any field modifications it found.

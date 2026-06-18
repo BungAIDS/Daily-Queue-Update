@@ -243,6 +243,53 @@ def refresh_autocad_folders(jobs: List[Dict[str, Any]]) -> int:
     return n
 
 
+_CO_IN_SO_NAME = re.compile(r"CO#(\d+)", re.I)
+
+
+def _latest_so_in_folder(folder: Path):
+    """The newest Sales Order revision on disk in a job's folder: the highest CO#
+    in the file name ('… CO#2.pdf' beats '… (original).pdf'), mtime as a
+    tiebreak. Returns (path, co_number) or None."""
+    best = None
+    try:
+        for p in folder.glob("*.pdf"):
+            m = _CO_IN_SO_NAME.search(p.name)
+            co = int(m.group(1)) if m else 0
+            key = (co, p.stat().st_mtime)
+            if best is None or key > best[0]:
+                best = (key, p, co)
+    except OSError:
+        return None
+    return (best[1], best[2]) if best else None
+
+
+def refresh_sales_orders(jobs: List[Dict[str, Any]]) -> int:
+    """Repoint an order's so_pdf at the latest Sales Order PDF actually on disk
+    whenever the stored one has gone — a change order renames the file
+    ('… (original).pdf' -> '… CO#1.pdf'), which dead-links a path captured before
+    the CO. Syncs co_number to the file found, so the change order also shows up
+    (red text, change log). Cheap: a single stat per order, and a folder listing
+    only for the ones whose link is broken. Mutates the job dicts in place;
+    returns how many were repointed."""
+    n = 0
+    for j in jobs:
+        jn = str(j.get("job") or "").strip()
+        if not jn:
+            continue
+        cur = (j.get("so_pdf") or "").strip()
+        if cur and Path(cur).exists():
+            continue                      # link still resolves — leave it alone
+        folder = Path(cur).parent if cur else (SALES_ORDER_DIR / jn)
+        hit = _latest_so_in_folder(folder)
+        if not hit:
+            continue
+        path, co = hit
+        j["so_pdf"] = str(path)
+        j["co_number"] = co
+        n += 1
+    return n
+
+
 # --------------------------------------------------------------------------- #
 # PDF parsing                                                                 #
 # --------------------------------------------------------------------------- #
