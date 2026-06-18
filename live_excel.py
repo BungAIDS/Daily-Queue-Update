@@ -614,8 +614,11 @@ def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any]
                 except Exception:  # noqa: BLE001
                     pass
     if wb is None:
-        log.warning("Could not open the live workbook (%s); Excel looked busy. "
-                    "Skipping this cycle; will retry next poll.", last_err)
+        log.warning("Could not open the live workbook after 3 tries: %s: %r. Excel "
+                    "may have a dialog open (co-authoring conflict, 'file in use', a "
+                    "save prompt) or be mid-sync — clearing that usually fixes it. "
+                    "Skipping this cycle; will retry next poll.",
+                    type(last_err).__name__, last_err)
         return False
 
     # Render each tab independently — a failure on one (e.g. the big Order

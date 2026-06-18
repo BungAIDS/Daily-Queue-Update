@@ -367,26 +367,54 @@ def _morning_snapshot(now: datetime) -> None:
     save_morning_copy(LIVE_WORKBOOK_PATH, dest)
 
 
+_CONSOLE_CTRL_REF: list = []   # keep the console handler alive (and register once)
+
+
 def _install_stop_handler(stop: "threading.Event") -> None:
-    """Make Ctrl+C reliable. Playwright's sync API and asyncio.run (both used in a
-    poll) can leave the SIGINT handler in a state where Ctrl+C is swallowed — the
-    symptom being a watcher you can't stop without closing the window. So we own
-    the handler: the first interrupt asks the loop to stop cleanly after the
-    current step; a second one force-quits immediately. It's re-installed each
-    cycle in case a poll reset it. Main-thread only (where run_watch runs)."""
-    def _handler(signum, frame):
+    """Make Ctrl+C reliable. A poll blocks the main thread inside native browser
+    (Playwright) and Excel (COM) calls, and that machinery can also leave Python's
+    own SIGINT handler swallowed — the symptom being a watcher you can't stop
+    without closing the window.
+
+    On Windows we register an OS console-control handler (pywin32): the OS runs it
+    on its *own* thread, so it fires even while the main thread is stuck in a
+    native call a Python signal handler can't preempt. First Ctrl+C / Ctrl+Break
+    asks the loop to stop cleanly after the current step (state is still saved); a
+    second one hard-quits immediately (works mid-call, from that other thread). A
+    plain SIGINT handler is also installed as a fallback (and for non-Windows)."""
+    def _request_stop() -> None:
         if stop.is_set():                       # already stopping -> hard quit
             log.warning("Second interrupt — force quitting now.")
             os._exit(130)
         stop.set()
         log.info("Interrupt received — saving and exiting after this step. "
                  "Press Ctrl+C again to force quit.")
+
+    # Windows console-control handler — the robust path. Registered once.
+    if os.name == "nt" and not _CONSOLE_CTRL_REF:
+        try:
+            import win32api  # type: ignore  (part of pywin32, already used for COM)
+
+            def _console_handler(ctrl_type):     # runs on an OS-created thread
+                if ctrl_type in (0, 1):          # CTRL_C_EVENT, CTRL_BREAK_EVENT
+                    _request_stop()
+                    return True                  # handled — suppress the default
+                return False
+            win32api.SetConsoleCtrlHandler(_console_handler, True)
+            _CONSOLE_CTRL_REF.append(_console_handler)   # prevent GC
+        except Exception as e:  # noqa: BLE001 - fall back to the signal handler
+            log.debug("Console control handler unavailable (%s); using SIGINT only", e)
+
+    # Signal handler — the only option off Windows, and a backup. Re-installed
+    # each call since a poll's async work can reset it.
+    def _sig_handler(signum, frame):
+        _request_stop()
     for signame in ("SIGINT", "SIGBREAK"):      # SIGBREAK = Ctrl+Break on Windows
         sig = getattr(signal, signame, None)
         if sig is None:
             continue
         try:
-            signal.signal(sig, _handler)
+            signal.signal(sig, _sig_handler)
         except (ValueError, OSError):           # not main thread / unsupported
             pass
 
