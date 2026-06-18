@@ -215,7 +215,7 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
     lq_payload = {"name": "Live Queue", "headers": live_sheets.LIVE_QUEUE_HEADERS, "ops": lq_ops,
                   "key_col": live_sheets.LIVE_QUEUE_KEY_COL, "allow_delete": True,
                   "sort_col": live_sheets.LIVE_QUEUE_CBC_COL, "text_cols": [2],  # Added (col 2) -> AM/PM text
-                  "top_rows": 3, "freeze": "D5"}   # rows 1-3 for buttons, row 4 header; freeze through it
+                  "freeze": "D2"}   # header on row 1, frozen with the #/Added/Job# columns
 
     # "Removed since this morning" block below the Live Queue. Render it only when
     # the set actually changes (a removal/return), not every cycle. Only orders

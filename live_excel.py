@@ -278,28 +278,27 @@ def _norm_key(v: Any) -> str:
     return str(v).strip()
 
 
-def _write_header(ws, headers: List[str], header_row: int = 1) -> None:
+def _write_header(ws, headers: List[str]) -> None:
     ncols = len(headers)
-    ws.Range(ws.Cells(header_row, 1), ws.Cells(header_row, ncols)).Value = [list(headers)]
-    _apply_run(ws, header_row, 1, ncols, "header", "header", False)
+    ws.Range(ws.Cells(1, 1), ws.Cells(1, ncols)).Value = [list(headers)]
+    _apply_run(ws, 1, 1, ncols, "header", "header", False)
 
 
-def _read_keymap(ws, key_col: int, data_start: int = 2):
-    """{order# -> row} for the data rows (from `data_start` down), by reading the
-    key column. Robust to a coworker sorting the sheet (we find rows by key, not a
-    remembered index). `last` is the last row that has a key (>= data_start - 1)."""
+def _read_keymap(ws, key_col: int):
+    """{order# -> row} for the data rows, by reading the key column. Robust to a
+    coworker sorting the sheet (we find rows by key, not a remembered index)."""
     last = ws.Cells(ws.Rows.Count, key_col).End(_XL_UP).Row
     keymap: Dict[str, int] = {}
-    if last >= data_start:
-        data = ws.Range(ws.Cells(data_start, key_col), ws.Cells(last, key_col)).Value
+    if last >= 2:
+        data = ws.Range(ws.Cells(2, key_col), ws.Cells(last, key_col)).Value
         if not isinstance(data, tuple):       # single cell -> scalar
             data = ((data,),)
-        for i, row in enumerate(data, start=data_start):
+        for i, row in enumerate(data, start=2):
             v = row[0] if isinstance(row, (list, tuple)) else row
             k = _norm_key(v)
             if k:
                 keymap[k] = i
-    return keymap, max(last, data_start - 1)
+    return keymap, last
 
 
 def _write_row(ws, r: int, cells: List, ncols: int) -> None:
@@ -351,18 +350,14 @@ def _render_below(ws, key_col: int, ncols: int, below: Dict[str, Any]) -> None:
 def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
                   key_col: int, allow_delete: bool, freeze: str | None = None,
                   sort_col: int | None = None, text_cols: List[int] | None = None,
-                  below: Dict[str, Any] | None = None, top_rows: int = 0) -> int:
+                  below: Dict[str, Any] | None = None) -> int:
     """Apply append/update/delete ops to a keyed sheet. Returns rows touched.
     When `sort_col` is set, the data is re-sorted ascending by that column after
-    any change (Live Queue: the '#' board-position column). `text_cols` are
-    pre-formatted as Text before any data is written. `below` renders a small
-    static section under the data (orders removed today). `top_rows` leaves that
-    many blank rows above the header (for buttons), so the header sits at
-    top_rows+1 and the data starts below it."""
+    any change (Live Queue: the '#' board-position column, to match cbcinsider).
+    `text_cols` are pre-formatted as Text before any data is written. `below`
+    renders a small static section under the data (orders removed today)."""
     ws = _get_or_make_sheet(wb, name)
     ncols = len(headers)
-    header_row = top_rows + 1
-    data_start = header_row + 1
     first_time = name not in _HEADER_DONE
     if first_time:
         # Once per process: wipe the sheet so a previous run's (possibly
@@ -370,10 +365,7 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
         # watcher resets the stored sigs at startup to match, so this cycle
         # rebuilds the tab; every later cycle is incremental.
         ws.Cells.Clear()
-        if top_rows:
-            ws.Cells(1, 1).Value = ("Tip: sort the '#' column ascending to restore "
-                                    "the cbcinsider order. (Buttons can go in these rows.)")
-        _write_header(ws, headers, header_row)
+        _write_header(ws, headers)
         for col in (text_cols or []):
             try:
                 ws.Columns(col).NumberFormat = "@"   # Text — must precede any write
@@ -381,7 +373,7 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
                 pass
         _HEADER_DONE.add(name)
 
-    keymap, last_row = _read_keymap(ws, key_col, data_start)
+    keymap, last_row = _read_keymap(ws, key_col)
     deletes = [k for kind, k, _ in ops if kind == "delete"]
     updates = [(k, c) for kind, k, c in ops if kind == "update"]
     appends = [(k, c) for kind, k, c in ops if kind == "append"]
@@ -392,7 +384,7 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
         except Exception:  # noqa: BLE001
             pass
     if deletes:
-        keymap, last_row = _read_keymap(ws, key_col, data_start)
+        keymap, last_row = _read_keymap(ws, key_col)
 
     for k, cells in updates:
         r = keymap.get(k)
@@ -405,16 +397,17 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
         _write_row(ws, last_row, cells, ncols)
 
     # Keep the tab sorted (Live Queue by the '#' board-position column) and
-    # re-extend AutoFilter. Sort the DATA ROWS ONLY so the header never moves.
+    # re-extend AutoFilter. Sort the DATA ROWS ONLY (row 2 down) so the header
+    # never moves; blanks fall to the bottom under ascending order.
     touched = bool(deletes or updates or appends)
-    if touched and last_row >= data_start:
+    if touched and last_row >= 2:
         try:
             if ws.AutoFilterMode:
                 ws.AutoFilterMode = False
-            if sort_col and last_row > data_start:
-                ws.Range(ws.Cells(data_start, 1), ws.Cells(last_row, ncols)).Sort(
-                    Key1=ws.Cells(data_start, sort_col), Order1=1, Header=2)  # xlAscending, xlNo
-            ws.Range(ws.Cells(header_row, 1), ws.Cells(last_row, ncols)).AutoFilter()
+            if sort_col and last_row >= 3:
+                ws.Range(ws.Cells(2, 1), ws.Cells(last_row, ncols)).Sort(
+                    Key1=ws.Cells(2, sort_col), Order1=1, Header=2)  # xlAscending, xlNo
+            ws.Range(ws.Cells(1, 1), ws.Cells(last_row, ncols)).AutoFilter()
         except Exception:  # noqa: BLE001
             pass
 
@@ -613,7 +606,7 @@ def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any]
         n = apply_upserts(app, wb, lq_payload["name"], lq_payload["headers"], lq_payload["ops"],
                           lq_payload["key_col"], lq_payload["allow_delete"], lq_payload.get("freeze"),
                           sort_col=lq_payload.get("sort_col"), text_cols=lq_payload.get("text_cols"),
-                          below=lq_payload.get("below"), top_rows=lq_payload.get("top_rows", 0))
+                          below=lq_payload.get("below"))
         if n:
             touched.append(f"{lq_payload['name']}(+{n})")
     except Exception as e:  # noqa: BLE001
