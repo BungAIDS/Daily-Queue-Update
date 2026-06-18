@@ -36,6 +36,7 @@ import asyncio
 import contextlib
 import logging
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List
 from urllib.parse import urlparse, parse_qs, urljoin
@@ -135,6 +136,37 @@ def _run_files_in_folder(folder: Path) -> List[Path]:
     except OSError as e:
         log.warning("  could not scan %s for quote-run files (%s)", folder, e)
         return []
+
+
+def _archived_runs(job: str) -> List[Path]:
+    """The quote-run files already in a job's Quote-Runs archive
+    (DRIVE_RUN_DIR/<job>/) — exactly what the report's 'YES (X)' link opens."""
+    d = DRIVE_RUN_DIR / job
+    try:
+        return sorted(f for f in d.iterdir()
+                      if f.is_file() and not f.name.startswith("~$"))
+    except OSError:
+        return []
+
+
+def _archive_folder_runs(job: str, autocad_folder: "Path | None") -> List[Path]:
+    """Copy any quote-run files that live only in the job's AutoCAD folder into
+    its Quote-Runs archive (DRIVE_RUN_DIR/<job>/), so every run the 'YES (X)'
+    count includes sits in the one folder the link opens. A file already there
+    (by name) is left as-is, and copy failures are logged but never fatal.
+    Returns all run files in the archive afterward."""
+    dest_dir = DRIVE_RUN_DIR / job
+    if autocad_folder:
+        for src in _run_files_in_folder(autocad_folder):
+            dest = dest_dir / src.name
+            if dest.exists():
+                continue
+            try:
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dest)
+            except OSError as e:  # noqa: BLE001 - a copy must not fail enrichment
+                log.warning("  could not copy run %s into the archive (%s)", src.name, e)
+    return _archived_runs(job)
 
 
 def _find_autocad_folders(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -790,24 +822,22 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
             j["dwg_missing_std"] = False
 
         # Construction / quote run: presence alone flags a highly-custom fan.
-        # More than one match (drive_run_count > 1) means someone should review
-        # which file is the real run — the report flags it.
+        # Gather every run into the job's Quote-Runs archive — the modal
+        # downloads plus any that only live in the AutoCAD folder — so the count
+        # and the link both describe that one folder (clicking 'YES (X)' lands you
+        # on exactly X files). More than one means someone should review which is
+        # the real run.
         dr_pdf = r.get("dr_pdf_path")
-        dr_count = r.get("dr_count") or 0
-        j["has_drive_run"] = bool(dr_pdf or r.get("dr_rev") is not None)
-        if info:
-            # Always scan the AutoCAD folder — it's a cheap local rglob and
-            # catches runs that only live there, plus any folder copies
-            # alongside document ones (both add to the review count).
-            hits = _run_files_in_folder(info["path"])
-            if hits:
-                if not j["has_drive_run"]:
-                    dr_pdf = str(hits[0])
-                    j["has_drive_run"] = True
-                    n_dr_folder += 1
-                dr_count += len(hits)
+        had_doc_run = bool(dr_pdf or r.get("dr_rev") is not None)
+        archived = _archive_folder_runs(jn, info["path"] if info else None)
+        if archived and not had_doc_run:
+            n_dr_folder += 1
+        j["has_drive_run"] = had_doc_run or bool(archived)
+        if not dr_pdf and archived:
+            dr_pdf = str(archived[0])
         j["drive_run_pdf"] = dr_pdf or ""
-        j["drive_run_count"] = dr_count if j["has_drive_run"] else 0
+        # X = the distinct run files actually in the archive folder the link opens.
+        j["drive_run_count"] = len(archived) if j["has_drive_run"] else 0
         j["drive_run_rev"] = r.get("dr_rev")
         # Read the run with whichever template matches its format — keyed mostly
         # by design # (Design 64 -> wheel-construction xlsx, HDX -> Qt Run text,
