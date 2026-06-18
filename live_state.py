@@ -60,28 +60,6 @@ def state_path(d: date) -> Path:
     return SNAPSHOT_DIR / f"live_state_{d.isoformat()}.json"
 
 
-def baseline_path(d: date) -> Path:
-    """Frozen start-of-day board, captured at the first poll, used as the
-    baseline for the 'changes since this morning' view (the live board keeps
-    mutating, so we need the morning values kept separately)."""
-    return SNAPSHOT_DIR / f"live_baseline_{d.isoformat()}.json"
-
-
-def save_baseline(jobs: List[Dict[str, Any]], d: date) -> None:
-    baseline_path(d).write_text(json.dumps(jobs, indent=2, default=str), encoding="utf-8")
-
-
-def load_baseline(d: date) -> List[Dict[str, Any]]:
-    p = baseline_path(d)
-    if not p.exists():
-        return []
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
-    except (json.JSONDecodeError, OSError):
-        return []
-
-
 def load_state(d: date) -> Dict[str, Any]:
     """Today's live state, or an empty dict on first run / unreadable file."""
     path = state_path(d)

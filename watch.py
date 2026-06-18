@@ -266,11 +266,6 @@ def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce
     if events:
         log.info("Logged %d field change(s) this poll.", len(events))
 
-    # Freeze the start-of-day baseline (enriched) on the first poll, so the
-    # 'changes since this morning' view has stable morning values to diff against.
-    if baseline:
-        live_state.save_baseline(present, today=now.date())
-
     if LIVE_WORKBOOK_PATH:
         _render_master(master, now)
     else:
