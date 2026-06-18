@@ -192,11 +192,20 @@ def _new_today_ids(lq_jobs: list, today: date) -> set:
     return ids & board_ids
 
 
-def _render_master(master: dict, now: datetime) -> None:
+def _render_master(master: dict, now: datetime, board_order: list | None = None) -> None:
     """Build Live Queue (incremental upsert) + Order History (matrix log) +
-    the Changes snapshot from the master log + line-items store, and push them in."""
+    the Changes snapshot from the master log + line-items store, and push them in.
+    `board_order` is the order numbers as they appear on cbcinsider, so the Live
+    Queue can match that order."""
     today = now.date()
     lq_jobs = live_master.on_queue(master)
+
+    # Tag each on-board order with its cbcinsider position and order the rows by
+    # it (the sheet is also sorted by the "#" column to keep that order).
+    pos = {str(jn): i + 1 for i, jn in enumerate(board_order or [])}
+    for j in lq_jobs:
+        j["_cbc_pos"] = pos.get(str(j.get("job")))
+    lq_jobs.sort(key=lambda j: (j.get("_cbc_pos") is None, j.get("_cbc_pos") or 0))
 
     new_today = _new_today_ids(lq_jobs, today)
 
@@ -204,8 +213,9 @@ def _render_master(master: dict, now: datetime) -> None:
     lq_ops = _plan(live_sheets.live_queue_records(lq_jobs, today, new_ids=new_today, ref=now),
                    lq_sigs, allow_delete=True)
     lq_payload = {"name": "Live Queue", "headers": live_sheets.LIVE_QUEUE_HEADERS, "ops": lq_ops,
-                  "key_col": live_sheets.LIVE_QUEUE_KEY_COL, "allow_delete": True, "freeze": "C2",
-                  "sort_col": live_sheets.LIVE_QUEUE_END_DATE_COL, "text_cols": [1]}  # Added col -> AM/PM text
+                  "key_col": live_sheets.LIVE_QUEUE_KEY_COL, "allow_delete": True,
+                  "sort_col": live_sheets.LIVE_QUEUE_CBC_COL, "text_cols": [2],  # Added (col 2) -> AM/PM text
+                  "top_rows": 3, "freeze": "D5"}   # rows 1-3 for buttons, row 4 header; freeze through it
 
     # "Removed since this morning" block below the Live Queue. Render it only when
     # the set actually changes (a removal/return), not every cycle. Only orders
@@ -214,9 +224,11 @@ def _render_master(master: dict, now: datetime) -> None:
                if e.get("seen_on_queue") and not e.get("on_queue")
                and str(e.get("left") or "")[:10] == today.isoformat()]
     removed.sort(key=lambda jl: str(jl[1] or ""), reverse=True)   # most recently removed first
+    # Keep the Job# column (LIVE_QUEUE_KEY_COL = col 3) blank in this block so the
+    # key-based "last live data row" lookup in _render_below skips these rows.
     below = {"title": "Removed from the queue since this morning",
-             "headers": ["Job #", "", "Customer", "Design", "Removed"],
-             "rows": [[j.get("job", ""), "", j.get("customer", ""),
+             "headers": ["Job #", "Customer", "", "Design", "Removed"],
+             "rows": [[j.get("job", ""), j.get("customer", ""), "",
                        j.get("so_design_desc") or j.get("design", ""),
                        live_sheets.fmt_time(left)] for j, left in removed]}
     below_sig = json.dumps(below, default=str, sort_keys=True)
@@ -277,7 +289,7 @@ def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce
         log.info("Logged %d field change(s) this poll.", len(events))
 
     if LIVE_WORKBOOK_PATH:
-        _render_master(master, now)
+        _render_master(master, now, board_order=[str(j.get("job")) for j in board if j.get("job")])
     else:
         log.warning("LIVE_WORKBOOK_PATH not set — live workbook not updated. "
                     "Set it in .env to the co-authored workbook's local path.")

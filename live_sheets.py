@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -139,7 +140,13 @@ def _job_value_cells(j: Dict[str, Any], columns: Optional[List] = None,
             c = Cell(_drive_run_label(j))
             dr = (j.get("drive_run_pdf") or "").strip()
             if dr:
-                c.link, c.font = dr, F_DRIVE_RUN_LINK
+                # With more than one run, link to the folder that holds the
+                # downloaded runs, not just one of the files.
+                if (j.get("drive_run_count") or 0) > 1:
+                    c.link = dr.rsplit("\\", 1)[0] if "\\" in dr else os.path.dirname(dr)
+                else:
+                    c.link = dr
+                c.font = F_DRIVE_RUN_LINK
                 linked_idx.add(idx)
             elif j.get("has_drive_run"):
                 c.font = F_DRIVE_RUN
@@ -367,9 +374,13 @@ LINE_ITEM_HEADERS = ["Job #", "Customer", "CO#", "Tags", "Item (as printed)",
 # (order#, [Cell, ...]); the renderer writes/append/updates the row whose key   #
 # matches.                                                                     #
 # --------------------------------------------------------------------------- #
-LIVE_QUEUE_HEADERS = ["Added"] + list(QUEUE_HEADERS)          # the DWG/feature matrices live on Order History
-LIVE_QUEUE_KEY_COL = 2 + QUEUE_HEADERS.index("Job #")          # 1-based col of Job # (Added is col 1)
-LIVE_QUEUE_END_DATE_COL = 2 + QUEUE_HEADERS.index("End Date")  # 1-based col of End Date (for the sort)
+# A leading "#" column carries the cbcinsider board position; the tab is sorted
+# by it so the order matches the queue on the site (and you can re-sort it to
+# restore that order). Then "Added", then the Full Queue columns.
+LIVE_QUEUE_HEADERS = ["#", "Added"] + list(QUEUE_HEADERS)      # DWG/feature matrices live on Order History
+LIVE_QUEUE_CBC_COL = 1                                         # the "#" board-position column (the sort key)
+LIVE_QUEUE_KEY_COL = 3 + QUEUE_HEADERS.index("Job #")          # 1-based col of Job # (# + Added lead)
+LIVE_QUEUE_END_DATE_COL = 3 + QUEUE_HEADERS.index("End Date")  # 1-based col of End Date
 _END_DATE_IDX = QUEUE_HEADERS.index("End Date")               # its index within the standard cells
 _CO_IDX = [i for i, (_, k) in enumerate(COLUMNS) if k == "co"][0]   # CO# cell index
 
@@ -426,12 +437,14 @@ def live_queue_records(jobs: List[Dict[str, Any]], today: date,
     new_ids = new_ids or set()
     out = []
     for j in jobs:
+        # "#" = the cbcinsider board position (the sort key for board order).
+        pos = j.get("_cbc_pos")
+        cbc = Cell(pos if isinstance(pos, int) else "", center=True)
         # number_format "@" (Text) keeps the AM/PM label (e.g. "3:53 PM") from
         # being coerced by Excel into a 24h datetime serial.
         added = Cell(added_label(j, ref=ref), number_format="@")
         std = _job_value_cells(j, co_changed=False)
-        # Write End Date as a real date so Live Queue can sort by it (overdue
-        # first -> red at the top); blanks sort to the bottom.
+        # Write End Date as a real date so it sorts/filters as a date in Excel.
         ed = _parse_date(j.get("end_date", ""))
         if ed is not None:
             std[_END_DATE_IDX].value = _excel_serial(ed)
@@ -439,7 +452,7 @@ def live_queue_records(jobs: List[Dict[str, Any]], today: date,
         # Hover the CO# cell to see the change-order history (most recent first).
         std[_CO_IDX].comment = _co_comment(j)
         fill = _row_fill(j, today, is_new=str(j.get("job") or "") in new_ids)
-        cells = [added] + std
+        cells = [cbc, added] + std
         if fill:
             for c in cells:
                 if c.fill is None:

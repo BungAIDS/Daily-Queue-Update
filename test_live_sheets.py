@@ -180,6 +180,33 @@ def test_live_queue_end_date_is_sortable_serial():
     assert blank[ls.LIVE_QUEUE_END_DATE_COL - 1].value == ""
 
 
+def test_live_queue_board_position_column():
+    # The "#" column carries the cbcinsider board position and is the sort key.
+    j = _job("421000")
+    j["_cbc_pos"] = 5
+    cells = ls.live_queue_records([j], TODAY)[0][1]
+    assert cells[ls.LIVE_QUEUE_CBC_COL - 1].value == 5
+    assert cells[ls.LIVE_QUEUE_CBC_COL - 1].center
+    # No board position (off-board / unknown) leaves it blank so it sorts last.
+    cells2 = ls.live_queue_records([_job("421001")], TODAY)[0][1]
+    assert cells2[ls.LIVE_QUEUE_CBC_COL - 1].value == ""
+
+
+def test_quote_run_link_folder_when_multiple_runs():
+    dr_idx = ls.QUEUE_HEADERS.index("Quote Run")
+    lead = ls.LIVE_QUEUE_KEY_COL - 1               # 0-based start of standard cells
+    # One run -> link straight to the downloaded PDF.
+    one = _job("421000", drive_run_pdf="Z:\\QUOTES\\421\\421000\\run1.pdf",
+               drive_run_count=1, has_drive_run=True)
+    cell = ls.live_queue_records([one], TODAY)[0][1][lead + dr_idx]
+    assert cell.link == "Z:\\QUOTES\\421\\421000\\run1.pdf"
+    # Multiple runs -> link to the folder that holds them, not just one file.
+    many = _job("421001", drive_run_pdf="Z:\\QUOTES\\421\\421001\\run2.pdf",
+                drive_run_count=3, has_drive_run=True)
+    cell = ls.live_queue_records([many], TODAY)[0][1][lead + dr_idx]
+    assert cell.link == "Z:\\QUOTES\\421\\421001"
+
+
 def test_added_label_today_older_and_no_data():
     from datetime import datetime
     ref = datetime(2026, 6, 17, 12, 0, 0)
@@ -199,10 +226,12 @@ def test_co_comment_most_recent_first_and_live_queue_cell():
     body = cm.splitlines()[1:]
     assert body[0].startswith("CO#3") and body[1].startswith("CO#2") and body[2].startswith("CO#1")
     assert ls._co_comment({"co_history": []}) is None
-    # The CO# cell on a Live Queue row carries that hover note.
+    # The CO# cell on a Live Queue row carries that hover note. The standard
+    # columns begin after the "#"/"Added" lead pair (Job # sits at the key col).
     j = _job("421000", co_number=3, co_history=hist)
     cells = ls.live_queue_records([j], TODAY)[0][1]
-    assert cells[1 + ls._CO_IDX].comment is not None and "CO#3" in cells[1 + ls._CO_IDX].comment
+    lead = ls.LIVE_QUEUE_KEY_COL - 1   # 0-based start of the standard column block
+    assert cells[lead + ls._CO_IDX].comment is not None and "CO#3" in cells[lead + ls._CO_IDX].comment
 
 
 def test_order_history_build_matrices_flags_and_separator():
