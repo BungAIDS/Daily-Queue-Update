@@ -450,13 +450,9 @@ def reset_sheet(name: str) -> None:
 
 
 def _cell_to_value(cell) -> Any:
-    """A bulk-writable value for a cell. A hyperlink becomes a =HYPERLINK()
-    formula so thousands of links go in one Range write (Hyperlinks.Add per cell
-    would crawl over a 12K-row tab)."""
-    if cell.link:
-        url = str(cell.link).replace('"', '""')
-        disp = str(cell.value if cell.value is not None else "").replace('"', '""')
-        return f'=HYPERLINK("{url}","{disp}")'
+    """A bulk-writable value for an Order History cell. Plain text only — at ~12K
+    rows we don't emit =HYPERLINK() formulas (thousands of them choke the bulk
+    write); the clickable links live on Live Queue, which is small."""
     return cell.value if cell.value is not None else ""
 
 
@@ -467,16 +463,18 @@ def _write_oh_row(ws, r: int, cells: List, ncols: int) -> None:
     ws.Range(ws.Cells(r, 1), ws.Cells(r, ncols)).Value = [vals]
 
 
-def _apply_matrix_cf(ws, key_col: int, c0: int, c1: int) -> None:
+def _apply_matrix_cf(ws, key_col: int, c0: int, c1: int, last_row: int) -> None:
     """Color a ✓/blank matrix block by conditional formatting — green for ✓, red
     for blank — but only on rows that actually have an order number (the key
-    column guard), so the empty area below the data isn't painted. Applied over
-    the whole columns so appended rows are colored automatically."""
+    column guard), so the empty area below the data isn't painted. The range is
+    bounded to the data (+ a buffer for future appends) rather than the whole
+    million-row column, which Excel rejects at ~12K rows."""
     if c1 < c0:
         return
     key = get_column_letter(key_col)
     tl = get_column_letter(c0)            # top-left of the CF range, for the relative formula
-    rng = ws.Range(ws.Cells(2, c0), ws.Cells(ws.Rows.Count, c1))
+    bottom = max(last_row + 3000, 3)      # buffer for appends; re-applied each process start
+    rng = ws.Range(ws.Cells(2, c0), ws.Cells(bottom, c1))
     try:
         rng.FormatConditions.Delete()
         green = rng.FormatConditions.Add(Type=_XL_EXPRESSION,
@@ -512,25 +510,33 @@ def apply_order_history(app, wb, name: str, spec: Dict[str, Any], ops: List,
         _write_header(ws, headers)
         _HEADER_DONE.add(name)
         records = spec["records"]
+        nrows = len(records)
+        last = 1 + nrows
         if records:
             grid = [[_cell_to_value(c) for c in cells] + [""] * (ncols - len(cells))
                     for _, cells in records]
-            ws.Range(ws.Cells(2, 1), ws.Cells(1 + len(grid), ncols)).Value = grid
-        _apply_matrix_cf(ws, key_col, *spec["dwg_range"])
-        _apply_matrix_cf(ws, key_col, *spec["feat_range"])
+            # Chunk the bulk write — a ~12K x ~100 array in one COM call overruns
+            # Excel (OLE error 0x800AC472). Batches of 1000 rows go through fine.
+            for s in range(0, len(grid), 1000):
+                block = grid[s:s + 1000]
+                r0 = 2 + s
+                try:
+                    ws.Range(ws.Cells(r0, 1), ws.Cells(r0 + len(block) - 1, ncols)).Value = block
+                except Exception as e:  # noqa: BLE001
+                    log.warning("Order History write chunk at row %d failed (%s)", r0, e)
+        _apply_matrix_cf(ws, key_col, *spec["dwg_range"], last)
+        _apply_matrix_cf(ws, key_col, *spec["feat_range"], last)
         _draw_separator(ws, spec["sep_col"])
-        # AutoFilter so it's sortable/filterable by any column, like Live Queue.
-        if records:
+        if records:                         # AutoFilter so it's sortable/filterable
             try:
-                ws.Range(ws.Cells(1, 1), ws.Cells(1 + len(records), ncols)).AutoFilter()
+                ws.Range(ws.Cells(1, 1), ws.Cells(last, ncols)).AutoFilter()
             except Exception:  # noqa: BLE001
                 pass
-        try:
-            ws.UsedRange.Columns.AutoFit()
+        try:                                # size columns from a small sample, not all 12K rows
+            sample = min(last, 60)
+            ws.Range(ws.Cells(1, 1), ws.Cells(sample, ncols)).Columns.AutoFit()
             for col in range(1, ncols + 1):
-                if col == spec["sep_col"]:
-                    continue
-                if ws.Columns(col).ColumnWidth > 40:
+                if col != spec["sep_col"] and ws.Columns(col).ColumnWidth > 40:
                     ws.Columns(col).ColumnWidth = 40
         except Exception:  # noqa: BLE001
             pass
@@ -543,7 +549,7 @@ def apply_order_history(app, wb, name: str, spec: Dict[str, Any], ops: List,
                 _FROZEN.add(name)
             except Exception:  # noqa: BLE001
                 pass
-        return len(spec["records"])
+        return nrows
 
     # Incremental: append new orders / update the few whose flags changed.
     keymap, last_row = _read_keymap(ws, key_col)
@@ -583,35 +589,48 @@ def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any]
         return False
     try:
         wb = _find_workbook(app, path)
-        touched = []
+    except Exception as e:  # noqa: BLE001
+        log.warning("Could not open the live workbook (%s); not updated this cycle.", e)
+        return False
+
+    # Render each tab independently — a failure on one (e.g. the big Order
+    # History) must not stop the others from updating.
+    touched = []
+    try:
         n = apply_upserts(app, wb, lq_payload["name"], lq_payload["headers"], lq_payload["ops"],
                           lq_payload["key_col"], lq_payload["allow_delete"], lq_payload.get("freeze"),
                           sort_col=lq_payload.get("sort_col"), text_cols=lq_payload.get("text_cols"),
                           below=lq_payload.get("below"))
         if n:
             touched.append(f"{lq_payload['name']}(+{n})")
+    except Exception as e:  # noqa: BLE001
+        log.warning("Live Queue update failed (%s)", e)
+    try:
         n = apply_order_history(app, wb, oh_payload["name"], oh_payload["spec"],
                                 oh_payload["ops"], oh_payload["key_col"], oh_payload.get("freeze"))
         if n:
             touched.append(f"{oh_payload['name']}(+{n})")
+    except Exception as e:  # noqa: BLE001
+        log.warning("Order History update failed (%s)", e)
+    try:
         if changes_sheet is not None:
             fp = _fingerprint(changes_sheet)
             if _RENDER_CACHE.get(changes_sheet.name) != fp:
                 render_sheet(app, wb, changes_sheet)
                 _RENDER_CACHE[changes_sheet.name] = fp
                 touched.append(changes_sheet.name)
-        if touched:
-            try:
-                wb.Save()
-            except Exception as e:  # noqa: BLE001
-                log.debug("wb.Save() raised (likely AutoSave-managed): %s", e)
-            log.info("Live workbook updated: %s [%s]", path.name, ", ".join(touched))
-        else:
-            log.info("Live workbook unchanged this cycle — nothing written.")
-        return True
     except Exception as e:  # noqa: BLE001
-        log.warning("Live workbook update failed (%s); state + alerts still recorded.", e)
-        return False
+        log.warning("Changes update failed (%s)", e)
+
+    if touched:
+        try:
+            wb.Save()
+        except Exception as e:  # noqa: BLE001
+            log.debug("wb.Save() raised (likely AutoSave-managed): %s", e)
+        log.info("Live workbook updated: %s [%s]", path.name, ", ".join(touched))
+    else:
+        log.info("Live workbook unchanged this cycle — nothing written.")
+    return True
 
 
 def update_workbook(sheets: List[Sheet], workbook_path: str | Path) -> bool:
