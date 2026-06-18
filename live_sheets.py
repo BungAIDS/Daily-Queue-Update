@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -24,7 +23,7 @@ from typing import Any, Dict, List, Optional
 
 from excel_writer import (COLUMNS, QUEUE_HEADERS, MONEY_FMT, _co_label,
                           _drive_run_label, _flags_str, _parse_date,
-                          _parse_money, _dwg_suffixes)
+                          _parse_money, _dwg_suffixes, folder_of)
 
 # --- named styles (resolved to real colors by live_excel) ------------------- #
 F_HEADER = "header"           # blue header bg + white bold
@@ -127,7 +126,10 @@ def _job_value_cells(j: Dict[str, Any], columns: Optional[List] = None,
             c = Cell(j.get("job", ""))
             so = (j.get("so_pdf") or "").strip()
             if so and j.get("job"):
-                c.link, c.font = so, F_LINK
+                # Link the SO *folder*, not the PDF: a change order renames the
+                # file (… (original).pdf -> … CO#1.pdf), which dead-links a path
+                # captured before the CO. The per-job folder name never changes.
+                c.link, c.font = folder_of(so), F_LINK
                 linked_idx.add(idx)
         elif key == "folder":
             folder = (j.get("job_folder") or "").strip()
@@ -143,10 +145,7 @@ def _job_value_cells(j: Dict[str, Any], columns: Optional[List] = None,
             if dr:
                 # With more than one run, link to the folder that holds the
                 # downloaded runs, not just one of the files.
-                if (j.get("drive_run_count") or 0) > 1:
-                    c.link = dr.rsplit("\\", 1)[0] if "\\" in dr else os.path.dirname(dr)
-                else:
-                    c.link = dr
+                c.link = folder_of(dr) if (j.get("drive_run_count") or 0) > 1 else dr
                 c.font = F_DRIVE_RUN_LINK
                 linked_idx.add(idx)
             elif j.get("has_drive_run"):

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
@@ -323,6 +324,17 @@ def _co_label(j: Dict[str, Any]) -> str:
     return f"CO#{co}" if co else ""
 
 
+def folder_of(path: str) -> str:
+    """The containing folder of a Windows/posix file path. Used to link the Job #
+    at the Sales Order *folder* rather than a specific PDF: a change order renames
+    the SO file (``… (original).pdf`` → ``… CO#1.pdf``), so a link captured before
+    the CO would dead-link, but the per-job folder name never changes."""
+    p = (path or "").strip()
+    if not p:
+        return ""
+    return p.rsplit("\\", 1)[0] if "\\" in p else os.path.dirname(p)
+
+
 def _drive_run_label(j: Dict[str, Any]) -> str:
     """"YES" when the job has a quote run; "YES (X)" when X > 1 files matched,
     so someone knows to review which one is the real run."""
@@ -337,10 +349,12 @@ def _write_job_row(ws, row: int, j: Dict[str, Any], co_changed: bool = False) ->
     for col, (_header, key) in enumerate(COLUMNS, start=1):
         if key == "job":
             cell = ws.cell(row=row, column=col, value=j.get("job", ""))
-            # Job # links to its Sales Order pdf on the Z: drive (when we have one).
+            # Job # links to its Sales Order *folder* on the Z: drive (when we
+            # have one). Linking the folder, not the PDF, keeps the link alive
+            # after a change order renames the SO file.
             so_pdf = (j.get("so_pdf") or "").strip()
             if so_pdf and j.get("job"):
-                cell.hyperlink = so_pdf
+                cell.hyperlink = folder_of(so_pdf)
                 cell.font = LINK_FONT
                 linked_cols.add(col)
         elif key == "folder":
