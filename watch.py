@@ -77,6 +77,14 @@ def _window_today(today: date) -> "tuple[datetime, datetime]":
     return start, end
 
 
+def _is_repair_order(job: str) -> bool:
+    """A repair order carries a trailing letter (e.g. 352366A, 354721D). These
+    don't live under the standard AutoCAD job-folder layout, so we table them
+    rather than re-sweeping the whole tree for them on every poll."""
+    jn = str(job or "").strip()
+    return bool(jn) and jn[-1].isalpha()
+
+
 def _seed_baseline(state: dict, today: datetime) -> None:
     """Pre-load the start-of-day board from the morning daily-run snapshot so the
     watcher doesn't re-enrich orders the 5 AM run already covered. Today's
@@ -307,8 +315,12 @@ def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce
     # Re-resolve AutoCAD folders for any on-board order still without one (cheap
     # now), so orders an earlier lookup missed ("Open") get filled in without a
     # full re-enrich. Mutates the state entries' job dicts in place so it sticks.
+    # Repair orders (a trailing letter, e.g. 352366A) are tabled: they have no
+    # standard AutoCAD folder, so re-searching triggers a full-tree sweep every
+    # poll for nothing — skip them here (they're still looked up once on enrich).
     unresolved = [e["job"] for e in state.values()
-                  if e.get("present") and e.get("job") and not e["job"].get("job_type")]
+                  if e.get("present") and e.get("job") and not e["job"].get("job_type")
+                  and not _is_repair_order(e["job"].get("job"))]
     if unresolved:
         resolved = refresh_autocad_folders(unresolved)
         if resolved:
