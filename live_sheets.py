@@ -485,25 +485,38 @@ def _order_tags(j: Dict[str, Any]) -> set:
     return out
 
 
-def order_history_build(orders: List, today: date) -> Dict[str, Any]:
+def _suffix_key(s: str):
+    return (int(s), s) if str(s).isdigit() else (10 ** 9, s)
+
+
+def order_history_build(orders: List, today: date,
+                        prev_columns: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Build the Order History tab: one row per order with the stable data
     columns (Job # first), then the On Queue / Added / Left flags, then the
     AutoCAD **DWG matrix** (green ✓ / red), a vertical divider, and the line-item
-    **Feature matrix** (green ✓ / red). The matrix columns are the union of DWG
-    suffixes / feature tags across `orders`, so they grow only when a brand-new
-    suffix or tag appears.
+    **Feature matrix** (green ✓ / red).
+
+    Column order is STABLE so the tab isn't rebuilt in normal operation: it keeps
+    `prev_columns`' order and only APPENDS brand-new suffixes/tags at the end (it
+    never drops or reorders). `spec["columns"]` is the order used — the caller
+    persists it; the headers change only when a new suffix/tag appears, which is
+    the only time the tab is rebuilt.
 
     `orders` is a list of (job#, entry) with entry = {on_queue, added, left, job}.
-    Returns a dict: headers, records [(key, cells)], and the 1-based column ranges
-    of each matrix + the separator (the renderer colors the matrices via
-    conditional formatting and draws the divider)."""
+    Returns headers, records [(key, cells)], the matrix/separator column ranges,
+    and the column order."""
     jobs = [e.get("job", {}) for _, e in orders]
-    suffixes = _dwg_suffixes(jobs)
-    tag_count: Dict[str, int] = {}
+    cur_suffixes = set(_dwg_suffixes(jobs))
+    cur_tags: set = set()
     for j in jobs:
-        for t in _order_tags(j):
-            tag_count[t] = tag_count.get(t, 0) + 1
-    tags = sorted(tag_count, key=lambda t: (-tag_count[t], t))   # most common first
+        cur_tags |= _order_tags(j)
+
+    prev = prev_columns or {}
+    prev_suffixes = list(prev.get("suffixes") or [])
+    prev_tags = list(prev.get("tags") or [])
+    suffixes = prev_suffixes + sorted(cur_suffixes - set(prev_suffixes), key=_suffix_key)
+    tags = prev_tags + sorted(cur_tags - set(prev_tags))
+    columns = {"suffixes": suffixes, "tags": tags}
 
     headers = ([h for h, _ in OH_DATA_COLUMNS] + OH_FLAG_HEADERS
                + [f"-{s}" for s in suffixes] + [OH_SEP_HEADER] + list(tags))
@@ -528,7 +541,7 @@ def order_history_build(orders: List, today: date) -> Dict[str, Any]:
         feat = [Cell("✓" if t in otags else "", center=True) for t in tags]
         records.append((str(jn), data + flags + dwg + sep + feat))
 
-    return {"headers": headers, "records": records,
+    return {"headers": headers, "records": records, "columns": columns,
             "dwg_range": dwg_range, "sep_col": sep_col, "feat_range": feat_range}
 
 

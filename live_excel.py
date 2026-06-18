@@ -450,9 +450,13 @@ def reset_sheet(name: str) -> None:
 
 
 def _cell_to_value(cell) -> Any:
-    """A bulk-writable value for an Order History cell. Plain text only — at ~12K
-    rows we don't emit =HYPERLINK() formulas (thousands of them choke the bulk
-    write); the clickable links live on Live Queue, which is small."""
+    """A bulk-writable value for an Order History cell. A hyperlink becomes a
+    =HYPERLINK() formula so links survive the bulk write (Hyperlinks.Add per cell
+    would crawl). The first build pays this once; after that we only append."""
+    if cell.link:
+        url = str(cell.link).replace('"', '""')
+        disp = str(cell.value if cell.value is not None else "").replace('"', '""')
+        return f'=HYPERLINK("{url}","{disp}")'
     return cell.value if cell.value is not None else ""
 
 
@@ -497,18 +501,22 @@ def _draw_separator(ws, sep_col: int) -> None:
 
 
 def apply_order_history(app, wb, name: str, spec: Dict[str, Any], ops: List,
-                        key_col: int, freeze: str | None = None) -> int:
-    """Render the Order History log. On the first touch this process: clear, write
-    the header, BULK-write every row at once, color the two matrices via
-    conditional formatting, and draw the divider. After that: append/update only
-    the few changed rows (a stable presence log, so this is rare)."""
+                        key_col: int, freeze: str | None = None,
+                        rebuild: bool = False) -> int:
+    """Render the Order History log. It is built ONCE — the first time it's empty,
+    or rarely when `rebuild` is set (a schema/migration change) — by writing the
+    header, bulk-writing every row (chunked), coloring the matrices via
+    conditional formatting, and drawing the divider. Every other run it only
+    appends new orders / updates the few changed rows; the tab is never wiped."""
     ws = _get_or_make_sheet(wb, name)
     headers = spec["headers"]
     ncols = len(headers)
-    if name not in _HEADER_DONE:
+    keymap, last_row = _read_keymap(ws, key_col)
+    populated = last_row >= 2 and bool(keymap)
+
+    if rebuild or not populated:
         ws.Cells.Clear()
         _write_header(ws, headers)
-        _HEADER_DONE.add(name)
         records = spec["records"]
         nrows = len(records)
         last = 1 + nrows
@@ -551,8 +559,8 @@ def apply_order_history(app, wb, name: str, spec: Dict[str, Any], ops: List,
                 pass
         return nrows
 
-    # Incremental: append new orders / update the few whose flags changed.
-    keymap, last_row = _read_keymap(ws, key_col)
+    # Already built -> incremental only: append new orders / update the few whose
+    # flags changed. The tab is never wiped here.
     updates = [(k, c) for kind, k, c in ops if kind == "update"]
     appends = [(k, c) for kind, k, c in ops if kind == "append"]
     for k, cells in updates:
@@ -607,7 +615,8 @@ def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any]
         log.warning("Live Queue update failed (%s)", e)
     try:
         n = apply_order_history(app, wb, oh_payload["name"], oh_payload["spec"],
-                                oh_payload["ops"], oh_payload["key_col"], oh_payload.get("freeze"))
+                                oh_payload["ops"], oh_payload["key_col"], oh_payload.get("freeze"),
+                                rebuild=oh_payload.get("rebuild", False))
         if n:
             touched.append(f"{oh_payload['name']}(+{n})")
     except Exception as e:  # noqa: BLE001

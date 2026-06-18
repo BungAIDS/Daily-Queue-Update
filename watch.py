@@ -54,6 +54,10 @@ from scraper import scrape_queue
 
 log = logging.getLogger("queue-watch")
 
+# Bump to force a one-time clean rebuild of the Order History tab (e.g. after a
+# layout change). In normal operation the tab is built once and only appended to.
+OH_BUILD_VERSION = 3
+
 
 def setup_logging() -> None:
     logging.basicConfig(
@@ -105,11 +109,11 @@ def _enrich_pending(state: dict) -> list:
 
 
 def _force_rebuild(master: dict) -> None:
-    """Drop the row signatures so the first cycle of this process re-writes every
-    tab — matching the renderer, which wipes each tab once at process start (clean
-    slate vs any prior-schema content)."""
+    """Live Queue is small and is rebuilt fresh each process start, so drop its
+    row signatures. Order History is NOT touched here — it's built once and then
+    only appended to (its oh_sigs persist across runs), so a restart never wipes
+    the ~12K-row tab."""
     master["lq_sigs"] = {}
-    master["oh_sigs"] = {}
     master.pop("below_sig", None)   # force the 'removed' block to redraw on (re)start
     # One-time cleanup: a backlog order the watcher never saw on the board must
     # have no 'left' time (earlier merges wrongly stamped one, which made the
@@ -221,15 +225,20 @@ def _render_master(master: dict, now: datetime) -> None:
         master["below_sig"] = below_sig
 
     # Order History: live master + the whole line-items backlog, as a matrix log.
-    spec = live_sheets.order_history_build(_oh_orders(master, line_items.load_store()), today)
-    if master.get("oh_headers") != spec["headers"]:
-        # Column set changed (new DWG suffix / feature tag) -> rebuild the tab.
-        live_excel.reset_sheet("Order History")
+    # Built ONCE then only appended to; we rebuild only on a build-format bump
+    # (one-time migration) or when the matrix columns actually grow.
+    spec = live_sheets.order_history_build(_oh_orders(master, line_items.load_store()), today,
+                                           prev_columns=master.get("oh_columns"))
+    rebuild = (master.get("oh_build_version") != OH_BUILD_VERSION
+               or master.get("oh_columns") != spec["columns"])
+    if rebuild:
         master["oh_sigs"] = {}
+        master["oh_columns"] = spec["columns"]
         master["oh_headers"] = spec["headers"]
+        master["oh_build_version"] = OH_BUILD_VERSION
     oh_sigs = master.setdefault("oh_sigs", {})
     oh_ops = _plan(spec["records"], oh_sigs, allow_delete=False)
-    oh_payload = {"name": "Order History", "spec": spec, "ops": oh_ops,
+    oh_payload = {"name": "Order History", "spec": spec, "ops": oh_ops, "rebuild": rebuild,
                   "key_col": live_sheets.ORDER_HISTORY_KEY_COL, "freeze": "B2"}  # pin Job # only
 
     update_master_workbook(LIVE_WORKBOOK_PATH, lq_payload, oh_payload,

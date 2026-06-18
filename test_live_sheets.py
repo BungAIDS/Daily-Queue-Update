@@ -228,6 +228,24 @@ def test_order_history_build_matrices_flags_and_separator():
     assert spec["sep_col"] == de + 1 and fs == spec["sep_col"] + 1 and fe >= fs
 
 
+def test_order_history_columns_stable_append_only():
+    a = ("100", {"on_queue": True, "added": "t", "left": None,
+                 "job": _job("100", dwg_extras={"51": "x"}, line_items=[{"tags": ["SHAFT SEAL"]}])})
+    s1 = ls.order_history_build([a], TODAY)
+    assert s1["columns"] == {"suffixes": ["51"], "tags": ["SHAFT SEAL"]}
+    # A new order brings a new suffix (-35) and a new tag (COATING).
+    b = ("200", {"on_queue": True, "added": "t", "left": None,
+                 "job": _job("200", dwg_extras={"35": "x"}, line_items=[{"tags": ["COATING"]}])})
+    s2 = ls.order_history_build([a, b], TODAY, prev_columns=s1["columns"])
+    # Prior order kept; new items APPENDED at the end (never reordered) so the
+    # existing rows/columns don't shift -> no rebuild needed for unchanged data.
+    assert s2["columns"]["suffixes"] == ["51", "35"]
+    assert s2["columns"]["tags"] == ["SHAFT SEAL", "COATING"]
+    # Same data + same prev columns -> identical columns (rebuild not triggered).
+    s3 = ls.order_history_build([a, b], TODAY, prev_columns=s2["columns"])
+    assert s3["columns"] == s2["columns"]
+
+
 def test_order_history_row_sig_stable_across_churny_fields():
     base = {"on_queue": True, "added": "2026-06-16T09:00:00", "left": None}
     e1 = ("421000", {**base, "job": _job("421000", end_date="06/20/2026", total_price="$1,000.00")})
