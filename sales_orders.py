@@ -138,41 +138,84 @@ def _run_files_in_folder(folder: Path) -> List[Path]:
 
 
 def _find_autocad_folders(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
-    """Locate each job under AUTOCAD_JOBS_DIR/<type>/<intermediate>/<job>.
+    """Locate each job's AutoCAD folder, which is AUTOCAD_JOBS_DIR/<type>/<first 3
+    digits of job#>/<job#> (e.g. JOBS/AXIAL/421/421303, JOBS/GENERAL LINE/421/
+    421034). Returns {job: {type, path, dwg_extras, dwg_missing_std}}; {} if the
+    drive isn't reachable. The <type> a job sits under is its job type.
 
-    One sweep of the two directory levels builds the whole index — a glob per
-    job re-scans every <type>/<intermediate> dir on the network share once per
-    job, which is N full sweeps for an N-job board. Returns {job: {type, path,
-    dwg_extras, dwg_missing_std}}; {} if the drive isn't reachable. The <type>
-    a job sits under is its job type. While we have the folder we also scan it
-    for the job's custom drawings (the extra -NN suffixes), reusing autocad_scan.
-    """
+    We build each job's expected path directly and check it per type, rather than
+    globbing the whole ~12K-folder tree — that's far faster and reliable on the
+    network share (the old full sweep could time out before reaching some types,
+    which is why axial fans came back as 'Open'). A glob fallback covers any job
+    that doesn't follow the <type>/<first3>/<job> convention. While we have a
+    folder we also scan it for the job's custom drawings."""
     out: Dict[str, Dict[str, Any]] = {}
     root = AUTOCAD_JOBS_DIR
-    wanted = set(job_numbers)
+    wanted = [str(j).strip() for j in job_numbers if str(j).strip()]
     try:
         if not root.exists():
             log.warning("AutoCAD jobs root not reachable: %s (folder links disabled)", root)
             return out
-        for m in root.glob("*/*/*"):
-            job = autocad_scan.job_key(m.name)  # "421314 ACME CORP" -> "421314"
-            if job not in wanted or job in out or not m.is_dir():
-                continue
-            info: Dict[str, Any] = {"type": m.relative_to(root).parts[0], "path": m,
-                                    "dwg_extras": {}, "dwg_missing_std": False}
-            try:  # live scan of this job's custom DWGs (names only — never opens a file)
-                names = [f.name for f in m.glob("*") if f.is_file()]
-                rec = autocad_scan.build_record(job, info["type"], str(m),
-                                                autocad_scan.scan_files(names, job))
-                info["dwg_extras"], info["dwg_missing_std"] = rec["extras"], rec["missing_std"]
-            except OSError as e:
-                log.warning("  could not scan DWGs for %s (%s)", job, e)
-            out[job] = info
-            if len(out) == len(wanted):
-                break  # found every job on the board — stop walking the share
-        log.info("Located %d/%d AutoCAD job folders under %s", len(out), len(job_numbers), root)
+        type_dirs = [d for d in root.iterdir() if d.is_dir()]
     except OSError as e:
-        log.warning("Could not look up AutoCAD folders (%s); folder links disabled", e)
+        log.warning("Could not list AutoCAD job types under %s (%s); folder links disabled", root, e)
+        return out
+
+    def _record(job: str, folder: Path, jtype: str) -> None:
+        info: Dict[str, Any] = {"type": jtype, "path": folder,
+                                "dwg_extras": {}, "dwg_missing_std": False}
+        try:  # live scan of this job's custom DWGs (names only — never opens a file)
+            names = [f.name for f in folder.glob("*") if f.is_file()]
+            rec = autocad_scan.build_record(job, jtype, str(folder),
+                                            autocad_scan.scan_files(names, job))
+            info["dwg_extras"], info["dwg_missing_std"] = rec["extras"], rec["missing_std"]
+        except OSError as e:
+            log.warning("  could not scan DWGs for %s (%s)", job, e)
+        out[job] = info
+
+    # Direct lookup: <type>/<first 3 digits>/<job>, checked against each type.
+    for job in wanted:
+        if job in out:
+            continue
+        inter_name = job[:3]
+        for td in type_dirs:
+            inter = td / inter_name
+            try:
+                cand = inter / job
+                if cand.is_dir():                       # exact "421303"
+                    _record(job, cand, td.name)
+                    break
+                if inter.is_dir():                      # "421303 ACME CORP"
+                    hits = [m for m in inter.glob(f"{job}*") if m.is_dir()]
+                    if hits:
+                        _record(job, hits[0], td.name)
+                        break
+            except OSError:
+                continue
+
+    # Fallback for any job whose folder doesn't follow <type>/<first3>/<job>:
+    # one depth-3 sweep, matching the leaf either exactly (keeps a trailing
+    # letter like 352366A) or by its leading number ("421034 ACME" -> 421034).
+    unfound = {j for j in wanted if j not in out}
+    if unfound:
+        try:
+            for m in root.glob("*/*/*"):
+                if not m.is_dir():
+                    continue
+                name = m.name.strip()
+                hit = name if name in unfound else (autocad_scan.job_key(name)
+                                                    if autocad_scan.job_key(name) in unfound else None)
+                if hit:
+                    _record(hit, m, m.relative_to(root).parts[0])
+                    unfound.discard(hit)
+                    if not unfound:
+                        break
+        except OSError as e:
+            log.warning("AutoCAD fallback sweep failed (%s)", e)
+
+    log.info("Located %d/%d AutoCAD job folders under %s", len(out), len(wanted), root)
+    if unfound:
+        log.info("  no folder for: %s", ", ".join(sorted(unfound))[:300])
     return out
 
 
