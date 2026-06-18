@@ -58,6 +58,7 @@ _FONT = {
     "drive_run": ("C55A11", True, False, None),
     "drive_run_link": ("C55A11", True, True, None),
     "red": ("C00000", True, False, None),
+    "note": ("808080", False, False, None),   # muted gray (e.g. the 'last updated' stamp)
 }
 
 # "History" is a RESERVED worksheet name in Excel (shared-workbook change

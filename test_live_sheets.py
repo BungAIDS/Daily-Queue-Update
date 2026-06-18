@@ -95,8 +95,10 @@ def test_changes_today_log_sections():
          "field": "CO#", "old": "0", "new": "1"},
     ]
     removed_today = [_job("420900")]
-    sh = ls.changes_sheet(new_today, events, removed_today, "2026-06-16")
+    sh = ls.changes_sheet(new_today, events, removed_today, "2026-06-16",
+                          updated_at="Jun 16, 2026 11:05 AM")
     assert _find(sh, "Changes — 2026-06-16") is not None
+    assert _find(sh, "Last updated Jun 16, 2026 11:05 AM") is not None   # live stamp near the top
     assert _find(sh, "New orders today (1)") is not None
     assert _find(sh, "Change orders today (1)") is not None          # the CO# event
     assert _find(sh, "Orders that changed today (2)") is not None    # two End Date lines
@@ -181,15 +183,30 @@ def test_live_queue_end_date_is_sortable_serial():
 
 
 def test_live_queue_board_position_column():
-    # The "#" column carries the cbcinsider board position and is the sort key.
+    # "Added" leads, the "#" board-position column trails (the sort key).
+    assert ls.LIVE_QUEUE_HEADERS[0] == "Added" and ls.LIVE_QUEUE_HEADERS[-1] == "#"
     j = _job("421000")
     j["_cbc_pos"] = 5
     cells = ls.live_queue_records([j], TODAY)[0][1]
-    assert cells[ls.LIVE_QUEUE_CBC_COL - 1].value == 5
-    assert cells[ls.LIVE_QUEUE_CBC_COL - 1].center
+    assert cells[-1] is cells[ls.LIVE_QUEUE_CBC_COL - 1]   # "#" is the last column
+    assert cells[-1].value == 5 and cells[-1].center
     # No board position (off-board / unknown) leaves it blank so it sorts last.
     cells2 = ls.live_queue_records([_job("421001")], TODAY)[0][1]
-    assert cells2[ls.LIVE_QUEUE_CBC_COL - 1].value == ""
+    assert cells2[-1].value == ""
+
+
+def test_live_queue_co_change_turns_text_red():
+    from live_sheets import F_RED
+    j = _job("421000", co_number=2)
+    cells = ls.live_queue_records([j], TODAY, co_changed_ids={"421000"})[0][1]
+    assert cells[0].font == F_RED                       # Added
+    assert cells[-1].font == F_RED                       # "#"
+    # A non-link standard cell (Customer) goes red too.
+    cust = (ls.LIVE_QUEUE_KEY_COL - 1) + ls.QUEUE_HEADERS.index("Customer")
+    assert cells[cust].font == F_RED
+    # An order without a change order today keeps its normal (non-red) text.
+    plain = ls.live_queue_records([_job("421001")], TODAY)[0][1]
+    assert plain[cust].font != F_RED
 
 
 def test_quote_run_link_folder_when_multiple_runs():

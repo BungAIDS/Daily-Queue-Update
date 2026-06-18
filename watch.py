@@ -156,15 +156,19 @@ def _oh_orders(master: dict, store: dict) -> list:
     return sorted(merged.items(), key=lambda kv: (str(kv[1].get("added") or ""), kv[0]))
 
 
-def _changes_sheet(master: dict, lq_jobs: list, new_today: set, today: date) -> "live_sheets.Sheet":
+def _changes_sheet(master: dict, lq_jobs: list, new_today: set, today: date,
+                   now: datetime) -> "live_sheets.Sheet":
     """Today's activity log: new orders today, change orders (CO#), the
-    field-modification log, and orders removed today."""
+    field-modification log, and orders removed today. `now` stamps a 'last
+    updated' line at the top so users can see the tab is live."""
     new_today_jobs = [j for j in lq_jobs if str(j.get("job") or "") in new_today]
     events = change_log.load(today)
     removed_today = [e.get("job", {}) for e in master.get("orders", {}).values()
                      if e.get("seen_on_queue") and not e.get("on_queue")
                      and str(e.get("left") or "")[:10] == today.isoformat()]
-    return live_sheets.changes_sheet(new_today_jobs, events, removed_today, today.isoformat())
+    updated_at = live_sheets.fmt_datetime(now)
+    return live_sheets.changes_sheet(new_today_jobs, events, removed_today,
+                                     today.isoformat(), updated_at=updated_at)
 
 
 def _new_today_ids(lq_jobs: list, today: date) -> set:
@@ -208,14 +212,18 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
     lq_jobs.sort(key=lambda j: (j.get("_cbc_pos") is None, j.get("_cbc_pos") or 0))
 
     new_today = _new_today_ids(lq_jobs, today)
+    # Orders that had a change order (CO#) land today -> their text goes red.
+    co_changed = {str(e.get("job")) for e in change_log.load(today)
+                  if e.get("field") == "CO#" and e.get("job")}
 
     lq_sigs = master.setdefault("lq_sigs", {})
-    lq_ops = _plan(live_sheets.live_queue_records(lq_jobs, today, new_ids=new_today, ref=now),
+    lq_ops = _plan(live_sheets.live_queue_records(lq_jobs, today, new_ids=new_today,
+                                                  co_changed_ids=co_changed, ref=now),
                    lq_sigs, allow_delete=True)
     lq_payload = {"name": "Live Queue", "headers": live_sheets.LIVE_QUEUE_HEADERS, "ops": lq_ops,
                   "key_col": live_sheets.LIVE_QUEUE_KEY_COL, "allow_delete": True,
-                  "sort_col": live_sheets.LIVE_QUEUE_CBC_COL, "text_cols": [2],  # Added (col 2) -> AM/PM text
-                  "freeze": "D2"}   # header on row 1, frozen with the #/Added/Job# columns
+                  "sort_col": live_sheets.LIVE_QUEUE_CBC_COL, "text_cols": [1],  # Added (col 1) -> AM/PM text
+                  "freeze": "C2"}   # header on row 1, frozen with the Added + Job # columns
 
     # "Removed since this morning" block below the Live Queue. Render it only when
     # the set actually changes (a removal/return), not every cycle. Only orders
@@ -224,11 +232,12 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
                if e.get("seen_on_queue") and not e.get("on_queue")
                and str(e.get("left") or "")[:10] == today.isoformat()]
     removed.sort(key=lambda jl: str(jl[1] or ""), reverse=True)   # most recently removed first
-    # Keep the Job# column (LIVE_QUEUE_KEY_COL = col 3) blank in this block so the
-    # key-based "last live data row" lookup in _render_below skips these rows.
+    # Keep the key column (LIVE_QUEUE_KEY_COL = col 2, Job #) blank in this block
+    # so the key-based "last live data row" lookup in _render_below — and the next
+    # poll's keymap — skip these rows. The order numbers go in col 1.
     below = {"title": "Removed from the queue since this morning",
-             "headers": ["Job #", "Customer", "", "Design", "Removed"],
-             "rows": [[j.get("job", ""), j.get("customer", ""), "",
+             "headers": ["Job #", "", "Customer", "Design", "Removed"],
+             "rows": [[j.get("job", ""), "", j.get("customer", ""),
                        j.get("so_design_desc") or j.get("design", ""),
                        live_sheets.fmt_time(left)] for j, left in removed]}
     below_sig = json.dumps(below, default=str, sort_keys=True)
@@ -254,7 +263,7 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
                   "key_col": live_sheets.ORDER_HISTORY_KEY_COL, "freeze": "B2"}  # pin Job # only
 
     update_master_workbook(LIVE_WORKBOOK_PATH, lq_payload, oh_payload,
-                           changes_sheet=_changes_sheet(master, lq_jobs, new_today, today))
+                           changes_sheet=_changes_sheet(master, lq_jobs, new_today, today, now))
 
 
 def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce: bool) -> dict:

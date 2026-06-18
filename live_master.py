@@ -138,25 +138,37 @@ def update(master: Dict[str, Any], present: List[Dict[str, Any]],
         present_nums.add(jn)
         entry = orders.get(jn)
         added = j.get("_first_seen") or now_iso
+        # We only truly KNOW the add time if we watched it arrive (a genuine new
+        # arrival, not one already on the board when the watch began — those are
+        # carried over with an approximate time).
+        known = not bool(j.get("_carried_over"))
         if entry is None:
-            # We only truly KNOW the add time if we watched it arrive (a genuine
-            # new arrival, not an order that was already on the board when the
-            # watch began — those are carried over with an approximate time).
-            orders[jn] = {"added": added, "added_known": not bool(j.get("_carried_over")),
+            orders[jn] = {"added": added, "added_known": known,
+                          "last_in": now_iso, "last_out": None,
                           "left": None, "on_queue": True, "seen_on_queue": True, "job": dict(j)}
         else:
             for field, old, new in _diffs(entry.get("job") or {}, j):
                 events.append({"time": now_iso, "job": jn, "customer": _norm(j.get("customer")),
                                "field": field, "old": old, "new": new})
+            if not entry.get("on_queue"):
+                # Off-board -> on-board: it just (re)entered the queue, so this is
+                # the moment that matters for "Added" — stamp last_in and treat the
+                # add time as known (we watched this arrival ourselves).
+                entry["last_in"] = now_iso
+                entry["added_known"] = known
             entry["job"] = dict(j)
             entry["on_queue"] = True
             entry["seen_on_queue"] = True   # the watcher has seen it on the board
             entry["left"] = None
             entry.setdefault("added", added)
+            entry.setdefault("last_in", entry.get("added") or now_iso)  # migrate old entries
+            entry.setdefault("last_out", None)
+            entry.setdefault("added_known", known)
 
     for jn, entry in orders.items():
         if jn not in present_nums and entry.get("on_queue"):
             entry["on_queue"] = False
+            entry["last_out"] = now_iso     # most recent departure (kept across returns)
             if not entry.get("left"):
                 entry["left"] = now_iso
 
@@ -206,15 +218,17 @@ def ordered(master: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
 
 
 def on_queue(master: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """The job dicts currently on the board, oldest-added first. Each carries the
-    master's all-time add time (`_added_iso`) and whether it's known
-    (`_added_known`) so the Live Queue 'Added' column can show a real time/date or
-    'NO DATA'."""
+    """The job dicts currently on the board, oldest-added first. Each carries when
+    it most recently came onto the board (`_added_iso` = last_in, so a returning
+    order shows today's entry rather than its all-time first sighting), whether
+    that time is known (`_added_known`), and its last departure (`_last_out`), so
+    the Live Queue 'Added' column can show a real time/date or 'NO DATA'."""
     out = []
     for _, e in ordered(master):
         if e.get("on_queue") and e.get("job"):
             j = dict(e["job"])
-            j["_added_iso"] = e.get("added")
+            j["_added_iso"] = e.get("last_in") or e.get("added")
             j["_added_known"] = e.get("added_known", False)
+            j["_last_out"] = e.get("last_out")
             out.append(j)
     return out

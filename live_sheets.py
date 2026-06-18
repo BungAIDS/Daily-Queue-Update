@@ -33,6 +33,7 @@ F_LINK = "link"               # blue underline hyperlink
 F_DRIVE_RUN = "drive_run"     # orange bold (highly-custom)
 F_DRIVE_RUN_LINK = "drive_run_link"
 F_RED = "red"                 # red bold (a change order landed)
+F_NOTE = "note"               # muted gray (e.g. the Changes 'last updated' stamp)
 
 FILL_HEADER = "header"
 FILL_OVERDUE = "overdue"      # End Date today/past
@@ -281,6 +282,18 @@ def fmt_time(iso: str) -> str:
 _fmt_time = fmt_time   # internal alias
 
 
+def fmt_datetime(when: "datetime | str") -> str:
+    """A date + AM/PM time, e.g. 'Jun 18, 2026 3:53 PM' — for the Changes tab's
+    'last updated' stamp. Accepts a datetime or an ISO string."""
+    if isinstance(when, str):
+        try:
+            when = datetime.fromisoformat(when)
+        except (ValueError, TypeError):
+            return when or ""
+    fmt = "%b %#d, %Y %#I:%M %p" if _is_windows() else "%b %-d, %Y %-I:%M %p"
+    return when.strftime(fmt)
+
+
 def _events_table(sh: Sheet, title: str, headers: List[str],
                   rows: List[List[Any]]) -> None:
     sh.row([Cell(f"{title} ({len(rows)})", font=F_SECTION)])
@@ -299,6 +312,7 @@ def changes_sheet(
     change_events: List[Dict[str, Any]],
     removed_today: List[Dict[str, Any]],
     date_str: str,
+    updated_at: Optional[str] = None,
     name: str = "Changes",
 ) -> Sheet:
     """Today's activity log:
@@ -307,9 +321,12 @@ def changes_sheet(
       - Orders that changed today: one line per field modification (a field that
         changes several times in a day is several lines), newest first.
       - Removed / completed today.
-    `change_events` is the day's change log (see change_log.py)."""
+    `change_events` is the day's change log (see change_log.py); `updated_at` is a
+    display string stamped at the top so users can see the tab is live."""
     sh = Sheet(name, freeze=None)
     sh.row([Cell(f"Changes — {date_str}", font=F_SECTION)])
+    if updated_at:
+        sh.row([Cell(f"Last updated {updated_at}", font=F_NOTE)])
     sh.blank()
 
     _job_table(sh, "New orders today", new_today,
@@ -374,13 +391,13 @@ LINE_ITEM_HEADERS = ["Job #", "Customer", "CO#", "Tags", "Item (as printed)",
 # (order#, [Cell, ...]); the renderer writes/append/updates the row whose key   #
 # matches.                                                                     #
 # --------------------------------------------------------------------------- #
-# A leading "#" column carries the cbcinsider board position; the tab is sorted
-# by it so the order matches the queue on the site (and you can re-sort it to
-# restore that order). Then "Added", then the Full Queue columns.
-LIVE_QUEUE_HEADERS = ["#", "Added"] + list(QUEUE_HEADERS)      # DWG/feature matrices live on Order History
-LIVE_QUEUE_CBC_COL = 1                                         # the "#" board-position column (the sort key)
-LIVE_QUEUE_KEY_COL = 3 + QUEUE_HEADERS.index("Job #")          # 1-based col of Job # (# + Added lead)
-LIVE_QUEUE_END_DATE_COL = 3 + QUEUE_HEADERS.index("End Date")  # 1-based col of End Date
+# "Added" (last time it came onto the board), then the Full Queue columns, then a
+# trailing "#" column carrying the cbcinsider board position. The tab is sorted by
+# "#" so the order matches the queue on the site (re-sort "#" to restore it).
+LIVE_QUEUE_HEADERS = ["Added"] + list(QUEUE_HEADERS) + ["#"]   # DWG/feature matrices live on Order History
+LIVE_QUEUE_CBC_COL = len(LIVE_QUEUE_HEADERS)                   # the trailing "#" board-position col (sort key)
+LIVE_QUEUE_KEY_COL = 2 + QUEUE_HEADERS.index("Job #")          # 1-based col of Job # (Added is col 1)
+LIVE_QUEUE_END_DATE_COL = 2 + QUEUE_HEADERS.index("End Date")  # 1-based col of End Date
 _END_DATE_IDX = QUEUE_HEADERS.index("End Date")               # its index within the standard cells
 _CO_IDX = [i for i, (_, k) in enumerate(COLUMNS) if k == "co"][0]   # CO# cell index
 
@@ -430,20 +447,23 @@ def row_sig(cells: List[Cell]) -> str:
 
 def live_queue_records(jobs: List[Dict[str, Any]], today: date,
                        new_ids: Optional[set] = None,
+                       co_changed_ids: Optional[set] = None,
                        ref: Optional[datetime] = None) -> List:
-    """(order#, cells) per on-board order: Added + every Full Queue column, with
-    urgency / new-today row fills and hyperlinks. `new_ids` is the set of order
-    numbers that are new today (not in the previous snapshot)."""
+    """(order#, cells) per on-board order: Added + every Full Queue column + the
+    "#" board position, with urgency / new-today row fills and hyperlinks.
+    `new_ids` is the set of order numbers new today (not in the previous
+    snapshot); `co_changed_ids` is the set that had a change order (CO#) land
+    today — their text goes red."""
     new_ids = new_ids or set()
+    co_changed_ids = co_changed_ids or set()
     out = []
     for j in jobs:
-        # "#" = the cbcinsider board position (the sort key for board order).
-        pos = j.get("_cbc_pos")
-        cbc = Cell(pos if isinstance(pos, int) else "", center=True)
+        jn = str(j.get("job") or "")
+        co_changed = jn in co_changed_ids
         # number_format "@" (Text) keeps the AM/PM label (e.g. "3:53 PM") from
         # being coerced by Excel into a 24h datetime serial.
         added = Cell(added_label(j, ref=ref), number_format="@")
-        std = _job_value_cells(j, co_changed=False)
+        std = _job_value_cells(j, co_changed=co_changed)
         # Write End Date as a real date so it sorts/filters as a date in Excel.
         ed = _parse_date(j.get("end_date", ""))
         if ed is not None:
@@ -451,13 +471,18 @@ def live_queue_records(jobs: List[Dict[str, Any]], today: date,
             std[_END_DATE_IDX].number_format = "mm/dd/yyyy"
         # Hover the CO# cell to see the change-order history (most recent first).
         std[_CO_IDX].comment = _co_comment(j)
-        fill = _row_fill(j, today, is_new=str(j.get("job") or "") in new_ids)
-        cells = [cbc, added] + std
+        # "#" = the cbcinsider board position (the sort key for board order).
+        pos = j.get("_cbc_pos")
+        cbc = Cell(pos if isinstance(pos, int) else "", center=True)
+        if co_changed:                       # carry the red over to the non-std cells
+            added.font = cbc.font = F_RED
+        fill = _row_fill(j, today, is_new=jn in new_ids)
+        cells = [added] + std + [cbc]
         if fill:
             for c in cells:
                 if c.fill is None:
                     c.fill = fill
-        out.append((str(j.get("job") or ""), cells))
+        out.append((jn, cells))
     return out
 
 

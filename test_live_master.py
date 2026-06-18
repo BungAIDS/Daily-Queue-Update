@@ -46,6 +46,42 @@ def test_leave_then_return():
     assert m["orders"]["200"]["left"] is None
 
 
+def test_last_in_updates_on_return_added_stays():
+    m = {"orders": {}}
+    lm.update(m, [_job("100", _first_seen="2026-06-16T09:00:00")], T0)
+    e = m["orders"]["100"]
+    assert e["last_in"] == T0.isoformat(timespec="seconds") and e["last_out"] is None
+    # Drops off -> last_out stamped, last_in unchanged.
+    lm.update(m, [], T1)
+    assert e["on_queue"] is False and e["last_out"] == T1.isoformat(timespec="seconds")
+    assert e["last_in"] == T0.isoformat(timespec="seconds")
+    # Returns -> last_in moves to the re-entry; all-time 'added' stays the first
+    # sight, and on_queue() shows last_in as what the Live Queue 'Added' uses.
+    lm.update(m, [_job("100")], T2)
+    assert e["last_in"] == T2.isoformat(timespec="seconds")
+    assert e["added"] == "2026-06-16T09:00:00"
+    assert lm.on_queue(m)[0]["_added_iso"] == T2.isoformat(timespec="seconds")
+
+
+def test_last_in_stable_while_continuously_present():
+    # A poll (e.g. after a watch.py restart) on an order that never left must not
+    # move its last_in — the add time it shows survives restarts.
+    m = {"orders": {}}
+    lm.update(m, [_job("100", _first_seen="2026-06-16T09:00:00")], T0)
+    lm.update(m, [_job("100", end_date="06/30/2026")], T1)
+    assert m["orders"]["100"]["last_in"] == T0.isoformat(timespec="seconds")
+
+
+def test_on_queue_migrates_missing_last_in_from_added():
+    # An entry persisted before last_in existed: on_queue falls back to 'added',
+    # and the next present poll backfills last_in from 'added' (not 'now').
+    m = {"orders": {"100": {"added": "2026-06-16T09:00:00", "on_queue": True,
+                            "job": {"job": "100"}}}}
+    assert lm.on_queue(m)[0]["_added_iso"] == "2026-06-16T09:00:00"
+    lm.update(m, [_job("100")], T2)
+    assert m["orders"]["100"]["last_in"] == "2026-06-16T09:00:00"
+
+
 def test_ordered_is_chronological_and_on_queue_filter():
     m = {"orders": {}}
     lm.update(m, [_job("100", _first_seen="2026-06-16T09:00:00")], T0)
