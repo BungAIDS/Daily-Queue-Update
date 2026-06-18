@@ -31,7 +31,10 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
+import signal
 import sys
+import threading
 import time
 from datetime import date, datetime, time as dtime, timedelta
 
@@ -352,6 +355,30 @@ def _morning_snapshot(now: datetime) -> None:
     save_morning_copy(LIVE_WORKBOOK_PATH, dest)
 
 
+def _install_stop_handler(stop: "threading.Event") -> None:
+    """Make Ctrl+C reliable. Playwright's sync API and asyncio.run (both used in a
+    poll) can leave the SIGINT handler in a state where Ctrl+C is swallowed — the
+    symptom being a watcher you can't stop without closing the window. So we own
+    the handler: the first interrupt asks the loop to stop cleanly after the
+    current step; a second one force-quits immediately. It's re-installed each
+    cycle in case a poll reset it. Main-thread only (where run_watch runs)."""
+    def _handler(signum, frame):
+        if stop.is_set():                       # already stopping -> hard quit
+            log.warning("Second interrupt — force quitting now.")
+            os._exit(130)
+        stop.set()
+        log.info("Interrupt received — saving and exiting after this step. "
+                 "Press Ctrl+C again to force quit.")
+    for signame in ("SIGINT", "SIGBREAK"):      # SIGBREAK = Ctrl+Break on Windows
+        sig = getattr(signal, signame, None)
+        if sig is None:
+            continue
+        try:
+            signal.signal(sig, _handler)
+        except (ValueError, OSError):           # not main thread / unsupported
+            pass
+
+
 def run_watch(ignore_window: bool = False) -> int:
     setup_logging()
     validate_runtime_config()
@@ -384,9 +411,11 @@ def run_watch(ignore_window: bool = False) -> int:
              today.isoformat(), start.strftime("%H:%M"), end.strftime("%H:%M"),
              POLL_INTERVAL_SECONDS, len(master.get("orders", {})))
 
+    stop = threading.Event()
+    _install_stop_handler(stop)
     cycle = 0
     try:
-        while True:
+        while not stop.is_set():
             now = datetime.now()
             if not ignore_window and now >= end:
                 log.info("Reached end of watch window (%s); stopping.", end.strftime("%H:%M"))
@@ -400,12 +429,18 @@ def run_watch(ignore_window: bool = False) -> int:
             if baseline:
                 _morning_snapshot(now)
             cycle += 1
+            # A poll's browser/async work can reset our SIGINT handler — re-assert
+            # it, then wait out the rest of the interval interruptibly: the wait
+            # returns the instant a Ctrl+C sets the stop event.
+            _install_stop_handler(stop)
             elapsed = time.monotonic() - t0
-            time.sleep(max(0.0, POLL_INTERVAL_SECONDS - elapsed))
-    except KeyboardInterrupt:
-        log.info("Interrupted — saving state and exiting.")
-        live_state.save_state(state, today)
-        live_master.save_master(master)
+            if stop.wait(max(0.0, POLL_INTERVAL_SECONDS - elapsed)):
+                break
+    except KeyboardInterrupt:           # belt and suspenders if the handler is bypassed
+        pass
+    log.info("Stopping — saving state.")
+    live_state.save_state(state, today)
+    live_master.save_master(master)
     log.info("=== Live watch done (%d cycles) ===", cycle)
     return 0
 

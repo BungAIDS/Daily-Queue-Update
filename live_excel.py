@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -594,10 +595,27 @@ def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any]
         log.warning("Could not reach Excel via COM (%s); live workbook not updated. "
                     "On Windows, ensure Excel is installed and signed in.", e)
         return False
-    try:
-        wb = _find_workbook(app, path)
-    except Exception as e:  # noqa: BLE001
-        log.warning("Could not open the live workbook (%s); not updated this cycle.", e)
+    # Reaching the workbook can be momentarily rejected while Excel is busy — a
+    # dialog is up, a co-authoring sync is in flight, or someone is mid-keystroke
+    # (surfaces as e.g. 'Excel.Application.Workbooks'). Retry a few times with a
+    # short backoff, refreshing the app handle in case it disconnected; if it's
+    # still busy we skip this cycle and try again on the next poll.
+    wb = last_err = None
+    for attempt in range(1, 4):
+        try:
+            wb = _find_workbook(app, path)
+            break
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            if attempt < 3:
+                time.sleep(0.6 * attempt)
+                try:
+                    app = _get_excel()
+                except Exception:  # noqa: BLE001
+                    pass
+    if wb is None:
+        log.warning("Could not open the live workbook (%s); Excel looked busy. "
+                    "Skipping this cycle; will retry next poll.", last_err)
         return False
 
     # Render each tab independently — a failure on one (e.g. the big Order
