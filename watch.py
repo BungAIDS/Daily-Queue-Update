@@ -49,7 +49,7 @@ from config import (LIVE_MORNING_SNAPSHOT, LIVE_WORKBOOK_PATH, OUTPUT_DIR,
 from live_excel import save_morning_copy, update_master_workbook
 from live_sheets import added_label
 from runstate import load_diff
-from sales_orders import enrich_with_sales_orders
+from sales_orders import enrich_with_sales_orders, refresh_autocad_folders
 from scraper import scrape_queue
 
 log = logging.getLogger("queue-watch")
@@ -259,6 +259,16 @@ def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce
              len(deltas["new"]), len(deltas["returning"]), len(deltas["removed"]))
 
     _enrich_pending(state)
+    # Re-resolve AutoCAD folders for any on-board order still without one (cheap
+    # now), so orders an earlier lookup missed ("Open") get filled in without a
+    # full re-enrich. Mutates the state entries' job dicts in place so it sticks.
+    unresolved = [e["job"] for e in state.values()
+                  if e.get("present") and e.get("job") and not e["job"].get("job_type")]
+    if unresolved:
+        resolved = refresh_autocad_folders(unresolved)
+        if resolved:
+            log.info("Resolved %d AutoCAD folder(s) for order(s) that showed 'Open'.", resolved)
+
     present = live_state.present_jobs(state)
     # Fold the board into the master log; log any field modifications it found.
     events = live_master.update(master, present, now)

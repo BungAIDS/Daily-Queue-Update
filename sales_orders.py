@@ -219,6 +219,30 @@ def _find_autocad_folders(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+def refresh_autocad_folders(jobs: List[Dict[str, Any]]) -> int:
+    """Re-run the (now cheap) AutoCAD folder lookup for `jobs`, updating each
+    dict's job_type / job_folder / dwg_extras / dwg_missing_std in place. Used to
+    fill in orders whose folder wasn't found by an earlier lookup (they showed
+    'Open') — the watcher enriches an order only once, so without this a folder
+    found by an improved lookup would never reach an already-known order.
+    Returns how many got a folder this pass."""
+    by_job = {j["job"]: j for j in jobs if j.get("job")}
+    if not by_job:
+        return 0
+    index = _find_autocad_folders(list(by_job.keys()))
+    n = 0
+    for jn, j in by_job.items():
+        info = index.get(jn)
+        if not info:
+            continue
+        j["job_type"] = info["type"]
+        j["job_folder"] = str(info["path"])
+        j["dwg_extras"] = info.get("dwg_extras", {})
+        j["dwg_missing_std"] = info.get("dwg_missing_std", False)
+        n += 1
+    return n
+
+
 # --------------------------------------------------------------------------- #
 # PDF parsing                                                                 #
 # --------------------------------------------------------------------------- #
