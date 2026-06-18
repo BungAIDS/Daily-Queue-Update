@@ -54,10 +54,11 @@ def test_full_queue_overdue_fill_and_job_link():
 
 
 def test_full_queue_new_fill_and_added_label():
-    j = _job("421001", end_date="12/31/2026",
-             _carried_over=False, _first_seen="2026-06-16T09:14:00")
+    from datetime import datetime
+    fs = datetime.now().replace(hour=9, minute=14, second=0, microsecond=0).isoformat()
+    j = _job("421001", end_date="12/31/2026", _carried_over=False, _first_seen=fs)
     sh = ls.full_queue_sheet([j], TODAY, new_ids={"421001"})
-    assert sh.grid[1][0].value.endswith("AM") or sh.grid[1][0].value.endswith("PM")
+    assert sh.grid[1][0].value.endswith("AM") or sh.grid[1][0].value.endswith("PM")  # added today -> time
     assert sh.grid[1][1].fill == FILL_NEW          # new, no urgency
 
 
@@ -182,12 +183,14 @@ def test_live_queue_end_date_is_sortable_serial():
 def test_added_label_today_older_and_no_data():
     from datetime import datetime
     ref = datetime(2026, 6, 17, 12, 0, 0)
-    assert ls.added_label({"_carried_over": True}, ref=ref) == "NO DATA"
-    assert ls.added_label({"_added_known": True, "_added_iso": ""}, ref=ref) == "NO DATA"
-    today = ls.added_label({"_added_known": True, "_added_iso": "2026-06-17T09:14:00"}, ref=ref)
-    assert today.endswith("AM") and "," not in today          # time only
-    older = ls.added_label({"_added_known": True, "_added_iso": "2026-06-16T15:53:00"}, ref=ref)
-    assert "Jun" in older and older.endswith("PM")            # date + time
+    # NO DATA only when there's literally no timestamp.
+    assert ls.added_label({}, ref=ref) == "NO DATA"
+    assert ls.added_label({"_added_iso": ""}, ref=ref) == "NO DATA"
+    today = ls.added_label({"_added_iso": "2026-06-17T09:14:00"}, ref=ref)
+    assert today.endswith("AM") and "," not in today          # today -> time only
+    older = ls.added_label({"_added_iso": "2026-06-16T15:53:00"}, ref=ref)
+    assert older == "Jun 16, 2026" or older == "Jun 16, 2026"  # earlier -> date, no time
+    assert ":" not in older and "Jun 16" in older
 
 
 def test_co_comment_most_recent_first_and_live_queue_cell():

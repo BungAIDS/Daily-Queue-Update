@@ -83,14 +83,8 @@ class Sheet:
 # Shared helpers                                                               #
 # --------------------------------------------------------------------------- #
 def added_label(job: Dict[str, Any], ref: Optional[datetime] = None) -> str:
-    """The 'Added' label: the AM/PM time if it was added today, the date + time
-    if it was added earlier, or 'NO DATA' when we don't have a real add time (an
-    order that was already on the board when the watch began, or an older entry)."""
-    known = job.get("_added_known")
-    if known is None:                                  # live present-dict fallback
-        known = not job.get("_carried_over", False)
-    if not known:
-        return "NO DATA"
+    """The 'Added' label: the AM/PM time if it was added today, just the date if
+    it was added earlier, or 'NO DATA' only when there's no add timestamp at all."""
     iso = job.get("_added_iso") or job.get("_first_seen") or ""
     try:
         dt = datetime.fromisoformat(iso)
@@ -99,8 +93,7 @@ def added_label(job: Dict[str, Any], ref: Optional[datetime] = None) -> str:
     ref = ref or datetime.now()
     if dt.date() == ref.date():
         return dt.strftime("%#I:%M %p") if _is_windows() else dt.strftime("%-I:%M %p")
-    fmt = "%b %#d, %#I:%M %p" if _is_windows() else "%b %-d, %-I:%M %p"
-    return dt.strftime(fmt)
+    return dt.strftime("%b %#d, %Y") if _is_windows() else dt.strftime("%b %-d, %Y")
 
 
 def _is_windows() -> bool:
