@@ -37,6 +37,7 @@ import sys
 import threading
 import time
 from datetime import date, datetime, time as dtime, timedelta
+from logging.handlers import TimedRotatingFileHandler
 
 import change_log
 import line_items
@@ -46,7 +47,7 @@ import live_sheets
 import live_state
 import notify
 from compare import load_latest_snapshot, load_snapshot
-from config import (LIVE_MORNING_SNAPSHOT, LIVE_WORKBOOK_PATH, OUTPUT_DIR,
+from config import (LIVE_MORNING_SNAPSHOT, LIVE_WORKBOOK_PATH, LOG_DIR, OUTPUT_DIR,
                     POLL_INTERVAL_SECONDS, SO_REVERIFY_MIN_AGE_MIN,
                     SO_REVERIFY_PER_POLL, WATCH_END, WATCH_START,
                     validate_runtime_config)
@@ -65,11 +66,21 @@ OH_BUILD_VERSION = 3
 
 
 def setup_logging() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout)],
-    )
+    """Log to the console AND to a daily-rotated file under LOG_DIR (keeping ~a
+    week), so the output survives the window closing and there's a record to chase
+    a bug through after the fact."""
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+    try:
+        fileh = TimedRotatingFileHandler(
+            LOG_DIR / "watch.log", when="midnight", backupCount=7, encoding="utf-8")
+        handlers.append(fileh)
+    except OSError as e:  # a bad/locked log dir must never stop the watcher
+        print(f"(could not open log file in {LOG_DIR}: {e}; console only)", file=sys.stderr)
+    for h in handlers:
+        h.setFormatter(fmt)
+    logging.basicConfig(level=logging.INFO, handlers=handlers)
+    log.info("Logging to console and %s (rotated daily, ~7 days kept).", LOG_DIR / "watch.log")
 
 
 def _window_today(today: date) -> "tuple[datetime, datetime]":

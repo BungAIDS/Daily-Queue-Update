@@ -63,6 +63,12 @@ SNAPSHOT_DIR = _output_path("SNAPSHOT_DIR", str(OUTPUT_DIR / "snapshots"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
+# Where the watcher tees its console output (rotated daily, ~a week kept). Defaults
+# to a `logs/` folder right next to the code so it's easy to find and share when a
+# bug needs chasing; override with LOG_DIR in .env.
+LOG_DIR = _output_path("LOG_DIR", str(Path(__file__).resolve().parent / "logs"))
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
 # Where the long-running backlog tools (autocad_scan.py, backfill_orders.py)
 # keep their resumable progress stores and master workbooks. Kept separate from
 # the daily queue report, which stays a one-day snapshot. Defaults under
