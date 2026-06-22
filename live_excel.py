@@ -44,8 +44,8 @@ def _bgr(rgb_hex: str) -> int:
 # Named fills -> Excel BGR (same RGB values as excel_writer's PatternFills).
 _FILL_RGB = {
     "header": "305496",
-    "overdue": "FFC7CE", "soon": "FFEB9C", "new": "D9D9D9",
-    "overdue_new": "F4A5A8", "soon_new": "F5D750",
+    "overdue": "FFC7CE", "duetoday": "F8CBAD", "soon": "FFEB9C", "new": "D9D9D9",
+    "overdue_new": "F4A5A8", "duetoday_new": "F4B183", "soon_new": "F5D750",
     "dwg_yes": "C6EFCE", "dwg_no": "FFC7CE",
     "sep": "808080",   # the vertical divider column between the two matrices
 }

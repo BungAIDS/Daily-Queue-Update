@@ -36,10 +36,12 @@ F_RED = "red"                 # red bold (a change order landed)
 F_NOTE = "note"               # muted gray (e.g. the Changes 'last updated' stamp)
 
 FILL_HEADER = "header"
-FILL_OVERDUE = "overdue"      # End Date today/past
-FILL_SOON = "soon"            # End Date within 3 days
+FILL_OVERDUE = "overdue"      # End Date in the past (overdue / red)
+FILL_DUETODAY = "duetoday"    # End Date today -> overdue (red) tomorrow (orange)
+FILL_SOON = "soon"            # End Date within 3 days (gold)
 FILL_NEW = "new"              # new/arrived today (no urgency)
 FILL_OVERDUE_NEW = "overdue_new"
+FILL_DUETODAY_NEW = "duetoday_new"
 FILL_SOON_NEW = "soon_new"
 FILL_DWG_YES = "dwg_yes"      # green ✓
 FILL_DWG_NO = "dwg_no"        # red (missing)
@@ -207,9 +209,11 @@ def _row_fill(j: Dict[str, Any], today: date, is_new: bool) -> Optional[str]:
     end = _parse_date(j.get("end_date", ""))
     soon = today + timedelta(days=3)
     if end is not None and end < today:
-        return FILL_OVERDUE_NEW if is_new else FILL_OVERDUE
+        return FILL_OVERDUE_NEW if is_new else FILL_OVERDUE        # past due -> red
+    if end is not None and end == today:                          # due today -> red tomorrow
+        return FILL_DUETODAY_NEW if is_new else FILL_DUETODAY      #             -> orange
     if end is not None and end <= soon:
-        return FILL_SOON_NEW if is_new else FILL_SOON
+        return FILL_SOON_NEW if is_new else FILL_SOON             # within 3 days -> gold
     return FILL_NEW if is_new else None
 
 

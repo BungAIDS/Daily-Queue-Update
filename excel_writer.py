@@ -18,9 +18,11 @@ from config import OUTPUT_DIR
 log = logging.getLogger(__name__)
 
 RED_FILL = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+ORANGE_FILL = PatternFill(start_color="F8CBAD", end_color="F8CBAD", fill_type="solid")  # due today -> red tomorrow
 YELLOW_FILL = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
 # One step darker than each base fill, used when a row is also new today.
 RED_FILL_NEW    = PatternFill(start_color="F4A5A8", end_color="F4A5A8", fill_type="solid")
+ORANGE_FILL_NEW = PatternFill(start_color="F4B183", end_color="F4B183", fill_type="solid")
 YELLOW_FILL_NEW = PatternFill(start_color="F5D750", end_color="F5D750", fill_type="solid")
 NEW_FILL        = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
 HEADER_FILL = PatternFill(start_color="305496", end_color="305496", fill_type="solid")
@@ -499,6 +501,8 @@ def _write_full_queue_tab(
         end = _parse_date(j.get("end_date", ""))
         if end is not None and end < today:
             fill = RED_FILL_NEW if is_new else RED_FILL
+        elif end is not None and end == today:           # due today -> red tomorrow
+            fill = ORANGE_FILL_NEW if is_new else ORANGE_FILL
         elif end is not None and end <= soon_threshold:
             fill = YELLOW_FILL_NEW if is_new else YELLOW_FILL
         elif is_new:

@@ -14,7 +14,7 @@ from datetime import date
 
 import live_sheets as ls
 from live_sheets import (FILL_DWG_NO, FILL_DWG_YES, FILL_NEW, FILL_OVERDUE,
-                         F_LINK, F_SECTION)
+                         FILL_DUETODAY, FILL_SOON, F_LINK, F_SECTION)
 
 TODAY = date(2026, 6, 16)
 
@@ -195,6 +195,16 @@ def test_live_queue_board_position_column():
     # No board position (off-board / unknown) leaves it blank so it sorts last.
     cells2 = ls.live_queue_records([_job("421001")], TODAY)[0][1]
     assert cells2[-1].value == ""
+
+
+def test_due_today_is_orange_between_red_and_gold():
+    from datetime import timedelta
+    def fill_for(end):
+        cells = ls.live_queue_records([_job("421000", end_date=end)], TODAY)[0][1]
+        return cells[ls.LIVE_QUEUE_KEY_COL - 1].fill        # Job # cell carries the row fill
+    assert fill_for(TODAY.strftime("%m/%d/%Y")) == FILL_DUETODAY                       # due today -> orange
+    assert fill_for((TODAY - timedelta(days=1)).strftime("%m/%d/%Y")) == FILL_OVERDUE  # past -> red
+    assert fill_for((TODAY + timedelta(days=2)).strftime("%m/%d/%Y")) == FILL_SOON     # within 3 days -> gold
 
 
 def test_prev_business_day_and_added_date():
