@@ -105,7 +105,10 @@ def test_changes_today_log_sections():
     assert _find(sh, "Last updated Jun 16, 2026 11:05 AM") is not None   # live stamp near the top
     assert _find(sh, "New orders today (1)") is not None
     assert _find(sh, "Change orders today (1)") is not None          # the CO# event
-    assert _find(sh, "Orders that changed today (2)") is not None    # two End Date lines
+    # One order changed (two End Date edits collapse to one before/after pair).
+    assert _find(sh, "Orders that changed today (1)") is not None
+    assert _find(sh, "06/01/2026") is not None    # 'was' = start-of-day End Date
+    assert _find(sh, "06/09/2026") is not None    # 'now' = latest End Date
     assert _find(sh, "Removed / completed today (1)") is not None
     assert _find(sh, "CO#0 -> CO#1") is not None
     # New change-order columns: Design, Arrangement (trimmed), and what changed.

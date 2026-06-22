@@ -348,6 +348,56 @@ def _events_table(sh: Sheet, title: str, headers: List[str],
     sh.blank()
 
 
+def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]]) -> None:
+    """'Orders that changed today' as a before/after view: ONE order = two rows —
+    the first what it was at the start of the day, the second what it is now — with
+    only the cells that changed shown (in red). Columns are the union of fields any
+    order changed today, ordered like the queue."""
+    by_job: Dict[str, Dict[str, Any]] = {}
+    for e in sorted(field_events, key=lambda x: x.get("time", "")):   # oldest first
+        jn, label = str(e.get("job", "") or ""), e.get("field", "") or ""
+        if not jn or not label or label == "Customer":
+            continue
+        rec = by_job.setdefault(jn, {"customer": "", "time": "", "fields": {}})
+        rec["customer"] = e.get("customer", "") or rec["customer"]
+        rec["time"] = max(rec["time"], e.get("time", ""))
+        f = rec["fields"].setdefault(label, {"old": e.get("old", "")})   # earliest old
+        f["new"] = e.get("new", "")                                       # latest new
+    # Drop fields whose net change is nothing (changed and changed back), then any
+    # order left with nothing changed.
+    for rec in by_job.values():
+        rec["fields"] = {l: f for l, f in rec["fields"].items()
+                         if str(f.get("old", "")) != str(f.get("new", ""))}
+    orders = {jn: rec for jn, rec in by_job.items() if rec["fields"]}
+
+    sh.row([Cell(f"Orders that changed today ({len(orders)})", font=F_SECTION)])
+    if not orders:
+        sh.row([Cell("(none)")])
+        sh.blank()
+        return
+    changed: set = set()
+    for rec in orders.values():
+        changed |= set(rec["fields"])
+    order_idx = {h: i for i, h in enumerate(QUEUE_HEADERS)}
+    cols = sorted(changed, key=lambda l: (order_idx.get(l, 10 ** 6), l))
+    sh.row(_header_cells(["Job #", "Customer"] + cols))
+    for jn in sorted(orders, key=lambda j: orders[j]["time"], reverse=True):
+        rec = orders[jn]
+        was = [Cell(jn), Cell(rec["customer"])]          # row 1: what it was
+        now = [Cell(""), Cell("")]                        # row 2: what it is now
+        for label in cols:
+            f = rec["fields"].get(label)
+            if f:
+                was.append(Cell(f.get("old", ""), font=F_RED))
+                now.append(Cell(f.get("new", ""), font=F_RED))
+            else:                                         # this order didn't change it
+                was.append(Cell(""))
+                now.append(Cell(""))
+        sh.row(was)
+        sh.row(now)
+    sh.blank()
+
+
 def _co_change_desc(order: Dict[str, Any], co_num: Any) -> str:
     """The change-order description for CO#<co_num> from the order's co_history
     (the part after the 'C/O #N date initials:' prefix), or '' if not found."""
@@ -402,10 +452,7 @@ def changes_sheet(
                   [_co_row(e) for e in co_events])
 
     field_events = [e for e in newest_first if e.get("field") != "CO#"]
-    _events_table(sh, "Orders that changed today",
-                  ["Time", "Job #", "Customer", "Field", "Old", "New"],
-                  [[_fmt_time(e.get("time", "")), e.get("job", ""), e.get("customer", ""),
-                    e.get("field", ""), e.get("old", ""), e.get("new", "")] for e in field_events])
+    _orders_changed_table(sh, field_events)
 
     _job_table(sh, "Removed / completed today", removed_today)
     return sh
