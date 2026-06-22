@@ -37,10 +37,19 @@ _IDENTITY = {
 }
 
 
-def _git(args: List[str], input_text: str | None = None) -> subprocess.CompletedProcess:
+def _git(args: List[str]) -> subprocess.CompletedProcess:
     env = {**os.environ, **_IDENTITY}
-    return subprocess.run(["git", *args], cwd=_REPO, env=env, input=input_text,
+    return subprocess.run(["git", *args], cwd=_REPO, env=env,
                           capture_output=True, text=True, timeout=90)
+
+
+def _git_stdin(args: List[str], data: bytes) -> subprocess.CompletedProcess:
+    """Run git feeding `data` on stdin as raw BYTES — never text — so Windows
+    can't translate the '\\n' line separators to '\\r\\n' (which would otherwise
+    leave a stray '\\r' on every filename written by `git mktree`)."""
+    env = {**os.environ, **_IDENTITY}
+    return subprocess.run(["git", *args], cwd=_REPO, env=env, input=data,
+                          capture_output=True, timeout=90)
 
 
 def push_logs(branch: str | None = None) -> bool:
@@ -60,13 +69,14 @@ def push_logs(branch: str | None = None) -> bool:
             if r.returncode != 0:
                 log.debug("log push: hash-object failed (%s)", r.stderr.strip())
                 return False
-            entries.append(f"100644 blob {r.stdout.strip()}\t{f.name}")
-        # 2. A tree holding just those files.
-        r = _git(["mktree"], input_text="\n".join(entries) + "\n")
+            name = f.name.replace("\r", "").replace("\n", "")   # defensive
+            entries.append(f"100644 blob {r.stdout.strip()}\t{name}")
+        # 2. A tree holding just those files (stdin as bytes -> no CRLF mangling).
+        r = _git_stdin(["mktree"], ("\n".join(entries) + "\n").encode("utf-8"))
         if r.returncode != 0:
-            log.debug("log push: mktree failed (%s)", r.stderr.strip())
+            log.debug("log push: mktree failed (%s)", r.stderr.decode(errors="replace").strip())
             return False
-        tree = r.stdout.strip()
+        tree = r.stdout.decode().strip()
         # 3. An orphan commit (no -p parent) -> the branch is always one snapshot.
         msg = f"watch logs @ {datetime.now().isoformat(timespec='seconds')}"
         r = _git(["commit-tree", tree, "-m", msg])

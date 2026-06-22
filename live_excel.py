@@ -368,12 +368,17 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
         # rebuilds the tab; every later cycle is incremental.
         ws.Cells.Clear()
         _write_header(ws, headers)
-        for col in (text_cols or []):
-            try:
-                ws.Columns(col).NumberFormat = "@"   # Text — must precede any write
-            except Exception:  # noqa: BLE001
-                pass
         _HEADER_DONE.add(name)
+
+    # Re-assert Text on the AM/PM columns EVERY render, before any value is
+    # written — so a time label like "9:42 AM" can never be coerced into a serial
+    # (which shows as e.g. 0.40416667). Doing it once at startup wasn't enough: a
+    # single failed/lost format set leaves later writes to corrupt the cell.
+    for col in (text_cols or []):
+        try:
+            ws.Columns(col).NumberFormat = "@"   # Text — must precede any write
+        except Exception:  # noqa: BLE001
+            pass
 
     keymap, last_row = _read_keymap(ws, key_col)
     deletes = [k for kind, k, _ in ops if kind == "delete"]

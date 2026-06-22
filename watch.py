@@ -162,7 +162,8 @@ def _enrich_pending(state: dict) -> list:
                if e.get("present") and not e.get("enriched") and e.get("job")]
     if not pending:
         return []
-    log.info("Enriching %d new order(s) (Sales Order + quote run + AutoCAD folder)...", len(pending))
+    log.info("Enriching %d order(s) — new, repriced or re-verified "
+             "(Sales Order + quote run + AutoCAD folder)...", len(pending))
     try:
         enrich_with_sales_orders(pending)
     except Exception:  # noqa: BLE001 - never let enrichment sink the loop
