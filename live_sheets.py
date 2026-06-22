@@ -98,6 +98,27 @@ def added_label(job: Dict[str, Any], ref: Optional[datetime] = None) -> str:
     return dt.strftime("%b %#d, %Y") if _is_windows() else dt.strftime("%b %-d, %Y")
 
 
+def added_date(job: Dict[str, Any]) -> Optional[date]:
+    """The date an order most recently came onto the board (from _added_iso /
+    _first_seen) — i.e. the date the 'Added' column reflects — or None if unknown."""
+    iso = job.get("_added_iso") or job.get("_first_seen") or ""
+    try:
+        return datetime.fromisoformat(iso).date()
+    except (ValueError, TypeError):
+        return None
+
+
+def prev_business_day(d: date) -> date:
+    """The most recent business day strictly before `d` (weekends skipped): Mon ->
+    Fri, Sun -> Fri, otherwise the day before. Holidays are not accounted for."""
+    wd = d.weekday()                  # Mon=0 .. Sun=6
+    if wd == 0:
+        return d - timedelta(days=3)
+    if wd == 6:
+        return d - timedelta(days=2)
+    return d - timedelta(days=1)
+
+
 def _is_windows() -> bool:
     import os
     return os.name == "nt"

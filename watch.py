@@ -278,13 +278,20 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
         j["_cbc_pos"] = pos.get(str(j.get("job")))
     lq_jobs.sort(key=lambda j: (j.get("_cbc_pos") is None, j.get("_cbc_pos") or 0))
 
-    new_today = _new_today_ids(lq_jobs, today)
+    new_today = _new_today_ids(lq_jobs, today)   # for the Changes tab / notifications
     # Orders that had a change order (CO#) land today -> their text goes red.
     co_changed = {str(e.get("job")) for e in change_log.load(today)
                   if e.get("field") == "CO#" and e.get("job")}
+    # Shade rows whose Added date is today or the most recent business day, so the
+    # highlight matches the 'Added' column (when each order last came onto the
+    # board) — not the morning snapshot diff, which misses intraday returns and
+    # over-marks when the daily run's snapshot is stale.
+    recent_days = {today, live_sheets.prev_business_day(today)}
+    shade_ids = {str(j.get("job")) for j in lq_jobs
+                 if live_sheets.added_date(j) in recent_days}
 
     lq_sigs = master.setdefault("lq_sigs", {})
-    lq_ops = _plan(live_sheets.live_queue_records(lq_jobs, today, new_ids=new_today,
+    lq_ops = _plan(live_sheets.live_queue_records(lq_jobs, today, new_ids=shade_ids,
                                                   co_changed_ids=co_changed, ref=now),
                    lq_sigs, allow_delete=True)
     lq_payload = {"name": "Live Queue", "headers": live_sheets.LIVE_QUEUE_HEADERS, "ops": lq_ops,

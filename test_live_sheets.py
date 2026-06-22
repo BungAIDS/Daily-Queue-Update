@@ -197,6 +197,17 @@ def test_live_queue_board_position_column():
     assert cells2[-1].value == ""
 
 
+def test_prev_business_day_and_added_date():
+    from datetime import date as _d
+    assert ls.prev_business_day(_d(2026, 6, 22)) == _d(2026, 6, 19)   # Mon -> Fri
+    assert ls.prev_business_day(_d(2026, 6, 23)) == _d(2026, 6, 22)   # Tue -> Mon
+    assert ls.prev_business_day(_d(2026, 6, 19)) == _d(2026, 6, 18)   # Fri -> Thu
+    assert ls.prev_business_day(_d(2026, 6, 21)) == _d(2026, 6, 19)   # Sun -> Fri
+    assert ls.added_date({"_added_iso": "2026-06-22T13:28:00"}) == _d(2026, 6, 22)
+    assert ls.added_date({"_first_seen": "2026-06-19T09:00:00"}) == _d(2026, 6, 19)
+    assert ls.added_date({}) is None
+
+
 def test_live_queue_co_change_turns_text_red():
     from live_sheets import F_RED
     j = _job("421000", co_number=2)
