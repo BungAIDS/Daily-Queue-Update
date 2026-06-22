@@ -23,7 +23,8 @@ from typing import Any, Dict, List, Optional
 
 from excel_writer import (COLUMNS, QUEUE_HEADERS, MONEY_FMT, _co_label,
                           _drive_run_label, _flags_str, _parse_date,
-                          _parse_money, _dwg_suffixes, folder_of, split_arrangement)
+                          _parse_money, _dwg_suffixes, folder_of, split_arrangement,
+                          split_size)
 
 # --- named styles (resolved to real colors by live_excel) ------------------- #
 F_HEADER = "header"           # blue header bg + white bold
@@ -160,6 +161,12 @@ def _job_value_cells(j: Dict[str, Any], columns: Optional[List] = None,
             # Keep the column to 'A/X'; hover the cell for the descriptive suffix.
             code, note = split_arrangement(j.get("so_arrangement", ""))
             c = Cell(code)
+            if note:
+                c.comment = note
+        elif key == "so_size" and arrange_comment:
+            # Keep the column to the main size; hover for any trailing detail.
+            main, note = split_size(j.get("so_size", ""))
+            c = Cell(main)
             if note:
                 c.comment = note
         elif key == "flags":

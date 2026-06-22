@@ -229,6 +229,24 @@ def test_live_queue_arrangement_code_and_comment():
     assert oh_arr.value == "A/4V C-Face Flange mount (no motor base)" and oh_arr.comment is None
 
 
+def test_live_queue_size_main_and_comment():
+    sz = (ls.LIVE_QUEUE_KEY_COL - 1) + ls.QUEUE_HEADERS.index("Size")
+    # A descriptive size is trimmed to the main size; the rest moves to a note.
+    j = ls.live_queue_records([_job("421000", so_size="3300-B12 Blade-1800")], TODAY)[0][1][sz]
+    assert j.value == "3300-B12" and j.comment == "Blade-1800"
+    paren = ls.live_queue_records([_job("421001", so_size="2412 (3600 RPM or less)")], TODAY)[0][1][sz]
+    assert paren.value == "2412" and "(3600 RPM or less)" in paren.comment
+    # A fraction stays whole; a plain size keeps no comment.
+    frac = ls.live_queue_records([_job("421002", so_size="13 1/2")], TODAY)[0][1][sz]
+    assert frac.value == "13 1/2" and frac.comment is None
+    plain = ls.live_queue_records([_job("421003", so_size="H3")], TODAY)[0][1][sz]
+    assert plain.value == "H3" and plain.comment is None
+    # Order History keeps the full text (built-once log isn't re-trimmed).
+    oh = ls._job_value_cells(_job("421000", so_size="3300-B12 Blade-1800"), columns=ls.OH_DATA_COLUMNS)
+    oh_sz = oh[[k for _, k in ls.OH_DATA_COLUMNS].index("so_size")]
+    assert oh_sz.value == "3300-B12 Blade-1800" and oh_sz.comment is None
+
+
 def test_quote_run_link_folder_when_multiple_runs():
     dr_idx = ls.QUEUE_HEADERS.index("Quote Run")
     lead = ls.LIVE_QUEUE_KEY_COL - 1               # 0-based start of standard cells

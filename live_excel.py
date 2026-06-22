@@ -282,7 +282,15 @@ def _norm_key(v: Any) -> str:
 
 def _write_header(ws, headers: List[str]) -> None:
     ncols = len(headers)
-    ws.Range(ws.Cells(1, 1), ws.Cells(1, ncols)).Value = [list(headers)]
+    rng = ws.Range(ws.Cells(1, 1), ws.Cells(1, ncols))
+    rng.Value = [list(headers)]
+    try:
+        # Keep titles on one horizontal line (no wrap/rotation) so a header never
+        # drives the column width or hides behind a tall wrapped cell.
+        rng.WrapText = False
+        rng.Orientation = 0
+    except Exception:  # noqa: BLE001
+        pass
     _apply_run(ws, 1, 1, ncols, "header", "header", False)
 
 
@@ -422,8 +430,11 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
         try:
             ws.UsedRange.Columns.AutoFit()
             for col in range(1, ncols + 1):
-                if ws.Columns(col).ColumnWidth > 60:
-                    ws.Columns(col).ColumnWidth = 60
+                w = ws.Columns(col).ColumnWidth
+                # Leave room for the AutoFilter dropdown arrow (~3 units) so it
+                # never covers the header title, then cap very wide columns.
+                hdr = str(headers[col - 1]) if col - 1 < len(headers) else ""
+                ws.Columns(col).ColumnWidth = min(60, max(w, len(hdr) + 3))
         except Exception:  # noqa: BLE001
             pass
 
