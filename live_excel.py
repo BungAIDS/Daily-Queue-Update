@@ -345,27 +345,36 @@ def _render_below(ws, key_col: int, ncols: int, below: Dict[str, Any]) -> None:
         used_bottom = used.Row + used.Rows.Count - 1
     except Exception:  # noqa: BLE001
         used_bottom = live_last
-    if used_bottom > live_last:                  # wipe the previous block
-        ws.Range(ws.Cells(live_last + 1, 1), ws.Cells(used_bottom, max(ncols, 8))).Clear()
     rows = below.get("rows") or []
     headers = below.get("headers") or ["Job #", "", "Customer", "Design", "Removed"]
-    r = live_last + 2                            # one blank gap row
-    title = ws.Cells(r, 1)
+    title_row = live_last + 2                     # one blank gap row
+    header_row = title_row + 1
+    bottom = max(used_bottom, header_row + len(rows))
+    # Clear the whole region the block occupies (plus any stale block below it),
+    # FULL WIDTH, so the block's text — the title and the 'Removed' time — spills
+    # freely into the empty cells to its right instead of being clipped.
+    if bottom >= live_last + 1:
+        try:
+            ws.Range(ws.Cells(live_last + 1, 1), ws.Cells(bottom, ncols)).Clear()
+        except Exception:  # noqa: BLE001
+            pass
+    title = ws.Cells(title_row, 1)
     title.Value = f"{below.get('title', 'Removed')} ({len(rows)})"
     title.Font.Bold = True
     title.Font.Size = 12
-    r += 1
-    ws.Range(ws.Cells(r, 1), ws.Cells(r, len(headers))).Value = [headers]
-    _apply_run(ws, r, 1, len(headers), "header", "header", False)
+    ws.Range(ws.Cells(header_row, 1), ws.Cells(header_row, len(headers))).Value = [headers]
+    _apply_run(ws, header_row, 1, len(headers), "header", "header", False)
     if rows:
-        # Format the block as Text BEFORE writing, so the 'Removed' time stays a
-        # string (e.g. "3:53 PM") and spills into the empty cells to its right
-        # rather than being coerced to a time serial that shows as "#####".
+        # Text + left-aligned BEFORE writing, so the 'Removed' time stays a string
+        # (e.g. "1:38 PM") and overflows to the right rather than being coerced to a
+        # serial that shows as "#####".
+        block = ws.Range(ws.Cells(header_row + 1, 1), ws.Cells(header_row + len(rows), len(headers)))
         try:
-            ws.Range(ws.Cells(r + 1, 1), ws.Cells(r + len(rows), len(headers))).NumberFormat = "@"
+            block.NumberFormat = "@"
+            block.HorizontalAlignment = -4131        # xlLeft
         except Exception:  # noqa: BLE001
             pass
-    for i, row in enumerate(rows, start=r + 1):
+    for i, row in enumerate(rows, start=header_row + 1):
         ws.Range(ws.Cells(i, 1), ws.Cells(i, len(row))).Value = [list(row)]
 
 
