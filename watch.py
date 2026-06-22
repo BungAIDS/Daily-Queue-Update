@@ -47,7 +47,8 @@ import live_state
 import notify
 from compare import load_latest_snapshot, load_snapshot
 from config import (LIVE_MORNING_SNAPSHOT, LIVE_WORKBOOK_PATH, OUTPUT_DIR,
-                    POLL_INTERVAL_SECONDS, WATCH_END, WATCH_START,
+                    POLL_INTERVAL_SECONDS, SO_REVERIFY_MIN_AGE_MIN,
+                    SO_REVERIFY_PER_POLL, WATCH_END, WATCH_START,
                     validate_runtime_config)
 from live_excel import save_morning_copy, update_master_workbook
 from live_sheets import added_label
@@ -83,6 +84,33 @@ def _is_repair_order(job: str) -> bool:
     rather than re-sweeping the whole tree for them on every poll."""
     jn = str(job or "").strip()
     return bool(jn) and jn[-1].isalpha()
+
+
+def _queue_stale_so_rechecks(state: dict, now: datetime) -> int:
+    """Round-robin background re-verification: flag the few on-board orders we've
+    gone longest without re-checking for a fresh Sales-Order fetch this poll, so a
+    silently-stale SO (e.g. one left at an old revision by an earlier failed
+    fetch) self-corrects within the hour instead of waiting for the next daily
+    run. Bounded by SO_REVERIFY_PER_POLL; skips repair orders and ones re-checked
+    within SO_REVERIFY_MIN_AGE_MIN. Returns how many were queued."""
+    if SO_REVERIFY_PER_POLL <= 0:
+        return 0
+    cutoff = (now - timedelta(minutes=SO_REVERIFY_MIN_AGE_MIN)).isoformat(timespec="seconds")
+    cands = []
+    for jn, e in state.items():
+        if not (e.get("present") and e.get("enriched") and e.get("job")):
+            continue
+        if _is_repair_order(jn):
+            continue
+        va = e.get("verified_at") or ""
+        if va and va > cutoff:
+            continue                       # re-checked recently enough
+        cands.append((va, jn))             # "" (never verified) sorts first -> oldest
+    cands.sort()
+    queued = [jn for _, jn in cands[:SO_REVERIFY_PER_POLL]]
+    for jn in queued:
+        state[jn]["enriched"] = False      # _enrich_pending re-fetches it this poll
+    return len(queued)
 
 
 def _seed_baseline(state: dict, today: datetime) -> None:
@@ -310,8 +338,21 @@ def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce
                 repriced += 1
         if repriced:
             log.info("%d order(s) changed price (possible change order) — re-fetching their SO.", repriced)
+        # Background round-robin: re-verify the few longest-unchecked orders so a
+        # silently-stale Sales Order self-corrects within the hour.
+        n_recheck = _queue_stale_so_rechecks(state, now)
+        if n_recheck:
+            log.info("Re-verifying %d on-board order(s) we hadn't re-checked recently.", n_recheck)
 
-    _enrich_pending(state)
+    enriched_now = _enrich_pending(state)
+    # Stamp when each order was last verified, so the round-robin re-check cycles
+    # through the board instead of re-doing the same orders.
+    if enriched_now:
+        now_iso = now.isoformat(timespec="seconds")
+        for jb in enriched_now:
+            e = state.get(str(jb.get("job") or ""))
+            if e:
+                e["verified_at"] = now_iso
     # Re-resolve AutoCAD folders for any on-board order still without one (cheap
     # now), so orders an earlier lookup missed ("Open") get filled in without a
     # full re-enrich. Mutates the state entries' job dicts in place so it sticks.

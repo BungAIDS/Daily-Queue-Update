@@ -156,6 +156,21 @@ try:
 except ValueError:
     POLL_INTERVAL_SECONDS = 120
 
+# Background Sales-Order re-verification: each poll, re-check this many on-board
+# orders we've gone longest without re-checking (round-robin), but only ones not
+# re-checked within the last SO_REVERIFY_MIN_AGE_MIN minutes. This is what lets a
+# silently-stale SO (e.g. an order left at an old revision by an earlier failed
+# fetch) self-correct within the hour instead of waiting for the next daily run.
+# Set SO_REVERIFY_PER_POLL=0 to disable. Costs ~ (per_poll) modal opens per poll.
+try:
+    SO_REVERIFY_PER_POLL = max(0, int(os.environ.get("SO_REVERIFY_PER_POLL", "2")))
+except ValueError:
+    SO_REVERIFY_PER_POLL = 2
+try:
+    SO_REVERIFY_MIN_AGE_MIN = max(1, int(os.environ.get("SO_REVERIFY_MIN_AGE_MIN", "45")))
+except ValueError:
+    SO_REVERIFY_MIN_AGE_MIN = 45
+
 
 def _parse_hhmm(raw: str, default: str) -> "tuple[int, int]":
     """Parse a 'HH:MM' watch-window bound into (hour, minute)."""
