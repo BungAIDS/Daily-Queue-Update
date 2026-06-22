@@ -105,10 +105,15 @@ def test_changes_today_log_sections():
     assert _find(sh, "Last updated Jun 16, 2026 11:05 AM") is not None   # live stamp near the top
     assert _find(sh, "New orders today (1)") is not None
     assert _find(sh, "Change orders today (1)") is not None          # the CO# event
-    # One order changed (two End Date edits collapse to one before/after pair).
+    # One order changed; End Date changed twice -> a 'was' row + two change rows.
     assert _find(sh, "Orders that changed today (1)") is not None
     assert _find(sh, "06/01/2026") is not None    # 'was' = start-of-day End Date
-    assert _find(sh, "06/09/2026") is not None    # 'now' = latest End Date
+    assert _find(sh, "06/05/2026") is not None    # the intermediate change (extra row)
+    assert _find(sh, "06/09/2026") is not None    # latest
+    # the two change rows are shaded progressively darker grey
+    from live_sheets import FILL_CHANGE1, FILL_CHANGE2
+    fills = {c.fill for row in sh.grid for c in row}
+    assert FILL_CHANGE1 in fills and FILL_CHANGE2 in fills
     assert _find(sh, "Removed / completed today (1)") is not None
     assert _find(sh, "CO#0 -> CO#1") is not None
     # New change-order columns: Design, Arrangement (trimmed), and what changed.

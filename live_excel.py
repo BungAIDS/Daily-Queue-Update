@@ -46,6 +46,7 @@ _FILL_RGB = {
     "header": "305496",
     "overdue": "FFC7CE", "duetoday": "F8CBAD", "soon": "FFEB9C", "new": "D9D9D9",
     "overdue_new": "F4A5A8", "duetoday_new": "F4B183", "soon_new": "F5D750",
+    "chg1": "D9D9D9", "chg2": "BFBFBF", "chg3": "A6A6A6",   # change-row greys (each darker)
     "dwg_yes": "C6EFCE", "dwg_no": "FFC7CE",
     "sep": "808080",   # the vertical divider column between the two matrices
 }
@@ -217,8 +218,11 @@ def _style_row(ws, r: int, cells: List) -> None:
 
 
 def _pad(row: List, ncols: int) -> List[Any]:
+    # Trailing cells are padded with None (a truly EMPTY cell), not "" — so a long
+    # title/header in an earlier column can spill over them instead of being
+    # clipped (Excel won't overflow text into a cell that holds an empty string).
     vals = [(cell.value if cell.value is not None else "") for cell in row]
-    return vals + [""] * (ncols - len(vals))
+    return vals + [None] * (ncols - len(vals))
 
 
 def render_sheet(app, wb, sheet: Sheet) -> None:
@@ -249,10 +253,16 @@ def render_sheet(app, wb, sheet: Sheet) -> None:
             pass
 
     try:
+        ws.UsedRange.WrapText = False        # let long titles spill, not wrap
         ws.UsedRange.Columns.AutoFit()
         for col in range(1, ncols + 1):
             if ws.Columns(col).ColumnWidth > 60:
                 ws.Columns(col).ColumnWidth = 60
+        # Column 1 holds the section titles and the 'last updated' stamp; cap it so
+        # those don't balloon the column — they overflow into the empty cells to
+        # the right instead. Its real data (Job #, times) is short.
+        if ws.Columns(1).ColumnWidth > 12:
+            ws.Columns(1).ColumnWidth = 12
     except Exception:  # noqa: BLE001
         pass
 
