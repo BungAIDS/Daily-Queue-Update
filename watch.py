@@ -234,8 +234,12 @@ def _changes_sheet(master: dict, lq_jobs: list, new_today: set, today: date,
                      if e.get("seen_on_queue") and not e.get("on_queue")
                      and str(e.get("left") or "")[:10] == today.isoformat()]
     updated_at = live_sheets.fmt_datetime(now)
+    # job# -> its latest job dict, for the change-order table's Design / Arrangement
+    # / change-description columns.
+    order_lookup = {jn: e.get("job", {}) for jn, e in master.get("orders", {}).items()}
     return live_sheets.changes_sheet(new_today_jobs, events, removed_today,
-                                     today.isoformat(), updated_at=updated_at)
+                                     today.isoformat(), updated_at=updated_at,
+                                     order_lookup=order_lookup)
 
 
 def _new_today_ids(lq_jobs: list, today: date) -> set:

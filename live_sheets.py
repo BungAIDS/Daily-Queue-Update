@@ -348,12 +348,24 @@ def _events_table(sh: Sheet, title: str, headers: List[str],
     sh.blank()
 
 
+def _co_change_desc(order: Dict[str, Any], co_num: Any) -> str:
+    """The change-order description for CO#<co_num> from the order's co_history
+    (the part after the 'C/O #N date initials:' prefix), or '' if not found."""
+    cn = str(co_num or "").strip()
+    for line in (order.get("co_history") or []):
+        m = re.match(r"\s*C\s*/?\s*O\s*#?\s*(\d+)", str(line), re.I)
+        if m and m.group(1) == cn:
+            return line.split(":", 1)[1].strip() if ":" in line else str(line).strip()
+    return ""
+
+
 def changes_sheet(
     new_today: List[Dict[str, Any]],
     change_events: List[Dict[str, Any]],
     removed_today: List[Dict[str, Any]],
     date_str: str,
     updated_at: Optional[str] = None,
+    order_lookup: Optional[Dict[str, Dict[str, Any]]] = None,
     name: str = "Changes",
 ) -> Sheet:
     """Today's activity log:
@@ -363,7 +375,10 @@ def changes_sheet(
         changes several times in a day is several lines), newest first.
       - Removed / completed today.
     `change_events` is the day's change log (see change_log.py); `updated_at` is a
-    display string stamped at the top so users can see the tab is live."""
+    display string stamped at the top so users can see the tab is live;
+    `order_lookup` maps job# -> the order's job dict (for the Design / Arrangement
+    / change description columns on the change-order table)."""
+    order_lookup = order_lookup or {}
     sh = Sheet(name, freeze=None)
     sh.row([Cell(f"Changes — {date_str}", font=F_SECTION)])
     if updated_at:
@@ -375,9 +390,16 @@ def changes_sheet(
 
     newest_first = sorted(change_events, key=lambda e: e.get("time", ""), reverse=True)
     co_events = [e for e in newest_first if e.get("field") == "CO#"]
-    _events_table(sh, "Change orders today", ["Time", "Job #", "Customer", "Change"],
-                  [[_fmt_time(e.get("time", "")), e.get("job", ""), e.get("customer", ""),
-                    f"CO#{e.get('old', '')} -> CO#{e.get('new', '')}"] for e in co_events])
+
+    def _co_row(e: Dict[str, Any]) -> List[Any]:
+        o = order_lookup.get(str(e.get("job", "")), {})
+        return [_fmt_time(e.get("time", "")), e.get("job", ""), e.get("customer", ""),
+                o.get("design", ""), split_arrangement(o.get("so_arrangement", ""))[0],
+                f"CO#{e.get('old', '')} -> CO#{e.get('new', '')}",
+                _co_change_desc(o, e.get("new"))]
+    _events_table(sh, "Change orders today",
+                  ["Time", "Job #", "Customer", "Design", "Arrangement", "Change", "What changed"],
+                  [_co_row(e) for e in co_events])
 
     field_events = [e for e in newest_first if e.get("field") != "CO#"]
     _events_table(sh, "Orders that changed today",

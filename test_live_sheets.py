@@ -97,8 +97,10 @@ def test_changes_today_log_sections():
          "field": "CO#", "old": "0", "new": "1"},
     ]
     removed_today = [_job("420900")]
+    order_lookup = {"420700": {"design": "47", "so_arrangement": "A/9H Belt drive",
+                               "co_history": ["C/O #1 06/16/26 KLO: ADDED VFD CONTROLS"]}}
     sh = ls.changes_sheet(new_today, events, removed_today, "2026-06-16",
-                          updated_at="Jun 16, 2026 11:05 AM")
+                          updated_at="Jun 16, 2026 11:05 AM", order_lookup=order_lookup)
     assert _find(sh, "Changes — 2026-06-16") is not None
     assert _find(sh, "Last updated Jun 16, 2026 11:05 AM") is not None   # live stamp near the top
     assert _find(sh, "New orders today (1)") is not None
@@ -106,6 +108,10 @@ def test_changes_today_log_sections():
     assert _find(sh, "Orders that changed today (2)") is not None    # two End Date lines
     assert _find(sh, "Removed / completed today (1)") is not None
     assert _find(sh, "CO#0 -> CO#1") is not None
+    # New change-order columns: Design, Arrangement (trimmed), and what changed.
+    assert _find(sh, "What changed") is not None                     # the new header
+    assert _find(sh, "ADDED VFD CONTROLS") is not None               # change description
+    assert _find(sh, "A/9H") is not None                             # arrangement (suffix trimmed)
 
 
 def test_history_sheet():
