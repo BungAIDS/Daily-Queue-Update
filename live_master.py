@@ -115,6 +115,42 @@ def _diffs(old_job: Dict[str, Any], new_job: Dict[str, Any]) -> List[Tuple[str, 
     return out
 
 
+# Enrichment (Sales-Order / quote-run / folder) fields. When a re-fetch or the
+# morning snapshot comes back having LOST a change order we already had — a CO#
+# never really drops, so that means the fetch failed or returned a stale doc — we
+# keep these from what we knew rather than wiping them to the failed fetch's
+# blanks. Board fields (status, dates, price, assignee, …) still refresh.
+_ENRICHMENT_KEEP = (
+    "co_number", "so_pdf", "co_history",
+    "so_design_desc", "so_size", "so_arrangement", "so_motor_pos", "so_class",
+    "so_rotation", "so_discharge", "so_pct_width", "so_wheel_type",
+    "so_design_temp", "so_max_temp", "so_special_temp",
+    "line_items", "line_item_tags",
+    "has_drive_run", "drive_run_pdf", "drive_run_count", "drive_run_rev",
+    "drive_run", "drive_run_summary", "drive_run_template",
+    "job_type", "job_folder", "dwg_extras", "dwg_missing_std",
+)
+
+
+def _keep_better_enrichment(stored: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
+    """Guard against a regression: if `incoming` has a LOWER change order than
+    `stored` (or the same CO# but a now-blank SO link), a re-fetch must have failed
+    or returned a stale/original Sales Order — keep the prior enrichment and take
+    only the fresh board fields. Otherwise use `incoming` unchanged."""
+    s_co = int(stored.get("co_number") or 0)
+    i_co = int(incoming.get("co_number") or 0)
+    s_pdf = (stored.get("so_pdf") or "").strip()
+    i_pdf = (incoming.get("so_pdf") or "").strip()
+    regressed = i_co < s_co or (i_co == s_co and s_pdf and not i_pdf)
+    if not regressed:
+        return incoming
+    merged = dict(incoming)
+    for f in _ENRICHMENT_KEEP:
+        if stored.get(f) not in (None, "", [], {}):
+            merged[f] = stored[f]
+    return merged
+
+
 def update(master: Dict[str, Any], present: List[Dict[str, Any]],
            now: datetime) -> List[Dict[str, Any]]:
     """Fold the current board into the master log: upsert every present order
@@ -147,7 +183,10 @@ def update(master: Dict[str, Any], present: List[Dict[str, Any]],
                           "last_in": now_iso, "last_out": None,
                           "left": None, "on_queue": True, "seen_on_queue": True, "job": dict(j)}
         else:
-            for field, old, new in _diffs(entry.get("job") or {}, j):
+            stored_job = entry.get("job") or {}
+            # Never let a failed/stale re-fetch wipe a change order we already had.
+            merged = _keep_better_enrichment(stored_job, j)
+            for field, old, new in _diffs(stored_job, merged):
                 events.append({"time": now_iso, "job": jn, "customer": _norm(j.get("customer")),
                                "field": field, "old": old, "new": new})
             if not entry.get("on_queue"):
@@ -156,7 +195,7 @@ def update(master: Dict[str, Any], present: List[Dict[str, Any]],
                 # add time as known (we watched this arrival ourselves).
                 entry["last_in"] = now_iso
                 entry["added_known"] = known
-            entry["job"] = dict(j)
+            entry["job"] = dict(merged)
             entry["on_queue"] = True
             entry["seen_on_queue"] = True   # the watcher has seen it on the board
             entry["left"] = None

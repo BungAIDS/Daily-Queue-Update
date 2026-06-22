@@ -316,6 +316,11 @@ def refresh_sales_orders(jobs: List[Dict[str, Any]]) -> int:
         if not hit:
             continue
         path, co = hit
+        # Never regress: if the only Sales Order on disk is older than the change
+        # order we already know about (e.g. the new CO's PDF hasn't downloaded
+        # yet), don't point the link back at the original — keep the known CO#.
+        if co < int(j.get("co_number") or 0):
+            continue
         j["so_pdf"] = str(path)
         j["co_number"] = co
         n += 1

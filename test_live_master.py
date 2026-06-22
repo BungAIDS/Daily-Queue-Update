@@ -119,6 +119,32 @@ def test_update_tracks_co_and_skips_initial_population():
     assert any(x["field"] == "Size" and x["old"] == "M2" and x["new"] == "M3" for x in ev3)
 
 
+def test_failed_refetch_does_not_regress_change_order():
+    m = {"orders": {}}
+    # A real change order with its SO link + spec.
+    lm.update(m, [_job("100", co_number=2, so_pdf="Z:/SO/100/CO#2.pdf", so_size="27")], T0)
+    assert m["orders"]["100"]["job"]["co_number"] == 2
+    # A later poll where a re-fetch FAILED (co dropped to 0, link + spec blanked)
+    # must NOT wipe the known change order, and must log NO CO# change.
+    ev = lm.update(m, [_job("100", co_number=0, so_pdf="", so_size="")], T1)
+    job = m["orders"]["100"]["job"]
+    assert job["co_number"] == 2 and job["so_pdf"] == "Z:/SO/100/CO#2.pdf" and job["so_size"] == "27"
+    assert not any(e["field"] == "CO#" for e in ev)
+    # A genuine advance (CO#2 -> CO#3) is still accepted and logged.
+    ev2 = lm.update(m, [_job("100", co_number=3, so_pdf="Z:/SO/100/CO#3.pdf", so_size="27")], T2)
+    assert m["orders"]["100"]["job"]["co_number"] == 3
+    co = [e for e in ev2 if e["field"] == "CO#"]
+    assert co and co[0]["old"] == "2" and co[0]["new"] == "3"
+
+
+def test_blank_so_link_does_not_overwrite_known_link():
+    m = {"orders": {}}
+    lm.update(m, [_job("200", co_number=1, so_pdf="Z:/SO/200/CO#1.pdf")], T0)
+    # Same CO#, but the link came back blank — keep the one we had.
+    lm.update(m, [_job("200", co_number=1, so_pdf="")], T1)
+    assert m["orders"]["200"]["job"]["so_pdf"] == "Z:/SO/200/CO#1.pdf"
+
+
 def test_merge_order_adds_and_never_regresses():
     m = {"orders": {}}
     # A backlog order we've never seen on the board is created off-queue.
