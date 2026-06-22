@@ -165,7 +165,10 @@ def _enrich_pending(state: dict) -> list:
     log.info("Enriching %d order(s) — new, repriced or re-verified "
              "(Sales Order + quote run + AutoCAD folder)...", len(pending))
     try:
-        enrich_with_sales_orders(pending)
+        # deep_folders=False: skip the full-tree folder sweep intraday — a
+        # standard folder is still found by direct lookup, the daily run catches
+        # the rest — so a folderless job doesn't cost a ~12K-folder walk each poll.
+        enrich_with_sales_orders(pending, deep_folders=False)
     except Exception:  # noqa: BLE001 - never let enrichment sink the loop
         log.exception("Enrichment failed this cycle; will retry these next poll")
         return []

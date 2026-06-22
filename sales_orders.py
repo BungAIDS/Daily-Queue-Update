@@ -169,7 +169,7 @@ def _archive_folder_runs(job: str, autocad_folder: "Path | None") -> List[Path]:
     return _archived_runs(job)
 
 
-def _find_autocad_folders(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
+def _find_autocad_folders(job_numbers: List[str], deep: bool = True) -> Dict[str, Dict[str, Any]]:
     """Locate each job's AutoCAD folder, which is AUTOCAD_JOBS_DIR/<type>/<first 3
     digits of job#>/<job#> (e.g. JOBS/AXIAL/421/421303, JOBS/GENERAL LINE/421/
     421034). Returns {job: {type, path, dwg_extras, dwg_missing_std}}; {} if the
@@ -178,9 +178,11 @@ def _find_autocad_folders(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
     We build each job's expected path directly and check it per type, rather than
     globbing the whole ~12K-folder tree — that's far faster and reliable on the
     network share (the old full sweep could time out before reaching some types,
-    which is why axial fans came back as 'Open'). A glob fallback covers any job
-    that doesn't follow the <type>/<first3>/<job> convention. While we have a
-    folder we also scan it for the job's custom drawings."""
+    which is why axial fans came back as 'Open'). When `deep`, a glob fallback also
+    covers any job that doesn't follow the <type>/<first3>/<job> convention; the
+    per-poll re-check passes deep=False to skip that expensive sweep, since the
+    direct lookup already finds a standard folder the moment it's created. While we
+    have a folder we also scan it for the job's custom drawings."""
     out: Dict[str, Dict[str, Any]] = {}
     root = AUTOCAD_JOBS_DIR
     wanted = [str(j).strip() for j in job_numbers if str(j).strip()]
@@ -228,8 +230,11 @@ def _find_autocad_folders(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
     # Fallback for any job whose folder doesn't follow <type>/<first3>/<job>:
     # one depth-3 sweep, matching the leaf either exactly (keeps a trailing
     # letter like 352366A) or by its leading number ("421034 ACME" -> 421034).
+    # Skipped when deep=False (the per-poll re-check) — that sweep walks the whole
+    # ~12K-folder tree and would run every cycle for jobs whose folder simply
+    # doesn't exist yet.
     unfound = {j for j in wanted if j not in out}
-    if unfound:
+    if deep and unfound:
         try:
             for m in root.glob("*/*/*"):
                 if not m.is_dir():
@@ -261,7 +266,9 @@ def refresh_autocad_folders(jobs: List[Dict[str, Any]]) -> int:
     by_job = {j["job"]: j for j in jobs if j.get("job")}
     if not by_job:
         return 0
-    index = _find_autocad_folders(list(by_job.keys()))
+    # Direct lookup only (no full-tree sweep): cheap enough to run every poll, and
+    # it still finds a standard <type>/<first3>/<job> folder the moment it exists.
+    index = _find_autocad_folders(list(by_job.keys()), deep=False)
     n = 0
     for jn, j in by_job.items():
         info = index.get(jn)
@@ -726,7 +733,8 @@ def _terminal(r: Dict[str, Any]) -> bool:
     return bool(r.get("pdf_path") or r.get("no_so"))
 
 
-def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) -> None:
+def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2,
+                             deep_folders: bool = True) -> None:
     """Mutate `jobs` in place, attaching sales-order + folder fields (see module
     docstring). Opens every job's detail modal in parallel — the slow step.
 
@@ -734,12 +742,17 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
     leaving a job empty. So we make up to `max_passes` passes, re-running only
     the jobs that came back incomplete; that leftover set is small and far less
     contended, so the stragglers come through — without changing concurrency.
+
+    `deep_folders=False` (the intraday watcher) skips the full-tree folder sweep —
+    a standard folder is still found by direct lookup, and non-standard ones are
+    picked up by the next daily run — so a folderless job never costs a ~12K-folder
+    walk on every enrichment.
     """
     by_job = {j["job"]: j for j in jobs if j.get("job")}
     if not by_job:
         return
 
-    index = _find_autocad_folders(list(by_job.keys()))
+    index = _find_autocad_folders(list(by_job.keys()), deep=deep_folders)
 
     so_results: Dict[str, Dict[str, Any]] = {}
     seen_types: set = set()
