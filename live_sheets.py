@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional
 
 from excel_writer import (COLUMNS, QUEUE_HEADERS, MONEY_FMT, _co_label,
                           _drive_run_label, _flags_str, _parse_date,
-                          _parse_money, _dwg_suffixes, folder_of)
+                          _parse_money, _dwg_suffixes, folder_of, split_arrangement)
 
 # --- named styles (resolved to real colors by live_excel) ------------------- #
 F_HEADER = "header"           # blue header bg + white bold
@@ -114,10 +114,13 @@ def _money_cell(raw: str) -> Cell:
 
 
 def _job_value_cells(j: Dict[str, Any], columns: Optional[List] = None,
-                     co_changed: bool = False) -> List[Cell]:
+                     co_changed: bool = False, arrange_comment: bool = False) -> List[Cell]:
     """The cells for one job across `columns` (defaults to the full COLUMNS) —
     mirrors excel_writer._write_job_row (hyperlinks, CO#, drive-run label, money,
-    flags), as style-tagged Cells."""
+    flags), as style-tagged Cells. `arrange_comment` trims the Arrangement cell to
+    its short 'A/X' code and moves any descriptive suffix to a hover note (used on
+    the display tabs; Order History keeps the full text to avoid re-writing the
+    whole log)."""
     columns = COLUMNS if columns is None else columns
     cells: List[Cell] = []
     linked_idx = set()
@@ -153,6 +156,12 @@ def _job_value_cells(j: Dict[str, Any], columns: Optional[List] = None,
                 c.font = F_DRIVE_RUN
         elif key == "total_price":
             c = _money_cell(j.get("total_price", ""))
+        elif key == "so_arrangement" and arrange_comment:
+            # Keep the column to 'A/X'; hover the cell for the descriptive suffix.
+            code, note = split_arrangement(j.get("so_arrangement", ""))
+            c = Cell(code)
+            if note:
+                c.comment = note
         elif key == "flags":
             c = Cell(_flags_str(j))
         else:
@@ -224,7 +233,7 @@ def full_queue_sheet(
         is_new = j.get("job") in new_ids
         fill = _row_fill(j, today, is_new)
         added = Cell(added_label(j, ref=ref))
-        std = _job_value_cells(j, co_changed=j.get("job") in co_changed_ids)
+        std = _job_value_cells(j, co_changed=j.get("job") in co_changed_ids, arrange_comment=True)
         # Apply the urgency/new row fill across Added + standard columns (not the
         # DWG cells, which keep their own green/red).
         if fill is not None:
@@ -463,7 +472,7 @@ def live_queue_records(jobs: List[Dict[str, Any]], today: date,
         # number_format "@" (Text) keeps the AM/PM label (e.g. "3:53 PM") from
         # being coerced by Excel into a 24h datetime serial.
         added = Cell(added_label(j, ref=ref), number_format="@")
-        std = _job_value_cells(j, co_changed=co_changed)
+        std = _job_value_cells(j, co_changed=co_changed, arrange_comment=True)
         # Write End Date as a real date so it sorts/filters as a date in Excel.
         ed = _parse_date(j.get("end_date", ""))
         if ed is not None:

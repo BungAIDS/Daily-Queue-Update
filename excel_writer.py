@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
 
 from openpyxl import Workbook
+from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -324,6 +326,22 @@ def _co_label(j: Dict[str, Any]) -> str:
     return f"CO#{co}" if co else ""
 
 
+_ARRANGEMENT_RE = re.compile(r"^(A/[A-Za-z0-9]+)(?:\s+(.*))?$")
+
+
+def split_arrangement(value: str) -> "tuple[str, str]":
+    """Split a raw arrangement into the short 'A/X' code (X = digits/letters) and
+    any trailing descriptive text, so the column stays tidy and the detail moves
+    to a hover note. 'A/4V C-Face Flange mount (no motor base)' -> ('A/4V',
+    'C-Face Flange mount (no motor base)'). Anything that isn't an 'A/...' code
+    (e.g. 'N/A', '') passes through unchanged with no note."""
+    s = (value or "").strip()
+    m = _ARRANGEMENT_RE.match(s)
+    if not m:
+        return s, ""
+    return m.group(1), (m.group(2) or "").strip()
+
+
 def folder_of(path: str) -> str:
     """The containing folder of a Windows/posix file path. Used to link the Job #
     at the Sales Order *folder* rather than a specific PDF: a change order renames
@@ -380,6 +398,13 @@ def _write_job_row(ws, row: int, j: Dict[str, Any], co_changed: bool = False) ->
                 cell.font = DRIVE_RUN_FONT
         elif key == "total_price":
             _write_money_cell(ws, row, col, j.get("total_price", ""))
+        elif key == "so_arrangement":
+            # Keep the column to the short 'A/X' code; any descriptive suffix
+            # moves to a hover note.
+            code, note = split_arrangement(j.get("so_arrangement", ""))
+            cell = ws.cell(row=row, column=col, value=code)
+            if note:
+                cell.comment = Comment(note, "Queue")
         elif key == "flags":
             ws.cell(row=row, column=col, value=_flags_str(j))
         else:

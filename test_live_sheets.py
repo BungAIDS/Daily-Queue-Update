@@ -211,6 +211,24 @@ def test_live_queue_co_change_turns_text_red():
     assert plain[cust].font != F_RED
 
 
+def test_live_queue_arrangement_code_and_comment():
+    arr = (ls.LIVE_QUEUE_KEY_COL - 1) + ls.QUEUE_HEADERS.index("Arrangement")
+    # A descriptive arrangement is trimmed to 'A/X'; the rest moves to a hover note.
+    j = _job("421000", so_arrangement="A/4V C-Face Flange mount (no motor base)")
+    c = ls.live_queue_records([j], TODAY)[0][1][arr]
+    assert c.value == "A/4V"
+    assert c.comment and "C-Face Flange mount (no motor base)" in c.comment
+    # A clean code keeps no comment; N/A passes through untouched.
+    c2 = ls.live_queue_records([_job("421001", so_arrangement="A/4")], TODAY)[0][1][arr]
+    assert c2.value == "A/4" and c2.comment is None
+    na = ls.live_queue_records([_job("421002", so_arrangement="N/A")], TODAY)[0][1][arr]
+    assert na.value == "N/A" and na.comment is None
+    # Order History keeps the full text (no trim, no note) to avoid re-writing the log.
+    oh = ls._job_value_cells(j, columns=ls.OH_DATA_COLUMNS)
+    oh_arr = oh[[k for _, k in ls.OH_DATA_COLUMNS].index("so_arrangement")]
+    assert oh_arr.value == "A/4V C-Face Flange mount (no motor base)" and oh_arr.comment is None
+
+
 def test_quote_run_link_folder_when_multiple_runs():
     dr_idx = ls.QUEUE_HEADERS.index("Quote Run")
     lead = ls.LIVE_QUEUE_KEY_COL - 1               # 0-based start of standard cells
