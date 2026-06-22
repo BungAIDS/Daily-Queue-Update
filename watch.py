@@ -29,7 +29,6 @@ same place the daily run lives. Configure it in .env (see .env.example).
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
 import signal
@@ -182,7 +181,7 @@ def _force_rebuild(master: dict) -> None:
     only appended to (its oh_sigs persist across runs), so a restart never wipes
     the ~12K-row tab."""
     master["lq_sigs"] = {}
-    master.pop("below_sig", None)   # force the 'removed' block to redraw on (re)start
+    master.pop("below_sig", None)   # legacy: the 'removed' block is now passed every cycle
     # One-time cleanup: a backlog order the watcher never saw on the board must
     # have no 'left' time (earlier merges wrongly stamped one, which made the
     # whole backlog look "removed today").
@@ -293,9 +292,10 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
                   "sort_col": live_sheets.LIVE_QUEUE_CBC_COL, "text_cols": [1],  # Added (col 1) -> AM/PM text
                   "freeze": "C2"}   # header on row 1, frozen with the Added + Job # columns
 
-    # "Removed since this morning" block below the Live Queue. Render it only when
-    # the set actually changes (a removal/return), not every cycle. Only orders
-    # the watcher actually saw on the board count — never the merged backlog.
+    # "Removed since this morning" block below the Live Queue. Pass it EVERY cycle
+    # so the renderer can reposition it when the queue grows (otherwise the new
+    # rows append right over it). Only orders the watcher actually saw on the
+    # board count — never the merged backlog.
     removed = [(e.get("job", {}), e.get("left")) for e in master.get("orders", {}).values()
                if e.get("seen_on_queue") and not e.get("on_queue")
                and str(e.get("left") or "")[:10] == today.isoformat()]
@@ -303,15 +303,12 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
     # Keep the key column (LIVE_QUEUE_KEY_COL = col 2, Job #) blank in this block
     # so the key-based "last live data row" lookup in _render_below — and the next
     # poll's keymap — skip these rows. The order numbers go in col 1.
-    below = {"title": "Removed from the queue since this morning",
-             "headers": ["Job #", "", "Customer", "Design", "Removed"],
-             "rows": [[j.get("job", ""), "", j.get("customer", ""),
-                       j.get("so_design_desc") or j.get("design", ""),
-                       live_sheets.fmt_time(left)] for j, left in removed]}
-    below_sig = json.dumps(below, default=str, sort_keys=True)
-    if below_sig != master.get("below_sig"):
-        lq_payload["below"] = below
-        master["below_sig"] = below_sig
+    lq_payload["below"] = {
+        "title": "Removed from the queue since this morning",
+        "headers": ["Job #", "", "Customer", "Design", "Removed"],
+        "rows": [[j.get("job", ""), "", j.get("customer", ""),
+                  j.get("so_design_desc") or j.get("design", ""),
+                  live_sheets.fmt_time(left)] for j, left in removed]}
 
     # Order History: live master + the whole line-items backlog, as a matrix log.
     # Built ONCE then only appended to; we rebuild only on a build-format bump

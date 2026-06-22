@@ -80,6 +80,10 @@ _FROZEN: set = set()
 # already done this process, so we don't rewrite the header every cycle.
 _HEADER_DONE: set = set()
 
+# Last-rendered 'below' block per sheet, so it's only re-drawn (and repositioned)
+# when the live data row count shifts or the block's content changes.
+_BELOW_LAST: Dict[str, Any] = {}
+
 _XL_UP = -4162           # xlUp
 _XL_NONE = -4142         # xlColorIndexNone
 _XL_AUTO = -4105         # xlColorIndexAutomatic
@@ -353,6 +357,14 @@ def _render_below(ws, key_col: int, ncols: int, below: Dict[str, Any]) -> None:
     r += 1
     ws.Range(ws.Cells(r, 1), ws.Cells(r, len(headers))).Value = [headers]
     _apply_run(ws, r, 1, len(headers), "header", "header", False)
+    if rows:
+        # Format the block as Text BEFORE writing, so the 'Removed' time stays a
+        # string (e.g. "3:53 PM") and spills into the empty cells to its right
+        # rather than being coerced to a time serial that shows as "#####".
+        try:
+            ws.Range(ws.Cells(r + 1, 1), ws.Cells(r + len(rows), len(headers))).NumberFormat = "@"
+        except Exception:  # noqa: BLE001
+            pass
     for i, row in enumerate(rows, start=r + 1):
         ws.Range(ws.Cells(i, 1), ws.Cells(i, len(row))).Value = [list(row)]
 
@@ -448,9 +460,13 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
         except Exception:  # noqa: BLE001
             pass
 
-    if below is not None:   # the 'Removed since this morning' section, best-effort
+    # The 'Removed since this morning' block sits right after the live data, so it
+    # must be re-drawn (repositioned) whenever the row count shifted — else new
+    # appends overwrite it — as well as when its own content changed. Best-effort.
+    if below is not None and (deletes or appends or below != _BELOW_LAST.get(name)):
         try:
             _render_below(ws, key_col, ncols, below)
+            _BELOW_LAST[name] = below
         except Exception as e:  # noqa: BLE001
             log.debug("below-block render failed (%s)", e)
 
