@@ -403,22 +403,28 @@ def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]]) -> None
     order_idx = {h: i for i, h in enumerate(QUEUE_HEADERS)}
     cols = sorted(changed, key=lambda l: (order_idx.get(l, 10 ** 6), l))
     sh.row(_header_cells(["Job #", "Customer"] + cols))
+    def _shade(idx: int) -> Optional[str]:
+        return _CHANGE_FILLS[min(idx, len(_CHANGE_FILLS) - 1)] if idx >= 0 else None
+
     for jn in sorted(orders, key=lambda j: orders[j]["time"], reverse=True):  # most recent first
         o = orders[jn]
         for i, (_t, moved) in enumerate(o["instances"]):  # each instance -> before/after pair
-            # 'after' rows get progressively darker grey for each later instance.
-            fill = _CHANGE_FILLS[min(i, len(_CHANGE_FILLS) - 1)]
-            # 'before' row: prior values of the fields that moved this instance
-            # (red); Job #/Customer only on the order's first row so it reads as a block.
-            before = [Cell(jn if i == 0 else ""), Cell(o["customer"] if i == 0 else "")]
+            # The block darkens monotonically down the order and only resets to
+            # white at a NEW order: the first 'before' row (the order's first row,
+            # which also carries Job #/Customer) is white, then every row steps a
+            # shade darker — before(i) matches the prior 'after', after(i) is darker.
+            before_fill = _shade(i - 1)                   # white for i == 0
+            after_fill = _shade(i)
+            before = [Cell(jn if i == 0 else "", fill=before_fill),
+                      Cell(o["customer"] if i == 0 else "", fill=before_fill)]
             for label in cols:
-                before.append(Cell(moved[label][0], font=F_RED) if label in moved else Cell(""))
+                before.append(Cell(moved[label][0], fill=before_fill, font=F_RED)
+                              if label in moved else Cell("", fill=before_fill))
             sh.row(before)
-            # 'after' row: the new values, shaded.
-            after = [Cell("", fill=fill), Cell("", fill=fill)]
+            after = [Cell("", fill=after_fill), Cell("", fill=after_fill)]
             for label in cols:
-                after.append(Cell(moved[label][1], fill=fill, font=F_RED)
-                             if label in moved else Cell("", fill=fill))
+                after.append(Cell(moved[label][1], fill=after_fill, font=F_RED)
+                             if label in moved else Cell("", fill=after_fill))
             sh.row(after)
     sh.blank()
 
