@@ -362,13 +362,13 @@ def _events_table(sh: Sheet, title: str, headers: List[str],
 
 
 def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]]) -> None:
-    """'Orders that changed today' grouped by CHANGE INSTANCE: each poll in which
-    an order changed becomes a before/after PAIR of rows — the 'before' row holds
-    the prior values and the 'after' row the new values of whichever fields moved
-    in that one instance. Several fields changing at once is still just two rows;
-    an order that changed in several polls gets a pair per instance (oldest
-    first). Changed cells are red; 'after' rows are shaded grey. Columns are the
-    union of fields any order changed today, ordered like the queue."""
+    """'Orders that changed today' as a running history: a white 'was' row with
+    each changed field's start-of-day value, then ONE row per change instance (a
+    poll in which the order changed) showing only the fields that moved in that
+    instance — the prior row's value carries forward as the implied 'old', so a
+    value is never repeated. Instance rows shade progressively darker; white marks
+    a new order. Changed cells are red. Columns are the union of fields any order
+    changed today, ordered like the queue."""
     by_job: Dict[str, Dict[str, Any]] = {}
     for e in sorted(field_events, key=lambda x: x.get("time", "")):   # oldest first
         jn, label = str(e.get("job", "") or ""), e.get("field", "") or ""
@@ -383,14 +383,18 @@ def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]]) -> None
 
     orders: Dict[str, Dict[str, Any]] = {}
     for jn, rec in by_job.items():
-        instances = [(t, rec["instances"][t]) for t in sorted(rec["instances"]) if rec["instances"][t]]
+        instances = [rec["instances"][t] for t in sorted(rec["instances"]) if rec["instances"][t]]
         if not instances:
             continue
-        fields: set = set()
-        for _t, moved in instances:
-            fields |= set(moved)
-        orders[jn] = {"customer": rec["customer"], "time": instances[-1][0],
-                      "fields": fields, "instances": instances}
+        first_old: Dict[str, Any] = {}
+        for moved in instances:                       # oldest first -> first old per field
+            for label, (old, _new) in moved.items():
+                first_old.setdefault(label, old)
+        orders[jn] = {"customer": rec["customer"], "time": max(rec["instances"]),
+                      "fields": set(first_old),
+                      # each instance as {field: new value}
+                      "steps": [{l: n for l, (_o, n) in moved.items()} for moved in instances],
+                      "baseline": first_old}
 
     sh.row([Cell(f"Orders that changed today ({len(orders)})", font=F_SECTION)])
     if not orders:
@@ -403,29 +407,22 @@ def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]]) -> None
     order_idx = {h: i for i, h in enumerate(QUEUE_HEADERS)}
     cols = sorted(changed, key=lambda l: (order_idx.get(l, 10 ** 6), l))
     sh.row(_header_cells(["Job #", "Customer"] + cols))
-    def _shade(idx: int) -> Optional[str]:
-        return _CHANGE_FILLS[min(idx, len(_CHANGE_FILLS) - 1)] if idx >= 0 else None
-
     for jn in sorted(orders, key=lambda j: orders[j]["time"], reverse=True):  # most recent first
         o = orders[jn]
-        for i, (_t, moved) in enumerate(o["instances"]):  # each instance -> before/after pair
-            # The block darkens monotonically down the order and only resets to
-            # white at a NEW order: the first 'before' row (the order's first row,
-            # which also carries Job #/Customer) is white, then every row steps a
-            # shade darker — before(i) matches the prior 'after', after(i) is darker.
-            before_fill = _shade(i - 1)                   # white for i == 0
-            after_fill = _shade(i)
-            before = [Cell(jn if i == 0 else "", fill=before_fill),
-                      Cell(o["customer"] if i == 0 else "", fill=before_fill)]
+        # 'was' row (white): start-of-day value of each changed field; the order's
+        # only white row, carrying Job #/Customer so white reads as a new order.
+        was = [Cell(jn), Cell(o["customer"])]
+        for label in cols:
+            was.append(Cell(o["baseline"][label], font=F_RED) if label in o["fields"] else Cell(""))
+        sh.row(was)
+        # one row per instance, progressively darker, showing only what it changed.
+        for i, step in enumerate(o["steps"]):
+            fill = _CHANGE_FILLS[min(i, len(_CHANGE_FILLS) - 1)]
+            row = [Cell("", fill=fill), Cell("", fill=fill)]
             for label in cols:
-                before.append(Cell(moved[label][0], fill=before_fill, font=F_RED)
-                              if label in moved else Cell("", fill=before_fill))
-            sh.row(before)
-            after = [Cell("", fill=after_fill), Cell("", fill=after_fill)]
-            for label in cols:
-                after.append(Cell(moved[label][1], fill=after_fill, font=F_RED)
-                             if label in moved else Cell("", fill=after_fill))
-            sh.row(after)
+                row.append(Cell(step[label], fill=fill, font=F_RED)
+                           if label in step else Cell("", fill=fill))
+            sh.row(row)
     sh.blank()
 
 
