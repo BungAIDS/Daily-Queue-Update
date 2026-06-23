@@ -58,9 +58,9 @@ COLUMNS = [
     ("Arrangement", "so_arrangement"),
     ("Assigned To", "assigned_to"),
     ("Checker", "checker"),
+    ("Note", "status_note"),
     ("Engineer", "engineers"),
     ("End Date", "end_date"),
-    ("Note", "status_note"),
     # --- everything else (original relative order) ---
     ("Description", "so_design_desc"),
     ("Motor Pos", "so_motor_pos"),
