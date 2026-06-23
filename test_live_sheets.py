@@ -266,12 +266,14 @@ def test_live_queue_arrangement_code_and_comment():
 
 def test_live_queue_size_main_and_comment():
     sz = (ls.LIVE_QUEUE_KEY_COL - 1) + ls.QUEUE_HEADERS.index("Size")
-    # A descriptive size is trimmed to the main size; the rest moves to a note.
+    # The leading number stays; the -code suffix and any description move to a note.
     j = ls.live_queue_records([_job("421000", so_size="3300-B12 Blade-1800")], TODAY)[0][1][sz]
-    assert j.value == "3300-B12" and j.comment == "Blade-1800"
+    assert j.value == "3300" and j.comment == "-B12 Blade-1800"
+    code = ls.live_queue_records([_job("421004", so_size="3000-A6")], TODAY)[0][1][sz]
+    assert code.value == "3000" and code.comment == "-A6"
     paren = ls.live_queue_records([_job("421001", so_size="2412 (3600 RPM or less)")], TODAY)[0][1][sz]
     assert paren.value == "2412" and "(3600 RPM or less)" in paren.comment
-    # A fraction stays whole; a plain size keeps no comment.
+    # A fraction stays whole; a plain number / code keeps no comment.
     frac = ls.live_queue_records([_job("421002", so_size="13 1/2")], TODAY)[0][1][sz]
     assert frac.value == "13 1/2" and frac.comment is None
     plain = ls.live_queue_records([_job("421003", so_size="H3")], TODAY)[0][1][sz]

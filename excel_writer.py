@@ -345,23 +345,25 @@ def split_arrangement(value: str) -> "tuple[str, str]":
     return m.group(1), (m.group(2) or "").strip()
 
 
-# The main size is the leading token (a number/code like 1200, H3, 3300-B12),
-# optionally followed by a fraction (so "13 1/2" stays whole); anything after that
-# (e.g. "Blade-1800", "(3600 RPM or less)") is descriptive and moves to the note.
-_SIZE_RE = re.compile(r"^(\S+(?:\s+\d+/\d+)?)(?:\s+(.*))?$")
+# The main size is the leading NUMBER (optionally a fraction, so "13 1/2" stays
+# whole). A "-A6"/"-B12"-style code suffix on the number, and any trailing text
+# (e.g. "Blade-1800", "(3600 RPM or less)"), are descriptive and move to the note.
+# Sizes that aren't number-led (e.g. "H3", "N/A") pass through unchanged.
+_SIZE_RE = re.compile(r"^(\d+(?:\s+\d+/\d+)?)(-\S*)?(?:\s+(.*))?$")
 
 
 def split_size(value: str) -> "tuple[str, str]":
-    """Split a raw size into the main size and any trailing descriptive text, so
-    the column stays tidy and the detail moves to a hover note. '3300-B12
-    Blade-1800' -> ('3300-B12', 'Blade-1800'); '2412 (3600 RPM or less)' ->
-    ('2412', '(3600 RPM or less)'); a fraction like '13 1/2' stays whole; plain
-    sizes ('1200', 'H3', '') pass through with no note."""
+    """Split a raw size into the leading number and the descriptive rest, so the
+    column stays tidy and the detail moves to a hover note. '3000-A6 Blade-1800' ->
+    ('3000', '-A6 Blade-1800'); '3300-B12' -> ('3300', '-B12'); '2412 (3600 RPM or
+    less)' -> ('2412', '(3600 RPM or less)'); a fraction like '13 1/2' stays whole;
+    non-number sizes ('H3', '182', '') pass through with no note."""
     s = (value or "").strip()
     m = _SIZE_RE.match(s)
     if not m:
         return s, ""
-    return m.group(1), (m.group(2) or "").strip()
+    note = " ".join(p for p in (m.group(2), m.group(3)) if p).strip()
+    return m.group(1), note
 
 
 def folder_of(path: str) -> str:
