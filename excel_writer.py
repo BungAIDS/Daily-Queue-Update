@@ -13,6 +13,7 @@ from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+import engineers
 from config import OUTPUT_DIR
 
 log = logging.getLogger(__name__)
@@ -57,6 +58,7 @@ COLUMNS = [
     ("Arrangement", "so_arrangement"),
     ("Assigned To", "assigned_to"),
     ("Checker", "checker"),
+    ("Engineer", "engineers"),
     ("End Date", "end_date"),
     ("Note", "status_note"),
     # --- everything else (original relative order) ---
@@ -437,6 +439,8 @@ def _write_job_row(ws, row: int, j: Dict[str, Any], co_changed: bool = False) ->
                 cell.comment = Comment(note, "Queue")
         elif key == "flags":
             ws.cell(row=row, column=col, value=_flags_str(j))
+        elif key == "engineers":
+            ws.cell(row=row, column=col, value=engineers.cell_text(j))
         else:
             ws.cell(row=row, column=col, value=j.get(key, ""))
 

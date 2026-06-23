@@ -32,6 +32,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+import engineers
 from config import SNAPSHOT_DIR
 
 log = logging.getLogger(__name__)
@@ -179,13 +180,21 @@ def update(master: Dict[str, Any], present: List[Dict[str, Any]],
         # carried over with an approximate time).
         known = not bool(j.get("_carried_over"))
         if entry is None:
+            nj = dict(j)
+            # First sighting: attach whichever engineers are named in its
+            # Assigned To / Checker / Note fields.
+            nj["engineers"] = engineers.detect(nj)
             orders[jn] = {"added": added, "added_known": known,
                           "last_in": now_iso, "last_out": None,
-                          "left": None, "on_queue": True, "seen_on_queue": True, "job": dict(j)}
+                          "left": None, "on_queue": True, "seen_on_queue": True, "job": nj}
         else:
             stored_job = entry.get("job") or {}
             # Never let a failed/stale re-fetch wipe a change order we already had.
             merged = _keep_better_enrichment(stored_job, j)
+            # Accumulate engineers: union the names already attached with any
+            # found this poll, so an association is never dropped on reassignment.
+            merged["engineers"] = engineers.merge(stored_job.get("engineers"),
+                                                  engineers.detect(merged))
             for field, old, new in _diffs(stored_job, merged):
                 events.append({"time": now_iso, "job": jn, "customer": _norm(j.get("customer")),
                                "field": field, "old": old, "new": new})

@@ -39,6 +39,7 @@ from datetime import date, datetime, time as dtime, timedelta
 from logging.handlers import TimedRotatingFileHandler
 
 import change_log
+import engineers
 import line_items
 import live_excel
 import live_master
@@ -62,7 +63,7 @@ log = logging.getLogger("queue-watch")
 
 # Bump to force a one-time clean rebuild of the Order History tab (e.g. after a
 # layout change). In normal operation the tab is built once and only appended to.
-OH_BUILD_VERSION = 3
+OH_BUILD_VERSION = 4   # +Engineer column
 
 
 def setup_logging() -> None:
@@ -519,6 +520,9 @@ def run_watch(ignore_window: bool = False) -> int:
 
     state = live_state.load_state(today)
     master = live_master.load_master()
+    tagged = engineers.backfill(master)   # tag historical orders by engineer (roster edits too)
+    if tagged:
+        log.info("Engineer roster: tagged/updated %d existing order(s)", tagged)
     _force_rebuild(master)            # process start -> rebuild the upsert tabs once
     first = not state
     if first:

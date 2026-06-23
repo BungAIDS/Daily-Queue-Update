@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+import engineers
 from excel_writer import (COLUMNS, QUEUE_HEADERS, MONEY_FMT, _co_label,
                           _drive_run_label, _flags_str, _parse_date,
                           _parse_money, _dwg_suffixes, folder_of, split_arrangement,
@@ -200,6 +201,8 @@ def _job_value_cells(j: Dict[str, Any], columns: Optional[List] = None,
                 c.comment = note
         elif key == "flags":
             c = Cell(_flags_str(j))
+        elif key == "engineers":
+            c = Cell(engineers.cell_text(j))
         else:
             c = Cell(j.get(key, ""))
         cells.append(c)
@@ -624,7 +627,8 @@ OH_DATA_COLUMNS = [
     ("Rotation", "so_rotation"), ("Discharge", "so_discharge"), ("% Width", "so_pct_width"),
     ("Wheel Type", "so_wheel_type"), ("Design Temp", "so_design_temp"),
     ("Max Temp", "so_max_temp"), ("Special Temp", "so_special_temp"),
-    ("Customer", "customer"), ("Primary Rep", "primary_rep"), ("Item", "item"),
+    ("Customer", "customer"), ("Engineer", "engineers"),
+    ("Primary Rep", "primary_rep"), ("Item", "item"),
 ]
 OH_FLAG_HEADERS = ["On Queue", "Added", "Left"]
 OH_SEP_HEADER = "│"
