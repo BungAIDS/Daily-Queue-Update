@@ -111,9 +111,10 @@ def test_changes_today_log_sections():
     assert _find(sh, "06/01/2026") is not None    # instance 1 'before'
     assert _find(sh, "06/05/2026") is not None    # instance 1 'after' / instance 2 'before'
     assert _find(sh, "06/09/2026") is not None    # instance 2 'after'
-    from live_sheets import FILL_CHANGE1
+    from live_sheets import FILL_CHANGE1, FILL_CHANGE2
     fills = {c.fill for row in sh.grid for c in row}
-    assert FILL_CHANGE1 in fills                  # 'after' rows are shaded grey
+    # Two instances -> the second 'after' row is a darker grey than the first.
+    assert FILL_CHANGE1 in fills and FILL_CHANGE2 in fills
     assert _find(sh, "Removed / completed today (1)") is not None
     assert _find(sh, "CO#0 -> CO#1") is not None
     # New change-order columns: Design, Arrangement (trimmed), and what changed.

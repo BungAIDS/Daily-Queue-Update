@@ -47,7 +47,13 @@ FILL_SOON_NEW = "soon_new"
 FILL_DWG_YES = "dwg_yes"      # green ✓
 FILL_DWG_NO = "dwg_no"        # red (missing)
 FILL_SEP = "sep"              # the vertical divider column between the two matrices
-FILL_CHANGE1 = "chg1"         # grey shading on the 'after' row of a change instance
+# Grey shading on the 'after' row of a change instance, getting darker for each
+# later instance the same order picks up through the day.
+FILL_CHANGE1 = "chg1"
+FILL_CHANGE2 = "chg2"
+FILL_CHANGE3 = "chg3"
+FILL_CHANGE4 = "chg4"
+_CHANGE_FILLS = [FILL_CHANGE1, FILL_CHANGE2, FILL_CHANGE3, FILL_CHANGE4]
 
 
 @dataclass
@@ -399,21 +405,21 @@ def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]]) -> None
     sh.row(_header_cells(["Job #", "Customer"] + cols))
     for jn in sorted(orders, key=lambda j: orders[j]["time"], reverse=True):  # most recent first
         o = orders[jn]
-        first = True
-        for _t, moved in o["instances"]:                  # each instance -> before/after pair
+        for i, (_t, moved) in enumerate(o["instances"]):  # each instance -> before/after pair
+            # 'after' rows get progressively darker grey for each later instance.
+            fill = _CHANGE_FILLS[min(i, len(_CHANGE_FILLS) - 1)]
             # 'before' row: prior values of the fields that moved this instance
             # (red); Job #/Customer only on the order's first row so it reads as a block.
-            before = [Cell(jn if first else ""), Cell(o["customer"] if first else "")]
+            before = [Cell(jn if i == 0 else ""), Cell(o["customer"] if i == 0 else "")]
             for label in cols:
                 before.append(Cell(moved[label][0], font=F_RED) if label in moved else Cell(""))
             sh.row(before)
-            # 'after' row: the new values, shaded grey.
-            after = [Cell("", fill=FILL_CHANGE1), Cell("", fill=FILL_CHANGE1)]
+            # 'after' row: the new values, shaded.
+            after = [Cell("", fill=fill), Cell("", fill=fill)]
             for label in cols:
-                after.append(Cell(moved[label][1], fill=FILL_CHANGE1, font=F_RED)
-                             if label in moved else Cell("", fill=FILL_CHANGE1))
+                after.append(Cell(moved[label][1], fill=fill, font=F_RED)
+                             if label in moved else Cell("", fill=fill))
             sh.row(after)
-            first = False
     sh.blank()
 
 

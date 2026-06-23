@@ -46,7 +46,7 @@ _FILL_RGB = {
     "header": "305496",
     "overdue": "FFC7CE", "duetoday": "F8CBAD", "soon": "FFEB9C", "new": "D9D9D9",
     "overdue_new": "F4A5A8", "duetoday_new": "F4B183", "soon_new": "F5D750",
-    "chg1": "D9D9D9",                                       # grey on a change instance's 'after' row
+    "chg1": "D9D9D9", "chg2": "BFBFBF", "chg3": "A6A6A6", "chg4": "8C8C8C",  # darker per later instance
     "dwg_yes": "C6EFCE", "dwg_no": "FFC7CE",
     "sep": "808080",   # the vertical divider column between the two matrices
 }
