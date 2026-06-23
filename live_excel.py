@@ -345,18 +345,45 @@ def _write_row(ws, r: int, cells: List, ncols: int) -> None:
     _style_row(ws, r, cells)
 
 
+def _live_last_row(ws, key_col: int, used_bottom: int) -> int:
+    """Last LIVE data row, found by scanning the key column and treating BOTH
+    truly-empty cells AND zero-length strings ("") as the end of the data.
+
+    `End(xlUp)` alone is fooled by "" cells: a prior 'Removed' block wrote ""
+    into the key column (col 2), which Excel counts as non-blank, so each cycle
+    saw the block as live data and stacked a fresh copy below the last one. We
+    read the column once and stop at the last cell holding a non-blank string."""
+    if used_bottom < 2:
+        return 1                                  # header only
+    vals = ws.Range(ws.Cells(2, key_col), ws.Cells(used_bottom, key_col)).Value
+    if not isinstance(vals, tuple):               # single cell -> scalar
+        vals = ((vals,),)
+    live_last = 1
+    for i, row in enumerate(vals, start=2):
+        v = row[0] if isinstance(row, (list, tuple)) else row
+        if v is not None and str(v).strip() != "":
+            live_last = i
+    return live_last
+
+
 def _render_below(ws, key_col: int, ncols: int, below: Dict[str, Any]) -> None:
     """Render a small static block below the keyed data (Live Queue's 'Removed
-    since this morning'). The key column is kept blank in the block so the
+    since this morning'). The key column is kept TRULY EMPTY in the block so the
     row-keying (which finds the last data row via the key column) ignores it."""
-    live_last = ws.Cells(ws.Rows.Count, key_col).End(_XL_UP).Row
     try:
         used = ws.UsedRange
         used_bottom = used.Row + used.Rows.Count - 1
     except Exception:  # noqa: BLE001
-        used_bottom = live_last
+        used_bottom = ws.Cells(ws.Rows.Count, key_col).End(_XL_UP).Row
+    live_last = _live_last_row(ws, key_col, used_bottom)
     rows = below.get("rows") or []
-    headers = below.get("headers") or ["Job #", "", "Customer", "Design", "Removed"]
+    headers = list(below.get("headers") or ["Job #", "", "Customer", "Design", "Removed"])
+    # Force the key column truly empty (None, not "") in the block's header and
+    # every row, so it never registers as content for the next cycle's scan.
+    ki = key_col - 1                              # 0-based index within a block row
+    if 0 <= ki < len(headers):
+        headers[ki] = None
+    rows = [[None if j == ki else c for j, c in enumerate(r)] for r in rows]
     title_row = live_last + 2                     # one blank gap row
     header_row = title_row + 1
     bottom = max(used_bottom, header_row + len(rows))
