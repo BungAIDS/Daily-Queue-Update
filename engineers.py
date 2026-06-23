@@ -27,8 +27,15 @@ from typing import Any, Dict, Iterable, List, Pattern, Tuple
 # Assigned To / Checker / Note fields. The canonical name is always matched too,
 # so it need not be repeated in its own alias list. EDIT THIS to add coworkers.
 ROSTER: Dict[str, List[str]] = {
-    # "John Doe":   ["John", "JD", "J.D.", "Doe"],
-    # "Maria Ruiz": ["Maria", "MR", "Ruiz"],
+    "Danny Groth":      ["DAG", "DG", "Danny", "Daniel", "Groth"],
+    "Justin Bolda":     ["JTB", "Justin", "Bolda", "Yustin"],
+    "Carlos Sandoval":  ["Carlos", "Sandoval", "CS"],
+    "Latrell Lee":      ["LL", "Latrell", "Lee"],
+    "Saad Omar":        ["Syed", "Saad", "SO", "Omar"],
+    "Ted Sledz":        ["Ted", "Sledz", "TES"],
+    "Michael Robinson": ["MSR", "Michael", "Robinson"],
+    "Varun Patel":      ["VDP", "Varun", "Patel"],
+    "Junzhao Zhang":    ["JZ", "Junzhao", "Zhang"],
 }
 
 # The order fields scanned for names: the two board assignment columns and the
