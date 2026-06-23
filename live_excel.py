@@ -342,19 +342,25 @@ def _write_header(ws, headers: List[str]) -> None:
 
 
 def _read_keymap(ws, key_col: int):
-    """{order# -> row} for the data rows, by reading the key column. Robust to a
-    coworker sorting the sheet (we find rows by key, not a remembered index)."""
-    last = ws.Cells(ws.Rows.Count, key_col).End(_XL_UP).Row
+    """{order# -> row} and the last LIVE data row. The live data is a contiguous
+    block from row 2; we bulk-read the key column and STOP at the first blank cell
+    — the one-row gap above the 'Removed' block — so that block's real Job #s
+    (drawn below the gap) are never read as live rows. Robust to a coworker
+    re-sorting the live data (rows found by key, not a remembered index)."""
+    bottom = ws.Cells(ws.Rows.Count, key_col).End(_XL_UP).Row   # last non-empty (incl. block)
     keymap: Dict[str, int] = {}
-    if last >= 2:
-        data = ws.Range(ws.Cells(2, key_col), ws.Cells(last, key_col)).Value
+    last = 1
+    if bottom >= 2:
+        data = ws.Range(ws.Cells(2, key_col), ws.Cells(bottom, key_col)).Value
         if not isinstance(data, tuple):       # single cell -> scalar
             data = ((data,),)
         for i, row in enumerate(data, start=2):
             v = row[0] if isinstance(row, (list, tuple)) else row
             k = _norm_key(v)
-            if k:
-                keymap[k] = i
+            if not k:
+                break          # gap -> end of live data; ignore the block below it
+            keymap[k] = i
+            last = i
     return keymap, last
 
 
@@ -378,51 +384,25 @@ def _write_row(ws, r: int, cells: List, ncols: int) -> None:
     _style_row(ws, r, cells)
 
 
-def _live_last_row(ws, key_col: int, used_bottom: int) -> int:
-    """Last LIVE data row, found by scanning the key column and treating BOTH
-    truly-empty cells AND zero-length strings ("") as the end of the data.
-
-    `End(xlUp)` alone is fooled by "" cells: a prior 'Removed' block wrote ""
-    into the key column (col 2), which Excel counts as non-blank, so each cycle
-    saw the block as live data and stacked a fresh copy below the last one. We
-    read the column once and stop at the last cell holding a non-blank string."""
-    if used_bottom < 2:
-        return 1                                  # header only
-    vals = ws.Range(ws.Cells(2, key_col), ws.Cells(used_bottom, key_col)).Value
-    if not isinstance(vals, tuple):               # single cell -> scalar
-        vals = ((vals,),)
-    live_last = 1
-    for i, row in enumerate(vals, start=2):
-        v = row[0] if isinstance(row, (list, tuple)) else row
-        if v is not None and str(v).strip() != "":
-            live_last = i
-    return live_last
-
-
-def _render_below(ws, key_col: int, ncols: int, below: Dict[str, Any]) -> None:
-    """Render a small static block below the keyed data (Live Queue's 'Removed
-    since this morning'). The key column is kept TRULY EMPTY in the block so the
-    row-keying (which finds the last data row via the key column) ignores it."""
+def _render_below(ws, live_last: int, ncols: int, below: Dict[str, Any]) -> None:
+    """Draw the 'Removed since this morning' block right below the live data
+    (whose last row is `live_last`, passed in from apply_upserts). Rows are full
+    styled Cells — same columns and look as the Live Queue — written under a
+    one-row blank gap, so the keymap scan stops at the gap and never reads the
+    block's Job #s as live rows."""
     try:
         used = ws.UsedRange
         used_bottom = used.Row + used.Rows.Count - 1
     except Exception:  # noqa: BLE001
-        used_bottom = ws.Cells(ws.Rows.Count, key_col).End(_XL_UP).Row
-    live_last = _live_last_row(ws, key_col, used_bottom)
-    rows = below.get("rows") or []
-    headers = list(below.get("headers") or ["Job #", "", "Customer", "Design", "Removed"])
-    # Force the key column truly empty (None, not "") in the block's header and
-    # every row, so it never registers as content for the next cycle's scan.
-    ki = key_col - 1                              # 0-based index within a block row
-    if 0 <= ki < len(headers):
-        headers[ki] = None
-    rows = [[None if j == ki else c for j, c in enumerate(r)] for r in rows]
-    title_row = live_last + 2                     # one blank gap row
+        used_bottom = live_last
+    rows = below.get("rows") or []                # list of [Cell, ...]
+    header_cells = below.get("header_cells") or []
+    title_row = live_last + 2                      # row live_last+1 stays a blank gap
     header_row = title_row + 1
     bottom = max(used_bottom, header_row + len(rows))
-    # Clear the whole region the block occupies (plus any stale block below it),
-    # FULL WIDTH, so the block's text — the title and the 'Removed' time — spills
-    # freely into the empty cells to its right instead of being clipped.
+    # Clear from the gap down, FULL WIDTH — wipes any stale/older block (and rows
+    # an append may have overwritten the old block with) and lets the block's text
+    # spill into the empty cells to its right.
     if bottom >= live_last + 1:
         try:
             ws.Range(ws.Cells(live_last + 1, 1), ws.Cells(bottom, ncols)).Clear()
@@ -430,22 +410,30 @@ def _render_below(ws, key_col: int, ncols: int, below: Dict[str, Any]) -> None:
             pass
     title = ws.Cells(title_row, 1)
     title.Value = f"{below.get('title', 'Removed')} ({len(rows)})"
-    title.Font.Bold = True
-    title.Font.Size = 12
-    ws.Range(ws.Cells(header_row, 1), ws.Cells(header_row, len(headers))).Value = [headers]
-    _apply_run(ws, header_row, 1, len(headers), "header", "header", False)
-    if rows:
-        # Text + left-aligned BEFORE writing, so the 'Removed' time stays a string
-        # (e.g. "1:38 PM") and overflows to the right rather than being coerced to a
-        # serial that shows as "#####".
-        block = ws.Range(ws.Cells(header_row + 1, 1), ws.Cells(header_row + len(rows), len(headers)))
+    try:
+        title.Font.Bold = True
+        title.Font.Size = 12
+    except Exception:  # noqa: BLE001
+        pass
+    if header_cells:                               # header row, styled like the board's
+        hvals = [c.value for c in header_cells]
+        ws.Range(ws.Cells(header_row, 1), ws.Cells(header_row, len(hvals))).Value = [hvals]
+        _style_row(ws, header_row, header_cells)
+    if not rows:
+        return
+    # Pre-format the AM/PM text columns (Added = 1, Removed = last) as Text BEFORE
+    # writing, so a time label isn't coerced into a serial (e.g. 0.40416667).
+    top, bot = header_row + 1, header_row + len(rows)
+    for tcol in (1, ncols):
         try:
-            block.NumberFormat = "@"
-            block.HorizontalAlignment = -4131        # xlLeft
+            ws.Range(ws.Cells(top, tcol), ws.Cells(bot, tcol)).NumberFormat = "@"
         except Exception:  # noqa: BLE001
             pass
-    for i, row in enumerate(rows, start=header_row + 1):
-        ws.Range(ws.Cells(i, 1), ws.Cells(i, len(row))).Value = [list(row)]
+    # Data rows: bulk values, then full styling (fills, fonts, links, comments).
+    for i, cells in enumerate(rows, start=top):
+        vals = [(c.value if c.value is not None else "") for c in cells]
+        ws.Range(ws.Cells(i, 1), ws.Cells(i, len(vals))).Value = [vals]
+        _style_row(ws, i, cells)
 
 
 def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
@@ -544,7 +532,7 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
     # appends overwrite it — as well as when its own content changed. Best-effort.
     if below is not None and (deletes or appends or below != _BELOW_LAST.get(name)):
         try:
-            _render_below(ws, key_col, ncols, below)
+            _render_below(ws, last_row, ncols, below)
             _BELOW_LAST[name] = below
         except Exception as e:  # noqa: BLE001
             log.debug("below-block render failed (%s)", e)

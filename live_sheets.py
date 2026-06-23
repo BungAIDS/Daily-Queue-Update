@@ -536,6 +536,10 @@ LIVE_QUEUE_HEADERS = ["Added"] + list(QUEUE_HEADERS) + ["#"]   # DWG/feature mat
 LIVE_QUEUE_CBC_COL = len(LIVE_QUEUE_HEADERS)                   # the trailing "#" board-position col (sort key)
 LIVE_QUEUE_KEY_COL = 2 + QUEUE_HEADERS.index("Job #")          # 1-based col of Job # (Added is col 1)
 LIVE_QUEUE_END_DATE_COL = 2 + QUEUE_HEADERS.index("End Date")  # 1-based col of End Date
+# The 'Removed since this morning' block mirrors the Live Queue columns exactly so
+# its rows line up under the board above; the trailing board-position "#" is
+# meaningless once removed, so that slot shows when the order left instead.
+LIVE_QUEUE_REMOVED_HEADERS = ["Added"] + list(QUEUE_HEADERS) + ["Removed"]
 _END_DATE_IDX = QUEUE_HEADERS.index("End Date")               # its index within the standard cells
 _CO_IDX = [i for i, (_, k) in enumerate(COLUMNS) if k == "co"][0]   # CO# cell index
 
@@ -583,6 +587,53 @@ def row_sig(cells: List[Cell]) -> str:
     return hashlib.md5(json.dumps(payload, default=str, sort_keys=True).encode()).hexdigest()
 
 
+def _board_row_cells(j: Dict[str, Any], today: date, co_changed: bool,
+                     is_new: bool, ref: Optional[datetime], trailing: Cell) -> List[Cell]:
+    """Added + every Full Queue column + a trailing cell, styled exactly like a
+    Live Queue row: '@'-text Added, real-date End Date, CO# hover note, CO#-red
+    text, and the urgency / new-today row fill. `trailing` is the last cell — the
+    board '#' position on the Live Queue, or the removal time in the Removed
+    block — so both render identically."""
+    added = Cell(added_label(j, ref=ref), number_format="@")
+    std = _job_value_cells(j, co_changed=co_changed, arrange_comment=True)
+    # Write End Date as a real date so it sorts/filters as a date in Excel.
+    ed = _parse_date(j.get("end_date", ""))
+    if ed is not None:
+        std[_END_DATE_IDX].value = _excel_serial(ed)
+        std[_END_DATE_IDX].number_format = "mm/dd/yyyy"
+    # Hover the CO# cell to see the change-order history (most recent first).
+    std[_CO_IDX].comment = _co_comment(j)
+    if co_changed:                       # carry the red over to the non-std cells
+        added.font = trailing.font = F_RED
+    cells = [added] + std + [trailing]
+    fill = _row_fill(j, today, is_new=is_new)
+    if fill:
+        for c in cells:
+            if c.fill is None:
+                c.fill = fill
+    return cells
+
+
+def removed_block(removed: List, today: date, new_ids: Optional[set] = None,
+                  co_changed_ids: Optional[set] = None, ref: Optional[datetime] = None,
+                  title: str = "Removed from the queue since this morning") -> Dict[str, Any]:
+    """The Live Queue's 'Removed since this morning' section as a styled block —
+    each removed order drawn exactly like its Live Queue row (same columns, the
+    urgency/new-today fill and CO#-red text it had on the board), with the trailing
+    board-position '#' slot replaced by the time it left. `removed` is a list of
+    (job_dict, left_iso). Returns a payload the COM renderer draws below the board."""
+    new_ids = new_ids or set()
+    co_changed_ids = co_changed_ids or set()
+    rows = []
+    for j, left in removed:
+        jn = str(j.get("job") or "")
+        rem = Cell(fmt_time(left), number_format="@")   # when it left, in the '#' slot
+        rows.append(_board_row_cells(j, today, jn in co_changed_ids, jn in new_ids, ref, rem))
+    return {"title": title,
+            "header_cells": _header_cells(LIVE_QUEUE_REMOVED_HEADERS),
+            "rows": rows}
+
+
 def live_queue_records(jobs: List[Dict[str, Any]], today: date,
                        new_ids: Optional[set] = None,
                        co_changed_ids: Optional[set] = None,
@@ -597,29 +648,10 @@ def live_queue_records(jobs: List[Dict[str, Any]], today: date,
     out = []
     for j in jobs:
         jn = str(j.get("job") or "")
-        co_changed = jn in co_changed_ids
-        # number_format "@" (Text) keeps the AM/PM label (e.g. "3:53 PM") from
-        # being coerced by Excel into a 24h datetime serial.
-        added = Cell(added_label(j, ref=ref), number_format="@")
-        std = _job_value_cells(j, co_changed=co_changed, arrange_comment=True)
-        # Write End Date as a real date so it sorts/filters as a date in Excel.
-        ed = _parse_date(j.get("end_date", ""))
-        if ed is not None:
-            std[_END_DATE_IDX].value = _excel_serial(ed)
-            std[_END_DATE_IDX].number_format = "mm/dd/yyyy"
-        # Hover the CO# cell to see the change-order history (most recent first).
-        std[_CO_IDX].comment = _co_comment(j)
         # "#" = the cbcinsider board position (the sort key for board order).
         pos = j.get("_cbc_pos")
         cbc = Cell(pos if isinstance(pos, int) else "", center=True)
-        if co_changed:                       # carry the red over to the non-std cells
-            added.font = cbc.font = F_RED
-        fill = _row_fill(j, today, is_new=jn in new_ids)
-        cells = [added] + std + [cbc]
-        if fill:
-            for c in cells:
-                if c.fill is None:
-                    c.fill = fill
+        cells = _board_row_cells(j, today, jn in co_changed_ids, jn in new_ids, ref, cbc)
         out.append((jn, cells))
     return out
 

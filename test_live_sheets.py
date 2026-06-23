@@ -86,6 +86,27 @@ def test_full_queue_footer_total():
     assert any(abs(c.value - 3500.0) < 0.001 for c in total_cells)
 
 
+def test_removed_block_mirrors_live_queue_row():
+    so = "Z:\\SO\\421757\\421757 CO#2.pdf"
+    overdue = _job("421757", end_date="06/10/2026", so_pdf=so, co_number=2)   # overdue + CO#
+    fresh = _job("421802", end_date="12/31/2026")
+    blk = ls.removed_block([(overdue, "2026-06-16T06:26:00"),
+                            (fresh, "2026-06-16T07:42:00")],
+                           TODAY, new_ids={"421802"}, co_changed_ids={"421757"})
+    # Same columns as the Live Queue, trailing slot relabeled 'Removed'.
+    assert len(blk["header_cells"]) == len(ls.LIVE_QUEUE_HEADERS)
+    assert blk["header_cells"][0].value == "Added" and blk["header_cells"][-1].value == "Removed"
+    r0, r1 = blk["rows"]
+    assert len(r0) == len(ls.LIVE_QUEUE_HEADERS)
+    job0 = r0[ls.LIVE_QUEUE_KEY_COL - 1]
+    assert job0.value == "421757" and job0.link == so          # Job # still links to its SO
+    assert r0[ls.LIVE_QUEUE_END_DATE_COL - 1].fill == FILL_OVERDUE   # kept its overdue fill
+    assert any(c.font == "red" for c in r0)                    # CO#-changed -> red text
+    assert r0[-1].value == "6:26 AM" and r0[-1].number_format == "@"  # removal time, as text
+    # the fresh (new-today) order keeps its 'new' shading and isn't red
+    assert any(c.fill == FILL_NEW for c in r1) and not any(c.font == "red" for c in r1)
+
+
 def test_changes_today_log_sections():
     new_today = [_job("421001", _carried_over=False, _first_seen="2026-06-16T09:14:00")]
     events = [

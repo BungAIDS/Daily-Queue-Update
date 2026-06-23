@@ -308,19 +308,24 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
     # so the renderer can reposition it when the queue grows (otherwise the new
     # rows append right over it). Only orders the watcher actually saw on the
     # board count — never the merged backlog.
-    removed = [(e.get("job", {}), e.get("left")) for e in master.get("orders", {}).values()
-               if e.get("seen_on_queue") and not e.get("on_queue")
-               and str(e.get("left") or "")[:10] == today.isoformat()]
+    removed = []
+    for e in master.get("orders", {}).values():
+        if (e.get("seen_on_queue") and not e.get("on_queue")
+                and str(e.get("left") or "")[:10] == today.isoformat()):
+            j = dict(e.get("job", {}))
+            # Mirror on_queue()'s injection so the 'Added' column and new-today
+            # shading match exactly what the order showed on the board before it left.
+            j["_added_iso"] = e.get("last_in") or e.get("added")
+            j["_added_known"] = e.get("added_known", False)
+            removed.append((j, e.get("left")))
     removed.sort(key=lambda jl: str(jl[1] or ""), reverse=True)   # most recently removed first
-    # Keep the key column (LIVE_QUEUE_KEY_COL = col 2, Job #) blank in this block
-    # so the key-based "last live data row" lookup in _render_below — and the next
-    # poll's keymap — skip these rows. The order numbers go in col 1.
-    lq_payload["below"] = {
-        "title": "Removed from the queue since this morning",
-        "headers": ["Job #", "", "Customer", "Design", "Removed"],
-        "rows": [[j.get("job", ""), "", j.get("customer", ""),
-                  j.get("so_design_desc") or j.get("design", ""),
-                  live_sheets.fmt_time(left)] for j, left in removed]}
+    # Render each removed order like its Live Queue row — same columns, same
+    # urgency/new fill and CO#-red text it had on the board. They're off the board
+    # so not in shade_ids; recompute new-today shading from their own Added date.
+    removed_new = {str(j.get("job")) for j, _ in removed
+                   if live_sheets.added_date(j) in recent_days}
+    lq_payload["below"] = live_sheets.removed_block(removed, today, new_ids=removed_new,
+                                                    co_changed_ids=co_changed, ref=now)
 
     # Order History: live master + the whole line-items backlog, as a matrix log.
     # Built ONCE then only appended to; we rebuild only on a build-format bump
