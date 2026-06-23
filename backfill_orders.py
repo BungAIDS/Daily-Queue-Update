@@ -243,7 +243,9 @@ def process_one(page, context, job: str, folder: str = "",
                     "so_arrangement": p.get("arrangement", ""), "so_motor_pos": p.get("motor_pos", ""),
                     "so_class": p.get("fan_class", ""), "so_rotation": p.get("rotation", ""),
                     "so_discharge": p.get("discharge", ""), "so_pct_width": p.get("pct_width", ""),
-                    "so_wheel_type": p.get("wheel_type", ""), "so_special_temp": p.get("special_temp", ""),
+                    "so_wheel_type": p.get("wheel_type", ""),
+                    "so_design_temp": p.get("design_temp", ""), "so_max_temp": p.get("max_temp", ""),
+                    "so_special_temp": p.get("special_temp", ""),
                     "so_pdf": so_pdf,
                 })
                 items = p.get("line_items") or []

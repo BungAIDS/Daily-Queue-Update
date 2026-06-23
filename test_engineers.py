@@ -1,4 +1,9 @@
-"""Tests for engineer roster matching / accumulation (engineers.py)."""
+"""Tests for engineer roster matching / accumulation (engineers.py).
+
+    python test_engineers.py
+"""
+import sys
+
 import engineers
 
 
@@ -94,3 +99,24 @@ def test_backfill_tags_and_preserves():
     assert changed == 2
     # Idempotent: a second pass changes nothing.
     assert engineers.backfill(master) == 0
+
+
+def main() -> int:
+    # Mirror pytest's per-test setup/teardown so the suite also runs as a plain
+    # script (how CI invokes it: `python test_engineers.py`).
+    passed = 0
+    for name, fn in sorted(globals().items()):
+        if name.startswith("test_") and callable(fn):
+            setup_function(fn)
+            try:
+                fn()
+            finally:
+                teardown_function(fn)
+            print(f"  ok  {name}")
+            passed += 1
+    print(f"\n{passed} tests passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
