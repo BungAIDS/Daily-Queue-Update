@@ -90,11 +90,34 @@ _XL_NONE = -4142         # xlColorIndexNone
 _XL_AUTO = -4105         # xlColorIndexAutomatic
 
 
+def _refresh_volatile(wb, sheet: Sheet) -> None:
+    """Write just the sheet's volatile cells (the 'Last updated' stamp) to their
+    positions — no Cells.Clear/repaint — so the stamp stays current without
+    disturbing a coworker's filter/scroll. Only runs on a render-cache hit, where
+    the layout is unchanged, so each volatile cell is still where it was drawn."""
+    vol = [(r, c, cell)
+           for r, row in enumerate(sheet.grid, start=1)
+           for c, cell in enumerate(row, start=1) if getattr(cell, "volatile", False)]
+    if not vol:
+        return
+    try:
+        ws = _get_or_make_sheet(wb, sheet.name)
+        for r, c, cell in vol:
+            ws.Cells(r, c).Value = cell.value
+    except Exception as e:  # noqa: BLE001
+        log.debug("volatile refresh failed (%s)", e)
+
+
 def _fingerprint(sheet: Sheet) -> int:
     parts = [sheet.name, sheet.freeze or "", sheet.autofilter_a1 or ""]
     for row in sheet.grid:
         for cell in row:
-            parts.append(f"{cell.value}|{cell.fill}|{cell.font}|{cell.link}|"
+            # Volatile cells (e.g. the 'Last updated' stamp) change every cycle;
+            # hashing their VALUE would defeat the render cache and force a full
+            # repaint each poll. Keep their structure/style in the hash but ignore
+            # the value, and refresh them in place instead (see _refresh_volatile).
+            value = "\x00VOLATILE" if getattr(cell, "volatile", False) else cell.value
+            parts.append(f"{value}|{cell.fill}|{cell.font}|{cell.link}|"
                          f"{cell.number_format}|{cell.center}")
         parts.append(";")
     return hash("\n".join(parts))
@@ -726,6 +749,11 @@ def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any]
                 render_sheet(app, wb, changes_sheet)
                 _RENDER_CACHE[changes_sheet.name] = fp
                 touched.append(changes_sheet.name)
+            else:
+                # Content unchanged — don't repaint (that would reset a viewer's
+                # filter/scroll). Just refresh the 'Last updated' stamp in place so
+                # the tab still reads as live. AutoSave carries it; no forced Save.
+                _refresh_volatile(wb, changes_sheet)
     except Exception as e:  # noqa: BLE001
         log.warning("Changes update failed (%s)", e)
 

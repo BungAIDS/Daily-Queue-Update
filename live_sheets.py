@@ -64,6 +64,9 @@ class Cell:
     number_format: Optional[str] = None
     center: bool = False
     comment: Optional[str] = None   # hover note (e.g. the CO# change-order history)
+    volatile: bool = False          # value changes every cycle (e.g. the 'Last updated'
+                                    # stamp): excluded from the render fingerprint so it
+                                    # doesn't force a full repaint, refreshed in place
 
 
 @dataclass
@@ -449,7 +452,7 @@ def changes_sheet(
     sh = Sheet(name, freeze=None)
     sh.row([Cell(f"Changes — {date_str}", font=F_SECTION)])
     if updated_at:
-        sh.row([Cell(f"Last updated {updated_at}", font=F_NOTE)])
+        sh.row([Cell(f"Last updated {updated_at}", font=F_NOTE, volatile=True)])
     sh.blank()
 
     _job_table(sh, "New orders today", new_today,

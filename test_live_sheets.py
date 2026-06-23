@@ -122,6 +122,22 @@ def test_changes_today_log_sections():
     assert _find(sh, "A/9H") is not None                             # arrangement (suffix trimmed)
 
 
+def test_changes_fingerprint_ignores_timestamp_but_not_content():
+    # The 'Last updated' stamp is volatile: it must NOT change the render
+    # fingerprint (else the tab fully repaints every poll), but a real content
+    # change must.
+    from live_excel import _fingerprint
+    events = [{"time": "2026-06-16T11:00:00", "job": "420700", "customer": "Y",
+               "field": "CO#", "old": "0", "new": "1"}]
+    a = ls.changes_sheet([], events, [], "2026-06-16", updated_at="Jun 16, 2026 11:05 AM")
+    b = ls.changes_sheet([], events, [], "2026-06-16", updated_at="Jun 16, 2026 11:07 AM")
+    assert _fingerprint(a) == _fingerprint(b)            # only the stamp differs -> no repaint
+    c = ls.changes_sheet([_job("421001", _carried_over=False,
+                                _first_seen="2026-06-16T09:14:00")],
+                         events, [], "2026-06-16", updated_at="Jun 16, 2026 11:05 AM")
+    assert _fingerprint(a) != _fingerprint(c)            # real content change -> repaint
+
+
 def test_history_sheet():
     hist = {"420000": {"last_seen": "2026-06-10",
                        "snapshot": _job("420000", dwg_extras={"35": "x"})}}
