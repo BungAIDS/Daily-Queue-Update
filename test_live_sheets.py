@@ -105,21 +105,58 @@ def test_changes_today_log_sections():
     assert _find(sh, "Last updated Jun 16, 2026 11:05 AM") is not None   # live stamp near the top
     assert _find(sh, "New orders today (1)") is not None
     assert _find(sh, "Change orders today (1)") is not None          # the CO# event
-    # One order changed; End Date changed twice -> a 'was' row + two change rows.
+    # One order changed; End Date moved in two separate polls -> two before/after
+    # pairs (instances), so each step's old and new value appears.
     assert _find(sh, "Orders that changed today (1)") is not None
-    assert _find(sh, "06/01/2026") is not None    # 'was' = start-of-day End Date
-    assert _find(sh, "06/05/2026") is not None    # the intermediate change (extra row)
-    assert _find(sh, "06/09/2026") is not None    # latest
-    # the two change rows are shaded progressively darker grey
-    from live_sheets import FILL_CHANGE1, FILL_CHANGE2
+    assert _find(sh, "06/01/2026") is not None    # instance 1 'before'
+    assert _find(sh, "06/05/2026") is not None    # instance 1 'after' / instance 2 'before'
+    assert _find(sh, "06/09/2026") is not None    # instance 2 'after'
+    from live_sheets import FILL_CHANGE1
     fills = {c.fill for row in sh.grid for c in row}
-    assert FILL_CHANGE1 in fills and FILL_CHANGE2 in fills
+    assert FILL_CHANGE1 in fills                  # 'after' rows are shaded grey
     assert _find(sh, "Removed / completed today (1)") is not None
     assert _find(sh, "CO#0 -> CO#1") is not None
     # New change-order columns: Design, Arrangement (trimmed), and what changed.
     assert _find(sh, "What changed") is not None                     # the new header
     assert _find(sh, "ADDED VFD CONTROLS") is not None               # change description
     assert _find(sh, "A/9H") is not None                             # arrangement (suffix trimmed)
+
+
+def test_orders_changed_one_instance_multiple_fields():
+    # An order that changes ONCE (one poll) with several fields moving must be a
+    # single before/after pair (two rows), not one row per field.
+    t = "2026-06-16T09:30:00"
+    events = [
+        {"time": t, "job": "420800", "customer": "X",
+         "field": "Assigned To", "old": "", "new": "DG"},   # '' old still shows as a move
+        {"time": t, "job": "420800", "customer": "X",
+         "field": "End Date", "old": "06/01/2026", "new": "06/05/2026"},
+        {"time": t, "job": "420800", "customer": "X",
+         "field": "Plan Hrs", "old": "10", "new": "12"},
+        {"time": t, "job": "420800", "customer": "X",
+         "field": "Checker", "old": "A", "new": "B"},
+    ]
+    sh = ls.changes_sheet([], events, [], "2026-06-16", updated_at="x")
+    # Find the section and count its data rows (header + before + after only).
+    grid = sh.grid
+    start = next(i for i, r in enumerate(grid)
+                 if r and str(r[0].value).startswith("Orders that changed today"))
+    # rows after the section title: header row, then exactly the before/after pair,
+    # then a blank separator row.
+    body = []
+    for r in grid[start + 1:]:
+        if not r:           # blank row ends the section
+            break
+        body.append(r)
+    assert len(body) == 3                       # header + before + after (one instance)
+    before, after = body[1], body[2]
+    assert before[0].value == "420800"          # Job # on the before row
+    # the 'before' row carries every changed field's OLD value; the 'after' its NEW.
+    before_vals = {str(c.value) for c in before}
+    after_vals = {str(c.value) for c in after}
+    assert "06/01/2026" in before_vals and "10" in before_vals   # OLD values
+    assert "06/05/2026" in after_vals and "12" in after_vals     # NEW values
+    assert after[0].fill == ls.FILL_CHANGE1     # after row shaded grey
 
 
 def test_changes_fingerprint_ignores_timestamp_but_not_content():
