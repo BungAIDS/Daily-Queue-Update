@@ -403,6 +403,23 @@ def _write_search_bar(ws, key_col: int) -> None:
         pass
 
 
+def _cf_separators(ws) -> List[str]:
+    """Argument separators to try in a conditional-format formula, likeliest
+    first: Excel's reported LOCAL list separator (some locales need ';'), then a
+    comma. A CF formula handed to Excel via .Add can require the local separator,
+    and we don't know the locale up front — so callers try each until one sticks."""
+    seps: List[str] = []
+    try:
+        local = ws.Application.International(_XL_LIST_SEPARATOR)
+        if local:
+            seps.append(str(local))
+    except Exception:  # noqa: BLE001
+        pass
+    if "," not in seps:
+        seps.append(",")
+    return seps
+
+
 def _apply_search_cf(ws, key_col: int, ncols: int, first_data_row: int,
                      last_row: int) -> bool:
     """Highlight (yellow fill + red box) the whole data row whose Job # equals the
@@ -420,18 +437,8 @@ def _apply_search_cf(ws, key_col: int, ncols: int, first_data_row: int,
     bottom = max(last_row + 3000, first_data_row)   # buffer for appends
     rng = ws.Range(ws.Cells(first_data_row, 1), ws.Cells(bottom, ncols))
 
-    seps: List[str] = []
-    try:
-        local = ws.Application.International(_XL_LIST_SEPARATOR)
-        if local:
-            seps.append(str(local))
-    except Exception:  # noqa: BLE001
-        pass
-    if "," not in seps:
-        seps.append(",")
-
     last_e = None
-    for sep in seps:
+    for sep in _cf_separators(ws):
         formula = (f'=AND(${key}$1<>""{sep}'
                    f'INDEX(${key}:${key}{sep}ROW())&""=${key}$1&"")')
         try:
@@ -743,16 +750,23 @@ def _apply_matrix_cf(ws, key_col: int, c0: int, c1: int, last_row: int) -> None:
     tl = get_column_letter(c0)            # top-left of the CF range, for the relative formula
     bottom = max(last_row + 3000, 3)      # buffer for appends; re-applied each process start
     rng = ws.Range(ws.Cells(2, c0), ws.Cells(bottom, c1))
-    try:
-        rng.FormatConditions.Delete()
-        green = rng.FormatConditions.Add(Type=_XL_EXPRESSION,
-                                         Formula1=f'=AND(${key}2<>"",{tl}2="✓")')
-        green.Interior.Color = _FILL["dwg_yes"]
-        red = rng.FormatConditions.Add(Type=_XL_EXPRESSION,
-                                       Formula1=f'=AND(${key}2<>"",{tl}2="")')
-        red.Interior.Color = _FILL["dwg_no"]
-    except Exception as e:  # noqa: BLE001 - values still readable without color
-        log.debug("Matrix conditional formatting failed (%s)", e)
+    last_e = None
+    for sep in _cf_separators(ws):
+        green_f = f'=AND(${key}2<>""{sep}{tl}2="✓")'
+        red_f = f'=AND(${key}2<>""{sep}{tl}2="")'
+        try:
+            rng.FormatConditions.Delete()
+            # Pass Type, Operator, Formula1 BY POSITION with a REAL Operator value —
+            # omitting Operator makes late-bound Excel drop Formula1 and reject the
+            # rule (the same bug that hid the Live Queue search highlight).
+            green = rng.FormatConditions.Add(_XL_EXPRESSION, _XL_EQUAL, green_f)
+            green.Interior.Color = _FILL["dwg_yes"]
+            red = rng.FormatConditions.Add(_XL_EXPRESSION, _XL_EQUAL, red_f)
+            red.Interior.Color = _FILL["dwg_no"]
+            return
+        except Exception as e:  # noqa: BLE001 - try the next separator
+            last_e = e
+    log.warning("Matrix conditional formatting failed (%s)", last_e)
 
 
 def _draw_separator(ws, sep_col: int) -> None:

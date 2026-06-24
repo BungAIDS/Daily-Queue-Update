@@ -63,7 +63,7 @@ log = logging.getLogger("queue-watch")
 
 # Bump to force a one-time clean rebuild of the Order History tab (e.g. after a
 # layout change). In normal operation the tab is built once and only appended to.
-OH_BUILD_VERSION = 4   # +Engineer column
+OH_BUILD_VERSION = 5   # rebuild once so the fixed ✓/red matrix conditional formatting lands
 
 
 def setup_logging() -> None:
