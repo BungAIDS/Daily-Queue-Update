@@ -418,11 +418,21 @@ def _apply_search_cf(ws, key_col: int, ncols: int, first_data_row: int,
     key = get_column_letter(key_col)
     bottom = max(last_row + 3000, first_data_row)   # buffer for appends
     rng = ws.Range(ws.Cells(first_data_row, 1), ws.Cells(bottom, ncols))
+    formula = f'=AND(${key}$1<>"",INDEX(${key}:${key},ROW())&""=${key}$1&"")'
     try:
+        # Operator is unused for xlExpression; pass it as "omitted" (pythoncom.Missing
+        # on Windows, None in the test path) so the call stays positional.
+        try:
+            import pythoncom
+            operator = pythoncom.Missing
+        except Exception:  # noqa: BLE001 - non-Windows / test path
+            operator = None
         rng.FormatConditions.Delete()
-        hit = rng.FormatConditions.Add(
-            Type=_XL_EXPRESSION,
-            Formula1=f'=AND(${key}$1<>"",INDEX(${key}:${key},ROW())&""=${key}$1&"")')
+        # Pass Type / Operator / Formula1 BY POSITION. Late-bound Excel
+        # (GetActiveObject, no type library) doesn't reliably bind keyword args like
+        # Formula1=; the formula then gets dropped and Excel raises "parameter not
+        # optional" (DISP_E_PARAMNOTOPTIONAL). Positional args make the formula land.
+        hit = rng.FormatConditions.Add(_XL_EXPRESSION, operator, formula)
         hit.Interior.Color = _SEARCH_HIT_FILL
         hit.Font.Bold = True
         try:
