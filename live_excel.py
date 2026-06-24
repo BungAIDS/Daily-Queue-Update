@@ -89,6 +89,11 @@ _RENDER_CACHE: Dict[str, int] = {}
 # coworker's view to that tab — so we only ever do it once per sheet.
 _FROZEN: set = set()
 
+# Sheets whose search-highlight conditional format has been applied successfully
+# this process. Tracked so we keep retrying until it lands once (a busy Excel can
+# reject the first attempt), then only re-apply when rows/the below-block change.
+_SEARCH_CF_DONE: set = set()
+
 # Per-sheet column count at last AutoFit. AutoFit scans the whole sheet, so on a
 # full-repaint tab (Changes) we only re-fit on first render or when the column
 # count changes — not every poll.
@@ -397,11 +402,12 @@ def _write_search_bar(ws, key_col: int) -> None:
 
 
 def _apply_search_cf(ws, key_col: int, ncols: int, first_data_row: int,
-                     last_row: int) -> None:
+                     last_row: int) -> bool:
     """Highlight (yellow fill + red box) the whole data row whose Job # equals the
     search cell (row 1, the key column). Bounded to the data + a buffer for later
     appends — a whole-column CF is rejected at scale. TEXT(...,\"@\") on both sides
-    so a job stored as text still matches a number typed into the box."""
+    so a job stored as text still matches a number typed into the box. Returns True
+    if the rule was applied (so the caller can stop retrying)."""
     key = get_column_letter(key_col)
     bottom = max(last_row + 3000, first_data_row)   # buffer for appends
     rng = ws.Range(ws.Cells(first_data_row, 1), ws.Cells(bottom, ncols))
@@ -417,8 +423,12 @@ def _apply_search_cf(ws, key_col: int, ncols: int, first_data_row: int,
             _box_border(hit, _SEARCH_RED)
         except Exception:  # noqa: BLE001 - keep the fill even if the box fails
             pass
+        return True
     except Exception as e:  # noqa: BLE001 - values still readable without the highlight
-        log.debug("Search highlight conditional formatting failed (%s)", e)
+        # WARNING (not debug): if the highlight can't be set we want it in the
+        # console so it's diagnosable rather than silently missing.
+        log.warning("Search highlight conditional formatting failed (%s)", e)
+        return False
 
 
 def _read_keymap(ws, key_col: int, start_row: int = 2):
@@ -601,21 +611,17 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
                 ws.Columns(col).ColumnWidth = min(60, max(w, len(hdr) + 3))
         except Exception:  # noqa: BLE001
             pass
-    # Search bar + highlight. Draw the bar EVERY cycle: it's three cheap cells and
-    # never overwrites the input cell's value (so what you typed survives), which
-    # makes it self-heal — if a render is ever interrupted mid-rebuild (e.g. Excel
-    # busy), a later cycle still paints it instead of leaving row 1 blank until the
-    # next restart. The autofit above (first render only) runs first, so the hint
-    # text spilling right never widens a data column. Re-apply the CF whenever rows
-    # changed so a freshly-appended order is covered (the below-block clear strips
-    # CF from the rows beneath the live data, which don't need it).
+    # Draw the search bar EVERY cycle: it's three cheap cells and never overwrites
+    # the input cell's value (so what you typed survives), which makes it self-heal
+    # — if a render is ever interrupted mid-rebuild (e.g. Excel busy), a later cycle
+    # still paints it instead of leaving row 1 blank until the next restart. The
+    # autofit above (first render only) runs first, so the hint text spilling right
+    # never widens a data column. The highlight CF is applied LAST (see below).
     if search:
         try:
             _write_search_bar(ws, key_col)
         except Exception as e:  # noqa: BLE001
             log.debug("search bar render failed (%s)", e)
-        if first_time or touched:
-            _apply_search_cf(ws, key_col, ncols, first_data_row, last_row)
 
     if freeze and name not in _FROZEN:
         try:
@@ -630,12 +636,23 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
     # The 'Removed since this morning' block sits right after the live data, so it
     # must be re-drawn (repositioned) whenever the row count shifted — else new
     # appends overwrite it — as well as when its own content changed. Best-effort.
+    below_ran = False
     if below is not None and (deletes or appends or below != _BELOW_LAST.get(name)):
         try:
             _render_below(ws, last_row, ncols, below)
             _BELOW_LAST[name] = below
+            below_ran = True
         except Exception as e:  # noqa: BLE001
             log.debug("below-block render failed (%s)", e)
+
+    # Apply the search highlight LAST — _render_below's Clear() on the rows beneath
+    # the live data wipes any CF there, so applying it earlier (before the block)
+    # left nothing highlighting. Re-apply on any change, when the block redrew, or
+    # until it first lands (a busy Excel can reject the first try); once it's stuck
+    # we only refresh it on a real change so we're not rewriting CF every poll.
+    if search and (first_time or touched or below_ran or name not in _SEARCH_CF_DONE):
+        if _apply_search_cf(ws, key_col, ncols, first_data_row, last_row):
+            _SEARCH_CF_DONE.add(name)
 
     return len(updates) + len(appends) + len(deletes)
 
@@ -646,6 +663,7 @@ def reset_sheet(name: str) -> None:
     or feature tag appeared in the Order History matrices)."""
     _HEADER_DONE.discard(name)
     _FROZEN.discard(name)
+    _SEARCH_CF_DONE.discard(name)
 
 
 def _cell_to_value(cell) -> Any:
