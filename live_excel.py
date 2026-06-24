@@ -375,18 +375,16 @@ def _write_search_bar(ws, key_col: int) -> None:
         lbl.HorizontalAlignment = _XL_RIGHT
     except Exception:  # noqa: BLE001
         pass
-    box = ws.Cells(1, key_col)             # the cell the conditional format watches
-    box.Value = ""
-    try:
+    box = ws.Cells(1, key_col)             # the cell the conditional format watches;
+    try:                                   # never overwrite its value (what you typed)
         box.Interior.Color = _SEARCH_BOX_FILL
         box.Font.Bold = True
         box.HorizontalAlignment = _XL_CENTER
         _box_border(box, _SEARCH_RED)
-        if box.Comment is not None:
-            box.Comment.Delete()
-        box.AddComment("Type an order # here and press Enter. The matching row "
-                       "below lights up yellow with a red box. Clear this cell to "
-                       "remove the highlight.")
+        if box.Comment is None:
+            box.AddComment("Type an order # here and press Enter. The matching row "
+                           "below lights up yellow with a red box. Clear this cell "
+                           "to remove the highlight.")
     except Exception:  # noqa: BLE001
         pass
     hint = ws.Cells(1, key_col + 1)
@@ -603,19 +601,21 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
                 ws.Columns(col).ColumnWidth = min(60, max(w, len(hdr) + 3))
         except Exception:  # noqa: BLE001
             pass
-        # Draw the search bar AFTER autofit (so its label/hint text never widen a
-        # data column). The highlight CF itself is (re)applied below.
-        if search:
-            try:
-                _write_search_bar(ws, key_col)
-            except Exception as e:  # noqa: BLE001
-                log.debug("search bar render failed (%s)", e)
-
-    # (Re)apply the search highlight over the current data extent whenever rows
-    # changed, so a freshly-appended order is covered too — the below-block clear
-    # strips CF from the rows beneath the live data (which don't need it).
-    if search and (first_time or touched):
-        _apply_search_cf(ws, key_col, ncols, first_data_row, last_row)
+    # Search bar + highlight. Draw the bar EVERY cycle: it's three cheap cells and
+    # never overwrites the input cell's value (so what you typed survives), which
+    # makes it self-heal — if a render is ever interrupted mid-rebuild (e.g. Excel
+    # busy), a later cycle still paints it instead of leaving row 1 blank until the
+    # next restart. The autofit above (first render only) runs first, so the hint
+    # text spilling right never widens a data column. Re-apply the CF whenever rows
+    # changed so a freshly-appended order is covered (the below-block clear strips
+    # CF from the rows beneath the live data, which don't need it).
+    if search:
+        try:
+            _write_search_bar(ws, key_col)
+        except Exception as e:  # noqa: BLE001
+            log.debug("search bar render failed (%s)", e)
+        if first_time or touched:
+            _apply_search_cf(ws, key_col, ncols, first_data_row, last_row)
 
     if freeze and name not in _FROZEN:
         try:
