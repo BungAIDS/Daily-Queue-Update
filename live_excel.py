@@ -272,6 +272,22 @@ def _pad(row: List, ncols: int) -> List[Any]:
     return vals + [None] * (ncols - len(vals))
 
 
+def _overflow_col_widths(sheet: Sheet) -> Dict[int, float]:
+    """For each column that holds an 'overflow' cell (free text meant to overrun,
+    e.g. the Changes tab's 'What changed'), the width it should take from its
+    NON-overflow content only — so AutoFit doesn't widen the column to fit the long
+    text and it overruns the empty cells to its right instead. {col(1-based): width}.
+    Measured from the model, so no extra COM round-trips."""
+    overflow_cols = {i for row in sheet.grid
+                     for i, c in enumerate(row, start=1) if c.overflow}
+    widths: Dict[int, int] = {col: 0 for col in overflow_cols}
+    for row in sheet.grid:
+        for i, c in enumerate(row, start=1):
+            if i in widths and not c.overflow and c.value not in (None, ""):
+                widths[i] = max(widths[i], len(str(c.value)))
+    return {col: min(max(w + 2, 10), 60) for col, w in widths.items()}
+
+
 def render_sheet(app, wb, sheet: Sheet) -> None:
     """Write one Sheet model into its worksheet: clear, bulk-write values, style,
     freeze, AutoFilter, autofit."""
@@ -314,6 +330,11 @@ def render_sheet(app, wb, sheet: Sheet) -> None:
             # to the right instead. Its real data (Job #, times) is short.
             if ws.Columns(1).ColumnWidth > 12:
                 ws.Columns(1).ColumnWidth = 12
+            # Re-narrow any column whose width was driven by an 'overflow' cell (free
+            # text like 'What changed'): size it to its other content so the text
+            # overruns the empty cells to its right rather than widening the column.
+            for col, width in _overflow_col_widths(sheet).items():
+                ws.Columns(col).ColumnWidth = width
             _AUTOFIT_NCOLS[sheet.name] = ncols
         except Exception:  # noqa: BLE001
             pass

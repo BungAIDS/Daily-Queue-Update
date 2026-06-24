@@ -197,9 +197,12 @@ actually added or removed). Tabs:
   appeared. "New today" shading is judged from the 5 AM `main.py` run's snapshot
   + diff (see below).
 - **Changes** — today's activity log: **New orders today**, **Change orders
-  today** (CO# increases), **Orders that changed today** (one line per field
-  modification — a field that changes several times in a day is several lines,
-  each time-stamped, newest first), and **Removed / completed today**.
+  today** (CO# increases, with each change order's written description),
+  **Orders that changed today**, and **Removed / completed today**. Every section
+  uses the same column order as the rest of the workbook (Live Queue's columns).
+  In **Orders that changed today**, each changed order shows a full row rolled
+  back to its start-of-day state, then one time-stamped line per change (a field
+  that changes several times in a day is several lines), newest order first.
 
 The tabs are wiped and rebuilt **once per process start** (so a 5 AM launch
 starts clean), then run incrementally all day. Order History rebuilds itself if
