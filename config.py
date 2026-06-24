@@ -177,16 +177,13 @@ try:
 except ValueError:
     SO_REVERIFY_MIN_AGE_MIN = 45
 
-# Auto-push the watcher's log to a throwaway branch so it can be read remotely
-# without copying files off the machine. Each push force-replaces the branch with
-# the current log as a single orphan commit (no history, so no repo bloat). Set
-# LOG_PUSH_MINUTES=0 (or LOG_PUSH_BRANCH empty) to disable. Needs an 'origin' you
-# can push to. NOTE: the log (job #s, customers, file paths) goes to that repo.
+# Publish the watcher's log to a throwaway branch so it can be read remotely
+# without copying files off the machine. The log is pushed at startup and again
+# on shutdown (Ctrl+C, or the end of the watch window) — each push force-replaces
+# the branch with the current log as a single orphan commit (no history, so no
+# repo bloat). Set LOG_PUSH_BRANCH empty to disable. Needs an 'origin' you can
+# push to. NOTE: the log (job #s, customers, file paths) goes to that repo.
 LOG_PUSH_BRANCH = (os.environ.get("LOG_PUSH_BRANCH", "debug-logs") or "").strip()
-try:
-    LOG_PUSH_MINUTES = max(0, int(os.environ.get("LOG_PUSH_MINUTES", "30")))
-except ValueError:
-    LOG_PUSH_MINUTES = 30
 
 
 def _parse_hhmm(raw: str, default: str) -> "tuple[int, int]":

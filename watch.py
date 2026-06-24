@@ -48,7 +48,7 @@ import live_state
 import notify
 from compare import load_latest_snapshot, load_snapshot
 from config import (LIVE_MORNING_SNAPSHOT, LIVE_WORKBOOK_PATH, LOG_DIR,
-                    LOG_PUSH_MINUTES, OUTPUT_DIR, POLL_INTERVAL_SECONDS,
+                    LOG_PUSH_BRANCH, OUTPUT_DIR, POLL_INTERVAL_SECONDS,
                     SO_REVERIFY_MIN_AGE_MIN, SO_REVERIFY_PER_POLL, WATCH_END,
                     WATCH_START, validate_runtime_config)
 from live_excel import save_morning_copy, update_master_workbook
@@ -63,7 +63,7 @@ log = logging.getLogger("queue-watch")
 
 # Bump to force a one-time clean rebuild of the Order History tab (e.g. after a
 # layout change). In normal operation the tab is built once and only appended to.
-OH_BUILD_VERSION = 4   # +Engineer column
+OH_BUILD_VERSION = 5   # rebuild once so the fixed ✓/red matrix conditional formatting lands
 
 
 def setup_logging() -> None:
@@ -303,7 +303,8 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
                   "key_col": live_sheets.LIVE_QUEUE_KEY_COL, "allow_delete": True,
                   "sort_col": live_sheets.LIVE_QUEUE_CBC_COL,
                   "text_cols": [1, live_sheets.LIVE_QUEUE_LAST_OUT_COL],  # Added + Last Out -> AM/PM text
-                  "freeze": "C2"}   # header on row 1, frozen with the Added + Job # columns
+                  "header_row": 2, "search": True,   # search bar on row 1, headers on row 2
+                  "freeze": "C3"}   # keep the search bar + header + Added/Job # columns visible
 
     # "Removed since this morning" block below the Live Queue. Pass it EVERY cycle
     # so the renderer can reposition it when the queue grows (otherwise the new
@@ -540,10 +541,8 @@ def run_watch(ignore_window: bool = False) -> int:
 
     stop = threading.Event()
     _install_stop_handler(stop)
-    push_every = LOG_PUSH_MINUTES * 60
-    last_push = time.monotonic()
-    if push_every:
-        _publish_logs()               # publish once at startup so the branch exists
+    if LOG_PUSH_BRANCH:
+        _publish_logs()               # snapshot the prior session at startup so the branch exists
     cycle = 0
     try:
         while not stop.is_set():
@@ -560,9 +559,6 @@ def run_watch(ignore_window: bool = False) -> int:
             if baseline:
                 _morning_snapshot(now)
             cycle += 1
-            if push_every and (time.monotonic() - last_push) >= push_every:
-                _publish_logs()
-                last_push = time.monotonic()
             # A poll's browser/async work can reset our SIGINT handler — re-assert
             # it, then wait out the rest of the interval interruptibly: the wait
             # returns the instant a Ctrl+C sets the stop event.
@@ -576,8 +572,8 @@ def run_watch(ignore_window: bool = False) -> int:
     live_state.save_state(state, today)
     live_master.save_master(master)
     log.info("=== Live watch done (%d cycles) ===", cycle)
-    if push_every:
-        _publish_logs()               # final push so the shutdown output is captured
+    if LOG_PUSH_BRANCH:
+        _publish_logs()               # publish on Ctrl+C / window end — captures the full session
     return 0
 
 
