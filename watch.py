@@ -46,7 +46,7 @@ import live_master
 import live_sheets
 import live_state
 import notify
-from compare import load_latest_snapshot, load_snapshot
+from compare import load_latest_snapshot, load_snapshot, save_snapshot
 from config import (LIVE_MORNING_SNAPSHOT, LIVE_WORKBOOK_PATH, LOG_DIR,
                     LOG_PUSH_BRANCH, OUTPUT_DIR, POLL_INTERVAL_SECONDS,
                     SO_REVERIFY_MIN_AGE_MIN, SO_REVERIFY_PER_POLL, WATCH_END,
@@ -152,6 +152,19 @@ def _seed_baseline(state: dict, today: datetime) -> None:
     else:
         log.info("No prior daily snapshot to seed from — the first poll's board "
                  "becomes the baseline (enriched once, not announced).")
+
+
+def _daily_snapshot(board: list, now: datetime) -> None:
+    """Freeze the start-of-day board as today's queue snapshot
+    (snapshots/queue_<date>.json) the first time the watcher sees the board each
+    day — the baseline that 'new today' and the start-of-day seed compare against.
+    This was the 5 AM main.py run's job; the watcher now owns it. Guarded on the
+    snapshot's absence, so it writes once per day (the first run Windows Scheduler
+    fires) and a later restart never clobbers the morning baseline."""
+    today = now.date()
+    if load_snapshot(today) is not None:
+        return
+    save_snapshot(board, today)   # logs "Saved snapshot: … (N jobs)"
 
 
 def _enrich_pending(state: dict) -> list:
@@ -357,6 +370,10 @@ def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce
     if not board:
         log.warning("Board scrape returned 0 orders — skipping this cycle (site/session issue?).")
         return {"new": [], "returning": [], "removed": []}
+
+    # First time we see the board today, freeze it as the day's queue snapshot —
+    # the 'new today' baseline that the 5 AM main.py run used to write.
+    _daily_snapshot(board, now)
 
     # Board prices before this poll overwrites them — a change order almost always
     # moves the order's price, so a shift is our (free) signal to re-fetch the SO.
