@@ -33,6 +33,7 @@ log = logging.getLogger(__name__)
 
 _XL_UNDERLINE_SINGLE = 2  # xlUnderlineStyleSingle
 _XL_EXPRESSION = 2        # xlExpression (conditional formatting)
+_XL_EQUAL = 3             # xlEqual — a real Operator value (ignored for xlExpression)
 _XL_LIST_SEPARATOR = 5    # Application.International index for the list separator
 _XL_CONTINUOUS = 1        # xlContinuous border line style
 _XL_MEDIUM = -4138        # xlMedium border weight
@@ -419,14 +420,6 @@ def _apply_search_cf(ws, key_col: int, ncols: int, first_data_row: int,
     bottom = max(last_row + 3000, first_data_row)   # buffer for appends
     rng = ws.Range(ws.Cells(first_data_row, 1), ws.Cells(bottom, ncols))
 
-    # Operator is unused for xlExpression; pass it "omitted" so Formula1 lands by
-    # position — late-bound Excel doesn't reliably bind it as a keyword argument.
-    try:
-        import pythoncom
-        operator = pythoncom.Missing
-    except Exception:  # noqa: BLE001 - non-Windows / test path
-        operator = None
-
     seps: List[str] = []
     try:
         local = ws.Application.International(_XL_LIST_SEPARATOR)
@@ -443,7 +436,12 @@ def _apply_search_cf(ws, key_col: int, ncols: int, first_data_row: int,
                    f'INDEX(${key}:${key}{sep}ROW())&""=${key}$1&"")')
         try:
             rng.FormatConditions.Delete()
-            hit = rng.FormatConditions.Add(_XL_EXPRESSION, operator, formula)
+            # Pass Type, Operator, Formula1 BY POSITION with a REAL Operator value.
+            # Operator is ignored for xlExpression, but it must be a concrete value:
+            # omitting it (or pythoncom.Missing) makes late-bound Excel drop Formula1,
+            # so Excel sees no formula and raises "parameter not optional". A real
+            # Operator keeps Formula1 as positional arg #3 so it actually arrives.
+            hit = rng.FormatConditions.Add(_XL_EXPRESSION, _XL_EQUAL, formula)
             hit.Interior.Color = _SEARCH_HIT_FILL
             hit.Font.Bold = True
             try:
@@ -453,13 +451,12 @@ def _apply_search_cf(ws, key_col: int, ncols: int, first_data_row: int,
             return True
         except Exception as e:  # noqa: BLE001 - try the next separator
             last_e = e
-    # WARNING (not debug): if the highlight can't be set we want it in the console
-    # so it's diagnosable rather than silently missing. Also report whether the
-    # workbook is in legacy shared mode or the sheet is protected — both BLOCK
-    # conditional formatting outright, which would be a different fix than the
-    # formula. (Modern OneDrive co-authoring is fine; legacy "Share Workbook"
-    # is not.)
-    shared = protected = "?"
+
+    # WARNING (not debug) + diagnostics: legacy sharing / sheet protection BLOCK
+    # conditional formatting outright, and the probe (the simplest possible CF)
+    # tells us whether ANY rule can be added — if even it fails, CF is blocked in
+    # this Excel/workbook rather than our formula being wrong.
+    shared = protected = probe = "?"
     try:
         shared = ws.Parent.MultiUserEditing
     except Exception:  # noqa: BLE001
@@ -468,8 +465,16 @@ def _apply_search_cf(ws, key_col: int, ncols: int, first_data_row: int,
         protected = ws.ProtectContents
     except Exception:  # noqa: BLE001
         pass
+    try:
+        c = ws.Cells(first_data_row, 1)
+        c.FormatConditions.Delete()
+        c.FormatConditions.Add(_XL_EXPRESSION, _XL_EQUAL, "=TRUE")
+        c.FormatConditions.Delete()
+        probe = "ok"
+    except Exception as pe:  # noqa: BLE001
+        probe = f"failed({pe})"
     log.warning("Search highlight conditional formatting failed (%s) "
-                "[workbook shared=%s, sheet protected=%s]", last_e, shared, protected)
+                "[shared=%s protected=%s trivial-CF=%s]", last_e, shared, protected, probe)
     return False
 
 
