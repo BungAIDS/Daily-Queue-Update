@@ -393,9 +393,9 @@ def _box_border(target, color: int, weight: int = _XL_MEDIUM) -> None:
 
 def _write_search_bar(ws, key_col: int) -> None:
     """Row 1 (above the header): a 'Search:' label and an input cell sitting right
-    above the Job # column. Typing an order # there lights up the matching row via
-    the conditional format in _apply_search_cf — no macros, mirroring the daily
-    report's Full Queue search."""
+    above the Job # column. Typing an order # (or just its last few digits) there
+    lights up the matching row via the conditional format in _apply_search_cf — no
+    macros, mirroring the daily report's Full Queue search."""
     lbl = ws.Cells(1, max(key_col - 1, 1))
     lbl.Value = "Search:"
     try:
@@ -410,13 +410,14 @@ def _write_search_bar(ws, key_col: int) -> None:
         box.HorizontalAlignment = _XL_CENTER
         _box_border(box, _SEARCH_RED)
         if box.Comment is None:
-            box.AddComment("Type an order # here and press Enter. The matching row "
-                           "below lights up yellow with a red box. Clear this cell "
-                           "to remove the highlight.")
+            box.AddComment("Type an order # (or just its last few digits, e.g. the "
+                           "last 3) here and press Enter. The matching row below "
+                           "lights up yellow with a red box. Clear this cell to "
+                           "remove the highlight.")
     except Exception:  # noqa: BLE001
         pass
     hint = ws.Cells(1, key_col + 1)
-    hint.Value = "← type an order # to highlight its row (clear to remove)"
+    hint.Value = "← type an order # or its last 3 digits to highlight its row (clear to remove)"
     try:
         hint.Font.Italic = True
         hint.Font.Color = _NOTE_GRAY
@@ -443,12 +444,14 @@ def _cf_separators(ws) -> List[str]:
 
 def _apply_search_cf(ws, key_col: int, ncols: int, first_data_row: int,
                      last_row: int) -> bool:
-    """Highlight (yellow fill + red box) the whole data row whose Job # equals the
-    search cell (row 1, the key column). Bounded to the data + a buffer for later
-    appends — a whole-column CF is rejected at scale. Returns True if the rule was
-    applied. INDEX(col, ROW()) reads each row's Job # with only absolute parts, so
-    the rule can't be mis-translated against the active cell; &"" coerces both
-    sides to text so a job stored as text still matches a number typed in the box.
+    """Highlight (yellow fill + red box) the whole data row whose Job # ENDS WITH the
+    search cell (row 1, the key column) — so typing the full order # OR just its last
+    few digits (e.g. the last 3) lights up the row. Bounded to the data + a buffer for
+    later appends — a whole-column CF is rejected at scale. Returns True if the rule was
+    applied. INDEX(col, ROW()) reads each row's Job # with only absolute parts, so the
+    rule can't be mis-translated against the active cell; RIGHT(job, LEN(typed)) takes
+    the matching tail and &"" coerces both sides to text so a job stored as text still
+    matches digits typed in the box.
 
     The formula's argument separator is locale-sensitive: a CF formula handed to
     Excel may need the LOCAL list separator (e.g. ';' in some regions) rather than
@@ -460,8 +463,14 @@ def _apply_search_cf(ws, key_col: int, ncols: int, first_data_row: int,
 
     last_e = None
     for sep in _cf_separators(ws):
+        # Match if the Job # ENDS WITH whatever's typed: RIGHT(job, LEN(typed))
+        # == typed. Typing the whole order # still matches (a string ends with
+        # itself); typing just the last few digits (e.g. the last 3) matches its
+        # row too. Both sides coerced to text (&"") so a job stored as text still
+        # matches digits typed in the box.
         formula = (f'=AND(${key}$1<>""{sep}'
-                   f'INDEX(${key}:${key}{sep}ROW())&""=${key}$1&"")')
+                   f'RIGHT(INDEX(${key}:${key}{sep}ROW())&""{sep}'
+                   f'LEN(${key}$1&""))=${key}$1&"")')
         try:
             rng.FormatConditions.Delete()
             # Pass Type, Operator, Formula1 BY POSITION with a REAL Operator value.
