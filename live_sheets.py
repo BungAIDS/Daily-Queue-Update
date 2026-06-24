@@ -111,6 +111,21 @@ def added_label(job: Dict[str, Any], ref: Optional[datetime] = None) -> str:
     return dt.strftime("%b %#d, %Y") if _is_windows() else dt.strftime("%b %-d, %Y")
 
 
+def last_out_label(job: Dict[str, Any], ref: Optional[datetime] = None) -> str:
+    """The 'Last Out' label: when the order was MOST RECENTLY removed before its
+    current stint (the entry's last_out, injected as `_last_out`) — a time if that
+    was today, else a short date. Blank if the order has never left the board."""
+    iso = job.get("_last_out") or ""
+    try:
+        dt = datetime.fromisoformat(iso)
+    except (ValueError, TypeError):
+        return ""
+    ref = ref or datetime.now()
+    if dt.date() == ref.date():
+        return dt.strftime("%#I:%M %p") if _is_windows() else dt.strftime("%-I:%M %p")
+    return dt.strftime("%b %#d, %Y") if _is_windows() else dt.strftime("%b %-d, %Y")
+
+
 def added_date(job: Dict[str, Any]) -> Optional[date]:
     """The date an order most recently came onto the board (from _added_iso /
     _first_seen) — i.e. the date the 'Added' column reflects — or None if unknown."""
@@ -532,14 +547,18 @@ LINE_ITEM_HEADERS = ["Job #", "Customer", "CO#", "Tags", "Item (as printed)",
 # "Added" (last time it came onto the board), then the Full Queue columns, then a
 # trailing "#" column carrying the cbcinsider board position. The tab is sorted by
 # "#" so the order matches the queue on the site (re-sort "#" to restore it).
-LIVE_QUEUE_HEADERS = ["Added"] + list(QUEUE_HEADERS) + ["#"]   # DWG/feature matrices live on Order History
+# "Last Out" (most recent prior departure) sits just before the trailing "#"
+# board-position column, so adding it doesn't shift Job #/End Date (still after the
+# single leading "Added").
+LIVE_QUEUE_HEADERS = ["Added"] + list(QUEUE_HEADERS) + ["Last Out", "#"]
 LIVE_QUEUE_CBC_COL = len(LIVE_QUEUE_HEADERS)                   # the trailing "#" board-position col (sort key)
+LIVE_QUEUE_LAST_OUT_COL = len(LIVE_QUEUE_HEADERS) - 1         # the "Last Out" col (AM/PM-or-date text)
 LIVE_QUEUE_KEY_COL = 2 + QUEUE_HEADERS.index("Job #")          # 1-based col of Job # (Added is col 1)
 LIVE_QUEUE_END_DATE_COL = 2 + QUEUE_HEADERS.index("End Date")  # 1-based col of End Date
-# The 'Removed since this morning' block mirrors the Live Queue columns exactly so
-# its rows line up under the board above; the trailing board-position "#" is
-# meaningless once removed, so that slot shows when the order left instead.
-LIVE_QUEUE_REMOVED_HEADERS = ["Added"] + list(QUEUE_HEADERS) + ["Removed"]
+# The 'Removed since this morning' block lines its data columns up under the board
+# above, but LEADS with the removal time (the "Removed" column) instead of "Added"
+# — the most relevant fact for an order that just left — and drops the trailing "#".
+LIVE_QUEUE_REMOVED_HEADERS = ["Removed"] + list(QUEUE_HEADERS)
 _END_DATE_IDX = QUEUE_HEADERS.index("End Date")               # its index within the standard cells
 _CO_IDX = [i for i, (_, k) in enumerate(COLUMNS) if k == "co"][0]   # CO# cell index
 
@@ -587,14 +606,13 @@ def row_sig(cells: List[Cell]) -> str:
     return hashlib.md5(json.dumps(payload, default=str, sort_keys=True).encode()).hexdigest()
 
 
-def _board_row_cells(j: Dict[str, Any], today: date, co_changed: bool,
-                     is_new: bool, ref: Optional[datetime], trailing: Cell) -> List[Cell]:
-    """Added + every Full Queue column + a trailing cell, styled exactly like a
-    Live Queue row: '@'-text Added, real-date End Date, CO# hover note, CO#-red
-    text, and the urgency / new-today row fill. `trailing` is the last cell — the
-    board '#' position on the Live Queue, or the removal time in the Removed
-    block — so both render identically."""
-    added = Cell(added_label(j, ref=ref), number_format="@")
+def _board_row_cells(j: Dict[str, Any], today: date, co_changed: bool, is_new: bool,
+                     ref: Optional[datetime], leading: Cell, trailing: List[Cell]) -> List[Cell]:
+    """`leading` cell + every Full Queue column + `trailing` cells, styled exactly
+    like a Live Queue row: real-date End Date, CO# hover note, CO#-red text, and the
+    urgency / new-today row fill. `leading` is the Added time on the board or the
+    removal time in the Removed block; `trailing` is [Last Out, '#'] on the board,
+    [] in the Removed block — so both render with the same data columns aligned."""
     std = _job_value_cells(j, co_changed=co_changed, arrange_comment=True)
     # Write End Date as a real date so it sorts/filters as a date in Excel.
     ed = _parse_date(j.get("end_date", ""))
@@ -604,8 +622,10 @@ def _board_row_cells(j: Dict[str, Any], today: date, co_changed: bool,
     # Hover the CO# cell to see the change-order history (most recent first).
     std[_CO_IDX].comment = _co_comment(j)
     if co_changed:                       # carry the red over to the non-std cells
-        added.font = trailing.font = F_RED
-    cells = [added] + std + [trailing]
+        leading.font = F_RED
+        for t in trailing:
+            t.font = F_RED
+    cells = [leading] + std + list(trailing)
     fill = _row_fill(j, today, is_new=is_new)
     if fill:
         for c in cells:
@@ -627,8 +647,9 @@ def removed_block(removed: List, today: date, new_ids: Optional[set] = None,
     rows = []
     for j, left in removed:
         jn = str(j.get("job") or "")
-        rem = Cell(fmt_time(left), number_format="@")   # when it left, in the '#' slot
-        rows.append(_board_row_cells(j, today, jn in co_changed_ids, jn in new_ids, ref, rem))
+        rem = Cell(fmt_time(left), number_format="@")   # when it left -> the LEADING column
+        rows.append(_board_row_cells(j, today, jn in co_changed_ids, jn in new_ids, ref,
+                                     leading=rem, trailing=[]))
     return {"title": title,
             "header_cells": _header_cells(LIVE_QUEUE_REMOVED_HEADERS),
             "rows": rows}
@@ -648,10 +669,13 @@ def live_queue_records(jobs: List[Dict[str, Any]], today: date,
     out = []
     for j in jobs:
         jn = str(j.get("job") or "")
+        added = Cell(added_label(j, ref=ref), number_format="@")
+        last_out = Cell(last_out_label(j, ref=ref), number_format="@")   # most recent prior departure
         # "#" = the cbcinsider board position (the sort key for board order).
         pos = j.get("_cbc_pos")
         cbc = Cell(pos if isinstance(pos, int) else "", center=True)
-        cells = _board_row_cells(j, today, jn in co_changed_ids, jn in new_ids, ref, cbc)
+        cells = _board_row_cells(j, today, jn in co_changed_ids, jn in new_ids, ref,
+                                 leading=added, trailing=[last_out, cbc])
         out.append((jn, cells))
     return out
 

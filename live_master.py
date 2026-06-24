@@ -15,7 +15,10 @@ Store shape:
         "<job#>": {
           "added":    ISO-8601,        # first time we ever saw it
           "left":     ISO-8601 | null, # when it last dropped off the board
+          "last_in":  ISO-8601,        # most recent time it (re)entered the board
+          "last_out": ISO-8601 | null, # most recent time it left the board
           "on_queue": bool,            # on the board as of the last poll?
+          "history":  [ {event: 'in'|'out', time: ISO-8601}, ... ],  # every add/remove
           "job":      { ...latest enriched job dict... },
         },
         ...
@@ -152,6 +155,25 @@ def _keep_better_enrichment(stored: Dict[str, Any], incoming: Dict[str, Any]) ->
     return merged
 
 
+def _log_event(entry: Dict[str, Any], event: str, when: str) -> None:
+    """Append an in/out transition to the order's full add/remove history
+    (`entry["history"]`, a chronological list of {event: 'in'|'out', time}). For an
+    entry created before history tracking, seed a best-effort prior history from
+    its 'added' (first in) and 'last_out' (most recent prior departure) so the log
+    is continuous from here on. Idempotent against re-adding the same event."""
+    hist = entry.get("history")
+    if hist is None:
+        hist = []
+        if entry.get("added"):
+            hist.append({"event": "in", "time": entry["added"]})
+        if entry.get("last_out"):
+            hist.append({"event": "out", "time": entry["last_out"]})
+        entry["history"] = hist
+    if hist and hist[-1].get("event") == event and hist[-1].get("time") == when:
+        return
+    hist.append({"event": event, "time": when})
+
+
 def update(master: Dict[str, Any], present: List[Dict[str, Any]],
            now: datetime) -> List[Dict[str, Any]]:
     """Fold the current board into the master log: upsert every present order
@@ -186,7 +208,8 @@ def update(master: Dict[str, Any], present: List[Dict[str, Any]],
             nj["engineers"] = engineers.detect(nj)
             orders[jn] = {"added": added, "added_known": known,
                           "last_in": now_iso, "last_out": None,
-                          "left": None, "on_queue": True, "seen_on_queue": True, "job": nj}
+                          "left": None, "on_queue": True, "seen_on_queue": True,
+                          "history": [{"event": "in", "time": added}], "job": nj}
         else:
             stored_job = entry.get("job") or {}
             # Never let a failed/stale re-fetch wipe a change order we already had.
@@ -200,10 +223,11 @@ def update(master: Dict[str, Any], present: List[Dict[str, Any]],
                                "field": field, "old": old, "new": new})
             if not entry.get("on_queue"):
                 # Off-board -> on-board: it just (re)entered the queue, so this is
-                # the moment that matters for "Added" — stamp last_in and treat the
-                # add time as known (we watched this arrival ourselves).
+                # the moment that matters for "Added" — stamp last_in, log the
+                # return, and treat the add time as known (we watched this arrival).
                 entry["last_in"] = now_iso
                 entry["added_known"] = known
+                _log_event(entry, "in", now_iso)
             entry["job"] = dict(merged)
             entry["on_queue"] = True
             entry["seen_on_queue"] = True   # the watcher has seen it on the board
@@ -216,7 +240,8 @@ def update(master: Dict[str, Any], present: List[Dict[str, Any]],
     for jn, entry in orders.items():
         if jn not in present_nums and entry.get("on_queue"):
             entry["on_queue"] = False
-            entry["last_out"] = now_iso     # most recent departure (kept across returns)
+            _log_event(entry, "out", now_iso)   # before last_out, so the seed reads the prior one
+            entry["last_out"] = now_iso         # most recent departure (kept across returns)
             if not entry.get("left"):
                 entry["left"] = now_iso
 

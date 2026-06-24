@@ -301,7 +301,8 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
                    lq_sigs, allow_delete=True)
     lq_payload = {"name": "Live Queue", "headers": live_sheets.LIVE_QUEUE_HEADERS, "ops": lq_ops,
                   "key_col": live_sheets.LIVE_QUEUE_KEY_COL, "allow_delete": True,
-                  "sort_col": live_sheets.LIVE_QUEUE_CBC_COL, "text_cols": [1],  # Added (col 1) -> AM/PM text
+                  "sort_col": live_sheets.LIVE_QUEUE_CBC_COL,
+                  "text_cols": [1, live_sheets.LIVE_QUEUE_LAST_OUT_COL],  # Added + Last Out -> AM/PM text
                   "freeze": "C2"}   # header on row 1, frozen with the Added + Job # columns
 
     # "Removed since this morning" block below the Live Queue. Pass it EVERY cycle

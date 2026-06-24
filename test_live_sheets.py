@@ -93,18 +93,32 @@ def test_removed_block_mirrors_live_queue_row():
     blk = ls.removed_block([(overdue, "2026-06-16T06:26:00"),
                             (fresh, "2026-06-16T07:42:00")],
                            TODAY, new_ids={"421802"}, co_changed_ids={"421757"})
-    # Same columns as the Live Queue, trailing slot relabeled 'Removed'.
-    assert len(blk["header_cells"]) == len(ls.LIVE_QUEUE_HEADERS)
-    assert blk["header_cells"][0].value == "Added" and blk["header_cells"][-1].value == "Removed"
+    # Leads with the removal time ('Removed'), then the same data columns as the
+    # board (so Job #/End Date line up under it); no trailing '#'.
+    assert blk["header_cells"][0].value == "Removed"
+    assert [c.value for c in blk["header_cells"]] == ls.LIVE_QUEUE_REMOVED_HEADERS
     r0, r1 = blk["rows"]
-    assert len(r0) == len(ls.LIVE_QUEUE_HEADERS)
-    job0 = r0[ls.LIVE_QUEUE_KEY_COL - 1]
-    assert job0.value == "421757" and job0.link == so          # Job # still links to its SO
+    assert len(r0) == len(ls.LIVE_QUEUE_REMOVED_HEADERS)
+    assert r0[0].value == "6:26 AM" and r0[0].number_format == "@"   # removal time leads, as text
+    job0 = r0[ls.LIVE_QUEUE_KEY_COL - 1]                             # Job # aligns with the board
+    assert job0.value == "421757" and job0.link == so               # Job # still links to its SO
     assert r0[ls.LIVE_QUEUE_END_DATE_COL - 1].fill == FILL_OVERDUE   # kept its overdue fill
-    assert any(c.font == "red" for c in r0)                    # CO#-changed -> red text
-    assert r0[-1].value == "6:26 AM" and r0[-1].number_format == "@"  # removal time, as text
+    assert any(c.font == "red" for c in r0)                          # CO#-changed -> red text
     # the fresh (new-today) order keeps its 'new' shading and isn't red
     assert any(c.fill == FILL_NEW for c in r1) and not any(c.font == "red" for c in r1)
+
+
+def test_live_queue_last_out_column():
+    # A returning order shows its most recent prior departure in 'Last Out';
+    # an order that has never left shows blank.
+    assert ls.LIVE_QUEUE_HEADERS[ls.LIVE_QUEUE_LAST_OUT_COL - 1] == "Last Out"
+    assert ls.LIVE_QUEUE_HEADERS[-1] == "#"                       # '#' still the trailing sort col
+    returned = _job("421000", _added_iso="2026-06-16T08:00:00", _last_out="2026-06-12T16:30:00")
+    cells = ls.live_queue_records([returned], TODAY)[0][1]
+    assert cells[ls.LIVE_QUEUE_LAST_OUT_COL - 1].value == "Jun 12, 2026"   # prior departure (earlier day)
+    never_left = _job("421001", _added_iso="2026-06-16T08:00:00")          # no _last_out
+    blank = ls.live_queue_records([never_left], TODAY)[0][1]
+    assert blank[ls.LIVE_QUEUE_LAST_OUT_COL - 1].value == ""
 
 
 def test_changes_today_log_sections():

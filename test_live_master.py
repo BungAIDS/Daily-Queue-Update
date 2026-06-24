@@ -46,6 +46,34 @@ def test_leave_then_return():
     assert m["orders"]["200"]["left"] is None
 
 
+def test_history_tracks_every_in_and_out():
+    m = {"orders": {}}
+    lm.update(m, [_job("100", _first_seen=T0.isoformat(timespec="seconds"))], T0)  # in
+    lm.update(m, [], T1)                                                            # out
+    lm.update(m, [_job("100")], T2)                                                 # in (return)
+    hist = m["orders"]["100"]["history"]
+    assert hist == [
+        {"event": "in", "time": T0.isoformat(timespec="seconds")},
+        {"event": "out", "time": T1.isoformat(timespec="seconds")},
+        {"event": "in", "time": T2.isoformat(timespec="seconds")},
+    ]
+
+
+def test_history_seeds_legacy_entries_from_added_and_last_out():
+    # An entry created before history tracking is seeded from added (+ prior
+    # last_out), then new transitions are appended continuously.
+    m = {"orders": {"600": {"added": "2026-06-10T09:00:00", "last_in": "2026-06-12T09:00:00",
+                            "last_out": "2026-06-11T17:00:00", "on_queue": False,
+                            "seen_on_queue": True, "left": "2026-06-11T17:00:00",
+                            "job": {"job": "600"}}}}
+    lm.update(m, [_job("600")], T0)            # legacy order returns
+    assert m["orders"]["600"]["history"] == [
+        {"event": "in", "time": "2026-06-10T09:00:00"},
+        {"event": "out", "time": "2026-06-11T17:00:00"},
+        {"event": "in", "time": T0.isoformat(timespec="seconds")},
+    ]
+
+
 def test_last_in_updates_on_return_added_stays():
     m = {"orders": {}}
     lm.update(m, [_job("100", _first_seen="2026-06-16T09:00:00")], T0)
