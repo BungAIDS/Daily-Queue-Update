@@ -33,6 +33,7 @@ log = logging.getLogger(__name__)
 
 _XL_UNDERLINE_SINGLE = 2  # xlUnderlineStyleSingle
 _XL_EXPRESSION = 2        # xlExpression (conditional formatting)
+_XL_LIST_SEPARATOR = 5    # Application.International index for the list separator
 _XL_CONTINUOUS = 1        # xlContinuous border line style
 _XL_MEDIUM = -4138        # xlMedium border weight
 _XL_RIGHT = -4152         # xlRight horizontal alignment
@@ -406,45 +407,70 @@ def _apply_search_cf(ws, key_col: int, ncols: int, first_data_row: int,
     """Highlight (yellow fill + red box) the whole data row whose Job # equals the
     search cell (row 1, the key column). Bounded to the data + a buffer for later
     appends — a whole-column CF is rejected at scale. Returns True if the rule was
-    applied (so the caller can stop retrying).
+    applied. INDEX(col, ROW()) reads each row's Job # with only absolute parts, so
+    the rule can't be mis-translated against the active cell; &"" coerces both
+    sides to text so a job stored as text still matches a number typed in the box.
 
-    The formula deliberately uses NO relative references: Excel re-bases a
-    relative CF formula against the *active cell* when the rule is added, which —
-    if someone is clicked into the search box (B1) at that moment — translates a
-    reference like $B3 into something invalid and the Add throws. INDEX($B:$B,
-    ROW()) reads each row's Job # with only absolute parts, so it's identical for
-    every cell and immune to that. &"" coerces both sides to text so a job stored
-    as text still matches a number typed into the box."""
+    The formula's argument separator is locale-sensitive: a CF formula handed to
+    Excel may need the LOCAL list separator (e.g. ';' in some regions) rather than
+    ','. We don't know which up front, so try Excel's reported separator first and
+    fall back to a comma — whichever Excel accepts wins."""
     key = get_column_letter(key_col)
     bottom = max(last_row + 3000, first_data_row)   # buffer for appends
     rng = ws.Range(ws.Cells(first_data_row, 1), ws.Cells(bottom, ncols))
-    formula = f'=AND(${key}$1<>"",INDEX(${key}:${key},ROW())&""=${key}$1&"")'
+
+    # Operator is unused for xlExpression; pass it "omitted" so Formula1 lands by
+    # position — late-bound Excel doesn't reliably bind it as a keyword argument.
     try:
-        # Operator is unused for xlExpression; pass it as "omitted" (pythoncom.Missing
-        # on Windows, None in the test path) so the call stays positional.
+        import pythoncom
+        operator = pythoncom.Missing
+    except Exception:  # noqa: BLE001 - non-Windows / test path
+        operator = None
+
+    seps: List[str] = []
+    try:
+        local = ws.Application.International(_XL_LIST_SEPARATOR)
+        if local:
+            seps.append(str(local))
+    except Exception:  # noqa: BLE001
+        pass
+    if "," not in seps:
+        seps.append(",")
+
+    last_e = None
+    for sep in seps:
+        formula = (f'=AND(${key}$1<>""{sep}'
+                   f'INDEX(${key}:${key}{sep}ROW())&""=${key}$1&"")')
         try:
-            import pythoncom
-            operator = pythoncom.Missing
-        except Exception:  # noqa: BLE001 - non-Windows / test path
-            operator = None
-        rng.FormatConditions.Delete()
-        # Pass Type / Operator / Formula1 BY POSITION. Late-bound Excel
-        # (GetActiveObject, no type library) doesn't reliably bind keyword args like
-        # Formula1=; the formula then gets dropped and Excel raises "parameter not
-        # optional" (DISP_E_PARAMNOTOPTIONAL). Positional args make the formula land.
-        hit = rng.FormatConditions.Add(_XL_EXPRESSION, operator, formula)
-        hit.Interior.Color = _SEARCH_HIT_FILL
-        hit.Font.Bold = True
-        try:
-            _box_border(hit, _SEARCH_RED)
-        except Exception:  # noqa: BLE001 - keep the fill even if the box fails
-            pass
-        return True
-    except Exception as e:  # noqa: BLE001 - values still readable without the highlight
-        # WARNING (not debug): if the highlight can't be set we want it in the
-        # console so it's diagnosable rather than silently missing.
-        log.warning("Search highlight conditional formatting failed (%s)", e)
-        return False
+            rng.FormatConditions.Delete()
+            hit = rng.FormatConditions.Add(_XL_EXPRESSION, operator, formula)
+            hit.Interior.Color = _SEARCH_HIT_FILL
+            hit.Font.Bold = True
+            try:
+                _box_border(hit, _SEARCH_RED)
+            except Exception:  # noqa: BLE001 - keep the fill even if the box fails
+                pass
+            return True
+        except Exception as e:  # noqa: BLE001 - try the next separator
+            last_e = e
+    # WARNING (not debug): if the highlight can't be set we want it in the console
+    # so it's diagnosable rather than silently missing. Also report whether the
+    # workbook is in legacy shared mode or the sheet is protected — both BLOCK
+    # conditional formatting outright, which would be a different fix than the
+    # formula. (Modern OneDrive co-authoring is fine; legacy "Share Workbook"
+    # is not.)
+    shared = protected = "?"
+    try:
+        shared = ws.Parent.MultiUserEditing
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        protected = ws.ProtectContents
+    except Exception:  # noqa: BLE001
+        pass
+    log.warning("Search highlight conditional formatting failed (%s) "
+                "[workbook shared=%s, sheet protected=%s]", last_e, shared, protected)
+    return False
 
 
 def _read_keymap(ws, key_col: int, start_row: int = 2):
