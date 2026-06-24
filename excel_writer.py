@@ -46,6 +46,9 @@ CENTER_ALIGN = Alignment(horizontal="center")
 # SEARCH_BOX_* make the input cell look like a box you can type into.
 SEARCH_HIT_FILL = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
 SEARCH_HIT_FONT = Font(bold=True, color="000000")
+_SEARCH_HIT_SIDE = Side(style="medium", color="C00000")  # red box around the matched row
+SEARCH_HIT_BORDER = Border(left=_SEARCH_HIT_SIDE, right=_SEARCH_HIT_SIDE,
+                           top=_SEARCH_HIT_SIDE, bottom=_SEARCH_HIT_SIDE)
 SEARCH_BOX_FILL = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
 _SEARCH_BOX_SIDE = Side(style="thin", color="BF8F00")
 SEARCH_BOX_BORDER = Border(left=_SEARCH_BOX_SIDE, right=_SEARCH_BOX_SIDE,
@@ -589,7 +592,8 @@ def _write_full_queue_tab(
             FormulaRule(
                 formula=[f'AND({SEARCH_CELL_ABS}<>"",'
                          f'TEXT($A{FIRST_DATA_ROW},"@")=TEXT({SEARCH_CELL_ABS},"@"))'],
-                fill=SEARCH_HIT_FILL, font=SEARCH_HIT_FONT, stopIfTrue=True))
+                fill=SEARCH_HIT_FILL, font=SEARCH_HIT_FONT,
+                border=SEARCH_HIT_BORDER, stopIfTrue=True))
 
     # Freeze below the search bar + header so both stay visible while scrolling.
     ws.freeze_panes = f"B{FIRST_DATA_ROW}"
