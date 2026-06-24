@@ -405,9 +405,16 @@ def _apply_search_cf(ws, key_col: int, ncols: int, first_data_row: int,
                      last_row: int) -> bool:
     """Highlight (yellow fill + red box) the whole data row whose Job # equals the
     search cell (row 1, the key column). Bounded to the data + a buffer for later
-    appends — a whole-column CF is rejected at scale. TEXT(...,\"@\") on both sides
-    so a job stored as text still matches a number typed into the box. Returns True
-    if the rule was applied (so the caller can stop retrying)."""
+    appends — a whole-column CF is rejected at scale. Returns True if the rule was
+    applied (so the caller can stop retrying).
+
+    The formula deliberately uses NO relative references: Excel re-bases a
+    relative CF formula against the *active cell* when the rule is added, which —
+    if someone is clicked into the search box (B1) at that moment — translates a
+    reference like $B3 into something invalid and the Add throws. INDEX($B:$B,
+    ROW()) reads each row's Job # with only absolute parts, so it's identical for
+    every cell and immune to that. &"" coerces both sides to text so a job stored
+    as text still matches a number typed into the box."""
     key = get_column_letter(key_col)
     bottom = max(last_row + 3000, first_data_row)   # buffer for appends
     rng = ws.Range(ws.Cells(first_data_row, 1), ws.Cells(bottom, ncols))
@@ -415,8 +422,7 @@ def _apply_search_cf(ws, key_col: int, ncols: int, first_data_row: int,
         rng.FormatConditions.Delete()
         hit = rng.FormatConditions.Add(
             Type=_XL_EXPRESSION,
-            Formula1=f'=AND(${key}$1<>"",'
-                     f'TEXT(${key}{first_data_row},"@")=TEXT(${key}$1,"@"))')
+            Formula1=f'=AND(${key}$1<>"",INDEX(${key}:${key},ROW())&""=${key}$1&"")')
         hit.Interior.Color = _SEARCH_HIT_FILL
         hit.Font.Bold = True
         try:
