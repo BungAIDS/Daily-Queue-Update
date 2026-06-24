@@ -185,13 +185,18 @@ def test_orders_changed_one_instance_multiple_fields():
             break
         body.append(r)
     assert len(body) == 3                       # header + before + after (one instance)
-    before, after = body[1], body[2]
-    assert before[0].value == "420800"          # Job # on the before row
+    header, before, after = body
+    # Same column order as the rest of the workbook: a leading Time, then the queue
+    # columns (so Job # sits one in, behind Time).
+    assert header[0].value == "Time" and header[1].value == "Job #"
+    assert before[0].value == ""                # no time on the start-of-day 'was' row
+    assert before[1].value == "420800"          # Job # on the before row (after Time)
     # the 'before' row carries every changed field's OLD value; the 'after' its NEW.
     before_vals = {str(c.value) for c in before}
     after_vals = {str(c.value) for c in after}
     assert "06/01/2026" in before_vals and "10" in before_vals   # OLD values
     assert "06/05/2026" in after_vals and "12" in after_vals     # NEW values
+    assert after[0].value == ls.fmt_time(t)     # the change instance is time-stamped
     assert after[0].fill == ls.FILL_CHANGE1     # after row shaded grey
 
 

@@ -376,14 +376,21 @@ def _events_table(sh: Sheet, title: str, headers: List[str],
     sh.blank()
 
 
-def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]]) -> None:
-    """'Orders that changed today' as a running history: a white 'was' row with
-    each changed field's start-of-day value, then ONE row per change instance (a
-    poll in which the order changed) showing only the fields that moved in that
-    instance — the prior row's value carries forward as the implied 'old', so a
-    value is never repeated. Instance rows shade progressively darker; white marks
-    a new order. Changed cells are red. Columns are the union of fields any order
-    changed today, ordered like the queue."""
+def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]],
+                          order_lookup: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+    """'Orders that changed today' as a running history, laid out in the same
+    column order as the rest of the workbook: a leading change Time, then every
+    Live Queue column. For each order — a white 'was' row showing the order's full
+    row with each field that changed today rolled back to its start-of-day value
+    (in red), then ONE row per change instance (a poll in which the order changed),
+    each stamped with that poll's time and showing only the fields that moved in it
+    (red); the prior row's value carries forward as the implied 'old', so a value
+    is never repeated. Instance rows shade progressively darker; white marks the
+    order. Changed fields with no queue column (e.g. Drawings, Unapproved / Credit
+    Hold) are appended as extra trailing columns so no change is lost. `order_lookup`
+    (job# -> the order's job dict) supplies the full 'was' row; an order missing
+    from it falls back to just its Job # and Customer."""
+    order_lookup = order_lookup or {}
     by_job: Dict[str, Dict[str, Any]] = {}
     for e in sorted(field_events, key=lambda x: x.get("time", "")):   # oldest first
         jn, label = str(e.get("job", "") or ""), e.get("field", "") or ""
@@ -398,17 +405,18 @@ def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]]) -> None
 
     orders: Dict[str, Dict[str, Any]] = {}
     for jn, rec in by_job.items():
-        instances = [rec["instances"][t] for t in sorted(rec["instances"]) if rec["instances"][t]]
-        if not instances:
+        times = [t for t in sorted(rec["instances"]) if rec["instances"][t]]   # oldest first
+        if not times:
             continue
         first_old: Dict[str, Any] = {}
-        for moved in instances:                       # oldest first -> first old per field
-            for label, (old, _new) in moved.items():
+        for t in times:                                # oldest first -> first old per field
+            for label, (old, _new) in rec["instances"][t].items():
                 first_old.setdefault(label, old)
-        orders[jn] = {"customer": rec["customer"], "time": max(rec["instances"]),
+        orders[jn] = {"customer": rec["customer"], "time": times[-1],
                       "fields": set(first_old),
-                      # each instance as {field: new value}
-                      "steps": [{l: n for l, (_o, n) in moved.items()} for moved in instances],
+                      # each instance as (poll time, {field: new value}), oldest first
+                      "steps": [(t, {l: n for l, (_o, n) in rec["instances"][t].items()})
+                                for t in times],
                       "baseline": first_old}
 
     sh.row([Cell(f"Orders that changed today ({len(orders)})", font=F_SECTION)])
@@ -419,25 +427,37 @@ def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]]) -> None
     changed: set = set()
     for o in orders.values():
         changed |= o["fields"]
-    order_idx = {h: i for i, h in enumerate(QUEUE_HEADERS)}
-    cols = sorted(changed, key=lambda l: (order_idx.get(l, 10 ** 6), l))
-    sh.row(_header_cells(["Job #", "Customer"] + cols))
+    qh_idx = {h: i for i, h in enumerate(QUEUE_HEADERS)}
+    extra_cols = sorted(changed - set(QUEUE_HEADERS))    # changed fields with no queue column
+    sh.row(_header_cells(["Time"] + list(QUEUE_HEADERS) + extra_cols))
     for jn in sorted(orders, key=lambda j: orders[j]["time"], reverse=True):  # most recent first
         o = orders[jn]
-        # 'was' row (white): start-of-day value of each changed field; the order's
-        # only white row, carrying Job #/Customer so white reads as a new order.
-        was = [Cell(jn), Cell(o["customer"])]
-        for label in cols:
-            was.append(Cell(o["baseline"][label], font=F_RED) if label in o["fields"] else Cell(""))
-        sh.row(was)
-        # one row per instance, progressively darker, showing only what it changed.
-        for i, step in enumerate(o["steps"]):
-            fill = _CHANGE_FILLS[min(i, len(_CHANGE_FILLS) - 1)]
-            row = [Cell("", fill=fill), Cell("", fill=fill)]
-            for label in cols:
-                row.append(Cell(step[label], fill=fill, font=F_RED)
-                           if label in step else Cell("", fill=fill))
-            sh.row(row)
+        # 'was' row (white): the order's full row (so it reads like every other
+        # tab), with each field that changed today rolled back to its start-of-day
+        # value in red. No timestamp — it's the state before today's first change.
+        base_job = dict(order_lookup.get(jn) or {})
+        base_job.setdefault("job", jn)
+        base_job.setdefault("customer", o["customer"])
+        was = _job_value_cells(base_job, co_changed=False)
+        for label in o["fields"]:
+            ci = qh_idx.get(label)
+            if ci is not None:
+                was[ci] = Cell(o["baseline"][label], font=F_RED)
+        extra_was = [Cell(o["baseline"][label], font=F_RED) if label in o["fields"] else Cell("")
+                     for label in extra_cols]
+        sh.row([Cell("")] + was + extra_was)
+        # one row per instance, progressively darker, stamped with the poll time and
+        # showing only the fields that moved in that poll.
+        for step_i, (t, step) in enumerate(o["steps"]):
+            fill = _CHANGE_FILLS[min(step_i, len(_CHANGE_FILLS) - 1)]
+            cells = [Cell("", fill=fill) for _ in QUEUE_HEADERS]
+            for label, newval in step.items():
+                ci = qh_idx.get(label)
+                if ci is not None:
+                    cells[ci] = Cell(newval, fill=fill, font=F_RED)
+            extra_cells = [Cell(step[label], fill=fill, font=F_RED) if label in step
+                           else Cell("", fill=fill) for label in extra_cols]
+            sh.row([Cell(_fmt_time(t), fill=fill)] + cells + extra_cells)
     sh.blank()
 
 
@@ -464,13 +484,15 @@ def changes_sheet(
     """Today's activity log:
       - New orders today (new as of today, with their Added time).
       - Change orders today (CO# increases — restored change-order tracking).
-      - Orders that changed today: one line per field modification (a field that
-        changes several times in a day is several lines), newest first.
+      - Orders that changed today: each changed order as a full queue row rolled
+        back to its start-of-day state, then a time-stamped line per change
+        instance showing what moved (newest order first), in the same column
+        order as the rest of the workbook.
       - Removed / completed today.
     `change_events` is the day's change log (see change_log.py); `updated_at` is a
     display string stamped at the top so users can see the tab is live;
-    `order_lookup` maps job# -> the order's job dict (for the Design / Arrangement
-    / change description columns on the change-order table)."""
+    `order_lookup` maps job# -> the order's job dict (the full row for the
+    change-order and orders-that-changed tables)."""
     order_lookup = order_lookup or {}
     sh = Sheet(name, freeze=None)
     sh.row([Cell(f"Changes — {date_str}", font=F_SECTION)])
@@ -495,7 +517,7 @@ def changes_sheet(
                   [_co_row(e) for e in co_events])
 
     field_events = [e for e in newest_first if e.get("field") != "CO#"]
-    _orders_changed_table(sh, field_events)
+    _orders_changed_table(sh, field_events, order_lookup=order_lookup)
 
     _job_table(sh, "Removed / completed today", removed_today)
     return sh
