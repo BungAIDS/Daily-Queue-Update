@@ -33,6 +33,11 @@ log = logging.getLogger(__name__)
 
 _XL_UNDERLINE_SINGLE = 2  # xlUnderlineStyleSingle
 _XL_EXPRESSION = 2        # xlExpression (conditional formatting)
+_XL_CONTINUOUS = 1        # xlContinuous border line style
+_XL_MEDIUM = -4138        # xlMedium border weight
+_XL_RIGHT = -4152         # xlRight horizontal alignment
+_XL_CENTER = -4108        # xlCenter horizontal alignment
+_BORDER_EDGES = (7, 8, 9, 10)  # xlEdgeLeft, xlEdgeTop, xlEdgeBottom, xlEdgeRight
 
 
 def _bgr(rgb_hex: str) -> int:
@@ -51,6 +56,13 @@ _FILL_RGB = {
     "sep": "808080",   # the vertical divider column between the two matrices
 }
 _FILL = {k: _bgr(v) for k, v in _FILL_RGB.items()}
+
+# Live Queue search bar colors (mirror excel_writer's Full Queue search): a bright
+# yellow row highlight + red box on the match, and a pale input cell.
+_SEARCH_HIT_FILL = _bgr("FFFF00")
+_SEARCH_BOX_FILL = _bgr("FFF2CC")
+_SEARCH_RED = _bgr("C00000")
+_NOTE_GRAY = _bgr("808080")
 
 # Named fonts -> (rgb color or None, bold, underline, size or None).
 _FONT = {
@@ -327,9 +339,9 @@ def _norm_key(v: Any) -> str:
     return str(v).strip()
 
 
-def _write_header(ws, headers: List[str]) -> None:
+def _write_header(ws, headers: List[str], row: int = 1) -> None:
     ncols = len(headers)
-    rng = ws.Range(ws.Cells(1, 1), ws.Cells(1, ncols))
+    rng = ws.Range(ws.Cells(row, 1), ws.Cells(row, ncols))
     rng.Value = [list(headers)]
     try:
         # Keep titles on one horizontal line (no wrap/rotation) so a header never
@@ -338,23 +350,93 @@ def _write_header(ws, headers: List[str]) -> None:
         rng.Orientation = 0
     except Exception:  # noqa: BLE001
         pass
-    _apply_run(ws, 1, 1, ncols, "header", "header", False)
+    _apply_run(ws, row, 1, ncols, "header", "header", False)
 
 
-def _read_keymap(ws, key_col: int):
+def _box_border(target, color: int, weight: int = _XL_MEDIUM) -> None:
+    """Draw a solid colored box around `target` (a Range or a FormatCondition):
+    its four outer edges, in `color`."""
+    for edge in _BORDER_EDGES:
+        b = target.Borders(edge)
+        b.LineStyle = _XL_CONTINUOUS
+        b.Weight = weight
+        b.Color = color
+
+
+def _write_search_bar(ws, key_col: int) -> None:
+    """Row 1 (above the header): a 'Search:' label and an input cell sitting right
+    above the Job # column. Typing an order # there lights up the matching row via
+    the conditional format in _apply_search_cf — no macros, mirroring the daily
+    report's Full Queue search."""
+    lbl = ws.Cells(1, max(key_col - 1, 1))
+    lbl.Value = "Search:"
+    try:
+        lbl.Font.Bold = True
+        lbl.HorizontalAlignment = _XL_RIGHT
+    except Exception:  # noqa: BLE001
+        pass
+    box = ws.Cells(1, key_col)             # the cell the conditional format watches
+    box.Value = ""
+    try:
+        box.Interior.Color = _SEARCH_BOX_FILL
+        box.Font.Bold = True
+        box.HorizontalAlignment = _XL_CENTER
+        _box_border(box, _SEARCH_RED)
+        if box.Comment is not None:
+            box.Comment.Delete()
+        box.AddComment("Type an order # here and press Enter. The matching row "
+                       "below lights up yellow with a red box. Clear this cell to "
+                       "remove the highlight.")
+    except Exception:  # noqa: BLE001
+        pass
+    hint = ws.Cells(1, key_col + 1)
+    hint.Value = "← type an order # to highlight its row (clear to remove)"
+    try:
+        hint.Font.Italic = True
+        hint.Font.Color = _NOTE_GRAY
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _apply_search_cf(ws, key_col: int, ncols: int, first_data_row: int,
+                     last_row: int) -> None:
+    """Highlight (yellow fill + red box) the whole data row whose Job # equals the
+    search cell (row 1, the key column). Bounded to the data + a buffer for later
+    appends — a whole-column CF is rejected at scale. TEXT(...,\"@\") on both sides
+    so a job stored as text still matches a number typed into the box."""
+    key = get_column_letter(key_col)
+    bottom = max(last_row + 3000, first_data_row)   # buffer for appends
+    rng = ws.Range(ws.Cells(first_data_row, 1), ws.Cells(bottom, ncols))
+    try:
+        rng.FormatConditions.Delete()
+        hit = rng.FormatConditions.Add(
+            Type=_XL_EXPRESSION,
+            Formula1=f'=AND(${key}$1<>"",'
+                     f'TEXT(${key}{first_data_row},"@")=TEXT(${key}$1,"@"))')
+        hit.Interior.Color = _SEARCH_HIT_FILL
+        hit.Font.Bold = True
+        try:
+            _box_border(hit, _SEARCH_RED)
+        except Exception:  # noqa: BLE001 - keep the fill even if the box fails
+            pass
+    except Exception as e:  # noqa: BLE001 - values still readable without the highlight
+        log.debug("Search highlight conditional formatting failed (%s)", e)
+
+
+def _read_keymap(ws, key_col: int, start_row: int = 2):
     """{order# -> row} and the last LIVE data row. The live data is a contiguous
-    block from row 2; we bulk-read the key column and STOP at the first blank cell
-    — the one-row gap above the 'Removed' block — so that block's real Job #s
+    block from `start_row`; we bulk-read the key column and STOP at the first blank
+    cell — the one-row gap above the 'Removed' block — so that block's real Job #s
     (drawn below the gap) are never read as live rows. Robust to a coworker
     re-sorting the live data (rows found by key, not a remembered index)."""
     bottom = ws.Cells(ws.Rows.Count, key_col).End(_XL_UP).Row   # last non-empty (incl. block)
     keymap: Dict[str, int] = {}
-    last = 1
-    if bottom >= 2:
-        data = ws.Range(ws.Cells(2, key_col), ws.Cells(bottom, key_col)).Value
+    last = start_row - 1
+    if bottom >= start_row:
+        data = ws.Range(ws.Cells(start_row, key_col), ws.Cells(bottom, key_col)).Value
         if not isinstance(data, tuple):       # single cell -> scalar
             data = ((data,),)
-        for i, row in enumerate(data, start=2):
+        for i, row in enumerate(data, start=start_row):
             v = row[0] if isinstance(row, (list, tuple)) else row
             k = _norm_key(v)
             if not k:
@@ -439,14 +521,19 @@ def _render_below(ws, live_last: int, ncols: int, below: Dict[str, Any]) -> None
 def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
                   key_col: int, allow_delete: bool, freeze: str | None = None,
                   sort_col: int | None = None, text_cols: List[int] | None = None,
-                  below: Dict[str, Any] | None = None) -> int:
+                  below: Dict[str, Any] | None = None, header_row: int = 1,
+                  search: bool = False) -> int:
     """Apply append/update/delete ops to a keyed sheet. Returns rows touched.
     When `sort_col` is set, the data is re-sorted ascending by that column after
     any change (Live Queue: the '#' board-position column, to match cbcinsider).
     `text_cols` are pre-formatted as Text before any data is written. `below`
-    renders a small static section under the data (orders removed today)."""
+    renders a small static section under the data (orders removed today).
+    `header_row` is the row the column headers sit on (data starts just below it);
+    `search` draws a search bar on row 1 above the header and a conditional format
+    that highlights the row whose Job # (the key column) matches what's typed."""
     ws = _get_or_make_sheet(wb, name)
     ncols = len(headers)
+    first_data_row = header_row + 1
     first_time = name not in _HEADER_DONE
     if first_time:
         # Once per process: wipe the sheet so a previous run's (possibly
@@ -454,7 +541,7 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
         # watcher resets the stored sigs at startup to match, so this cycle
         # rebuilds the tab; every later cycle is incremental.
         ws.Cells.Clear()
-        _write_header(ws, headers)
+        _write_header(ws, headers, row=header_row)
         _HEADER_DONE.add(name)
 
     # Re-assert Text on the AM/PM columns EVERY render, before any value is
@@ -467,7 +554,7 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
         except Exception:  # noqa: BLE001
             pass
 
-    keymap, last_row = _read_keymap(ws, key_col)
+    keymap, last_row = _read_keymap(ws, key_col, start_row=first_data_row)
     deletes = [k for kind, k, _ in ops if kind == "delete"]
     updates = [(k, c) for kind, k, c in ops if kind == "update"]
     appends = [(k, c) for kind, k, c in ops if kind == "append"]
@@ -478,7 +565,7 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
         except Exception:  # noqa: BLE001
             pass
     if deletes:
-        keymap, last_row = _read_keymap(ws, key_col)
+        keymap, last_row = _read_keymap(ws, key_col, start_row=first_data_row)
 
     for k, cells in updates:
         r = keymap.get(k)
@@ -491,17 +578,17 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
         _write_row(ws, last_row, cells, ncols)
 
     # Keep the tab sorted (Live Queue by the '#' board-position column) and
-    # re-extend AutoFilter. Sort the DATA ROWS ONLY (row 2 down) so the header
-    # never moves; blanks fall to the bottom under ascending order.
+    # re-extend AutoFilter. Sort the DATA ROWS ONLY (below the header) so the
+    # header never moves; blanks fall to the bottom under ascending order.
     touched = bool(deletes or updates or appends)
-    if touched and last_row >= 2:
+    if touched and last_row >= first_data_row:
         try:
             if ws.AutoFilterMode:
                 ws.AutoFilterMode = False
-            if sort_col and last_row >= 3:
-                ws.Range(ws.Cells(2, 1), ws.Cells(last_row, ncols)).Sort(
-                    Key1=ws.Cells(2, sort_col), Order1=1, Header=2)  # xlAscending, xlNo
-            ws.Range(ws.Cells(1, 1), ws.Cells(last_row, ncols)).AutoFilter()
+            if sort_col and last_row >= first_data_row + 1:
+                ws.Range(ws.Cells(first_data_row, 1), ws.Cells(last_row, ncols)).Sort(
+                    Key1=ws.Cells(first_data_row, sort_col), Order1=1, Header=2)  # xlAscending, xlNo
+            ws.Range(ws.Cells(header_row, 1), ws.Cells(last_row, ncols)).AutoFilter()
         except Exception:  # noqa: BLE001
             pass
 
@@ -516,6 +603,19 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
                 ws.Columns(col).ColumnWidth = min(60, max(w, len(hdr) + 3))
         except Exception:  # noqa: BLE001
             pass
+        # Draw the search bar AFTER autofit (so its label/hint text never widen a
+        # data column). The highlight CF itself is (re)applied below.
+        if search:
+            try:
+                _write_search_bar(ws, key_col)
+            except Exception as e:  # noqa: BLE001
+                log.debug("search bar render failed (%s)", e)
+
+    # (Re)apply the search highlight over the current data extent whenever rows
+    # changed, so a freshly-appended order is covered too — the below-block clear
+    # strips CF from the rows beneath the live data (which don't need it).
+    if search and (first_time or touched):
+        _apply_search_cf(ws, key_col, ncols, first_data_row, last_row)
 
     if freeze and name not in _FROZEN:
         try:
@@ -727,7 +827,8 @@ def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any]
         n = apply_upserts(app, wb, lq_payload["name"], lq_payload["headers"], lq_payload["ops"],
                           lq_payload["key_col"], lq_payload["allow_delete"], lq_payload.get("freeze"),
                           sort_col=lq_payload.get("sort_col"), text_cols=lq_payload.get("text_cols"),
-                          below=lq_payload.get("below"))
+                          below=lq_payload.get("below"), header_row=lq_payload.get("header_row", 1),
+                          search=lq_payload.get("search", False))
         if n:
             touched.append(f"{lq_payload['name']}(+{n})")
     except Exception as e:  # noqa: BLE001

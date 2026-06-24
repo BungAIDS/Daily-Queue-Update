@@ -303,7 +303,8 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
                   "key_col": live_sheets.LIVE_QUEUE_KEY_COL, "allow_delete": True,
                   "sort_col": live_sheets.LIVE_QUEUE_CBC_COL,
                   "text_cols": [1, live_sheets.LIVE_QUEUE_LAST_OUT_COL],  # Added + Last Out -> AM/PM text
-                  "freeze": "C2"}   # header on row 1, frozen with the Added + Job # columns
+                  "header_row": 2, "search": True,   # search bar on row 1, headers on row 2
+                  "freeze": "C3"}   # keep the search bar + header + Added/Job # columns visible
 
     # "Removed since this morning" block below the Live Queue. Pass it EVERY cycle
     # so the renderer can reposition it when the queue grows (otherwise the new
