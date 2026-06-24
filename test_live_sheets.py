@@ -156,6 +156,9 @@ def test_changes_today_log_sections():
     assert _find(sh, "What changed") is not None                     # the new header
     assert _find(sh, "ADDED VFD CONTROLS") is not None               # change description
     assert _find(sh, "A/9H") is not None                             # arrangement (suffix trimmed)
+    # The 'What changed' description overruns instead of widening its column.
+    r, c = _find(sh, "ADDED VFD CONTROLS")
+    assert sh.grid[r][c].overflow is True
 
 
 def test_orders_changed_one_instance_multiple_fields():

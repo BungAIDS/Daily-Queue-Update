@@ -68,6 +68,10 @@ class Cell:
     volatile: bool = False          # value changes every cycle (e.g. the 'Last updated'
                                     # stamp): excluded from the render fingerprint so it
                                     # doesn't force a full repaint, refreshed in place
+    overflow: bool = False          # free-text cell meant to overrun its empty right-hand
+                                    # neighbors (e.g. the Changes tab's 'What changed'):
+                                    # excluded from its column's autofit so the column
+                                    # stays sized to its other content and this spills
 
 
 @dataclass
@@ -513,7 +517,9 @@ def changes_sheet(
                 o.get("oper", ""),
                 f"CO#{e.get('old', '')} -> CO#{e.get('new', '')}",
                 e.get("customer", ""),
-                _co_change_desc(o, e.get("new"))]
+                # Free-text description: let it overrun the empty cells to its right
+                # rather than widen the column (it's the table's last column).
+                Cell(_co_change_desc(o, e.get("new")), overflow=True)]
     _events_table(sh, "Change orders today",
                   ["Time", "Job #", "Design", "Arrangement", "Oper", "Change", "Customer", "What changed"],
                   [_co_row(e) for e in co_events])
