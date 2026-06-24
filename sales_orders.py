@@ -36,6 +36,7 @@ import asyncio
 import contextlib
 import logging
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List
 from urllib.parse import urlparse, parse_qs, urljoin
@@ -137,43 +138,200 @@ def _run_files_in_folder(folder: Path) -> List[Path]:
         return []
 
 
-def _find_autocad_folders(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
-    """Locate each job under AUTOCAD_JOBS_DIR/<type>/<intermediate>/<job>.
+def _archived_runs(job: str) -> List[Path]:
+    """The quote-run files already in a job's Quote-Runs archive
+    (DRIVE_RUN_DIR/<job>/) — exactly what the report's 'YES (X)' link opens."""
+    d = DRIVE_RUN_DIR / job
+    try:
+        return sorted(f for f in d.iterdir()
+                      if f.is_file() and not f.name.startswith("~$"))
+    except OSError:
+        return []
 
-    One sweep of the two directory levels builds the whole index — a glob per
-    job re-scans every <type>/<intermediate> dir on the network share once per
-    job, which is N full sweeps for an N-job board. Returns {job: {type, path,
-    dwg_extras, dwg_missing_std}}; {} if the drive isn't reachable. The <type>
-    a job sits under is its job type. While we have the folder we also scan it
-    for the job's custom drawings (the extra -NN suffixes), reusing autocad_scan.
-    """
+
+def _archive_folder_runs(job: str, autocad_folder: "Path | None") -> List[Path]:
+    """Copy any quote-run files that live only in the job's AutoCAD folder into
+    its Quote-Runs archive (DRIVE_RUN_DIR/<job>/), so every run the 'YES (X)'
+    count includes sits in the one folder the link opens. A file already there
+    (by name) is left as-is, and copy failures are logged but never fatal.
+    Returns all run files in the archive afterward."""
+    dest_dir = DRIVE_RUN_DIR / job
+    if autocad_folder:
+        for src in _run_files_in_folder(autocad_folder):
+            dest = dest_dir / src.name
+            if dest.exists():
+                continue
+            try:
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dest)
+            except OSError as e:  # noqa: BLE001 - a copy must not fail enrichment
+                log.warning("  could not copy run %s into the archive (%s)", src.name, e)
+    return _archived_runs(job)
+
+
+def _find_autocad_folders(job_numbers: List[str], deep: bool = True) -> Dict[str, Dict[str, Any]]:
+    """Locate each job's AutoCAD folder, which is AUTOCAD_JOBS_DIR/<type>/<first 3
+    digits of job#>/<job#> (e.g. JOBS/AXIAL/421/421303, JOBS/GENERAL LINE/421/
+    421034). Returns {job: {type, path, dwg_extras, dwg_missing_std}}; {} if the
+    drive isn't reachable. The <type> a job sits under is its job type.
+
+    We build each job's expected path directly and check it per type, rather than
+    globbing the whole ~12K-folder tree — that's far faster and reliable on the
+    network share (the old full sweep could time out before reaching some types,
+    which is why axial fans came back as 'Open'). When `deep`, a glob fallback also
+    covers any job that doesn't follow the <type>/<first3>/<job> convention; the
+    per-poll re-check passes deep=False to skip that expensive sweep, since the
+    direct lookup already finds a standard folder the moment it's created. While we
+    have a folder we also scan it for the job's custom drawings."""
     out: Dict[str, Dict[str, Any]] = {}
     root = AUTOCAD_JOBS_DIR
-    wanted = set(job_numbers)
+    wanted = [str(j).strip() for j in job_numbers if str(j).strip()]
     try:
         if not root.exists():
             log.warning("AutoCAD jobs root not reachable: %s (folder links disabled)", root)
             return out
-        for m in root.glob("*/*/*"):
-            job = autocad_scan.job_key(m.name)  # "421314 ACME CORP" -> "421314"
-            if job not in wanted or job in out or not m.is_dir():
-                continue
-            info: Dict[str, Any] = {"type": m.relative_to(root).parts[0], "path": m,
-                                    "dwg_extras": {}, "dwg_missing_std": False}
-            try:  # live scan of this job's custom DWGs (names only — never opens a file)
-                names = [f.name for f in m.glob("*") if f.is_file()]
-                rec = autocad_scan.build_record(job, info["type"], str(m),
-                                                autocad_scan.scan_files(names, job))
-                info["dwg_extras"], info["dwg_missing_std"] = rec["extras"], rec["missing_std"]
-            except OSError as e:
-                log.warning("  could not scan DWGs for %s (%s)", job, e)
-            out[job] = info
-            if len(out) == len(wanted):
-                break  # found every job on the board — stop walking the share
-        log.info("Located %d/%d AutoCAD job folders under %s", len(out), len(job_numbers), root)
+        type_dirs = [d for d in root.iterdir() if d.is_dir()]
     except OSError as e:
-        log.warning("Could not look up AutoCAD folders (%s); folder links disabled", e)
+        log.warning("Could not list AutoCAD job types under %s (%s); folder links disabled", root, e)
+        return out
+
+    def _record(job: str, folder: Path, jtype: str) -> None:
+        info: Dict[str, Any] = {"type": jtype, "path": folder,
+                                "dwg_extras": {}, "dwg_missing_std": False}
+        try:  # live scan of this job's custom DWGs (names only — never opens a file)
+            names = [f.name for f in folder.glob("*") if f.is_file()]
+            rec = autocad_scan.build_record(job, jtype, str(folder),
+                                            autocad_scan.scan_files(names, job))
+            info["dwg_extras"], info["dwg_missing_std"] = rec["extras"], rec["missing_std"]
+        except OSError as e:
+            log.warning("  could not scan DWGs for %s (%s)", job, e)
+        out[job] = info
+
+    # Direct lookup: <type>/<first 3 digits>/<job>, checked against each type.
+    for job in wanted:
+        if job in out:
+            continue
+        inter_name = job[:3]
+        for td in type_dirs:
+            inter = td / inter_name
+            try:
+                cand = inter / job
+                if cand.is_dir():                       # exact "421303"
+                    _record(job, cand, td.name)
+                    break
+                if inter.is_dir():                      # "421303 ACME CORP"
+                    hits = [m for m in inter.glob(f"{job}*") if m.is_dir()]
+                    if hits:
+                        _record(job, hits[0], td.name)
+                        break
+            except OSError:
+                continue
+
+    # Fallback for any job whose folder doesn't follow <type>/<first3>/<job>:
+    # one depth-3 sweep, matching the leaf either exactly (keeps a trailing
+    # letter like 352366A) or by its leading number ("421034 ACME" -> 421034).
+    # Skipped when deep=False (the per-poll re-check) — that sweep walks the whole
+    # ~12K-folder tree and would run every cycle for jobs whose folder simply
+    # doesn't exist yet.
+    unfound = {j for j in wanted if j not in out}
+    if deep and unfound:
+        try:
+            for m in root.glob("*/*/*"):
+                if not m.is_dir():
+                    continue
+                name = m.name.strip()
+                hit = name if name in unfound else (autocad_scan.job_key(name)
+                                                    if autocad_scan.job_key(name) in unfound else None)
+                if hit:
+                    _record(hit, m, m.relative_to(root).parts[0])
+                    unfound.discard(hit)
+                    if not unfound:
+                        break
+        except OSError as e:
+            log.warning("AutoCAD fallback sweep failed (%s)", e)
+
+    log.info("Located %d/%d AutoCAD job folders under %s", len(out), len(wanted), root)
+    if unfound:
+        log.info("  no folder for: %s", ", ".join(sorted(unfound))[:300])
     return out
+
+
+def refresh_autocad_folders(jobs: List[Dict[str, Any]]) -> int:
+    """Re-run the (now cheap) AutoCAD folder lookup for `jobs`, updating each
+    dict's job_type / job_folder / dwg_extras / dwg_missing_std in place. Used to
+    fill in orders whose folder wasn't found by an earlier lookup (they showed
+    'Open') — the watcher enriches an order only once, so without this a folder
+    found by an improved lookup would never reach an already-known order.
+    Returns how many got a folder this pass."""
+    by_job = {j["job"]: j for j in jobs if j.get("job")}
+    if not by_job:
+        return 0
+    # Direct lookup only (no full-tree sweep): cheap enough to run every poll, and
+    # it still finds a standard <type>/<first3>/<job> folder the moment it exists.
+    index = _find_autocad_folders(list(by_job.keys()), deep=False)
+    n = 0
+    for jn, j in by_job.items():
+        info = index.get(jn)
+        if not info:
+            continue
+        j["job_type"] = info["type"]
+        j["job_folder"] = str(info["path"])
+        j["dwg_extras"] = info.get("dwg_extras", {})
+        j["dwg_missing_std"] = info.get("dwg_missing_std", False)
+        n += 1
+    return n
+
+
+_CO_IN_SO_NAME = re.compile(r"CO#(\d+)", re.I)
+
+
+def _latest_so_in_folder(folder: Path):
+    """The newest Sales Order revision on disk in a job's folder: the highest CO#
+    in the file name ('… CO#2.pdf' beats '… (original).pdf'), mtime as a
+    tiebreak. Returns (path, co_number) or None."""
+    best = None
+    try:
+        for p in folder.glob("*.pdf"):
+            m = _CO_IN_SO_NAME.search(p.name)
+            co = int(m.group(1)) if m else 0
+            key = (co, p.stat().st_mtime)
+            if best is None or key > best[0]:
+                best = (key, p, co)
+    except OSError:
+        return None
+    return (best[1], best[2]) if best else None
+
+
+def refresh_sales_orders(jobs: List[Dict[str, Any]]) -> int:
+    """Repoint an order's so_pdf at the latest Sales Order PDF actually on disk
+    whenever the stored one has gone — a change order renames the file
+    ('… (original).pdf' -> '… CO#1.pdf'), which dead-links a path captured before
+    the CO. Syncs co_number to the file found, so the change order also shows up
+    (red text, change log). Cheap: a single stat per order, and a folder listing
+    only for the ones whose link is broken. Mutates the job dicts in place;
+    returns how many were repointed."""
+    n = 0
+    for j in jobs:
+        jn = str(j.get("job") or "").strip()
+        if not jn:
+            continue
+        cur = (j.get("so_pdf") or "").strip()
+        if cur and Path(cur).exists():
+            continue                      # link still resolves — leave it alone
+        folder = Path(cur).parent if cur else (SALES_ORDER_DIR / jn)
+        hit = _latest_so_in_folder(folder)
+        if not hit:
+            continue
+        path, co = hit
+        # Never regress: if the only Sales Order on disk is older than the change
+        # order we already know about (e.g. the new CO's PDF hasn't downloaded
+        # yet), don't point the link back at the original — keep the known CO#.
+        if co < int(j.get("co_number") or 0):
+            continue
+        j["so_pdf"] = str(path)
+        j["co_number"] = co
+        n += 1
+    return n
 
 
 # --------------------------------------------------------------------------- #
@@ -575,7 +733,8 @@ def _terminal(r: Dict[str, Any]) -> bool:
     return bool(r.get("pdf_path") or r.get("no_so"))
 
 
-def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) -> None:
+def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2,
+                             deep_folders: bool = True) -> None:
     """Mutate `jobs` in place, attaching sales-order + folder fields (see module
     docstring). Opens every job's detail modal in parallel — the slow step.
 
@@ -583,12 +742,17 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
     leaving a job empty. So we make up to `max_passes` passes, re-running only
     the jobs that came back incomplete; that leftover set is small and far less
     contended, so the stragglers come through — without changing concurrency.
+
+    `deep_folders=False` (the intraday watcher) skips the full-tree folder sweep —
+    a standard folder is still found by direct lookup, and non-standard ones are
+    picked up by the next daily run — so a folderless job never costs a ~12K-folder
+    walk on every enrichment.
     """
     by_job = {j["job"]: j for j in jobs if j.get("job")}
     if not by_job:
         return
 
-    index = _find_autocad_folders(list(by_job.keys()))
+    index = _find_autocad_folders(list(by_job.keys()), deep=deep_folders)
 
     so_results: Dict[str, Dict[str, Any]] = {}
     seen_types: set = set()
@@ -676,24 +840,22 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2) ->
             j["dwg_missing_std"] = False
 
         # Construction / quote run: presence alone flags a highly-custom fan.
-        # More than one match (drive_run_count > 1) means someone should review
-        # which file is the real run — the report flags it.
+        # Gather every run into the job's Quote-Runs archive — the modal
+        # downloads plus any that only live in the AutoCAD folder — so the count
+        # and the link both describe that one folder (clicking 'YES (X)' lands you
+        # on exactly X files). More than one means someone should review which is
+        # the real run.
         dr_pdf = r.get("dr_pdf_path")
-        dr_count = r.get("dr_count") or 0
-        j["has_drive_run"] = bool(dr_pdf or r.get("dr_rev") is not None)
-        if info:
-            # Always scan the AutoCAD folder — it's a cheap local rglob and
-            # catches runs that only live there, plus any folder copies
-            # alongside document ones (both add to the review count).
-            hits = _run_files_in_folder(info["path"])
-            if hits:
-                if not j["has_drive_run"]:
-                    dr_pdf = str(hits[0])
-                    j["has_drive_run"] = True
-                    n_dr_folder += 1
-                dr_count += len(hits)
+        had_doc_run = bool(dr_pdf or r.get("dr_rev") is not None)
+        archived = _archive_folder_runs(jn, info["path"] if info else None)
+        if archived and not had_doc_run:
+            n_dr_folder += 1
+        j["has_drive_run"] = had_doc_run or bool(archived)
+        if not dr_pdf and archived:
+            dr_pdf = str(archived[0])
         j["drive_run_pdf"] = dr_pdf or ""
-        j["drive_run_count"] = dr_count if j["has_drive_run"] else 0
+        # X = the distinct run files actually in the archive folder the link opens.
+        j["drive_run_count"] = len(archived) if j["has_drive_run"] else 0
         j["drive_run_rev"] = r.get("dr_rev")
         # Read the run with whichever template matches its format — keyed mostly
         # by design # (Design 64 -> wheel-construction xlsx, HDX -> Qt Run text,

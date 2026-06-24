@@ -3,6 +3,181 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-17 — Every helper feeds the one master store
+
+DG: incorporate everything we know about each order into live_master, and have
+every helper add what it collects.
+
+- `live_master.merge_order(master, job, fields)` — the single merge primitive:
+  writes only non-empty values, never regresses an existing value to empty, and
+  creates an unseen order off-queue. Tested.
+- `master_sync.py` — reads each helper's store off disk (no heavy imports) and
+  merges via per-source adapters: autocad (`dwg_extras`/type/folder), quote_runs
+  (drive-run fields), line_items (items + tags + customer/co/so_pdf), backfill
+  (full SO spec). `run("<source>")` does load-merge-save; CLI
+  `python master_sync.py [sources]` consolidates on demand.
+- Hooked the end of each helper's main (`autocad_scan`, `quote_run_scan`,
+  `line_items_scan`, `backfill_orders`) to `master_sync.run(...)` — best-effort,
+  so any time a helper runs, its data lands in the master.
+- Tests: `test_master_sync.py` (in CI) + a `merge_order` case in
+  `test_live_master.py`.
+- Note: this can grow live_master.json to the full backlog (~12K). Concurrency:
+  run big syncs off the watcher's clock (both do load-merge-save).
+
+## 2026-06-17 — Master JSON + change log; Changes-tab rebuild; UI fixes
+
+Big batch from DG:
+
+- **One master JSON** (`live_master.json`) is the source of truth: per order it
+  holds all the info we have (board fields + SO design/size/arrangement/temps +
+  CO# + DWGs + line-item features). `live_master.update` now compares each scan
+  field-by-field (`tracked_values`/`_diffs`), updates the master, and RETURNS the
+  modifications. Initial population (''->value, i.e. enrichment filling in) is
+  skipped so the log stays meaningful.
+- **`change_log.py`** — per-day `change_log_<date>.json` of field events
+  {time, job, customer, field, old, new}. A field changing N times/day = N
+  events (N lines). Archived with the other dated files (runstate).
+- **Changes tab rebuilt** as a today log: New orders today, **Change orders
+  today (CO# — restored)**, Orders that changed today (one time-stamped line per
+  field modification, newest first), Removed/completed today. Replaces the old
+  this-morning/vs-yesterday snapshot groups (which mis-flagged everything new).
+- **"New today"** now reads main.py's today snapshot + diff (+ arrived-since-
+  morning), so launching watch.py any time after the 5 AM run flags the right
+  orders. Verified end-to-end.
+- **Order History reorder**: data columns first (Job # pinned), then On Queue/
+  Added/Left right before the DWG matrix; AutoFilter added (sortable).
+- **Live Queue Added** written as Text -> shows the AM/PM label, not a 24h serial.
+- Tests: `test_change_log.py` (new, in CI) + change-detection cases in
+  `test_live_master.py`; Changes-tab test rewritten. 80+ pure tests green.
+
+## 2026-06-16 — Order History = stable 12K log with DWG + Feature matrices
+
+Refined the master log per DG:
+
+- **Custom DWGs**: removed the text column from Live Queue; Order History now
+  carries the full green-✓/red **AutoCAD DWG matrix** AND a new **line-item
+  Feature matrix** (one column per tag, from `line_items` store tags), side by
+  side with a **vertical divider** (a thin gray column).
+- **12K backlog**: Order History merges the live master with the *whole*
+  line-items store (`_oh_orders`), so it shows ~1 row per order ever (live +
+  backlog), using the data we already gathered.
+- **Stable log**: Order History shows only identity + SO-spec + the matrices +
+  presence flags — NOT churny board fields — so a row's signature changes only on
+  add / On-Queue flip. The 12K log isn't rewritten when a date/price ticks.
+- **Efficient render**: `apply_order_history` bulk-writes all rows once, colors
+  the matrices by **conditional formatting** (green ✓ / red blank, key-column
+  guarded so the empty area isn't painted), draws the divider, and uses
+  `=HYPERLINK()` formulas so 12K links go in the bulk write. Rebuilds the tab if
+  the matrix column set grows (`reset_sheet` + sig reset).
+- **Sigs**: moved to flat `lq_sigs` / `oh_sigs` maps in the master (so
+  backlog-only orders are tracked, not just live ones).
+- **"New today"**: now judged vs **this morning's** frozen baseline (not the
+  previous day).
+
+Smoke-tested the merge + matrix spec + sig planning across cycles (append all
+once, no-op when unchanged, single update on an On-Queue flip). COM render needs
+the on-PC smoke test.
+
+## 2026-06-16 — Master log: incremental upsert instead of repaint
+
+DG: stop repainting the whole tab every cycle (it reset filters). New model is a
+chronological master log updated by **upsert keyed on order #**:
+
+- **`live_master.py`** — the all-time log (`live_master.json`), one entry per
+  order ever seen: `added` (set once), `left`, `on_queue`, latest `job`. Unlike
+  history.json it's append-only (never pops a returning order). 3 tests.
+- **`live_sheets.py`** — added stable-schema record builders
+  (`live_queue_records`, `order_history_records`) keyed on order #, a compact
+  **Custom DWGs** text column (the variable-width matrix fought the fixed
+  schema; full matrix stays in the daily report), `row_sig` (md5 hex so it
+  survives a JSON round-trip), and a pure `plan_upsert` (append/update/delete;
+  unchanged rows -> no op). Order History gains On Queue/Added/Left columns.
+- **`live_excel.py`** — `apply_upserts`: reads the key column for row positions
+  (robust to a coworker sorting), writes/append/updates rows in place, deletes
+  departed ones (Live Queue), re-extends AutoFilter only when the row count
+  changed. No Cells.Clear() per cycle, so filters/sort/scroll persist. Each
+  upsert tab is wiped+rebuilt once per process start (clean slate vs the old
+  full-grid content; sigs reset to match via watch `_force_rebuild`).
+- **`watch.py`** — maintains the master each cycle, plans upserts (storing sigs
+  in the master so change-detection survives restarts), renders Live Queue
+  (delete-on-leave) + Order History (append-only) incrementally, keeps Changes
+  as a full-repaint snapshot. **Line Items tab dropped** (multiple rows/order
+  was confusing).
+
+Verified the op-planning end-to-end across cycles (unchanged->no-op,
+changed->update, new->append, left->delete from Live Queue / stays in Order
+History). COM apply still needs the on-PC smoke test.
+
+## 2026-06-16 — Live workbook becomes the master (4 tabs) + email link
+
+DG wants the live co-authored workbook to be the team's master sheet, not a
+stripped board. Built the full multi-tab master, all written through Excel COM:
+
+- **`live_sheets.py`** — a PURE model layer (`Cell`/`Sheet` with named style
+  intents) that builds each tab, reusing `excel_writer`'s COLUMNS + label helpers
+  and `compare.diff_queues` so the live master and the daily report can't drift.
+  Tabs: **Live Queue** (Added col + every Full Queue column + DWG matrix + date/
+  new fills + hyperlinks + totals + AutoFilter), **Changes** (two date-labeled
+  groups — since this morning's frozen baseline, and vs yesterday), **History**,
+  **Line Items** (one row per order×normalized item; AutoFilter the Normalized
+  column to find orders — the in-workbook `find_orders`). 8 tests in
+  `test_live_sheets.py` (added to CI).
+- **`live_excel.py`** — rewritten as a GENERIC renderer: bulk-write values, then
+  map named fills/fonts to Excel BGR colors, add hyperlinks, freeze, AutoFilter,
+  autofit. A per-tab fingerprint cache repaints a tab only when its content
+  changed, so a coworker's active filter/scroll isn't reset every cycle.
+- **`watch.py`** — each cycle builds all four sheet models and calls
+  `update_workbook`. Freezes an enriched start-of-day baseline
+  (`live_baseline_<date>.json`) on the first poll for the intraday diff.
+- **Email** — `emailer` now leads with an active `LIVE_WORKBOOK_LINK` and writes
+  dates in full ("Tuesday, June 16, 2026" / "vs Monday, June 15, 2026"). The
+  dated `queue_<date>.xlsx` is still saved for the archive; attach it only with
+  `EMAIL_ATTACH_REPORT=1`. `compare.diff_queues` now returns `prev_date`.
+
+Still Windows-only for the COM/notify paths (untestable in the sandbox); the
+pure sheet model + diff are what's tested. NOTE: the "Features" column on the
+board is kept as a quick tag summary; the real per-item detail is the new Line
+Items tab.
+
+DG: Line Items tab covers the WHOLE backlog (every order in the line-items
+store), not just the board, so the item search spans all history. Empty until
+the store is built (`line_items_scan.py`). Perf note: a large backlog makes that
+tab's repaint heavier, but the fingerprint cache only repaints it when the store
+changes (a few new orders/day) — revisit if it ever drags.
+
+## 2026-06-16 — Live intraday watcher (queue stays fresh all day)
+
+The queue went stale between 5 AM runs. New `watch.py` keeps a **co-authored
+Excel workbook** live all day without re-paying the slow enrichment. The insight:
+the cheap part of a run is the board scrape (`scrape_queue` — order numbers + row
+data, no modals); the slow part is per-order enrichment (`enrich_with_sales_orders`).
+So the watcher polls the board every couple of minutes and runs enrichment **only
+for order numbers it hasn't seen yet today**, stamping each with its first-seen
+("added") time. New modules:
+
+- **`live_state.py`** — pure, unit-tested per-day memory (`live_state_<date>.json`):
+  detects new/returning/removed orders, stamps a stable `first_seen`, refreshes
+  volatile board fields each poll without clobbering enrichment, seeds the
+  start-of-day baseline from the morning daily snapshot, sorts present orders
+  newest-first. 8 tests in `test_live_state.py` (added to CI).
+- **`live_excel.py`** — writes the live board into the co-authored workbook by
+  driving the **desktop Excel app via COM** (mirrors `emailer.py`'s Outlook
+  automation) so co-authoring/cursors sync to coworkers; openpyxl can't do this
+  (it replaces the whole file). One bulk `Range.Value` write per cycle, light
+  stable formatting, `SaveCopyAs` for the dated morning snapshot.
+- **`notify.py`** — per-new-order **Windows toast** (winotify, PowerShell
+  fallback) + **Microsoft Teams** Incoming-Webhook card (stdlib urllib, no dep)
+  so coworkers + phones get pinged. Both best-effort.
+- **`watch.py`** — the loop: 5am–5pm window (configurable), default 2-min
+  interval, first poll = silent baseline + morning snapshot, restart-safe.
+  `--once` / `--now` flags. Own lightweight logging (doesn't drag in anthropic).
+
+Config in `.env`: `LIVE_WORKBOOK_PATH`, `POLL_INTERVAL_SECONDS`, `WATCH_START`/
+`WATCH_END`, `TEAMS_WEBHOOK_URL`, `LIVE_TOAST`, `LIVE_MORNING_SNAPSHOT`. Can't be
+exercised from the sandbox (Excel COM / Teams / toast are all on the Windows
+box) — the pure state logic is what's tested; the COM/notify paths follow the
+established lazy-import, best-effort pattern and need a smoke test on the PC.
+
 ## 2026-06-16 — Text PDFs parse as Qt Runs
 
 After the rescan (unknown 55→18, CB text 250→265), the ~85 text-bearing PDF

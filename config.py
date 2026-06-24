@@ -63,6 +63,12 @@ SNAPSHOT_DIR = _output_path("SNAPSHOT_DIR", str(OUTPUT_DIR / "snapshots"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
+# Where the watcher tees its console output (rotated daily, ~a week kept). Defaults
+# to a `logs/` folder right next to the code so it's easy to find and share when a
+# bug needs chasing; override with LOG_DIR in .env.
+LOG_DIR = _output_path("LOG_DIR", str(Path(__file__).resolve().parent / "logs"))
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
 # Where the long-running backlog tools (autocad_scan.py, backfill_orders.py)
 # keep their resumable progress stores and master workbooks. Kept separate from
 # the daily queue report, which stays a one-day snapshot. Defaults under
@@ -134,6 +140,101 @@ LINE_ITEM_RULES = (os.environ.get("LINE_ITEM_RULES") or "").strip()
 # These are just the destination addresses (an address alone isn't sensitive).
 EMAIL_TO = os.environ.get("EMAIL_TO", "")
 EMAIL_ALERT_TO = os.environ.get("EMAIL_ALERT_TO") or EMAIL_TO
+
+
+# --------------------------------------------------------------------------- #
+# Live intraday watcher (watch.py)                                            #
+# --------------------------------------------------------------------------- #
+# The watcher polls the board every couple of minutes through the day and only
+# does the slow per-order enrichment for orders that are NEW since the last
+# poll, writing the result into a co-authored Excel workbook in real time.
+
+# The Microsoft 365 co-authored workbook the live queue is written into. Use the
+# LOCAL OneDrive/SharePoint-synced path (e.g.
+# C:\Users\you\OneDrive - Company\Daily Queue\Live Queue.xlsx) so the desktop
+# Excel app — which the watcher drives via COM — keeps it synced for coworkers.
+_live_wb_raw = (os.environ.get("LIVE_WORKBOOK_PATH") or "").strip()
+LIVE_WORKBOOK_PATH = _expand_path(_live_wb_raw) if _live_wb_raw else None
+
+# How often to poll the board, in seconds (default 120 = every 2 minutes).
+try:
+    POLL_INTERVAL_SECONDS = max(15, int(os.environ.get("POLL_INTERVAL_SECONDS", "120")))
+except ValueError:
+    POLL_INTERVAL_SECONDS = 120
+
+# Background Sales-Order re-verification: each poll, re-check this many on-board
+# orders we've gone longest without re-checking (round-robin), but only ones not
+# re-checked within the last SO_REVERIFY_MIN_AGE_MIN minutes. This is what lets a
+# silently-stale SO (e.g. an order left at an old revision by an earlier failed
+# fetch) self-correct within the hour instead of waiting for the next daily run.
+# Set SO_REVERIFY_PER_POLL=0 to disable. Costs ~ (per_poll) modal opens per poll.
+try:
+    SO_REVERIFY_PER_POLL = max(0, int(os.environ.get("SO_REVERIFY_PER_POLL", "2")))
+except ValueError:
+    SO_REVERIFY_PER_POLL = 2
+try:
+    SO_REVERIFY_MIN_AGE_MIN = max(1, int(os.environ.get("SO_REVERIFY_MIN_AGE_MIN", "45")))
+except ValueError:
+    SO_REVERIFY_MIN_AGE_MIN = 45
+
+# Auto-push the watcher's log to a throwaway branch so it can be read remotely
+# without copying files off the machine. Each push force-replaces the branch with
+# the current log as a single orphan commit (no history, so no repo bloat). Set
+# LOG_PUSH_MINUTES=0 (or LOG_PUSH_BRANCH empty) to disable. Needs an 'origin' you
+# can push to. NOTE: the log (job #s, customers, file paths) goes to that repo.
+LOG_PUSH_BRANCH = (os.environ.get("LOG_PUSH_BRANCH", "debug-logs") or "").strip()
+try:
+    LOG_PUSH_MINUTES = max(0, int(os.environ.get("LOG_PUSH_MINUTES", "30")))
+except ValueError:
+    LOG_PUSH_MINUTES = 30
+
+
+def _parse_hhmm(raw: str, default: str) -> "tuple[int, int]":
+    """Parse a 'HH:MM' watch-window bound into (hour, minute)."""
+    raw = (raw or "").strip() or default
+    try:
+        h, m = raw.split(":", 1)
+        return max(0, min(23, int(h))), max(0, min(59, int(m)))
+    except ValueError:
+        h, m = default.split(":")
+        return int(h), int(m)
+
+
+# Daily watch window (local time). Defaults to 05:00–17:00 (5am–5pm).
+WATCH_START = _parse_hhmm(os.environ.get("WATCH_START", ""), "05:00")
+WATCH_END = _parse_hhmm(os.environ.get("WATCH_END", ""), "17:00")
+
+# Microsoft Teams Incoming Webhook URL. When set, each new order is posted to
+# that channel so coworkers (and their phones) get notified — nothing to install
+# on their machines. Leave blank to disable Teams notifications.
+TEAMS_WEBHOOK_URL = (os.environ.get("TEAMS_WEBHOOK_URL") or "").strip()
+
+# Pop a Windows toast on the watcher PC for each new order. On by default; set
+# LIVE_TOAST=0/false/no to silence the local pop-ups (Teams still fires).
+LIVE_TOAST_ENABLED = (os.environ.get("LIVE_TOAST", "1").strip().lower()
+                      not in ("0", "false", "no", "off", ""))
+
+# Save a dated, frozen copy of the workbook at the first poll each morning (the
+# "what it looked like at the start of the day" snapshot). On by default.
+LIVE_MORNING_SNAPSHOT = (os.environ.get("LIVE_MORNING_SNAPSHOT", "1").strip().lower()
+                         not in ("0", "false", "no", "off", ""))
+
+# The shareable WEB link to the live co-authored workbook (OneDrive/SharePoint
+# "Copy link"). The daily 5 AM email sends this as an active link so the team
+# opens the live sheet rather than a stale attachment. Blank = the email falls
+# back to attaching the dated report.
+LIVE_WORKBOOK_LINK = (os.environ.get("LIVE_WORKBOOK_LINK") or "").strip()
+
+# Whether the daily email still attaches the dated .xlsx report. Default off when
+# a live link is set (the link is the point); on otherwise so you still get the
+# file. Set EMAIL_ATTACH_REPORT=1/0 to force it either way.
+_attach_raw = (os.environ.get("EMAIL_ATTACH_REPORT") or "").strip().lower()
+if _attach_raw in ("1", "true", "yes", "on"):
+    EMAIL_ATTACH_REPORT = True
+elif _attach_raw in ("0", "false", "no", "off"):
+    EMAIL_ATTACH_REPORT = False
+else:
+    EMAIL_ATTACH_REPORT = not LIVE_WORKBOOK_LINK
 
 
 def validate_runtime_config() -> None:

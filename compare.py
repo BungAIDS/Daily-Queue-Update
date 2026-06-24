@@ -269,4 +269,5 @@ def diff_queues(
         "persistent": persistent,
         "today_count": len(today_jobs),
         "yesterday_count": len(yesterday_jobs or []),
+        "prev_date": yesterday_date,  # the baseline date these changes are vs.
     }

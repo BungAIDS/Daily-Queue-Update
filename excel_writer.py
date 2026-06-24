@@ -2,22 +2,28 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
 
 from openpyxl import Workbook
+from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+import engineers
 from config import OUTPUT_DIR
 
 log = logging.getLogger(__name__)
 
 RED_FILL = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+ORANGE_FILL = PatternFill(start_color="F8CBAD", end_color="F8CBAD", fill_type="solid")  # due today -> red tomorrow
 YELLOW_FILL = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
 # One step darker than each base fill, used when a row is also new today.
 RED_FILL_NEW    = PatternFill(start_color="F4A5A8", end_color="F4A5A8", fill_type="solid")
+ORANGE_FILL_NEW = PatternFill(start_color="F4B183", end_color="F4B183", fill_type="solid")
 YELLOW_FILL_NEW = PatternFill(start_color="F5D750", end_color="F5D750", fill_type="solid")
 NEW_FILL        = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
 HEADER_FILL = PatternFill(start_color="305496", end_color="305496", fill_type="solid")
@@ -47,9 +53,16 @@ COLUMNS = [
     ("CO#", "co"),
     ("Oper", "oper"),
     ("Design", "design"),
-    ("Description", "so_design_desc"),
+    ("Customer", "customer"),
     ("Size", "so_size"),
     ("Arrangement", "so_arrangement"),
+    ("Assigned To", "assigned_to"),
+    ("Checker", "checker"),
+    ("Note", "status_note"),
+    ("Engineer", "engineers"),
+    ("End Date", "end_date"),
+    # --- everything else (original relative order) ---
+    ("Description", "so_design_desc"),
     ("Motor Pos", "so_motor_pos"),
     ("Class", "so_class"),
     ("Rotation", "so_rotation"),
@@ -60,18 +73,13 @@ COLUMNS = [
     ("Max Temp", "so_max_temp"),
     ("Special Temp", "so_special_temp"),
     ("Features", "line_item_tags"),
-    ("Customer", "customer"),
     ("Primary Rep", "primary_rep"),
-    ("Assigned To", "assigned_to"),
-    ("Checker", "checker"),
     ("Start Date", "start_date"),
-    ("End Date", "end_date"),
     ("FanNet Date", "fannet_date"),
     ("Item", "item"),
     ("Plan Hrs", "plan_hrs"),
     ("Total Price", "total_price"),
     ("Ship With", "ship_with"),
-    ("Note", "status_note"),
     ("Flags", "flags"),
     ("Status", "status"),
 ]
@@ -323,6 +331,54 @@ def _co_label(j: Dict[str, Any]) -> str:
     return f"CO#{co}" if co else ""
 
 
+_ARRANGEMENT_RE = re.compile(r"^(A/[A-Za-z0-9]+)(?:\s+(.*))?$")
+
+
+def split_arrangement(value: str) -> "tuple[str, str]":
+    """Split a raw arrangement into the short 'A/X' code (X = digits/letters) and
+    any trailing descriptive text, so the column stays tidy and the detail moves
+    to a hover note. 'A/4V C-Face Flange mount (no motor base)' -> ('A/4V',
+    'C-Face Flange mount (no motor base)'). Anything that isn't an 'A/...' code
+    (e.g. 'N/A', '') passes through unchanged with no note."""
+    s = (value or "").strip()
+    m = _ARRANGEMENT_RE.match(s)
+    if not m:
+        return s, ""
+    return m.group(1), (m.group(2) or "").strip()
+
+
+# The main size is the leading NUMBER (optionally a fraction, so "13 1/2" stays
+# whole). A "-A6"/"-B12"-style code suffix on the number, and any trailing text
+# (e.g. "Blade-1800", "(3600 RPM or less)"), are descriptive and move to the note.
+# Sizes that aren't number-led (e.g. "H3", "N/A") pass through unchanged.
+_SIZE_RE = re.compile(r"^(\d+(?:\s+\d+/\d+)?)(-\S*)?(?:\s+(.*))?$")
+
+
+def split_size(value: str) -> "tuple[str, str]":
+    """Split a raw size into the leading number and the descriptive rest, so the
+    column stays tidy and the detail moves to a hover note. '3000-A6 Blade-1800' ->
+    ('3000', '-A6 Blade-1800'); '3300-B12' -> ('3300', '-B12'); '2412 (3600 RPM or
+    less)' -> ('2412', '(3600 RPM or less)'); a fraction like '13 1/2' stays whole;
+    non-number sizes ('H3', '182', '') pass through with no note."""
+    s = (value or "").strip()
+    m = _SIZE_RE.match(s)
+    if not m:
+        return s, ""
+    note = " ".join(p for p in (m.group(2), m.group(3)) if p).strip()
+    return m.group(1), note
+
+
+def folder_of(path: str) -> str:
+    """The containing folder of a Windows/posix file path. Used to link the Job #
+    at the Sales Order *folder* rather than a specific PDF: a change order renames
+    the SO file (``… (original).pdf`` → ``… CO#1.pdf``), so a link captured before
+    the CO would dead-link, but the per-job folder name never changes."""
+    p = (path or "").strip()
+    if not p:
+        return ""
+    return p.rsplit("\\", 1)[0] if "\\" in p else os.path.dirname(p)
+
+
 def _drive_run_label(j: Dict[str, Any]) -> str:
     """"YES" when the job has a quote run; "YES (X)" when X > 1 files matched,
     so someone knows to review which one is the real run."""
@@ -337,7 +393,9 @@ def _write_job_row(ws, row: int, j: Dict[str, Any], co_changed: bool = False) ->
     for col, (_header, key) in enumerate(COLUMNS, start=1):
         if key == "job":
             cell = ws.cell(row=row, column=col, value=j.get("job", ""))
-            # Job # links to its Sales Order pdf on the Z: drive (when we have one).
+            # Job # links to its latest Sales Order pdf on the Z: drive (when we
+            # have one). The daily run downloads the current revision each
+            # morning, so this path is always the newest CO's SO.
             so_pdf = (j.get("so_pdf") or "").strip()
             if so_pdf and j.get("job"):
                 cell.hyperlink = so_pdf
@@ -366,8 +424,23 @@ def _write_job_row(ws, row: int, j: Dict[str, Any], co_changed: bool = False) ->
                 cell.font = DRIVE_RUN_FONT
         elif key == "total_price":
             _write_money_cell(ws, row, col, j.get("total_price", ""))
+        elif key == "so_arrangement":
+            # Keep the column to the short 'A/X' code; any descriptive suffix
+            # moves to a hover note.
+            code, note = split_arrangement(j.get("so_arrangement", ""))
+            cell = ws.cell(row=row, column=col, value=code)
+            if note:
+                cell.comment = Comment(note, "Queue")
+        elif key == "so_size":
+            # Keep the column to the main size; any trailing detail moves to a note.
+            main, note = split_size(j.get("so_size", ""))
+            cell = ws.cell(row=row, column=col, value=main)
+            if note:
+                cell.comment = Comment(note, "Queue")
         elif key == "flags":
             ws.cell(row=row, column=col, value=_flags_str(j))
+        elif key == "engineers":
+            ws.cell(row=row, column=col, value=engineers.cell_text(j))
         else:
             ws.cell(row=row, column=col, value=j.get(key, ""))
 
@@ -435,6 +508,8 @@ def _write_full_queue_tab(
         end = _parse_date(j.get("end_date", ""))
         if end is not None and end < today:
             fill = RED_FILL_NEW if is_new else RED_FILL
+        elif end is not None and end == today:           # due today -> red tomorrow
+            fill = ORANGE_FILL_NEW if is_new else ORANGE_FILL
         elif end is not None and end <= soon_threshold:
             fill = YELLOW_FILL_NEW if is_new else YELLOW_FILL
         elif is_new:

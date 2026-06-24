@@ -69,11 +69,13 @@ ARCHIVE_AFTER_DAYS = 60
 
 _DATED_NAME = re.compile(r"\d{4}-\d{2}-\d{2}")
 
-# (folder, filename patterns) swept by archive_old_runs. history.json — the
-# live long-term store — deliberately matches none of these.
+# (folder, filename patterns) swept by archive_old_runs. The live long-term
+# stores — history.json and live_master.json — carry no date in their names, so
+# they deliberately match none of these and are never swept.
 _ARCHIVE_SWEEPS = (
     (SNAPSHOT_DIR, ("queue_*.json", "diff_*.json", "briefing_*.json",
-                    "excel_*.json", "history_*_start.json")),
+                    "excel_*.json", "history_*_start.json",
+                    "live_state_*.json", "live_baseline_*.json", "change_log_*.json")),
     (OUTPUT_DIR, ("queue_*.xlsx",)),
 )
 

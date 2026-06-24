@@ -243,7 +243,9 @@ def process_one(page, context, job: str, folder: str = "",
                     "so_arrangement": p.get("arrangement", ""), "so_motor_pos": p.get("motor_pos", ""),
                     "so_class": p.get("fan_class", ""), "so_rotation": p.get("rotation", ""),
                     "so_discharge": p.get("discharge", ""), "so_pct_width": p.get("pct_width", ""),
-                    "so_wheel_type": p.get("wheel_type", ""), "so_special_temp": p.get("special_temp", ""),
+                    "so_wheel_type": p.get("wheel_type", ""),
+                    "so_design_temp": p.get("design_temp", ""), "so_max_temp": p.get("max_temp", ""),
+                    "so_special_temp": p.get("special_temp", ""),
                     "so_pdf": so_pdf,
                 })
                 items = p.get("line_items") or []
@@ -489,6 +491,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     save_progress(records)
     line_items.save_store(li_store)
+    try:   # fold the backfilled SO spec + drive runs + line items into the one master store
+        import master_sync
+        master_sync.run("backfill", "line_items")
+    except Exception as e:  # noqa: BLE001
+        log.warning("Could not sync backfill to the live master (%s)", e)
     out = write_workbook(records, dwg, Path(args.out))
     by_status: Dict[str, int] = {}
     for r in records.values():

@@ -142,6 +142,147 @@ re-running `brief.py`/`send.py` is safe and never double-counts.
 4. Save and exit. Verify with `crontab -l`.
 5. Mac users: macOS may need to grant cron Full Disk Access under **System Settings → Privacy & Security → Full Disk Access** so it can write to your output folder.
 
+## Live intraday watcher (keep the queue fresh all day)
+
+The 5 AM run is a once-a-day photo. The problem: the queue changes through the
+day, so by mid-afternoon the report is stale. `watch.py` fixes that — it keeps a
+**live, co-authored Excel workbook** current all day, and does it cheaply.
+
+**How it stays cheap.** The slow part of a run isn't reading the board, it's the
+per-order enrichment (open the order, download + parse the Sales Order and quote
+run, scan the AutoCAD folder). So the watcher splits the two:
+
+- Every couple of minutes it does the **cheap board scrape** (order numbers + row
+  data — no clicking into anything).
+- It compares the order numbers to what it saw last time, and runs the **slow
+  enrichment only for orders that are new**. Each new order is stamped with the
+  time it was added (the first poll it appeared on).
+
+The current board is written into your **Microsoft 365 co-authored workbook by
+driving the desktop Excel app through COM** — the same no-password trick the
+email step uses for Outlook — so edits flow through Excel and your coworkers see
+them appear live (cursors and all), with no file-lock fights. New orders pop a
+**Windows toast** on the watcher PC and post a **Microsoft Teams card** so
+coworkers (and their phones) get notified too.
+
+```bash
+python watch.py          # run the daytime watch loop (5am–5pm by default)
+python watch.py --once   # one poll cycle now, then exit (for testing)
+python watch.py --now    # ignore the time window; start polling immediately
+```
+
+**The workbook is the team's master sheet**, built as a **chronological log that
+updates by upsert, not repaint** — each poll checks every board order against
+the master list and **appends new ones / updates changed rows in place**, so a
+coworker's filter, sort, and scroll survive (a filter only shifts when rows are
+actually added or removed). Tabs:
+
+- **Order History** — the **master log**: one row per order, covering both the
+  orders the watcher has seen live AND the whole **line-items backlog** (~12K
+  orders from `backlog/line_items.json`, once `line_items_scan.py` has run). It's
+  a *stable presence log* — **Job #** (the pinned column) and the order's
+  identity/SO-spec columns, then **On Queue (YES/NO)**, **Added**, **Left**,
+  then two green-✓/red matrices side by side with a vertical divider: the
+  **AutoCAD DWG matrix** (a column per drawing suffix) and the **line-item
+  Feature matrix** (a column per feature tag). A row changes only when an order
+  is added or its On Queue/Left flag flips — the churny board fields (dates,
+  price, assignee) are NOT here, so the big log isn't rewritten on every tick.
+  The matrices are colored by conditional formatting and bulk-written (~12K rows
+  render fast), and the tab has AutoFilter so you can sort/filter any column.
+- **Live Queue** — the orders **currently on the board**, incremental upsert
+  (append / update in place / delete when an order leaves), keeping the clickable
+  links (Job # → SO pdf, Folder, Quote Run) and the red/yellow date highlights.
+  Always **sorted by End Date** (most overdue — the red rows — at the top; blanks
+  at the bottom). The **Added** column shows the AM/PM time an order first
+  appeared. "New today" shading is judged from the 5 AM `main.py` run's snapshot
+  + diff (see below).
+- **Changes** — today's activity log: **New orders today**, **Change orders
+  today** (CO# increases), **Orders that changed today** (one line per field
+  modification — a field that changes several times in a day is several lines,
+  each time-stamped, newest first), and **Removed / completed today**.
+
+The tabs are wiped and rebuilt **once per process start** (so a 5 AM launch
+starts clean), then run incrementally all day. Order History rebuilds itself if
+its matrix columns change (a brand-new drawing suffix or feature tag appears).
+
+**The master data model.** One JSON file, `snapshots/live_master.json`, is the
+single source of truth — one entry per order with everything we have on it
+(design, size, arrangement, the AutoCAD DWGs, the line items, the quote run, …).
+Every poll, each board order is compared field-by-field against the master;
+**anything that differs updates the master and is appended to the day's change
+log** (`snapshots/change_log_<date>.json`) — which is what feeds the Changes
+tab's "Orders that changed today".
+
+**Every helper feeds the master.** The offline tools each merge what they gather
+into `live_master.json` at the end of their run (`master_sync.py`): the line
+items (`line_items_scan.py`), the custom AutoCAD DWGs (`autocad_scan.py`), the
+parsed quote runs (`quote_run_scan.py`), and the full backfill
+(`backfill_orders.py`). You can also consolidate everything on demand:
+
+```bash
+python master_sync.py          # merge every helper store into the master
+python master_sync.py autocad  # just one source (autocad | quote_runs | line_items | backfill)
+```
+
+The merge never regresses a value (a sparse source won't wipe richer data), and
+an order the watcher hasn't seen on the board is added off-queue. Run the big
+backlog syncs when the watcher isn't also writing the master.
+
+**"New today"** is read from the 5 AM `main.py` run's own output (today's
+snapshot + diff): an order is new today if `main.py` flagged it new/returning
+this morning, or it has appeared on the board since the morning snapshot. So you
+can launch `watch.py` any time after the daily run and it knows what's new —
+without re-flagging the whole board.
+
+**The 5 AM email becomes a live link.** The 5 AM run still **saves** the dated
+`queue_<date>.xlsx` for the archive, but the **email** now leads with an active
+link to the live sheet (`LIVE_WORKBOOK_LINK` = the workbook's Share → Copy link),
+and writes dates out in full. Set `EMAIL_ATTACH_REPORT=1` to also attach the file.
+
+**A day, start to finish.** The first poll establishes the start-of-day baseline
+*silently* — seeded from the morning daily-run snapshot when there is one, so the
+whole board isn't re-enriched or announced — and saves a dated **morning
+snapshot** copy of the workbook (`OUTPUT_DIR\live_snapshots\`). Every poll after
+that announces only genuinely new arrivals. State lives in
+`SNAPSHOT_DIR\live_state_<date>.json`, so if the watcher restarts mid-day it
+resumes without re-enriching or re-announcing what it already saw.
+
+### One-time setup
+
+1. **Make the workbook.** Create an Excel file in OneDrive/SharePoint (so it can
+   be co-authored), share it with your coworkers, and put its **local synced
+   path** in `LIVE_WORKBOOK_PATH` in `.env`. The watcher manages the **Live
+   Queue / Changes / History / Line Items** tabs; any other tabs you add are
+   left untouched. For the 5 AM email link, also set `LIVE_WORKBOOK_LINK` to the
+   workbook's **Share → Copy link** URL.
+2. **Teams alerts (optional).** Put a Teams webhook URL in `TEAMS_WEBHOOK_URL` and
+   everyone in that channel gets a desktop + phone notification per new order,
+   nothing to install. Both webhook types are auto-detected — use **Workflows**
+   (Microsoft's replacement for the retiring connector): channel **··· →
+   Workflows → "Post to a channel when a webhook request is received"** → pick the
+   channel → copy the URL. (The old **··· → Connectors → Incoming Webhook** still
+   works too, but it's being retired.) Leave blank to skip Teams.
+3. **Nicer toast (optional).** `pip install winotify` for a real toast; without
+   it the watcher falls back to a PowerShell tray balloon.
+4. **Interval / window (optional).** Defaults are every 2 minutes, 05:00–17:00.
+   Override with `POLL_INTERVAL_SECONDS`, `WATCH_START`, `WATCH_END` in `.env`.
+
+### Scheduling it (Windows Task Scheduler)
+
+Add a second task alongside the 5 AM one, with the same **"Run only when user is
+logged on"** setting (it needs your interactive desktop session for Excel COM and
+toasts):
+
+- **Trigger:** Daily at **5:00 AM** (it self-stops at `WATCH_END`).
+- **Program/script:** the venv's `python.exe`. **Arguments:** `watch.py`.
+  **Start in:** the project folder.
+- If launched before `WATCH_START` it sleeps until the window opens; launched
+  after `WATCH_END` it exits immediately.
+
+> Like the daily run, this is Windows + your logged-in session: Excel must be
+> installed and signed into the same Microsoft 365 account, and the workbook must
+> live in OneDrive/SharePoint for co-authoring to sync to your coworkers.
+
 ## File layout
 
 ```
@@ -159,6 +300,14 @@ Daily-Queue-Update/
 ├── templates.py        # Quote-run TEMPLATE collection — match a run by design#/format, pull its fields
 ├── drive_run.py        # PDF quote-run reader (the .pdf template in templates.py)
 ├── compare.py          # Diff today vs the most recent prior run; persistence tracking
+├── watch.py            # Live intraday watcher — poll the board, enrich only new orders all day
+├── live_state.py       # The watcher's per-day memory: first-seen times, what's new/enriched
+├── live_master.py      # THE master JSON store — every order + all its info; detects field changes
+├── change_log.py       # Per-day log of field modifications (feeds the Changes tab)
+├── master_sync.py      # Merges every helper's store (DWGs/runs/line items/backfill) into the master
+├── live_sheets.py      # Pure models + the keyed upsert planner for the master tabs
+├── live_excel.py       # Renders the master tabs into the co-authored workbook via Excel COM (upsert)
+├── notify.py           # New-order notifications — Windows toast + Microsoft Teams card
 ├── analyzer.py         # Claude API call — briefing + anomalies + action items
 ├── excel_writer.py     # Two-tab .xlsx report with AutoFilter and date highlights
 ├── emailer.py          # Plain-text email + failure alert email

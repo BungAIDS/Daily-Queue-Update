@@ -327,6 +327,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             log.info("  scanned %d (%d total) ...", scanned, len(records))
 
     save_progress(records)
+    try:   # fold these parsed quote/construction runs into the one master store
+        import master_sync
+        master_sync.run("quote_runs")
+    except Exception as e:  # noqa: BLE001
+        log.warning("Could not sync quote runs to the live master (%s)", e)
     out = write_workbook(records, Path(args.out))
 
     rows = run_rows(records)
