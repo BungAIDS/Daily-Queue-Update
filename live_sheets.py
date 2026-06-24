@@ -508,12 +508,14 @@ def changes_sheet(
 
     def _co_row(e: Dict[str, Any]) -> List[Any]:
         o = order_lookup.get(str(e.get("job", "")), {})
-        return [_fmt_time(e.get("time", "")), e.get("job", ""), e.get("customer", ""),
+        return [_fmt_time(e.get("time", "")), e.get("job", ""),
                 o.get("design", ""), split_arrangement(o.get("so_arrangement", ""))[0],
+                o.get("oper", ""),
                 f"CO#{e.get('old', '')} -> CO#{e.get('new', '')}",
+                e.get("customer", ""),
                 _co_change_desc(o, e.get("new"))]
     _events_table(sh, "Change orders today",
-                  ["Time", "Job #", "Customer", "Design", "Arrangement", "Change", "What changed"],
+                  ["Time", "Job #", "Design", "Arrangement", "Oper", "Change", "Customer", "What changed"],
                   [_co_row(e) for e in co_events])
 
     field_events = [e for e in newest_first if e.get("field") != "CO#"]
