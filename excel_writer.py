@@ -10,7 +10,8 @@ from typing import Any, Dict, List
 
 from openpyxl import Workbook
 from openpyxl.comments import Comment
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.formatting.rule import FormulaRule
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 import engineers
@@ -36,6 +37,24 @@ DRIVE_RUN_LINK_FONT = Font(color="C55A11", bold=True, underline="single")  # ^ +
 DWG_HAS_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")  # green: has the drawing
 DWG_NO_FILL = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")   # red: doesn't
 CENTER_ALIGN = Alignment(horizontal="center")
+
+# Full Queue search bar. Type an order # into the search cell (row 1) and a
+# conditional-format rule lights up whichever Job # row matches — pure formula +
+# formatting, so no macros and nothing to "enable"; it survives the daily
+# openpyxl rewrite. SEARCH_HIT_* style the matched row (bright yellow so it pops
+# over every urgency color, bold so it's legible whatever the row was already);
+# SEARCH_BOX_* make the input cell look like a box you can type into.
+SEARCH_HIT_FILL = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+SEARCH_HIT_FONT = Font(bold=True, color="000000")
+SEARCH_BOX_FILL = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+_SEARCH_BOX_SIDE = Side(style="thin", color="BF8F00")
+SEARCH_BOX_BORDER = Border(left=_SEARCH_BOX_SIDE, right=_SEARCH_BOX_SIDE,
+                           top=_SEARCH_BOX_SIDE, bottom=_SEARCH_BOX_SIDE)
+# Full Queue row layout: row 1 is the search bar, the column headers sit on
+# row 2, and job rows start on row 3. SEARCH_CELL is what you type into.
+SEARCH_ROW, HEADER_ROW, FIRST_DATA_ROW = 1, 2, 3
+SEARCH_CELL = "B1"
+SEARCH_CELL_ABS = "$B$1"  # absolute form for the conditional-format formula
 
 # Single source of truth for column order. Each entry is (header, key); the key
 # names the job field to print, or a special renderer handled in _write_job_row:
@@ -461,14 +480,14 @@ def _dwg_suffixes(jobs: List[Dict[str, Any]]) -> List[str]:
     return sorted(seen, key=lambda s: (int(s), s) if s.isdigit() else (10**9, s))
 
 
-def _append_dwg_matrix(ws, rows: List, start_col: int) -> List[str]:
+def _append_dwg_matrix(ws, rows: List, start_col: int, header_row: int = 1) -> List[str]:
     """Append the custom-DWG matrix starting at column `start_col`: one header
-    per distinct suffix (row 1), then per-row green-✓ (has the drawing) / red
-    (doesn't). `rows` is a list of (row_index, job_dict). Returns the suffixes so
-    the caller can size the AutoFilter/columns."""
+    per distinct suffix (on `header_row`), then per-row green-✓ (has the drawing)
+    / red (doesn't). `rows` is a list of (row_index, job_dict). Returns the
+    suffixes so the caller can size the AutoFilter/columns."""
     suffixes = _dwg_suffixes([j for _, j in rows])
     for k, s in enumerate(suffixes, start=start_col):
-        cell = ws.cell(row=1, column=k, value=f"-{s}")
+        cell = ws.cell(row=header_row, column=k, value=f"-{s}")
         cell.font = HEADER_FONT
         cell.fill = HEADER_FILL
     for row_i, j in rows:
@@ -482,6 +501,28 @@ def _append_dwg_matrix(ws, rows: List, start_col: int) -> List[str]:
     return suffixes
 
 
+def _write_search_bar(ws) -> None:
+    """Row 1: a labelled cell you type an order # into. The conditional-format
+    rule that actually highlights the match is added by the caller once the data
+    extent is known (see _write_full_queue_tab)."""
+    label = ws.cell(row=SEARCH_ROW, column=1, value="Search:")
+    label.font = Font(bold=True)
+    label.alignment = Alignment(horizontal="right")
+
+    box = ws.cell(row=SEARCH_ROW, column=2)  # B1 — SEARCH_CELL, the input cell
+    box.fill = SEARCH_BOX_FILL
+    box.border = SEARCH_BOX_BORDER
+    box.alignment = CENTER_ALIGN
+    box.font = Font(bold=True)
+    box.comment = Comment(
+        "Type an order # here and press Enter. The matching row below lights up "
+        "bright yellow. Clear this cell to remove the highlight.", "Queue")
+
+    hint = ws.cell(row=SEARCH_ROW, column=3,
+                   value="← type an order # to highlight its row (clear to remove)")
+    hint.font = Font(italic=True, color="808080")
+
+
 def _write_full_queue_tab(
     ws,
     jobs: List[Dict[str, Any]],
@@ -491,15 +532,16 @@ def _write_full_queue_tab(
 ) -> None:
     new_job_ids = new_job_ids or set()
     co_changed_ids = co_changed_ids or set()
+    _write_search_bar(ws)
     for c, h in enumerate(QUEUE_HEADERS, start=1):
-        cell = ws.cell(row=1, column=c, value=h)
+        cell = ws.cell(row=HEADER_ROW, column=c, value=h)
         cell.font = HEADER_FONT
         cell.fill = HEADER_FILL
 
     total_price_sum = 0.0
     soon_threshold = today + timedelta(days=3)
 
-    for i, j in enumerate(jobs, start=2):
+    for i, j in enumerate(jobs, start=FIRST_DATA_ROW):
         _write_job_row(ws, i, j, co_changed=j.get("job") in co_changed_ids)
         # Pick a row fill based on End Date urgency; if the order is also new
         # today, step the chosen color one shade darker (or to light gray if
@@ -521,8 +563,9 @@ def _write_full_queue_tab(
                 ws.cell(row=i, column=c).fill = fill
         total_price_sum += _parse_money(j.get("total_price", ""))
 
-    # Summary footer
-    footer = len(jobs) + 3
+    # Summary footer (one blank row below the last job row)
+    last_data = len(jobs) + FIRST_DATA_ROW - 1
+    footer = last_data + 2
     ws.cell(row=footer, column=1, value=f"Total jobs: {len(jobs)}").font = SECTION_FONT
     ws.cell(row=footer, column=TOTAL_PRICE_COL - 1, value="Total $ in process:").font = SECTION_FONT
     total_cell = ws.cell(row=footer, column=TOTAL_PRICE_COL, value=total_price_sum)
@@ -530,16 +573,30 @@ def _write_full_queue_tab(
     total_cell.font = SECTION_FONT
 
     # Custom-DWG green-✓/red matrix, appended after the standard columns.
-    suffixes = _append_dwg_matrix(ws, list(enumerate(jobs, start=2)), len(QUEUE_HEADERS) + 1)
+    suffixes = _append_dwg_matrix(ws, list(enumerate(jobs, start=FIRST_DATA_ROW)),
+                                  len(QUEUE_HEADERS) + 1, header_row=HEADER_ROW)
     total_cols = len(QUEUE_HEADERS) + len(suffixes)
 
-    # AutoFilter across the data rows (including the DWG columns)
     if jobs:
         last_col = get_column_letter(total_cols)
-        ws.auto_filter.ref = f"A1:{last_col}{len(jobs) + 1}"
+        # AutoFilter across the data rows (including the DWG columns)
+        ws.auto_filter.ref = f"A{HEADER_ROW}:{last_col}{last_data}"
+        # Search highlight: light up the whole row whose Job # (col A) matches
+        # what's typed into the search cell. TEXT(...,"@") on both sides so a
+        # job stored as text still matches a number you type (and vice versa).
+        ws.conditional_formatting.add(
+            f"A{FIRST_DATA_ROW}:{last_col}{last_data}",
+            FormulaRule(
+                formula=[f'AND({SEARCH_CELL_ABS}<>"",'
+                         f'TEXT($A{FIRST_DATA_ROW},"@")=TEXT({SEARCH_CELL_ABS},"@"))'],
+                fill=SEARCH_HIT_FILL, font=SEARCH_HIT_FONT, stopIfTrue=True))
 
-    ws.freeze_panes = "B2"  # keep the header row AND the Job # column visible
-    _autosize(ws, num_cols=total_cols)
+    # Freeze below the search bar + header so both stay visible while scrolling.
+    ws.freeze_panes = f"B{FIRST_DATA_ROW}"
+    # Skip the search-bar cells when sizing: the hint deliberately overflows into
+    # the empty cells to its right, so it shouldn't widen its whole column.
+    _autosize(ws, num_cols=total_cols,
+              skip_cells={(SEARCH_ROW, 1), (SEARCH_ROW, 2), (SEARCH_ROW, 3)})
 
 
 def _write_history_tab(ws, history: Dict[str, Any]) -> None:
