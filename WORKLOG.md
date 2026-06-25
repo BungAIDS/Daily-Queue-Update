@@ -3,6 +3,29 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-25 — Baseline poll no longer floods "Orders that changed today"
+
+Symptom: the Changes tab showed a grey "changed today" row under (nearly) every
+order, all stamped 5:00 AM, with the whole Sales-Order block (Size, Arrangement,
+Description, Motor Pos, Class, …) flagged red — even when nothing had moved.
+
+Cause: `watch.poll_once` appended `live_master.update`'s deltas to today's change
+log on *every* poll, including the silent start-of-day **baseline** poll. The
+baseline poll diffs the board against *yesterday's* saved master, so its deltas
+are overnight moves — and, for orders the raw start-of-day seed re-enters
+without their enrichment yet, `_keep_better_enrichment`'s guard only protects
+fields when the stored order has a `so_pdf`; an order with SO fields but a blank
+`so_pdf` has them recorded as `value -> ''`. Either way these are not changes
+that happened *during* today's watch, so they shouldn't be "changed today".
+
+Fix: `poll_once` now appends to the change log only when `not baseline`. The
+master is still folded/updated on the baseline poll; we just don't record its
+deltas. Later (non-baseline) polls log genuine intraday changes as before, so
+each real move still gets its own grey row.
+
+Tests: `test_watch_baseline.py` — baseline poll writes nothing to the change
+log; a later normal poll still logs a real End-Date move.
+
 ## 2026-06-17 — Every helper feeds the one master store
 
 DG: incorporate everything we know about each order into live_master, and have

@@ -439,9 +439,16 @@ def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce
     present = live_state.present_jobs(state)
     # Fold the board into the master log; log any field modifications it found.
     events = live_master.update(master, present, now)
-    change_log.append(now.date(), events)
-    if events:
-        log.info("Logged %d field change(s) this poll.", len(events))
+    # The baseline poll establishes the start-of-day picture silently: its deltas
+    # are differences vs yesterday's saved master (overnight moves, or fields the
+    # raw start-of-day seed hadn't re-enriched yet), NOT changes that happened
+    # during today's watch — so they must NOT land in today's change log. Logging
+    # them put a grey "changed today" row under (nearly) every order at 5 AM. The
+    # master is still updated above; we only skip recording the deltas.
+    if not baseline:
+        change_log.append(now.date(), events)
+        if events:
+            log.info("Logged %d field change(s) this poll.", len(events))
 
     if LIVE_WORKBOOK_PATH:
         _render_master(master, now, board_order=[str(j.get("job")) for j in board if j.get("job")])
