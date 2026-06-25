@@ -161,6 +161,41 @@ def test_changes_today_log_sections():
     assert sh.grid[r][c].overflow is True
 
 
+def test_changes_today_columns_align_across_sections():
+    """The 'changed today' table leads with a Time column, so its Job # sits in
+    column B and Folder in C. The 'New' and 'Removed' tables keep Job # in column
+    A and get a blank spacer in column B, so Folder / Quote Run / CO# line up in
+    the same columns across all three sections."""
+    new_today = [_job("421001")]
+    events = [{"time": "2026-06-16T09:30:00", "job": "420800", "customer": "X",
+               "field": "Oper", "old": "10", "new": "20"}]
+    removed_today = [_job("420900")]
+    sh = ls.changes_sheet(new_today, events, removed_today, "2026-06-16",
+                          updated_at="x", order_lookup={"420800": {"design": "47"}})
+
+    def header_after(title):
+        r, _ = _find(sh, title)
+        return [str(c.value) for c in sh.grid[r + 1]]
+
+    new_hdr = header_after("New orders today")
+    chg_hdr = header_after("Orders that changed today")
+    rem_hdr = header_after("Removed / completed today")
+
+    # New / Removed: Job # in A, blank spacer in B, Folder in C.
+    for hdr in (new_hdr, rem_hdr):
+        assert hdr[0] == "Job #" and hdr[1] == "" and hdr[2] == "Folder"
+    # Changed: Time in A, Job # in B, Folder in C.
+    assert chg_hdr[0] == "Time" and chg_hdr[1] == "Job #" and chg_hdr[2] == "Folder"
+    # Folder, Quote Run, CO# line up in the same columns (C/D/E) across all three.
+    for hdr in (new_hdr, chg_hdr, rem_hdr):
+        assert hdr[2:5] == ["Folder", "Quote Run", "CO#"]
+
+    # Data rows match: New/Removed put the job # in column A and leave B blank.
+    nr, _ = _find(sh, "New orders today")
+    new_data = sh.grid[nr + 2]
+    assert new_data[0].value == "421001" and new_data[1].value == ""
+
+
 def test_orders_changed_one_instance_multiple_fields():
     # An order that changes ONCE (one poll) with several fields moving must be a
     # single before/after pair (two rows), not one row per field.

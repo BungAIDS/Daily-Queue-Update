@@ -3,6 +3,16 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-25 — Changes tab: New/Removed columns aligned with the changed table
+
+The 'Orders that changed today' table leads with a Time column, so its Job # sits
+in column B and Folder in C. 'New orders today' and 'Removed / completed today'
+had Job # in A and Folder in B, so everything from Folder on was off by one column
+between sections. Fix: `_job_table` now inserts a blank spacer column right after
+Job #, so Job # stays in A, B is blank, and Folder / Quote Run / CO# / … line up
+in the same columns (C/D/E/…) across all three sections. Test:
+`test_changes_today_columns_align_across_sections` in `test_live_sheets.py`.
+
 ## 2026-06-25 — Live tabs no longer drop rows after a busy-Excel write
 
 Symptom: "all the orders vanished" — the Live Queue tab showed ~18 of 56 on-board

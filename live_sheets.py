@@ -328,15 +328,25 @@ def full_queue_sheet(
 def _job_table(sh: Sheet, title: str, jobs: List[Dict[str, Any]],
                extra_headers: Optional[List[str]] = None,
                extra: Optional[Any] = None) -> None:
-    """A titled mini-table of full job rows (used by the Changes sections)."""
+    """A titled mini-table of full job rows (used by the Changes sections).
+
+    A blank spacer column is inserted right after Job # so these tables line up
+    with 'Orders that changed today', whose leading Time column pushes its Job #
+    into column B and Folder into column C. Here Job # stays in column A, the
+    spacer fills column B, and Folder lands in column C to match — so Folder,
+    Quote Run, CO#, … align across all three sections."""
     sh.row([Cell(f"{title} ({len(jobs)})", font=F_SECTION)])
     if not jobs:
         sh.row([Cell("(none)")])
         sh.blank()
         return
-    sh.row(_header_cells(list(QUEUE_HEADERS) + (extra_headers or [])))
+    # [Job #][spacer][Folder, Quote Run, …]  — the spacer is the empty header cell
+    # that mirrors the changed table's Job # column.
+    headers = [QUEUE_HEADERS[0], ""] + list(QUEUE_HEADERS[1:]) + (extra_headers or [])
+    sh.row(_header_cells(headers))
     for j in jobs:
         cells = _job_value_cells(j, co_changed=False)
+        cells = [cells[0], Cell("")] + cells[1:]   # blank cell under the spacer header
         if extra is not None:
             cells = cells + [Cell(extra(j))]
         sh.row(cells)
