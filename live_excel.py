@@ -19,6 +19,7 @@ poll cycle carries on (state + notifications still happen).
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import time
@@ -112,6 +113,51 @@ _BELOW_LAST: Dict[str, Any] = {}
 _XL_UP = -4162           # xlUp
 _XL_NONE = -4142         # xlColorIndexNone
 _XL_AUTO = -4105         # xlColorIndexAutomatic
+
+_XL_CALC_MANUAL = -4135     # xlCalculationManual
+_XL_CALC_AUTOMATIC = -4105  # xlCalculationAutomatic
+
+
+@contextlib.contextmanager
+def _tuned(app):
+    """Suspend screen repaints, event handlers, save/co-authoring prompts and
+    AUTOMATIC recalculation for one render pass, restoring each afterward.
+
+    Driving Excel cell-by-cell with these ON is what makes a render expensive and
+    leaky over a long session: every single .Value/.Interior write repaints the
+    window AND triggers Excel to recompute the WHOLE workbook — including the ~12K
+    =HYPERLINK() formulas and the conditional-format rules on the Order History
+    matrices. That's the bulk of the CPU, and the recalc/redraw caches it churns
+    are a steady source of the memory growth. With recalc held to manual we do all
+    the writes, then Calculate() once at the end.
+
+    Each setting is application-level (so it also covers a coworker's other open
+    files on this box) and is restored in the finally, so it's only suspended for
+    the few seconds a render takes. Every get/set is best-effort: a busy or
+    co-authoring Excel can reject one, and that must never abort the update."""
+    saved: Dict[str, Any] = {}
+    for attr, off in (("ScreenUpdating", False), ("EnableEvents", False),
+                      ("DisplayAlerts", False), ("Calculation", _XL_CALC_MANUAL)):
+        try:
+            saved[attr] = getattr(app, attr)
+            setattr(app, attr, off)
+        except Exception:  # noqa: BLE001 - never let a rejected tuning abort the render
+            pass
+    try:
+        yield
+    finally:
+        # Recompute once now that every write is in (manual calc skipped them), then
+        # restore each setting to what it was before — including Calculation, so we
+        # don't leave the user's Excel stuck on manual.
+        try:
+            app.Calculate()
+        except Exception:  # noqa: BLE001
+            pass
+        for attr, val in saved.items():
+            try:
+                setattr(app, attr, val)
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def _refresh_volatile(wb, sheet: Sheet) -> None:
@@ -673,6 +719,12 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
     # re-extend AutoFilter. Sort the DATA ROWS ONLY (below the header) so the
     # header never moves; blanks fall to the bottom under ascending order.
     touched = bool(deletes or updates or appends)
+    # A STRUCTURAL change (rows added/removed) is the only thing that requires the
+    # search conditional format to be re-laid; an in-place value update doesn't
+    # shift any row. Re-applying CF every poll (on plain updates) is what lets
+    # Excel fragment one rule into thousands of sub-range rules over a day — a real
+    # source of the unbounded memory growth — so gate the re-apply on structure.
+    structural = bool(deletes or appends)
     if touched and last_row >= first_data_row:
         try:
             if ws.AutoFilterMode:
@@ -731,10 +783,12 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
 
     # Apply the search highlight LAST — _render_below's Clear() on the rows beneath
     # the live data wipes any CF there, so applying it earlier (before the block)
-    # left nothing highlighting. Re-apply on any change, when the block redrew, or
-    # until it first lands (a busy Excel can reject the first try); once it's stuck
-    # we only refresh it on a real change so we're not rewriting CF every poll.
-    if search and (first_time or touched or below_ran or name not in _SEARCH_CF_DONE):
+    # left nothing highlighting. Re-apply only on a STRUCTURAL change (rows added/
+    # removed), when the block redrew, or until it first lands (a busy Excel can
+    # reject the first try); plain value updates leave every row where it was, so
+    # they don't need the rule re-laid — re-applying it then is pure churn that
+    # fragments the CF and grows memory.
+    if search and (first_time or structural or below_ran or name not in _SEARCH_CF_DONE):
         if _apply_search_cf(ws, key_col, ncols, first_data_row, last_row):
             _SEARCH_CF_DONE.add(name)
 
@@ -930,40 +984,44 @@ def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any]
         return False
 
     # Render each tab independently — a failure on one (e.g. the big Order
-    # History) must not stop the others from updating.
+    # History) must not stop the others from updating. The whole pass runs with
+    # screen updates + automatic recalc suspended (see _tuned): cell-by-cell COM
+    # writes with those on recompute/redraw the entire workbook every write, which
+    # is the bulk of the CPU and a steady source of Excel's memory growth.
     touched = []
-    try:
-        n = apply_upserts(app, wb, lq_payload["name"], lq_payload["headers"], lq_payload["ops"],
-                          lq_payload["key_col"], lq_payload["allow_delete"], lq_payload.get("freeze"),
-                          sort_col=lq_payload.get("sort_col"), text_cols=lq_payload.get("text_cols"),
-                          below=lq_payload.get("below"), header_row=lq_payload.get("header_row", 1),
-                          search=lq_payload.get("search", False))
-        if n:
-            touched.append(f"{lq_payload['name']}(+{n})")
-    except Exception as e:  # noqa: BLE001
-        log.warning("Live Queue update failed (%s)", e)
-    try:
-        n = apply_order_history(app, wb, oh_payload["name"], oh_payload["spec"],
-                                oh_payload["ops"], oh_payload["key_col"], oh_payload.get("freeze"),
-                                rebuild=oh_payload.get("rebuild", False))
-        if n:
-            touched.append(f"{oh_payload['name']}(+{n})")
-    except Exception as e:  # noqa: BLE001
-        log.warning("Order History update failed (%s)", e)
-    try:
-        if changes_sheet is not None:
-            fp = _fingerprint(changes_sheet)
-            if _RENDER_CACHE.get(changes_sheet.name) != fp:
-                render_sheet(app, wb, changes_sheet)
-                _RENDER_CACHE[changes_sheet.name] = fp
-                touched.append(changes_sheet.name)
-            else:
-                # Content unchanged — don't repaint (that would reset a viewer's
-                # filter/scroll). Just refresh the 'Last updated' stamp in place so
-                # the tab still reads as live. AutoSave carries it; no forced Save.
-                _refresh_volatile(wb, changes_sheet)
-    except Exception as e:  # noqa: BLE001
-        log.warning("Changes update failed (%s)", e)
+    with _tuned(app):
+        try:
+            n = apply_upserts(app, wb, lq_payload["name"], lq_payload["headers"], lq_payload["ops"],
+                              lq_payload["key_col"], lq_payload["allow_delete"], lq_payload.get("freeze"),
+                              sort_col=lq_payload.get("sort_col"), text_cols=lq_payload.get("text_cols"),
+                              below=lq_payload.get("below"), header_row=lq_payload.get("header_row", 1),
+                              search=lq_payload.get("search", False))
+            if n:
+                touched.append(f"{lq_payload['name']}(+{n})")
+        except Exception as e:  # noqa: BLE001
+            log.warning("Live Queue update failed (%s)", e)
+        try:
+            n = apply_order_history(app, wb, oh_payload["name"], oh_payload["spec"],
+                                    oh_payload["ops"], oh_payload["key_col"], oh_payload.get("freeze"),
+                                    rebuild=oh_payload.get("rebuild", False))
+            if n:
+                touched.append(f"{oh_payload['name']}(+{n})")
+        except Exception as e:  # noqa: BLE001
+            log.warning("Order History update failed (%s)", e)
+        try:
+            if changes_sheet is not None:
+                fp = _fingerprint(changes_sheet)
+                if _RENDER_CACHE.get(changes_sheet.name) != fp:
+                    render_sheet(app, wb, changes_sheet)
+                    _RENDER_CACHE[changes_sheet.name] = fp
+                    touched.append(changes_sheet.name)
+                else:
+                    # Content unchanged — don't repaint (that would reset a viewer's
+                    # filter/scroll). Just refresh the 'Last updated' stamp in place so
+                    # the tab still reads as live. AutoSave carries it; no forced Save.
+                    _refresh_volatile(wb, changes_sheet)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Changes update failed (%s)", e)
 
     if touched:
         try:
@@ -991,13 +1049,14 @@ def update_workbook(sheets: List[Sheet], workbook_path: str | Path) -> bool:
         wb = _find_workbook(app, path)
         order = {n: i for i, n in enumerate(SHEET_ORDER)}
         rendered = []
-        for sheet in sorted(sheets, key=lambda s: order.get(s.name, 99)):
-            fp = _fingerprint(sheet)
-            if _RENDER_CACHE.get(sheet.name) == fp:
-                continue  # unchanged — leave it alone so filters/scroll persist
-            render_sheet(app, wb, sheet)
-            _RENDER_CACHE[sheet.name] = fp
-            rendered.append(sheet.name)
+        with _tuned(app):   # suspend redraw + automatic recalc for the render pass
+            for sheet in sorted(sheets, key=lambda s: order.get(s.name, 99)):
+                fp = _fingerprint(sheet)
+                if _RENDER_CACHE.get(sheet.name) == fp:
+                    continue  # unchanged — leave it alone so filters/scroll persist
+                render_sheet(app, wb, sheet)
+                _RENDER_CACHE[sheet.name] = fp
+                rendered.append(sheet.name)
         if rendered:
             try:
                 wb.Save()
@@ -1025,4 +1084,59 @@ def save_morning_copy(workbook_path: str | Path, dest: str | Path) -> bool:
         return True
     except Exception as e:  # noqa: BLE001
         log.warning("Could not save morning snapshot copy (%s)", e)
+        return False
+
+
+def recycle_workbook(workbook_path: str | Path) -> bool:
+    """Close the live workbook so Excel reclaims the memory it accumulated over a
+    long watch session, then let the next poll reopen it fresh.
+
+    Excel never gives all of it back on its own: a day (often several days, since
+    the watcher attaches to whatever Excel is already running and never quits it)
+    of thousands of writes, sorts, AutoFilters and conditional-format passes leaves
+    fragmented CF rules, a bloated calc chain and undo/redraw caches behind, and
+    the process climbs into the multi-GB range. Closing the workbook frees those
+    workbook-bound structures; reopening reads the same file back from
+    OneDrive/SharePoint.
+
+    Safe on the co-authored file: AutoSave + co-authoring have already synced every
+    edit (we Save once more first to be sure), so nothing is lost, and only the
+    BOT'S OWN Excel instance is touched — coworkers have their own open elsewhere
+    and are unaffected. The process-level render caches (_HEADER_DONE/_FROZEN/…)
+    are deliberately left intact: the reopened file still has the headers, frozen
+    panes, rows and formats on disk, so the next poll resumes incremental upserts
+    rather than doing a full rebuild. Best-effort — a failure just means we keep
+    the current Excel and try again at the next recycle point."""
+    path = Path(workbook_path)
+    try:
+        import win32com.client  # type: ignore
+        # Only recycle an ALREADY-running Excel; never launch one just to close it.
+        app = win32com.client.GetActiveObject("Excel.Application")
+    except Exception as e:  # noqa: BLE001
+        log.debug("No running Excel to recycle (%s); skipping.", e)
+        return False
+    wb = None
+    target = os.path.normcase(str(path))
+    for w in app.Workbooks:
+        try:
+            if w.Name == path.name or os.path.normcase(w.FullName) == target:
+                wb = w
+                break
+        except Exception:  # noqa: BLE001
+            continue
+    if wb is None:
+        log.debug("Live workbook not open in Excel; nothing to recycle.")
+        return False
+    try:
+        try:
+            wb.Save()                       # flush any unsynced edits before closing
+        except Exception as e:  # noqa: BLE001
+            log.debug("pre-recycle Save() raised (likely AutoSave-managed): %s", e)
+        wb.Close(SaveChanges=True)
+        log.info("Recycled the live workbook (closed to reclaim Excel memory; "
+                 "the next poll reopens it).")
+        return True
+    except Exception as e:  # noqa: BLE001
+        log.warning("Could not recycle the live workbook (%s); keeping the current "
+                    "Excel and will retry at the next recycle point.", e)
         return False

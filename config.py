@@ -162,6 +162,20 @@ try:
 except ValueError:
     POLL_INTERVAL_SECONDS = 120
 
+# The watcher drives the DESKTOP Excel app over COM all day and never quits it, so
+# Excel keeps accumulating memory it doesn't fully reclaim (fragmented conditional-
+# format rules, a growing calc chain, undo/redraw caches) — left unchecked it
+# climbs into the multi-GB range and a rebuild stops finishing inside one poll.
+# Every this-many polls the watcher recycles the live workbook: it closes it
+# (AutoSave/co-authoring has already synced every edit, and only the bot's own
+# Excel is touched — coworkers are unaffected) and the next poll reopens it fresh,
+# which frees the accumulated memory. At the 120s default, 30 polls ≈ once an hour.
+# Set 0 to disable.
+try:
+    EXCEL_RECYCLE_EVERY_POLLS = max(0, int(os.environ.get("EXCEL_RECYCLE_EVERY_POLLS", "30")))
+except ValueError:
+    EXCEL_RECYCLE_EVERY_POLLS = 30
+
 # Background Sales-Order re-verification: each poll, re-check this many on-board
 # orders we've gone longest without re-checking (round-robin), but only ones not
 # re-checked within the last SO_REVERIFY_MIN_AGE_MIN minutes. This is what lets a

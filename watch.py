@@ -47,11 +47,13 @@ import live_sheets
 import live_state
 import notify
 from compare import load_latest_snapshot, load_snapshot, save_snapshot
-from config import (LIVE_MORNING_SNAPSHOT, LIVE_WORKBOOK_PATH, LOG_DIR,
-                    LOG_PUSH_BRANCH, OUTPUT_DIR, POLL_INTERVAL_SECONDS,
-                    SO_REVERIFY_MIN_AGE_MIN, SO_REVERIFY_PER_POLL, WATCH_END,
-                    WATCH_START, validate_runtime_config)
-from live_excel import save_morning_copy, update_master_workbook
+from config import (EXCEL_RECYCLE_EVERY_POLLS, LIVE_MORNING_SNAPSHOT,
+                    LIVE_WORKBOOK_PATH, LOG_DIR, LOG_PUSH_BRANCH, OUTPUT_DIR,
+                    POLL_INTERVAL_SECONDS, SO_REVERIFY_MIN_AGE_MIN,
+                    SO_REVERIFY_PER_POLL, WATCH_END, WATCH_START,
+                    validate_runtime_config)
+from live_excel import (recycle_workbook, save_morning_copy,
+                        update_master_workbook)
 from live_sheets import added_label
 from log_push import push_logs
 from runstate import load_diff
@@ -576,6 +578,17 @@ def run_watch(ignore_window: bool = False) -> int:
             if baseline:
                 _morning_snapshot(now)
             cycle += 1
+            # Periodically recycle the live workbook so Excel's all-day memory
+            # accumulation (fragmented CF rules, calc chain, undo/redraw caches)
+            # can't climb unbounded: close it now (AutoSave already synced; only the
+            # bot's Excel is touched) and the next poll reopens it fresh. Done during
+            # the idle wait so the reopen cost lands on the next poll, not this one.
+            if (EXCEL_RECYCLE_EVERY_POLLS and LIVE_WORKBOOK_PATH
+                    and cycle % EXCEL_RECYCLE_EVERY_POLLS == 0):
+                try:
+                    recycle_workbook(LIVE_WORKBOOK_PATH)
+                except Exception:  # noqa: BLE001 - recycling is a nicety, never fatal
+                    log.exception("Workbook recycle failed; continuing")
             # A poll's browser/async work can reset our SIGINT handler — re-assert
             # it, then wait out the rest of the interval interruptibly: the wait
             # returns the instant a Ctrl+C sets the stop event.
