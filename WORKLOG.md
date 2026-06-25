@@ -3,6 +3,38 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-25 — Live tabs no longer drop rows after a busy-Excel write
+
+Symptom: "all the orders vanished" — the Live Queue tab showed ~18 of 56 on-board
+orders even though every poll logged `56 on board | removed=0` and the master log
+was intact. No data was lost; the tab just failed to redraw.
+
+Cause: the live tabs are drawn incrementally — each poll writes only the rows
+whose signature changed (`master['lq_sigs']` / `['oh_sigs']`). `watch._plan`
+committed those signatures as soon as the ops were *planned*, before the Excel
+write. When a write failed (Excel busy / `OLE error 0x800ac472`, e.g. a dialog or
+co-authoring sync), the store believed the rows were on the sheet, so the next
+poll planned no op for them and they stayed missing until a restart — and if the
+restart's first render also hit a busy Excel, it re-poisoned the store.
+
+Fix (commit-after-success + idempotent appends):
+- `watch._plan` now returns `(ops, commit)`; `_render_master` calls `commit()`
+  only for tabs that `update_master_workbook` reports as rendered.
+- `update_master_workbook` now returns the set of tab names that rendered without
+  error (was a bare bool, which nobody used).
+- `apply_upserts` / `apply_order_history` appends are now idempotent: if a key is
+  already on the sheet (a re-planned row after a failed write), update it in place
+  instead of adding a duplicate. A failed write therefore self-heals on the next
+  poll — no restart, no duplicates.
+
+Performance: unchanged in steady state — same ops/writes per poll; the only added
+work is an O(1) keymap lookup (the keymap is already read each poll) and redrawing
+rows after a failed write, which is the point.
+
+Tests: `test_watch_render_commit.py` — a failed write leaves signatures
+uncommitted (rows re-planned next poll); a successful write commits and then skips
+unchanged rows.
+
 ## 2026-06-25 — Baseline poll no longer floods "Orders that changed today"
 
 Symptom: the Changes tab showed a grey "changed today" row under (nearly) every

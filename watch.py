@@ -204,20 +204,30 @@ def _force_rebuild(master: dict) -> None:
             e["left"] = None
 
 
-def _plan(records: list, sig_store: dict, allow_delete: bool) -> list:
+def _plan(records: list, sig_store: dict, allow_delete: bool):
     """Turn (key, cells) records into upsert ops vs what we last wrote (the sigs
-    in `sig_store`, a flat {order#: sig} persisted in the master), and update the
-    store. Flat (not per-order) so backlog orders that live only in the line-items
-    store are tracked too. Change detection survives restarts."""
+    in `sig_store`, a flat {order#: sig} persisted in the master). Flat (not
+    per-order) so backlog orders that live only in the line-items store are tracked
+    too. Change detection survives restarts.
+
+    Returns (ops, commit). `commit()` folds the new signatures into `sig_store`;
+    call it ONLY after the tab's Excel write actually succeeds. Committing eagerly
+    was the bug behind 'all the orders vanished': if the write then failed (Excel
+    busy / OLE error) the store believed those rows were on the sheet, so the next
+    poll planned no op for them and they stayed missing until a restart. Deferring
+    the commit means a failed write simply re-plans the same ops next cycle."""
     desired = [(key, live_sheets.row_sig(cells), cells) for key, cells in records]
     ops = live_sheets.plan_upsert(desired, dict(sig_store), allow_delete=allow_delete)
     sig_by = {key: sig for key, sig, _ in desired}
-    for kind, key, _ in ops:
-        if kind in ("append", "update"):
-            sig_store[key] = sig_by[key]
-        elif kind == "delete":
-            sig_store.pop(key, None)
-    return ops
+
+    def commit() -> None:
+        for kind, key, _ in ops:
+            if kind in ("append", "update"):
+                sig_store[key] = sig_by[key]
+            elif kind == "delete":
+                sig_store.pop(key, None)
+
+    return ops, commit
 
 
 def _oh_orders(master: dict, store: dict) -> list:
@@ -309,9 +319,9 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
                  if live_sheets.added_date(j) in recent_days}
 
     lq_sigs = master.setdefault("lq_sigs", {})
-    lq_ops = _plan(live_sheets.live_queue_records(lq_jobs, today, new_ids=shade_ids,
-                                                  co_changed_ids=co_changed, ref=now),
-                   lq_sigs, allow_delete=True)
+    lq_ops, lq_commit = _plan(live_sheets.live_queue_records(lq_jobs, today, new_ids=shade_ids,
+                                                             co_changed_ids=co_changed, ref=now),
+                              lq_sigs, allow_delete=True)
     lq_payload = {"name": "Live Queue", "headers": live_sheets.LIVE_QUEUE_HEADERS, "ops": lq_ops,
                   "key_col": live_sheets.LIVE_QUEUE_KEY_COL, "allow_delete": True,
                   "sort_col": live_sheets.LIVE_QUEUE_CBC_COL,
@@ -355,12 +365,19 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
         master["oh_headers"] = spec["headers"]
         master["oh_build_version"] = OH_BUILD_VERSION
     oh_sigs = master.setdefault("oh_sigs", {})
-    oh_ops = _plan(spec["records"], oh_sigs, allow_delete=False)
+    oh_ops, oh_commit = _plan(spec["records"], oh_sigs, allow_delete=False)
     oh_payload = {"name": "Order History", "spec": spec, "ops": oh_ops, "rebuild": rebuild,
                   "key_col": live_sheets.ORDER_HISTORY_KEY_COL, "freeze": "B2"}  # pin Job # only
 
-    update_master_workbook(LIVE_WORKBOOK_PATH, lq_payload, oh_payload,
-                           changes_sheet=_changes_sheet(master, lq_jobs, new_today, today, now))
+    rendered = update_master_workbook(LIVE_WORKBOOK_PATH, lq_payload, oh_payload,
+                                      changes_sheet=_changes_sheet(master, lq_jobs, new_today, today, now))
+    # Commit each tab's row signatures only if its write actually landed. A tab
+    # whose write failed (Excel busy / OLE error) is left out of `rendered`, so its
+    # ops are re-planned and re-drawn next poll instead of being lost.
+    if lq_payload["name"] in rendered:
+        lq_commit()
+    if oh_payload["name"] in rendered:
+        oh_commit()
 
 
 def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce: bool) -> dict:
