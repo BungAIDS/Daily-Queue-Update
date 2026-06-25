@@ -299,6 +299,10 @@ def render_sheet(app, wb, sheet: Sheet) -> None:
     except Exception:  # noqa: BLE001
         pass
     ws.Cells.Clear()  # bot-owned sheet — full repaint keeps it correct
+    try:
+        ws.Cells.UnMerge()   # drop any merges from a previous (taller) repaint
+    except Exception:  # noqa: BLE001
+        pass
     if nrows == 0 or ncols == 0:
         return
 
@@ -308,6 +312,17 @@ def render_sheet(app, wb, sheet: Sheet) -> None:
     for r, row in enumerate(sheet.grid, start=1):
         if row:
             _style_row(ws, r, row)
+
+    # Merge any cell that spans columns (e.g. the Changes 'Job #' header over its
+    # blank spacer). The covered cells stay in the grid as positional spacers, so
+    # this only removes the wall — it never shifts the columns to its right.
+    for r, row in enumerate(sheet.grid, start=1):
+        for c, cell in enumerate(row, start=1):
+            if getattr(cell, "colspan", 1) > 1:
+                try:
+                    ws.Range(ws.Cells(r, c), ws.Cells(r, c + cell.colspan - 1)).Merge()
+                except Exception:  # noqa: BLE001
+                    pass
 
     if sheet.autofilter_a1:
         try:

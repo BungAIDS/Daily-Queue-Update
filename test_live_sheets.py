@@ -195,6 +195,14 @@ def test_changes_today_columns_align_across_sections():
     new_data = sh.grid[nr + 2]
     assert new_data[0].value == "421001" and new_data[1].value == ""
 
+    # New/Removed merge Job # across its spacer (colspan 2) so there's no wall
+    # after the job number; the changed table keeps Time and Job # as two cells.
+    nh = sh.grid[_find(sh, "New orders today")[0] + 1]
+    rh = sh.grid[_find(sh, "Removed / completed today")[0] + 1]
+    ch = sh.grid[_find(sh, "Orders that changed today")[0] + 1]
+    assert nh[0].colspan == 2 and rh[0].colspan == 2 and new_data[0].colspan == 2
+    assert ch[0].colspan == 1 and ch[1].colspan == 1   # Time / Job # untouched
+
 
 def test_orders_changed_one_instance_multiple_fields():
     # An order that changes ONCE (one poll) with several fields moving must be a

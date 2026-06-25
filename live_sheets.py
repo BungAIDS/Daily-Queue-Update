@@ -72,6 +72,9 @@ class Cell:
                                     # neighbors (e.g. the Changes tab's 'What changed'):
                                     # excluded from its column's autofit so the column
                                     # stays sized to its other content and this spills
+    colspan: int = 1                # merge this cell across N columns (the cells it covers
+                                    # stay in the grid as positional spacers): e.g. the
+                                    # Changes 'Job #' header spanning its blank spacer col
 
 
 @dataclass
@@ -340,13 +343,18 @@ def _job_table(sh: Sheet, title: str, jobs: List[Dict[str, Any]],
         sh.row([Cell("(none)")])
         sh.blank()
         return
-    # [Job #][spacer][Folder, Quote Run, …]  — the spacer is the empty header cell
-    # that mirrors the changed table's Job # column.
+    # [Job #][spacer][Folder, Quote Run, …]. The spacer keeps Folder in column C
+    # (aligned with the changed table); Job # is merged across it (colspan=2) so
+    # there's no cell wall between Job # and the spacer. 'Orders that changed today'
+    # is left alone — its Time and Job # stay as two separate cells.
     headers = [QUEUE_HEADERS[0], ""] + list(QUEUE_HEADERS[1:]) + (extra_headers or [])
-    sh.row(_header_cells(headers))
+    header_cells = _header_cells(headers)
+    header_cells[0].colspan = 2
+    sh.row(header_cells)
     for j in jobs:
         cells = _job_value_cells(j, co_changed=False)
-        cells = [cells[0], Cell("")] + cells[1:]   # blank cell under the spacer header
+        cells[0].colspan = 2                       # Job # spans the blank spacer (col B)
+        cells = [cells[0], Cell("")] + cells[1:]
         if extra is not None:
             cells = cells + [Cell(extra(j))]
         sh.row(cells)
