@@ -161,6 +161,24 @@ def test_changes_today_log_sections():
     assert sh.grid[r][c].overflow is True
 
 
+def test_verbose_arrangement_normalizes_to_short_code():
+    """The Sales Order sometimes spells it out ('Arrangement 4') instead of the
+    short 'A/4' code; that should normalize so the column stays narrow."""
+    from excel_writer import split_arrangement, QUEUE_HEADERS
+    assert split_arrangement("Arrangement 4") == ("A/4", "")
+    assert split_arrangement("Arr. 9 belt drive") == ("A/9", "belt drive")
+    assert split_arrangement("arrangement 10") == ("A/10", "")
+    assert split_arrangement("A/4V C-Face mount") == ("A/4V", "C-Face mount")  # unchanged
+    assert split_arrangement("N/A") == ("N/A", "")                             # passthrough
+
+    # And it shows through on the Live Queue cell.
+    qi = {h: i for i, h in enumerate(QUEUE_HEADERS)}
+    recs = ls.live_queue_records([_job("421884", so_arrangement="Arrangement 4")], TODAY)
+    _key, cells = recs[0]
+    # live_queue_records prepends the 'Added' column, so the queue cols shift by one.
+    assert cells[qi["Arrangement"] + 1].value == "A/4"
+
+
 def test_change_orders_table_columns_and_abbrev_header():
     """'Change orders today' reads like the other tables: Time, Job #, Folder,
     Quote Run, CO#, Oper, Design, Customer, What changed. And Arrangement headers
