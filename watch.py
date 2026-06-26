@@ -513,8 +513,8 @@ def _install_stop_handler(stop: "threading.Event") -> None:
             log.warning("Second interrupt — force quitting now.")
             os._exit(130)
         stop.set()
-        log.info("Interrupt received — saving and exiting after this step. "
-                 "Press Ctrl+C again to force quit.")
+        log.info("Interrupt received — finishing the current poll, then saving and "
+                 "exiting. Press Ctrl+C again to force-quit.")
 
     # Windows console-control handler — the robust path. Registered once.
     if os.name == "nt" and not _CONSOLE_CTRL_REF:
@@ -529,7 +529,9 @@ def _install_stop_handler(stop: "threading.Event") -> None:
             win32api.SetConsoleCtrlHandler(_console_handler, True)
             _CONSOLE_CTRL_REF.append(_console_handler)   # prevent GC
         except Exception as e:  # noqa: BLE001 - fall back to the signal handler
-            log.debug("Console control handler unavailable (%s); using SIGINT only", e)
+            log.warning("Windows console-control handler unavailable (%s) — falling "
+                        "back to SIGINT, which a browser poll can occasionally cut "
+                        "short. Install pywin32 for a rock-solid Ctrl+C.", e)
 
     # Signal handler — the only option off Windows, and a backup. Re-installed
     # each call since a poll's async work can reset it.
@@ -582,6 +584,12 @@ def run_watch(ignore_window: bool = False) -> int:
 
     stop = threading.Event()
     _install_stop_handler(stop)
+    if _CONSOLE_CTRL_REF:
+        log.info("Ctrl+C: the poll in progress finishes first, then state is saved and the "
+                 "watch exits (press Ctrl+C again to force-quit).")
+    else:
+        log.info("Ctrl+C: requests a clean stop and the run finishes the current poll where it "
+                 "can; press Ctrl+C again to force-quit.")
     if LOG_PUSH_BRANCH:
         _publish_logs()               # snapshot the prior session at startup so the branch exists
     cycle = 0
@@ -595,6 +603,9 @@ def run_watch(ignore_window: bool = False) -> int:
             t0 = time.monotonic()
             try:
                 poll_once(state, master, now, baseline=baseline, announce=not baseline)
+            except KeyboardInterrupt:   # handler was bypassed and the poll was cut short
+                log.info("Ctrl+C received mid-poll — saving and exiting now.")
+                stop.set()
             except Exception:  # noqa: BLE001 - one bad cycle must not end the watch
                 log.exception("Poll cycle failed; continuing to the next one")
             if baseline:

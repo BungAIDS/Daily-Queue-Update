@@ -3,6 +3,20 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-25 — Ctrl+C finishes the current poll (hardened + clearer)
+
+The first Ctrl+C already only sets a stop flag (no raise), so the poll in progress
+runs to completion before the watch saves and exits; a second Ctrl+C force-quits.
+On Windows the OS console-control handler makes this robust (own thread, suppresses
+the default KeyboardInterrupt) even while a poll is blocked in Playwright/Excel.
+Hardening this run:
+- Startup logs which Ctrl+C guarantee is active so it's visible.
+- The 'console handler unavailable' fallback is now a WARNING (it's the only case
+  a poll could be cut short — install pywin32 to avoid it).
+- A poll-boundary `except KeyboardInterrupt` makes the rare cut-short case exit
+  cleanly (save + stop) instead of unwinding with a traceback.
+- Clearer interrupt message: "finishing the current poll, then saving and exiting".
+
 ## 2026-06-25 — Changes tab: 'Arr.' header + change-order table restructured
 
 - Arrangement header now displays as 'Arr.' (display only — the internal label
