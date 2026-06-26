@@ -72,6 +72,9 @@ class Cell:
                                     # neighbors (e.g. the Changes tab's 'What changed'):
                                     # excluded from its column's autofit so the column
                                     # stays sized to its other content and this spills
+    colspan: int = 1                # merge this cell across N columns (the cells it covers
+                                    # stay in the grid as positional spacers): e.g. the
+                                    # Changes 'Job #' header spanning its blank spacer col
 
 
 @dataclass
@@ -156,8 +159,18 @@ def _is_windows() -> bool:
     return os.name == "nt"
 
 
+# Display-only header abbreviations (the full label stays the internal key, so
+# change-log field matching and column lookups are unaffected). Keeps wide columns
+# from being held open by a long header when the data itself is short.
+_HEADER_ABBR = {"Arrangement": "Arr."}
+
+
+def _abbrev_header(h: str) -> str:
+    return _HEADER_ABBR.get(h, h)
+
+
 def _header_cells(headers: List[str]) -> List[Cell]:
-    return [Cell(h, fill=FILL_HEADER, font=F_HEADER) for h in headers]
+    return [Cell(_abbrev_header(h), fill=FILL_HEADER, font=F_HEADER) for h in headers]
 
 
 def _money_cell(raw: str) -> Cell:
@@ -328,15 +341,30 @@ def full_queue_sheet(
 def _job_table(sh: Sheet, title: str, jobs: List[Dict[str, Any]],
                extra_headers: Optional[List[str]] = None,
                extra: Optional[Any] = None) -> None:
-    """A titled mini-table of full job rows (used by the Changes sections)."""
+    """A titled mini-table of full job rows (used by the Changes sections).
+
+    A blank spacer column is inserted right after Job # so these tables line up
+    with 'Orders that changed today', whose leading Time column pushes its Job #
+    into column B and Folder into column C. Here Job # stays in column A, the
+    spacer fills column B, and Folder lands in column C to match — so Folder,
+    Quote Run, CO#, … align across all three sections."""
     sh.row([Cell(f"{title} ({len(jobs)})", font=F_SECTION)])
     if not jobs:
         sh.row([Cell("(none)")])
         sh.blank()
         return
-    sh.row(_header_cells(list(QUEUE_HEADERS) + (extra_headers or [])))
+    # [Job #][spacer][Folder, Quote Run, …]. The spacer keeps Folder in column C
+    # (aligned with the changed table); Job # is merged across it (colspan=2) so
+    # there's no cell wall between Job # and the spacer. 'Orders that changed today'
+    # is left alone — its Time and Job # stay as two separate cells.
+    headers = [QUEUE_HEADERS[0], ""] + list(QUEUE_HEADERS[1:]) + (extra_headers or [])
+    header_cells = _header_cells(headers)
+    header_cells[0].colspan = 2
+    sh.row(header_cells)
     for j in jobs:
-        cells = _job_value_cells(j, co_changed=False)
+        cells = _job_value_cells(j, co_changed=False, arrange_comment=True)
+        cells[0].colspan = 2                       # Job # spans the blank spacer (col B)
+        cells = [cells[0], Cell("")] + cells[1:]
         if extra is not None:
             cells = cells + [Cell(extra(j))]
         sh.row(cells)
@@ -378,6 +406,23 @@ def _events_table(sh: Sheet, title: str, headers: List[str],
     for r in rows:
         sh.row([c if isinstance(c, Cell) else Cell(c) for c in r])
     sh.blank()
+
+
+def _suffix_comment_cell(label: str, value: Any, **cell_kw) -> Cell:
+    """A changed-field cell that mirrors the display tabs: for Arrangement / Size
+    show the short code and move the descriptive suffix to a hover note (so the
+    column stays narrow); any other field is shown as-is. Extra Cell kwargs
+    (fill/font) pass through."""
+    if label == "Arrangement":
+        code, note = split_arrangement(value)
+    elif label == "Size":
+        code, note = split_size(value)
+    else:
+        return Cell(value, **cell_kw)
+    c = Cell(code, **cell_kw)
+    if note:
+        c.comment = note
+    return c
 
 
 def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]],
@@ -442,11 +487,11 @@ def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]],
         base_job = dict(order_lookup.get(jn) or {})
         base_job.setdefault("job", jn)
         base_job.setdefault("customer", o["customer"])
-        was = _job_value_cells(base_job, co_changed=False)
+        was = _job_value_cells(base_job, co_changed=False, arrange_comment=True)
         for label in o["fields"]:
             ci = qh_idx.get(label)
             if ci is not None:
-                was[ci] = Cell(o["baseline"][label], font=F_RED)
+                was[ci] = _suffix_comment_cell(label, o["baseline"][label], font=F_RED)
         extra_was = [Cell(o["baseline"][label], font=F_RED) if label in o["fields"] else Cell("")
                      for label in extra_cols]
         sh.row([Cell("")] + was + extra_was)
@@ -458,7 +503,7 @@ def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]],
             for label, newval in step.items():
                 ci = qh_idx.get(label)
                 if ci is not None:
-                    cells[ci] = Cell(newval, fill=fill, font=F_RED)
+                    cells[ci] = _suffix_comment_cell(label, newval, fill=fill, font=F_RED)
             extra_cells = [Cell(step[label], fill=fill, font=F_RED) if label in step
                            else Cell("", fill=fill) for label in extra_cols]
             sh.row([Cell(_fmt_time(t), fill=fill)] + cells + extra_cells)
@@ -509,19 +554,26 @@ def changes_sheet(
 
     newest_first = sorted(change_events, key=lambda e: e.get("time", ""), reverse=True)
     co_events = [e for e in newest_first if e.get("field") == "CO#"]
+    qh_idx = {h: i for i, h in enumerate(QUEUE_HEADERS)}
 
     def _co_row(e: Dict[str, Any]) -> List[Any]:
         o = order_lookup.get(str(e.get("job", "")), {})
+        # Reuse the standard cell builder for the linked Folder / Quote Run cells so
+        # they read exactly like the other tables; pull just those two out by index.
+        full = _job_value_cells(o, arrange_comment=True) if o else None
+        col = (lambda name: full[qh_idx[name]]) if full else (lambda name: Cell(""))
         return [_fmt_time(e.get("time", "")), e.get("job", ""),
-                o.get("design", ""), split_arrangement(o.get("so_arrangement", ""))[0],
-                o.get("oper", ""),
-                f"CO#{e.get('old', '')} -> CO#{e.get('new', '')}",
-                e.get("customer", ""),
+                col("Folder"), col("Quote Run"),
+                # CO# column like the other tables: just the current CO# this change
+                # landed on (formatted via _co_label), not a CO#old -> CO#new string.
+                Cell(_co_label({"co_number": e.get("new")})),
+                o.get("oper", ""), o.get("design", ""), e.get("customer", ""),
                 # Free-text description: let it overrun the empty cells to its right
                 # rather than widen the column (it's the table's last column).
                 Cell(_co_change_desc(o, e.get("new")), overflow=True)]
     _events_table(sh, "Change orders today",
-                  ["Time", "Job #", "Design", "Arrangement", "Oper", "Change", "Customer", "What changed"],
+                  ["Time", "Job #", "Folder", "Quote Run", "CO#", "Oper", "Design",
+                   "Customer", "What changed"],
                   [_co_row(e) for e in co_events])
 
     field_events = [e for e in newest_first if e.get("field") != "CO#"]
@@ -580,7 +632,7 @@ LINE_ITEM_HEADERS = ["Job #", "Customer", "CO#", "Tags", "Item (as printed)",
 # "Last Out" (most recent prior departure) sits just before the trailing "#"
 # board-position column, so adding it doesn't shift Job #/End Date (still after the
 # single leading "Added").
-LIVE_QUEUE_HEADERS = ["Added"] + list(QUEUE_HEADERS) + ["Last Out", "#"]
+LIVE_QUEUE_HEADERS = ["Added"] + [_abbrev_header(h) for h in QUEUE_HEADERS] + ["Last Out", "#"]
 LIVE_QUEUE_CBC_COL = len(LIVE_QUEUE_HEADERS)                   # the trailing "#" board-position col (sort key)
 LIVE_QUEUE_LAST_OUT_COL = len(LIVE_QUEUE_HEADERS) - 1         # the "Last Out" col (AM/PM-or-date text)
 LIVE_QUEUE_KEY_COL = 2 + QUEUE_HEADERS.index("Job #")          # 1-based col of Job # (Added is col 1)
@@ -588,7 +640,7 @@ LIVE_QUEUE_END_DATE_COL = 2 + QUEUE_HEADERS.index("End Date")  # 1-based col of 
 # The 'Removed since this morning' block lines its data columns up under the board
 # above, but LEADS with the removal time (the "Removed" column) instead of "Added"
 # — the most relevant fact for an order that just left — and drops the trailing "#".
-LIVE_QUEUE_REMOVED_HEADERS = ["Removed"] + list(QUEUE_HEADERS)
+LIVE_QUEUE_REMOVED_HEADERS = ["Removed"] + [_abbrev_header(h) for h in QUEUE_HEADERS]
 _END_DATE_IDX = QUEUE_HEADERS.index("End Date")               # its index within the standard cells
 _CO_IDX = [i for i, (_, k) in enumerate(COLUMNS) if k == "co"][0]   # CO# cell index
 

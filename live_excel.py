@@ -299,6 +299,10 @@ def render_sheet(app, wb, sheet: Sheet) -> None:
     except Exception:  # noqa: BLE001
         pass
     ws.Cells.Clear()  # bot-owned sheet — full repaint keeps it correct
+    try:
+        ws.Cells.UnMerge()   # drop any merges from a previous (taller) repaint
+    except Exception:  # noqa: BLE001
+        pass
     if nrows == 0 or ncols == 0:
         return
 
@@ -308,6 +312,17 @@ def render_sheet(app, wb, sheet: Sheet) -> None:
     for r, row in enumerate(sheet.grid, start=1):
         if row:
             _style_row(ws, r, row)
+
+    # Merge any cell that spans columns (e.g. the Changes 'Job #' header over its
+    # blank spacer). The covered cells stay in the grid as positional spacers, so
+    # this only removes the wall — it never shifts the columns to its right.
+    for r, row in enumerate(sheet.grid, start=1):
+        for c, cell in enumerate(row, start=1):
+            if getattr(cell, "colspan", 1) > 1:
+                try:
+                    ws.Range(ws.Cells(r, c), ws.Cells(r, c + cell.colspan - 1)).Merge()
+                except Exception:  # noqa: BLE001
+                    pass
 
     if sheet.autofilter_a1:
         try:
@@ -666,7 +681,16 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
         else:
             appends.append((k, cells))   # vanished from the sheet — re-add it
     for k, cells in appends:
+        r = keymap.get(k)
+        if r:
+            # Already on the sheet — a prior write of this key landed but its
+            # signature wasn't committed (the render failed afterwards, so it was
+            # re-planned as an append). Update in place instead of adding a
+            # duplicate row; this keeps re-tried writes idempotent.
+            _write_row(ws, r, cells, ncols)
+            continue
         last_row += 1
+        keymap[k] = last_row              # so a duplicate key within this batch can't re-add
         _write_row(ws, last_row, cells, ncols)
 
     # Keep the tab sorted (Live Queue by the '#' board-position column) and
@@ -878,7 +902,12 @@ def apply_order_history(app, wb, name: str, spec: Dict[str, Any], ops: List,
         else:
             appends.append((k, cells))
     for k, cells in appends:
+        r = keymap.get(k)
+        if r:                                  # already present (re-planned after a
+            _write_oh_row(ws, r, cells, ncols)  # failed write) -> update, never duplicate
+            continue
         last_row += 1
+        keymap[k] = last_row
         _write_oh_row(ws, last_row, cells, ncols)
     if appends:   # re-extend AutoFilter to cover the newly appended rows
         try:
@@ -892,17 +921,22 @@ def apply_order_history(app, wb, name: str, spec: Dict[str, Any], ops: List,
 
 def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any],
                            oh_payload: Dict[str, Any],
-                           changes_sheet: Sheet | None = None) -> bool:
+                           changes_sheet: Sheet | None = None) -> set:
     """Render the master workbook: an incremental upsert for Live Queue, the
     matrix log for Order History, and a full repaint for the Changes snapshot
-    (only when changed). Best-effort — any COM error is logged and swallowed."""
+    (only when changed). Best-effort — any COM error is logged and swallowed.
+
+    Returns the set of tab names that rendered WITHOUT error this cycle, so the
+    caller can commit only those tabs' row signatures. If a tab's write fails
+    (Excel busy / OLE error) its name is omitted, so its rows are re-planned and
+    re-drawn next poll rather than being silently treated as already on the sheet."""
     path = Path(workbook_path)
     try:
         app = _get_excel()
     except Exception as e:  # noqa: BLE001
         log.warning("Could not reach Excel via COM (%s); live workbook not updated. "
                     "On Windows, ensure Excel is installed and signed in.", e)
-        return False
+        return set()
     # Reaching the workbook can be momentarily rejected while Excel is busy — a
     # dialog is up, a co-authoring sync is in flight, or someone is mid-keystroke
     # (surfaces as e.g. 'Excel.Application.Workbooks'). Retry a few times with a
@@ -927,17 +961,20 @@ def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any]
                     "save prompt) or be mid-sync — clearing that usually fixes it. "
                     "Skipping this cycle; will retry next poll.",
                     type(last_err).__name__, last_err)
-        return False
+        return set()
 
     # Render each tab independently — a failure on one (e.g. the big Order
-    # History) must not stop the others from updating.
+    # History) must not stop the others from updating. `ok` collects the tabs that
+    # rendered cleanly so the caller commits only their signatures.
     touched = []
+    ok: set = set()
     try:
         n = apply_upserts(app, wb, lq_payload["name"], lq_payload["headers"], lq_payload["ops"],
                           lq_payload["key_col"], lq_payload["allow_delete"], lq_payload.get("freeze"),
                           sort_col=lq_payload.get("sort_col"), text_cols=lq_payload.get("text_cols"),
                           below=lq_payload.get("below"), header_row=lq_payload.get("header_row", 1),
                           search=lq_payload.get("search", False))
+        ok.add(lq_payload["name"])
         if n:
             touched.append(f"{lq_payload['name']}(+{n})")
     except Exception as e:  # noqa: BLE001
@@ -946,6 +983,7 @@ def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any]
         n = apply_order_history(app, wb, oh_payload["name"], oh_payload["spec"],
                                 oh_payload["ops"], oh_payload["key_col"], oh_payload.get("freeze"),
                                 rebuild=oh_payload.get("rebuild", False))
+        ok.add(oh_payload["name"])
         if n:
             touched.append(f"{oh_payload['name']}(+{n})")
     except Exception as e:  # noqa: BLE001
@@ -973,7 +1011,7 @@ def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any]
         log.info("Live workbook updated: %s [%s]", path.name, ", ".join(touched))
     else:
         log.info("Live workbook unchanged this cycle — nothing written.")
-    return True
+    return ok
 
 
 def update_workbook(sheets: List[Sheet], workbook_path: str | Path) -> bool:
