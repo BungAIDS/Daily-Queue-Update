@@ -152,13 +152,42 @@ def test_changes_today_log_sections():
     assert FILL_CHANGE1 in fills and FILL_CHANGE2 in fills
     assert _find(sh, "Removed / completed today (1)") is not None
     assert _find(sh, "CO#0 -> CO#1") is not None
-    # New change-order columns: Design, Arrangement (trimmed), and what changed.
+    # Change-order table reads like the rest: Folder, Quote Run, CO#, Oper, Design,
+    # Customer, then the free-text 'What changed'.
     assert _find(sh, "What changed") is not None                     # the new header
     assert _find(sh, "ADDED VFD CONTROLS") is not None               # change description
-    assert _find(sh, "A/9H") is not None                             # arrangement (suffix trimmed)
     # The 'What changed' description overruns instead of widening its column.
     r, c = _find(sh, "ADDED VFD CONTROLS")
     assert sh.grid[r][c].overflow is True
+
+
+def test_change_orders_table_columns_and_abbrev_header():
+    """'Change orders today' reads like the other tables: Time, Job #, Folder,
+    Quote Run, CO#, Oper, Design, Customer, What changed. And Arrangement headers
+    are abbreviated to 'Arr.' to keep the column narrow."""
+    events = [{"time": "2026-06-16T11:00:00", "job": "420700", "customer": "ACME",
+               "field": "CO#", "old": "0", "new": "1"}]
+    lookup = {"420700": {"job": "420700", "design": "47", "oper": "200",
+                         "so_arrangement": "A/9H Belt drive",
+                         "co_history": ["C/O #1 06/16/26 KLO: ADDED VFD"]}}
+    sh = ls.changes_sheet([], events, [], "2026-06-16", updated_at="x",
+                          order_lookup=lookup)
+    r, _ = _find(sh, "Change orders today")
+    hdr = [str(c.value) for c in sh.grid[r + 1]]
+    assert hdr == ["Time", "Job #", "Folder", "Quote Run", "CO#", "Oper",
+                   "Design", "Customer", "What changed"]
+    row = sh.grid[r + 2]
+    assert row[1].value == "420700"                 # Job #
+    assert str(row[4].value) == "CO#0 -> CO#1"      # the CO# column (the change)
+    assert row[6].value == "47"                     # Design
+    assert row[7].value == "ACME"                   # Customer
+
+    # The Arrangement header reads 'Arr.' wherever it appears (e.g. the changed
+    # table), while the internal column key stays 'Arrangement'.
+    sh2 = ls.changes_sheet([_job("421001")], [], [], "2026-06-16", updated_at="x")
+    assert _find(sh2, "Arr.") is not None
+    assert _find(sh2, "Arrangement") is None
+    assert "Arr." in ls.LIVE_QUEUE_HEADERS and "Arrangement" not in ls.LIVE_QUEUE_HEADERS
 
 
 def test_changes_today_columns_align_across_sections():

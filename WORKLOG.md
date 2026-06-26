@@ -3,6 +3,18 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-25 — Changes tab: 'Arr.' header + change-order table restructured
+
+- Arrangement header now displays as 'Arr.' (display only — the internal label
+  stays 'Arrangement', so change-log matching and column lookups are untouched).
+  Applied via `_header_cells` and the Live Queue display-header constants.
+- 'Change orders today' now reads like the other tables: Time, Job #, Folder,
+  Quote Run, CO#, Oper, Design, Customer, What changed. The old free-text
+  'Change' column is the CO# column (still shows CO#old -> CO#new). Folder /
+  Quote Run reuse the standard cell builder.
+- Tests: `test_change_orders_table_columns_and_abbrev_header`; updated
+  `test_changes_today_log_sections`.
+
 ## 2026-06-25 — Changes tab: Arrangement/Size suffix -> hover comment
 
 Mirror the Live Queue on the Changes tab to save width: Arrangement shows just

@@ -159,8 +159,18 @@ def _is_windows() -> bool:
     return os.name == "nt"
 
 
+# Display-only header abbreviations (the full label stays the internal key, so
+# change-log field matching and column lookups are unaffected). Keeps wide columns
+# from being held open by a long header when the data itself is short.
+_HEADER_ABBR = {"Arrangement": "Arr."}
+
+
+def _abbrev_header(h: str) -> str:
+    return _HEADER_ABBR.get(h, h)
+
+
 def _header_cells(headers: List[str]) -> List[Cell]:
-    return [Cell(h, fill=FILL_HEADER, font=F_HEADER) for h in headers]
+    return [Cell(_abbrev_header(h), fill=FILL_HEADER, font=F_HEADER) for h in headers]
 
 
 def _money_cell(raw: str) -> Cell:
@@ -544,20 +554,26 @@ def changes_sheet(
 
     newest_first = sorted(change_events, key=lambda e: e.get("time", ""), reverse=True)
     co_events = [e for e in newest_first if e.get("field") == "CO#"]
+    qh_idx = {h: i for i, h in enumerate(QUEUE_HEADERS)}
 
     def _co_row(e: Dict[str, Any]) -> List[Any]:
         o = order_lookup.get(str(e.get("job", "")), {})
+        # Reuse the standard cell builder for the linked Folder / Quote Run cells so
+        # they read exactly like the other tables; pull just those two out by index.
+        full = _job_value_cells(o, arrange_comment=True) if o else None
+        col = (lambda name: full[qh_idx[name]]) if full else (lambda name: Cell(""))
         return [_fmt_time(e.get("time", "")), e.get("job", ""),
-                o.get("design", ""),
-                _suffix_comment_cell("Arrangement", o.get("so_arrangement", "")),
-                o.get("oper", ""),
-                f"CO#{e.get('old', '')} -> CO#{e.get('new', '')}",
-                e.get("customer", ""),
+                col("Folder"), col("Quote Run"),
+                # 'Change' is now a CO# column like the other tables, but it shows
+                # the transition (CO#old -> CO#new) since that IS the change.
+                Cell(f"CO#{e.get('old', '')} -> CO#{e.get('new', '')}"),
+                o.get("oper", ""), o.get("design", ""), e.get("customer", ""),
                 # Free-text description: let it overrun the empty cells to its right
                 # rather than widen the column (it's the table's last column).
                 Cell(_co_change_desc(o, e.get("new")), overflow=True)]
     _events_table(sh, "Change orders today",
-                  ["Time", "Job #", "Design", "Arrangement", "Oper", "Change", "Customer", "What changed"],
+                  ["Time", "Job #", "Folder", "Quote Run", "CO#", "Oper", "Design",
+                   "Customer", "What changed"],
                   [_co_row(e) for e in co_events])
 
     field_events = [e for e in newest_first if e.get("field") != "CO#"]
@@ -616,7 +632,7 @@ LINE_ITEM_HEADERS = ["Job #", "Customer", "CO#", "Tags", "Item (as printed)",
 # "Last Out" (most recent prior departure) sits just before the trailing "#"
 # board-position column, so adding it doesn't shift Job #/End Date (still after the
 # single leading "Added").
-LIVE_QUEUE_HEADERS = ["Added"] + list(QUEUE_HEADERS) + ["Last Out", "#"]
+LIVE_QUEUE_HEADERS = ["Added"] + [_abbrev_header(h) for h in QUEUE_HEADERS] + ["Last Out", "#"]
 LIVE_QUEUE_CBC_COL = len(LIVE_QUEUE_HEADERS)                   # the trailing "#" board-position col (sort key)
 LIVE_QUEUE_LAST_OUT_COL = len(LIVE_QUEUE_HEADERS) - 1         # the "Last Out" col (AM/PM-or-date text)
 LIVE_QUEUE_KEY_COL = 2 + QUEUE_HEADERS.index("Job #")          # 1-based col of Job # (Added is col 1)
@@ -624,7 +640,7 @@ LIVE_QUEUE_END_DATE_COL = 2 + QUEUE_HEADERS.index("End Date")  # 1-based col of 
 # The 'Removed since this morning' block lines its data columns up under the board
 # above, but LEADS with the removal time (the "Removed" column) instead of "Added"
 # — the most relevant fact for an order that just left — and drops the trailing "#".
-LIVE_QUEUE_REMOVED_HEADERS = ["Removed"] + list(QUEUE_HEADERS)
+LIVE_QUEUE_REMOVED_HEADERS = ["Removed"] + [_abbrev_header(h) for h in QUEUE_HEADERS]
 _END_DATE_IDX = QUEUE_HEADERS.index("End Date")               # its index within the standard cells
 _CO_IDX = [i for i, (_, k) in enumerate(COLUMNS) if k == "co"][0]   # CO# cell index
 
