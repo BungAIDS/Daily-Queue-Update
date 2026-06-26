@@ -151,7 +151,7 @@ def test_changes_today_log_sections():
     # Two instances -> the second 'after' row is a darker grey than the first.
     assert FILL_CHANGE1 in fills and FILL_CHANGE2 in fills
     assert _find(sh, "Removed / completed today (1)") is not None
-    assert _find(sh, "CO#0 -> CO#1") is not None
+    assert _find(sh, "CO#1") is not None             # CO# column shows the current CO#
     # Change-order table reads like the rest: Folder, Quote Run, CO#, Oper, Design,
     # Customer, then the free-text 'What changed'.
     assert _find(sh, "What changed") is not None                     # the new header
@@ -178,7 +178,7 @@ def test_change_orders_table_columns_and_abbrev_header():
                    "Design", "Customer", "What changed"]
     row = sh.grid[r + 2]
     assert row[1].value == "420700"                 # Job #
-    assert str(row[4].value) == "CO#0 -> CO#1"      # the CO# column (the change)
+    assert str(row[4].value) == "CO#1"              # CO# column shows current CO#
     assert row[6].value == "47"                     # Design
     assert row[7].value == "ACME"                   # Customer
 

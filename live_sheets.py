@@ -564,9 +564,9 @@ def changes_sheet(
         col = (lambda name: full[qh_idx[name]]) if full else (lambda name: Cell(""))
         return [_fmt_time(e.get("time", "")), e.get("job", ""),
                 col("Folder"), col("Quote Run"),
-                # 'Change' is now a CO# column like the other tables, but it shows
-                # the transition (CO#old -> CO#new) since that IS the change.
-                Cell(f"CO#{e.get('old', '')} -> CO#{e.get('new', '')}"),
+                # CO# column like the other tables: just the current CO# this change
+                # landed on (formatted via _co_label), not a CO#old -> CO#new string.
+                Cell(_co_label({"co_number": e.get("new")})),
                 o.get("oper", ""), o.get("design", ""), e.get("customer", ""),
                 # Free-text description: let it overrun the empty cells to its right
                 # rather than widen the column (it's the table's last column).
