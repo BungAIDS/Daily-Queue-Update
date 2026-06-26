@@ -204,6 +204,34 @@ def test_changes_today_columns_align_across_sections():
     assert ch[0].colspan == 1 and ch[1].colspan == 1   # Time / Job # untouched
 
 
+def test_changes_arrangement_size_suffix_moves_to_comment():
+    """Like the Live Queue, the Changes tab trims Arrangement to its 'A/X' code and
+    Size to its main value, moving the descriptive suffix to a hover comment so the
+    columns stay narrow — in the New/Removed tables and the changed-order rows."""
+    from excel_writer import QUEUE_HEADERS
+    qi = {h: i for i, h in enumerate(QUEUE_HEADERS)}
+    arr = "A/4V C-Face Flange mount (no motor base)"
+    new_today = [_job("421884", so_arrangement=arr, so_size="6000-C6 Blade-1800")]
+    events = [{"time": "2026-06-16T09:52:00", "job": "421572", "customer": "F",
+               "field": "Arrangement", "old": "A/8", "new": arr}]
+    lookup = {"421572": {"job": "421572", "so_arrangement": arr}}
+    sh = ls.changes_sheet(new_today, events, [], "2026-06-16",
+                          updated_at="x", order_lookup=lookup)
+
+    # New orders table: Job # + spacer shift the queue columns right by one cell.
+    nr, _ = _find(sh, "New orders today")
+    data = sh.grid[nr + 2]
+    a_cell, s_cell = data[qi["Arrangement"] + 1], data[qi["Size"] + 1]
+    assert a_cell.value == "A/4V" and a_cell.comment == "C-Face Flange mount (no motor base)"
+    assert s_cell.value == "6000" and s_cell.comment == "-C6 Blade-1800"
+
+    # The changed-order instance row trims the new Arrangement value the same way.
+    cr, _ = _find(sh, "Orders that changed today")
+    inst = sh.grid[cr + 3]                       # title, header, 'was', instance
+    ic = inst[qi["Arrangement"] + 1]             # leading Time shifts queue cols by one
+    assert ic.value == "A/4V" and ic.comment == "C-Face Flange mount (no motor base)"
+
+
 def test_orders_changed_one_instance_multiple_fields():
     # An order that changes ONCE (one poll) with several fields moving must be a
     # single before/after pair (two rows), not one row per field.

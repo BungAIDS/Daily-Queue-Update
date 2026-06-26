@@ -352,7 +352,7 @@ def _job_table(sh: Sheet, title: str, jobs: List[Dict[str, Any]],
     header_cells[0].colspan = 2
     sh.row(header_cells)
     for j in jobs:
-        cells = _job_value_cells(j, co_changed=False)
+        cells = _job_value_cells(j, co_changed=False, arrange_comment=True)
         cells[0].colspan = 2                       # Job # spans the blank spacer (col B)
         cells = [cells[0], Cell("")] + cells[1:]
         if extra is not None:
@@ -396,6 +396,23 @@ def _events_table(sh: Sheet, title: str, headers: List[str],
     for r in rows:
         sh.row([c if isinstance(c, Cell) else Cell(c) for c in r])
     sh.blank()
+
+
+def _suffix_comment_cell(label: str, value: Any, **cell_kw) -> Cell:
+    """A changed-field cell that mirrors the display tabs: for Arrangement / Size
+    show the short code and move the descriptive suffix to a hover note (so the
+    column stays narrow); any other field is shown as-is. Extra Cell kwargs
+    (fill/font) pass through."""
+    if label == "Arrangement":
+        code, note = split_arrangement(value)
+    elif label == "Size":
+        code, note = split_size(value)
+    else:
+        return Cell(value, **cell_kw)
+    c = Cell(code, **cell_kw)
+    if note:
+        c.comment = note
+    return c
 
 
 def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]],
@@ -460,11 +477,11 @@ def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]],
         base_job = dict(order_lookup.get(jn) or {})
         base_job.setdefault("job", jn)
         base_job.setdefault("customer", o["customer"])
-        was = _job_value_cells(base_job, co_changed=False)
+        was = _job_value_cells(base_job, co_changed=False, arrange_comment=True)
         for label in o["fields"]:
             ci = qh_idx.get(label)
             if ci is not None:
-                was[ci] = Cell(o["baseline"][label], font=F_RED)
+                was[ci] = _suffix_comment_cell(label, o["baseline"][label], font=F_RED)
         extra_was = [Cell(o["baseline"][label], font=F_RED) if label in o["fields"] else Cell("")
                      for label in extra_cols]
         sh.row([Cell("")] + was + extra_was)
@@ -476,7 +493,7 @@ def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]],
             for label, newval in step.items():
                 ci = qh_idx.get(label)
                 if ci is not None:
-                    cells[ci] = Cell(newval, fill=fill, font=F_RED)
+                    cells[ci] = _suffix_comment_cell(label, newval, fill=fill, font=F_RED)
             extra_cells = [Cell(step[label], fill=fill, font=F_RED) if label in step
                            else Cell("", fill=fill) for label in extra_cols]
             sh.row([Cell(_fmt_time(t), fill=fill)] + cells + extra_cells)
@@ -531,7 +548,8 @@ def changes_sheet(
     def _co_row(e: Dict[str, Any]) -> List[Any]:
         o = order_lookup.get(str(e.get("job", "")), {})
         return [_fmt_time(e.get("time", "")), e.get("job", ""),
-                o.get("design", ""), split_arrangement(o.get("so_arrangement", ""))[0],
+                o.get("design", ""),
+                _suffix_comment_cell("Arrangement", o.get("so_arrangement", "")),
                 o.get("oper", ""),
                 f"CO#{e.get('old', '')} -> CO#{e.get('new', '')}",
                 e.get("customer", ""),

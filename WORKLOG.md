@@ -3,6 +3,15 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-25 — Changes tab: Arrangement/Size suffix -> hover comment
+
+Mirror the Live Queue on the Changes tab to save width: Arrangement shows just
+the 'A/X' code and Size its main value, with the descriptive suffix moved to a
+hover comment. Applied to New orders / Removed (via `arrange_comment=True`), the
+'orders that changed today' was-row + instance rows, and the change-order table
+(new `_suffix_comment_cell` helper). Test:
+`test_changes_arrangement_size_suffix_moves_to_comment`.
+
 ## 2026-06-25 — Changes tab: New/Removed columns aligned with the changed table
 
 The 'Orders that changed today' table leads with a Time column, so its Job # sits
