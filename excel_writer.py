@@ -354,19 +354,27 @@ def _co_label(j: Dict[str, Any]) -> str:
 
 
 _ARRANGEMENT_RE = re.compile(r"^(A/[A-Za-z0-9]+)(?:\s+(.*))?$")
+# Verbose spellings the Sales Order sometimes uses instead of the short code:
+# 'Arrangement 4', 'Arr. 9', 'arr 10 belt drive'. Normalize the leading
+# 'Arrangement N' to 'A/N'; any trailing text becomes the note.
+_ARRANGEMENT_VERBOSE_RE = re.compile(r"^arr(?:angement)?\.?\s*(\d+[A-Za-z]*)(?:\s+(.*))?$", re.I)
 
 
 def split_arrangement(value: str) -> "tuple[str, str]":
     """Split a raw arrangement into the short 'A/X' code (X = digits/letters) and
     any trailing descriptive text, so the column stays tidy and the detail moves
     to a hover note. 'A/4V C-Face Flange mount (no motor base)' -> ('A/4V',
-    'C-Face Flange mount (no motor base)'). Anything that isn't an 'A/...' code
-    (e.g. 'N/A', '') passes through unchanged with no note."""
+    'C-Face Flange mount (no motor base)'). The verbose spelling is normalized too:
+    'Arrangement 4' -> ('A/4', ''), 'Arr. 9 belt drive' -> ('A/9', 'belt drive').
+    Anything that isn't an arrangement (e.g. 'N/A', '') passes through unchanged."""
     s = (value or "").strip()
     m = _ARRANGEMENT_RE.match(s)
-    if not m:
-        return s, ""
-    return m.group(1), (m.group(2) or "").strip()
+    if m:
+        return m.group(1), (m.group(2) or "").strip()
+    m = _ARRANGEMENT_VERBOSE_RE.match(s)
+    if m:
+        return "A/" + m.group(1).upper(), (m.group(2) or "").strip()
+    return s, ""
 
 
 # The main size is the leading NUMBER (optionally a fraction, so "13 1/2" stays

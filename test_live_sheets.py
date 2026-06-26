@@ -151,14 +151,132 @@ def test_changes_today_log_sections():
     # Two instances -> the second 'after' row is a darker grey than the first.
     assert FILL_CHANGE1 in fills and FILL_CHANGE2 in fills
     assert _find(sh, "Removed / completed today (1)") is not None
-    assert _find(sh, "CO#0 -> CO#1") is not None
-    # New change-order columns: Design, Arrangement (trimmed), and what changed.
+    assert _find(sh, "CO#1") is not None             # CO# column shows the current CO#
+    # Change-order table reads like the rest: Folder, Quote Run, CO#, Oper, Design,
+    # Customer, then the free-text 'What changed'.
     assert _find(sh, "What changed") is not None                     # the new header
     assert _find(sh, "ADDED VFD CONTROLS") is not None               # change description
-    assert _find(sh, "A/9H") is not None                             # arrangement (suffix trimmed)
     # The 'What changed' description overruns instead of widening its column.
     r, c = _find(sh, "ADDED VFD CONTROLS")
     assert sh.grid[r][c].overflow is True
+
+
+def test_verbose_arrangement_normalizes_to_short_code():
+    """The Sales Order sometimes spells it out ('Arrangement 4') instead of the
+    short 'A/4' code; that should normalize so the column stays narrow."""
+    from excel_writer import split_arrangement, QUEUE_HEADERS
+    assert split_arrangement("Arrangement 4") == ("A/4", "")
+    assert split_arrangement("Arr. 9 belt drive") == ("A/9", "belt drive")
+    assert split_arrangement("arrangement 10") == ("A/10", "")
+    assert split_arrangement("A/4V C-Face mount") == ("A/4V", "C-Face mount")  # unchanged
+    assert split_arrangement("N/A") == ("N/A", "")                             # passthrough
+
+    # And it shows through on the Live Queue cell.
+    qi = {h: i for i, h in enumerate(QUEUE_HEADERS)}
+    recs = ls.live_queue_records([_job("421884", so_arrangement="Arrangement 4")], TODAY)
+    _key, cells = recs[0]
+    # live_queue_records prepends the 'Added' column, so the queue cols shift by one.
+    assert cells[qi["Arrangement"] + 1].value == "A/4"
+
+
+def test_change_orders_table_columns_and_abbrev_header():
+    """'Change orders today' reads like the other tables: Time, Job #, Folder,
+    Quote Run, CO#, Oper, Design, Customer, What changed. And Arrangement headers
+    are abbreviated to 'Arr.' to keep the column narrow."""
+    events = [{"time": "2026-06-16T11:00:00", "job": "420700", "customer": "ACME",
+               "field": "CO#", "old": "0", "new": "1"}]
+    lookup = {"420700": {"job": "420700", "design": "47", "oper": "200",
+                         "so_arrangement": "A/9H Belt drive",
+                         "co_history": ["C/O #1 06/16/26 KLO: ADDED VFD"]}}
+    sh = ls.changes_sheet([], events, [], "2026-06-16", updated_at="x",
+                          order_lookup=lookup)
+    r, _ = _find(sh, "Change orders today")
+    hdr = [str(c.value) for c in sh.grid[r + 1]]
+    assert hdr == ["Time", "Job #", "Folder", "Quote Run", "CO#", "Oper",
+                   "Design", "Customer", "What changed"]
+    row = sh.grid[r + 2]
+    assert row[1].value == "420700"                 # Job #
+    assert str(row[4].value) == "CO#1"              # CO# column shows current CO#
+    assert row[6].value == "47"                     # Design
+    assert row[7].value == "ACME"                   # Customer
+
+    # The Arrangement header reads 'Arr.' wherever it appears (e.g. the changed
+    # table), while the internal column key stays 'Arrangement'.
+    sh2 = ls.changes_sheet([_job("421001")], [], [], "2026-06-16", updated_at="x")
+    assert _find(sh2, "Arr.") is not None
+    assert _find(sh2, "Arrangement") is None
+    assert "Arr." in ls.LIVE_QUEUE_HEADERS and "Arrangement" not in ls.LIVE_QUEUE_HEADERS
+
+
+def test_changes_today_columns_align_across_sections():
+    """The 'changed today' table leads with a Time column, so its Job # sits in
+    column B and Folder in C. The 'New' and 'Removed' tables keep Job # in column
+    A and get a blank spacer in column B, so Folder / Quote Run / CO# line up in
+    the same columns across all three sections."""
+    new_today = [_job("421001")]
+    events = [{"time": "2026-06-16T09:30:00", "job": "420800", "customer": "X",
+               "field": "Oper", "old": "10", "new": "20"}]
+    removed_today = [_job("420900")]
+    sh = ls.changes_sheet(new_today, events, removed_today, "2026-06-16",
+                          updated_at="x", order_lookup={"420800": {"design": "47"}})
+
+    def header_after(title):
+        r, _ = _find(sh, title)
+        return [str(c.value) for c in sh.grid[r + 1]]
+
+    new_hdr = header_after("New orders today")
+    chg_hdr = header_after("Orders that changed today")
+    rem_hdr = header_after("Removed / completed today")
+
+    # New / Removed: Job # in A, blank spacer in B, Folder in C.
+    for hdr in (new_hdr, rem_hdr):
+        assert hdr[0] == "Job #" and hdr[1] == "" and hdr[2] == "Folder"
+    # Changed: Time in A, Job # in B, Folder in C.
+    assert chg_hdr[0] == "Time" and chg_hdr[1] == "Job #" and chg_hdr[2] == "Folder"
+    # Folder, Quote Run, CO# line up in the same columns (C/D/E) across all three.
+    for hdr in (new_hdr, chg_hdr, rem_hdr):
+        assert hdr[2:5] == ["Folder", "Quote Run", "CO#"]
+
+    # Data rows match: New/Removed put the job # in column A and leave B blank.
+    nr, _ = _find(sh, "New orders today")
+    new_data = sh.grid[nr + 2]
+    assert new_data[0].value == "421001" and new_data[1].value == ""
+
+    # New/Removed merge Job # across its spacer (colspan 2) so there's no wall
+    # after the job number; the changed table keeps Time and Job # as two cells.
+    nh = sh.grid[_find(sh, "New orders today")[0] + 1]
+    rh = sh.grid[_find(sh, "Removed / completed today")[0] + 1]
+    ch = sh.grid[_find(sh, "Orders that changed today")[0] + 1]
+    assert nh[0].colspan == 2 and rh[0].colspan == 2 and new_data[0].colspan == 2
+    assert ch[0].colspan == 1 and ch[1].colspan == 1   # Time / Job # untouched
+
+
+def test_changes_arrangement_size_suffix_moves_to_comment():
+    """Like the Live Queue, the Changes tab trims Arrangement to its 'A/X' code and
+    Size to its main value, moving the descriptive suffix to a hover comment so the
+    columns stay narrow — in the New/Removed tables and the changed-order rows."""
+    from excel_writer import QUEUE_HEADERS
+    qi = {h: i for i, h in enumerate(QUEUE_HEADERS)}
+    arr = "A/4V C-Face Flange mount (no motor base)"
+    new_today = [_job("421884", so_arrangement=arr, so_size="6000-C6 Blade-1800")]
+    events = [{"time": "2026-06-16T09:52:00", "job": "421572", "customer": "F",
+               "field": "Arrangement", "old": "A/8", "new": arr}]
+    lookup = {"421572": {"job": "421572", "so_arrangement": arr}}
+    sh = ls.changes_sheet(new_today, events, [], "2026-06-16",
+                          updated_at="x", order_lookup=lookup)
+
+    # New orders table: Job # + spacer shift the queue columns right by one cell.
+    nr, _ = _find(sh, "New orders today")
+    data = sh.grid[nr + 2]
+    a_cell, s_cell = data[qi["Arrangement"] + 1], data[qi["Size"] + 1]
+    assert a_cell.value == "A/4V" and a_cell.comment == "C-Face Flange mount (no motor base)"
+    assert s_cell.value == "6000" and s_cell.comment == "-C6 Blade-1800"
+
+    # The changed-order instance row trims the new Arrangement value the same way.
+    cr, _ = _find(sh, "Orders that changed today")
+    inst = sh.grid[cr + 3]                       # title, header, 'was', instance
+    ic = inst[qi["Arrangement"] + 1]             # leading Time shifts queue cols by one
+    assert ic.value == "A/4V" and ic.comment == "C-Face Flange mount (no motor base)"
 
 
 def test_orders_changed_one_instance_multiple_fields():

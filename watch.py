@@ -206,20 +206,30 @@ def _force_rebuild(master: dict) -> None:
             e["left"] = None
 
 
-def _plan(records: list, sig_store: dict, allow_delete: bool) -> list:
+def _plan(records: list, sig_store: dict, allow_delete: bool):
     """Turn (key, cells) records into upsert ops vs what we last wrote (the sigs
-    in `sig_store`, a flat {order#: sig} persisted in the master), and update the
-    store. Flat (not per-order) so backlog orders that live only in the line-items
-    store are tracked too. Change detection survives restarts."""
+    in `sig_store`, a flat {order#: sig} persisted in the master). Flat (not
+    per-order) so backlog orders that live only in the line-items store are tracked
+    too. Change detection survives restarts.
+
+    Returns (ops, commit). `commit()` folds the new signatures into `sig_store`;
+    call it ONLY after the tab's Excel write actually succeeds. Committing eagerly
+    was the bug behind 'all the orders vanished': if the write then failed (Excel
+    busy / OLE error) the store believed those rows were on the sheet, so the next
+    poll planned no op for them and they stayed missing until a restart. Deferring
+    the commit means a failed write simply re-plans the same ops next cycle."""
     desired = [(key, live_sheets.row_sig(cells), cells) for key, cells in records]
     ops = live_sheets.plan_upsert(desired, dict(sig_store), allow_delete=allow_delete)
     sig_by = {key: sig for key, sig, _ in desired}
-    for kind, key, _ in ops:
-        if kind in ("append", "update"):
-            sig_store[key] = sig_by[key]
-        elif kind == "delete":
-            sig_store.pop(key, None)
-    return ops
+
+    def commit() -> None:
+        for kind, key, _ in ops:
+            if kind in ("append", "update"):
+                sig_store[key] = sig_by[key]
+            elif kind == "delete":
+                sig_store.pop(key, None)
+
+    return ops, commit
 
 
 def _oh_orders(master: dict, store: dict) -> list:
@@ -311,9 +321,9 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
                  if live_sheets.added_date(j) in recent_days}
 
     lq_sigs = master.setdefault("lq_sigs", {})
-    lq_ops = _plan(live_sheets.live_queue_records(lq_jobs, today, new_ids=shade_ids,
-                                                  co_changed_ids=co_changed, ref=now),
-                   lq_sigs, allow_delete=True)
+    lq_ops, lq_commit = _plan(live_sheets.live_queue_records(lq_jobs, today, new_ids=shade_ids,
+                                                             co_changed_ids=co_changed, ref=now),
+                              lq_sigs, allow_delete=True)
     lq_payload = {"name": "Live Queue", "headers": live_sheets.LIVE_QUEUE_HEADERS, "ops": lq_ops,
                   "key_col": live_sheets.LIVE_QUEUE_KEY_COL, "allow_delete": True,
                   "sort_col": live_sheets.LIVE_QUEUE_CBC_COL,
@@ -357,12 +367,19 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
         master["oh_headers"] = spec["headers"]
         master["oh_build_version"] = OH_BUILD_VERSION
     oh_sigs = master.setdefault("oh_sigs", {})
-    oh_ops = _plan(spec["records"], oh_sigs, allow_delete=False)
+    oh_ops, oh_commit = _plan(spec["records"], oh_sigs, allow_delete=False)
     oh_payload = {"name": "Order History", "spec": spec, "ops": oh_ops, "rebuild": rebuild,
                   "key_col": live_sheets.ORDER_HISTORY_KEY_COL, "freeze": "B2"}  # pin Job # only
 
-    update_master_workbook(LIVE_WORKBOOK_PATH, lq_payload, oh_payload,
-                           changes_sheet=_changes_sheet(master, lq_jobs, new_today, today, now))
+    rendered = update_master_workbook(LIVE_WORKBOOK_PATH, lq_payload, oh_payload,
+                                      changes_sheet=_changes_sheet(master, lq_jobs, new_today, today, now))
+    # Commit each tab's row signatures only if its write actually landed. A tab
+    # whose write failed (Excel busy / OLE error) is left out of `rendered`, so its
+    # ops are re-planned and re-drawn next poll instead of being lost.
+    if lq_payload["name"] in rendered:
+        lq_commit()
+    if oh_payload["name"] in rendered:
+        oh_commit()
 
 
 def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce: bool) -> dict:
@@ -441,9 +458,16 @@ def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce
     present = live_state.present_jobs(state)
     # Fold the board into the master log; log any field modifications it found.
     events = live_master.update(master, present, now)
-    change_log.append(now.date(), events)
-    if events:
-        log.info("Logged %d field change(s) this poll.", len(events))
+    # The baseline poll establishes the start-of-day picture silently: its deltas
+    # are differences vs yesterday's saved master (overnight moves, or fields the
+    # raw start-of-day seed hadn't re-enriched yet), NOT changes that happened
+    # during today's watch — so they must NOT land in today's change log. Logging
+    # them put a grey "changed today" row under (nearly) every order at 5 AM. The
+    # master is still updated above; we only skip recording the deltas.
+    if not baseline:
+        change_log.append(now.date(), events)
+        if events:
+            log.info("Logged %d field change(s) this poll.", len(events))
 
     if LIVE_WORKBOOK_PATH:
         _render_master(master, now, board_order=[str(j.get("job")) for j in board if j.get("job")])
@@ -491,8 +515,8 @@ def _install_stop_handler(stop: "threading.Event") -> None:
             log.warning("Second interrupt — force quitting now.")
             os._exit(130)
         stop.set()
-        log.info("Interrupt received — saving and exiting after this step. "
-                 "Press Ctrl+C again to force quit.")
+        log.info("Interrupt received — finishing the current poll, then saving and "
+                 "exiting. Press Ctrl+C again to force-quit.")
 
     # Windows console-control handler — the robust path. Registered once.
     if os.name == "nt" and not _CONSOLE_CTRL_REF:
@@ -507,7 +531,9 @@ def _install_stop_handler(stop: "threading.Event") -> None:
             win32api.SetConsoleCtrlHandler(_console_handler, True)
             _CONSOLE_CTRL_REF.append(_console_handler)   # prevent GC
         except Exception as e:  # noqa: BLE001 - fall back to the signal handler
-            log.debug("Console control handler unavailable (%s); using SIGINT only", e)
+            log.warning("Windows console-control handler unavailable (%s) — falling "
+                        "back to SIGINT, which a browser poll can occasionally cut "
+                        "short. Install pywin32 for a rock-solid Ctrl+C.", e)
 
     # Signal handler — the only option off Windows, and a backup. Re-installed
     # each call since a poll's async work can reset it.
@@ -560,6 +586,12 @@ def run_watch(ignore_window: bool = False) -> int:
 
     stop = threading.Event()
     _install_stop_handler(stop)
+    if _CONSOLE_CTRL_REF:
+        log.info("Ctrl+C: the poll in progress finishes first, then state is saved and the "
+                 "watch exits (press Ctrl+C again to force-quit).")
+    else:
+        log.info("Ctrl+C: requests a clean stop and the run finishes the current poll where it "
+                 "can; press Ctrl+C again to force-quit.")
     if LOG_PUSH_BRANCH:
         _publish_logs()               # snapshot the prior session at startup so the branch exists
     cycle = 0
@@ -573,6 +605,9 @@ def run_watch(ignore_window: bool = False) -> int:
             t0 = time.monotonic()
             try:
                 poll_once(state, master, now, baseline=baseline, announce=not baseline)
+            except KeyboardInterrupt:   # handler was bypassed and the poll was cut short
+                log.info("Ctrl+C received mid-poll — saving and exiting now.")
+                stop.set()
             except Exception:  # noqa: BLE001 - one bad cycle must not end the watch
                 log.exception("Poll cycle failed; continuing to the next one")
             if baseline:

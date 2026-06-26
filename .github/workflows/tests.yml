@@ -32,3 +32,5 @@ jobs:
       - run: python test_change_log.py
       - run: python test_master_sync.py
       - run: python test_engineers.py
+      - run: python test_watch_baseline.py
+      - run: python test_watch_render_commit.py

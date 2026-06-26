@@ -3,6 +3,106 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-06-25 — Ctrl+C finishes the current poll (hardened + clearer)
+
+The first Ctrl+C already only sets a stop flag (no raise), so the poll in progress
+runs to completion before the watch saves and exits; a second Ctrl+C force-quits.
+On Windows the OS console-control handler makes this robust (own thread, suppresses
+the default KeyboardInterrupt) even while a poll is blocked in Playwright/Excel.
+Hardening this run:
+- Startup logs which Ctrl+C guarantee is active so it's visible.
+- The 'console handler unavailable' fallback is now a WARNING (it's the only case
+  a poll could be cut short — install pywin32 to avoid it).
+- A poll-boundary `except KeyboardInterrupt` makes the rare cut-short case exit
+  cleanly (save + stop) instead of unwinding with a traceback.
+- Clearer interrupt message: "finishing the current poll, then saving and exiting".
+
+## 2026-06-25 — Changes tab: 'Arr.' header + change-order table restructured
+
+- Arrangement header now displays as 'Arr.' (display only — the internal label
+  stays 'Arrangement', so change-log matching and column lookups are untouched).
+  Applied via `_header_cells` and the Live Queue display-header constants.
+- 'Change orders today' now reads like the other tables: Time, Job #, Folder,
+  Quote Run, CO#, Oper, Design, Customer, What changed. The old free-text
+  'Change' column is the CO# column (still shows CO#old -> CO#new). Folder /
+  Quote Run reuse the standard cell builder.
+- Tests: `test_change_orders_table_columns_and_abbrev_header`; updated
+  `test_changes_today_log_sections`.
+
+## 2026-06-25 — Changes tab: Arrangement/Size suffix -> hover comment
+
+Mirror the Live Queue on the Changes tab to save width: Arrangement shows just
+the 'A/X' code and Size its main value, with the descriptive suffix moved to a
+hover comment. Applied to New orders / Removed (via `arrange_comment=True`), the
+'orders that changed today' was-row + instance rows, and the change-order table
+(new `_suffix_comment_cell` helper). Test:
+`test_changes_arrangement_size_suffix_moves_to_comment`.
+
+## 2026-06-25 — Changes tab: New/Removed columns aligned with the changed table
+
+The 'Orders that changed today' table leads with a Time column, so its Job # sits
+in column B and Folder in C. 'New orders today' and 'Removed / completed today'
+had Job # in A and Folder in B, so everything from Folder on was off by one column
+between sections. Fix: `_job_table` now inserts a blank spacer column right after
+Job #, so Job # stays in A, B is blank, and Folder / Quote Run / CO# / … line up
+in the same columns (C/D/E/…) across all three sections. Test:
+`test_changes_today_columns_align_across_sections` in `test_live_sheets.py`.
+
+## 2026-06-25 — Live tabs no longer drop rows after a busy-Excel write
+
+Symptom: "all the orders vanished" — the Live Queue tab showed ~18 of 56 on-board
+orders even though every poll logged `56 on board | removed=0` and the master log
+was intact. No data was lost; the tab just failed to redraw.
+
+Cause: the live tabs are drawn incrementally — each poll writes only the rows
+whose signature changed (`master['lq_sigs']` / `['oh_sigs']`). `watch._plan`
+committed those signatures as soon as the ops were *planned*, before the Excel
+write. When a write failed (Excel busy / `OLE error 0x800ac472`, e.g. a dialog or
+co-authoring sync), the store believed the rows were on the sheet, so the next
+poll planned no op for them and they stayed missing until a restart — and if the
+restart's first render also hit a busy Excel, it re-poisoned the store.
+
+Fix (commit-after-success + idempotent appends):
+- `watch._plan` now returns `(ops, commit)`; `_render_master` calls `commit()`
+  only for tabs that `update_master_workbook` reports as rendered.
+- `update_master_workbook` now returns the set of tab names that rendered without
+  error (was a bare bool, which nobody used).
+- `apply_upserts` / `apply_order_history` appends are now idempotent: if a key is
+  already on the sheet (a re-planned row after a failed write), update it in place
+  instead of adding a duplicate. A failed write therefore self-heals on the next
+  poll — no restart, no duplicates.
+
+Performance: unchanged in steady state — same ops/writes per poll; the only added
+work is an O(1) keymap lookup (the keymap is already read each poll) and redrawing
+rows after a failed write, which is the point.
+
+Tests: `test_watch_render_commit.py` — a failed write leaves signatures
+uncommitted (rows re-planned next poll); a successful write commits and then skips
+unchanged rows.
+
+## 2026-06-25 — Baseline poll no longer floods "Orders that changed today"
+
+Symptom: the Changes tab showed a grey "changed today" row under (nearly) every
+order, all stamped 5:00 AM, with the whole Sales-Order block (Size, Arrangement,
+Description, Motor Pos, Class, …) flagged red — even when nothing had moved.
+
+Cause: `watch.poll_once` appended `live_master.update`'s deltas to today's change
+log on *every* poll, including the silent start-of-day **baseline** poll. The
+baseline poll diffs the board against *yesterday's* saved master, so its deltas
+are overnight moves — and, for orders the raw start-of-day seed re-enters
+without their enrichment yet, `_keep_better_enrichment`'s guard only protects
+fields when the stored order has a `so_pdf`; an order with SO fields but a blank
+`so_pdf` has them recorded as `value -> ''`. Either way these are not changes
+that happened *during* today's watch, so they shouldn't be "changed today".
+
+Fix: `poll_once` now appends to the change log only when `not baseline`. The
+master is still folded/updated on the baseline poll; we just don't record its
+deltas. Later (non-baseline) polls log genuine intraday changes as before, so
+each real move still gets its own grey row.
+
+Tests: `test_watch_baseline.py` — baseline poll writes nothing to the change
+log; a later normal poll still logs a real End-Date move.
+
 ## 2026-06-17 — Every helper feeds the one master store
 
 DG: incorporate everything we know about each order into live_master, and have
