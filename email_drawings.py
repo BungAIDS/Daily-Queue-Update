@@ -164,6 +164,8 @@ _ADVANCE_RX = _re.compile(r"\bgo\b|find|search|lookup|open\s*order|continue|next
 # The recipients box (e.g. #MainContent_txtTo) — match a trailing/standalone
 # "to", "recipient", "email", "mail to". NOT the body textarea.
 _RECIP_RX = _re.compile(r"recipient|e-?mail|mail\s*to|send\s*to|txt_?to|to\b|address", _re.I)
+# The "Attach File" button (posts back per file) — distinct from "Send".
+_UPLOAD_RX = _re.compile(r"attach|upload", _re.I)
 _SEND_RX = _re.compile(r"send|transmit", _re.I)
 
 
@@ -225,9 +227,14 @@ def _guess_page2(d: dict) -> dict:
     emails = (EMAIL_DRAWINGS_EMAILS_SELECTOR
               or _pick(d["texts"], _RECIP_RX, fallback=False)
               or _pick(d["textareas"], _RECIP_RX, fallback=False))
+    # The Attach File button is the upload-only submit; keep it distinct from the
+    # Send button so the per-file attach loop never clicks Send.
+    upload = _pick([b for b in d["buttons"] if not _SEND_RX.search(b.get("desc", ""))],
+                   _UPLOAD_RX, fallback=False)
     return {
         "emails": emails,
         "attach": EMAIL_DRAWINGS_ATTACH_SELECTOR or (d["files"][0]["sel"] if d["files"] else None),
+        "upload": upload,
         "send": EMAIL_DRAWINGS_SUBMIT_SELECTOR or _pick(d["buttons"], _SEND_RX, fallback=False),
     }
 
@@ -286,7 +293,8 @@ def probe(order: Optional[str] = None, headless: bool = False) -> None:
                 g2 = _guess_page2(d2)
                 _dump_fields(page, "PAGE 2 (email form)")
                 print(f"\n  -> detected emails box: {g2['emails'] or '(none found)'}")
-                print(f"  -> detected attach    : {g2['attach'] or '(none found)'}")
+                print(f"  -> detected attach in : {g2['attach'] or '(none found)'}")
+                print(f"  -> detected Attach btn: {g2['upload'] or '(none found)'}")
                 print(f"  -> detected Send btn  : {g2['send'] or '(none found)'}  (never auto-clicked)")
                 env["EMAIL_DRAWINGS_EMAILS_SELECTOR"] = g2["emails"] or ""
                 env["EMAIL_DRAWINGS_ATTACH_SELECTOR"] = g2["attach"] or ""
@@ -336,19 +344,39 @@ def prepare(order: str, emails: List[str], files: List[str], headless: bool = Fa
                             "the page, or set EMAIL_DRAWINGS_ORDER_SELECTOR in .env.")
 
             g2 = _guess_page2(_detect(page))
-            if g2["emails"]:
-                page.fill(g2["emails"], "; ".join(emails))
-            else:
-                log.warning("No recipients field detected — skipping emails fill.")
 
-            if g2["attach"]:
+            # Attach each file: set the file input, click "Attach File", and wait
+            # for the postback that adds it to the list. Done before filling the
+            # To box so the postbacks can't clobber it.
+            if g2["attach"] and g2["upload"]:
+                attached = 0
+                for f in files:
+                    if not Path(f).exists():
+                        log.warning("Attachment not found, skipping: %s", f)
+                        continue
+                    page.set_input_files(g2["attach"], f)
+                    page.click(g2["upload"])
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=20000)
+                    except Exception:  # noqa: BLE001 - AJAX/postback may not settle
+                        page.wait_for_timeout(1500)
+                    attached += 1
+                log.info("Attached %d file(s) via the Attach File button.", attached)
+            elif g2["attach"]:
+                log.warning("Found the file input but not the Attach File button — "
+                            "set the file but did not upload it.")
                 for f in files:
                     if Path(f).exists():
                         page.set_input_files(g2["attach"], f)
-                    else:
-                        log.warning("Attachment not found, skipping: %s", f)
             else:
                 log.warning("No file-attach control detected — skipping attachments.")
+
+            # Fill recipients last (re-detect: the upload postbacks reloaded page 2).
+            emails_sel = _guess_page2(_detect(page))["emails"]
+            if emails_sel:
+                page.fill(emails_sel, "; ".join(emails))
+            else:
+                log.warning("No recipients field detected — skipping emails fill.")
 
             # ----------------------------------------------------------------- #
             # SEND IS HARD-DISABLED. The submit click below is intentionally     #
