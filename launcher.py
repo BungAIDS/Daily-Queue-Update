@@ -517,9 +517,13 @@ class LauncherApp(tk.Tk):
             return {"options": {}, "last_action": ""}
 
     def _save_state(self) -> None:
-        data = {"options": {}, "last_action": self.current_action_id or ""}
+        # Start from previously saved options so actions we never opened this
+        # session keep their remembered values instead of being dropped.
+        options = dict(self.state.get("options") or {})
         for action_id, vars_by_key in self.option_vars.items():
-            data["options"][action_id] = {k: v.get() for k, v in vars_by_key.items()}
+            options[action_id] = {k: v.get() for k, v in vars_by_key.items()}
+        data = {"options": options, "last_action": self.current_action_id or ""}
+        self.state = data
         try:
             STATE_PATH.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
         except OSError as exc:
@@ -670,6 +674,11 @@ class LauncherApp(tk.Tk):
     def _select_first_in_current_tab(self) -> None:
         category = self.notebook.tab(self.notebook.select(), "text")
         items = self.listbox_items.get(category) or []
+        # Selecting an action programmatically switches tabs, which fires this
+        # handler. Don't override a selection that already lives in this tab
+        # (e.g. the remembered last action when it isn't first in its list).
+        if self.current_action_id in items:
+            return
         if items:
             self._select_action(items[0])
 
@@ -781,7 +790,7 @@ class LauncherApp(tk.Tk):
             pieces = shlex.split(raw, posix=False) if spec.split else [raw]
             if spec.arg:
                 command.append(spec.arg)
-            command.extend(pieces if spec.positional or spec.arg else pieces)
+            command.extend(pieces)
         return command
 
     def _command_text(self, command: Iterable[str]) -> str:
@@ -995,22 +1004,37 @@ class LauncherApp(tk.Tk):
         info = self.processes.get(action_id)
         return bool(info and info.process.poll() is None)
 
-    def _refresh_external_status(self, schedule: bool = True) -> None:
-        running: set[str] = set()
-        output = ""
+    def _running_python_command_lines(self) -> list[str]:
+        """Lowercased command lines of running python processes.
+
+        Uses PowerShell's CIM Win32_Process rather than `wmic`, which is
+        deprecated and removed by default on recent Windows builds. Any
+        failure (including non-Windows hosts with no PowerShell) yields an
+        empty list, so external detection simply goes quiet instead of
+        erroring.
+        """
+        ps_script = (
+            "Get-CimInstance Win32_Process "
+            "-Filter \"Name='python.exe' OR Name='pythonw.exe'\" "
+            "| ForEach-Object { $_.CommandLine }"
+        )
         try:
             output = subprocess.check_output(
-                ["wmic", "path", "win32_process", "get", "ProcessId,CommandLine"],
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
                 text=True,
                 encoding="utf-8",
                 errors="replace",
                 stderr=subprocess.DEVNULL,
-                timeout=3,
+                timeout=6,
                 **hidden_console_kwargs(),
             )
         except Exception:
-            output = ""
-        process_lines = [line.lower() for line in output.splitlines() if "python" in line.lower()]
+            return []
+        return [line.lower() for line in output.splitlines() if line.strip()]
+
+    def _refresh_external_status(self, schedule: bool = True) -> None:
+        running: set[str] = set()
+        process_lines = self._running_python_command_lines()
         for action in self.actions:
             if not action.long_running or not action.script or self._is_running(action.id):
                 continue
@@ -1019,7 +1043,9 @@ class LauncherApp(tk.Tk):
         self.external_running = running
         self._update_all_statuses()
         if schedule:
-            self.after(5000, self._refresh_external_status)
+            # PowerShell starts slower than wmic did, so poll a little less
+            # often; per-second elapsed time is handled by _tick_status.
+            self.after(8000, self._refresh_external_status)
 
     def _tick_status(self) -> None:
         self._update_detail_status()
