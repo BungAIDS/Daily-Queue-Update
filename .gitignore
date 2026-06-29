@@ -11,6 +11,8 @@ cron.log
 # Watcher logs (rotated daily, kept ~a week) — runtime only, don't commit
 logs/
 watch.log*
+launcher_logs/
+.launcher_state.json
 
 # Python
 venv/

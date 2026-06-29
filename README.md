@@ -105,6 +105,43 @@ path, or `--dry-run`, to override). The history/tracking state is advanced
 exactly once — by whichever run does the scrape (`scrape.py` or `main.py`) — so
 re-running `brief.py`/`send.py` is safe and never double-counts.
 
+## Desktop launcher GUI
+
+If you do not want to remember every command, run the desktop launcher:
+
+```bat
+RunLauncher.vbs
+```
+
+It opens `launcher.py`, a standard-library Windows desktop app that:
+
+- uses `venv\Scripts\pythonw.exe`, `.venv\Scripts\pythonw.exe`, or `pyw.exe`
+  automatically so the GUI can open without leaving a command window behind,
+- groups the scripts into Daily Run, Live Watch, Scans / Backfill, Search /
+  Inspect, Transmittals, Tools, and Developer tabs,
+- requires confirmation before every run,
+- keeps email/send actions locked until you check **Allow email / send actions**,
+- shows a green running indicator for long-running tools such as `watch.py`,
+- blocks starting a second copy of an already-running long-running script,
+- lets you stop a launcher-started process,
+- shows live console output and writes per-run logs under `launcher_logs/`,
+- remembers last-used options in `.launcher_state.json`,
+- provides a Developer tab for the direct-script test files.
+
+To create a desktop shortcut, double-click:
+
+```bat
+CreateLauncherShortcut.bat
+```
+
+That creates **Daily Queue Launcher** on your desktop, pointing at
+`RunLauncher.vbs`. The launcher state and logs are local runtime files and are
+ignored by git.
+
+If you run `watch.py` from the launcher and it stops with a missing `EMAIL_TO`
+message, open `.env` and set `EMAIL_TO` first. `watch.py` validates that value
+before starting because it can send notifications during the live watch.
+
 
 ## Scheduling at 5 AM daily
 
@@ -291,6 +328,10 @@ toasts):
 ```
 Daily-Queue-Update/
 ├── login.py            # Run once — log in by hand, save session (no password stored)
+├── launcher.py         # Desktop GUI launcher for running/stopping the scripts
+├── RunLauncher.vbs     # Quiet double-click launcher startup
+├── RunLauncher.bat     # Console fallback startup (uses venv/pyw when present)
+├── CreateLauncherShortcut.bat # Creates a desktop shortcut to the launcher
 ├── main.py             # The 5 AM job — runs scrape -> brief -> send in one shot
 ├── scrape.py           # Stage 1 — scrape + diff + Excel (no AI, no email)
 ├── brief.py            # Stage 2 — add the AI overview to today's run (no email)
