@@ -20,8 +20,9 @@ the spellings/initials it may appear as on the board.
 """
 from __future__ import annotations
 
+import getpass
 import re
-from typing import Any, Dict, Iterable, List, Pattern, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Pattern, Tuple
 
 # Canonical engineer name -> every spelling/initial it may appear as in the
 # Assigned To / Checker / Note fields. The canonical name is always matched too,
@@ -41,6 +42,27 @@ ROSTER: Dict[str, List[str]] = {
 # The order fields scanned for names: the two board assignment columns and the
 # Sales-Order status note.
 _SCAN_FIELDS: Tuple[str, ...] = ("assigned_to", "checker", "status_note")
+
+# Windows login -> the signature initials the engineer hand-signs a transmittal
+# with ("BY: __" on the Drawing Transmittal). This is a lookup, not an algorithm:
+# Danny Groth signs "DAG", Debbie Decker signs "DD" — neither is derivable from
+# the bare username, so each engineer is listed explicitly. EDIT to add people.
+SIGNATURES: Dict[str, str] = {
+    "dgroth": "DAG",   # Danny Groth
+    "ddecker": "DD",   # Debbie (Deborah) Decker
+}
+
+
+def signature_for_user(username: Optional[str] = None) -> str:
+    """The transmittal signature for a Windows login (defaults to the current
+    user, getpass.getuser()). Looks up SIGNATURES; returns '' if the user isn't
+    listed (the caller then prompts/overrides rather than guessing initials)."""
+    if username is None:
+        try:
+            username = getpass.getuser()
+        except Exception:  # noqa: BLE001 - getuser can raise if no login info
+            username = ""
+    return SIGNATURES.get((username or "").strip().lower(), "")
 
 
 def _alias_pattern(alias: str) -> Pattern:
