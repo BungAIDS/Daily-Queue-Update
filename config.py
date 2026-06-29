@@ -32,9 +32,20 @@ TRANSMITTAL_MODE = (os.environ.get("TRANSMITTAL_MODE", "preview").strip().lower(
 # The CBC Insider "Email Drawings" page URL (Engineering -> Email Drawings). Set
 # in .env once you know it; the probe can also be pointed straight at it.
 EMAIL_DRAWINGS_URL = (os.environ.get("EMAIL_DRAWINGS_URL") or "").strip()
-# Optional CSS-selector overrides for the Email Drawings form fields, filled in
-# after running `python email_drawings.py --probe`. Blank => auto-detect / unknown.
+# Optional CSS-selector overrides for the Email Drawings flow, filled in after
+# running `python email_drawings.py --probe`. Blank => unknown / not set.
+# The flow is TWO pages:
+#   Page 1 (order lookup): type the order # and submit to advance.
+#     EMAIL_DRAWINGS_ORDER_SELECTOR        the order # input on page 1
+#     EMAIL_DRAWINGS_ORDER_SUBMIT_SELECTOR the button/link that advances to page 2
+#                                          (leave blank to submit with Enter)
+#   Page 2 (the email form, has the Send button we DON'T press):
+#     EMAIL_DRAWINGS_EMAILS_SELECTOR       the recipients field
+#     EMAIL_DRAWINGS_ATTACH_SELECTOR       the file <input type=file>
+#     EMAIL_DRAWINGS_SUBMIT_SELECTOR       the SEND button — recorded so we know
+#                                          what NOT to click; sending is disabled.
 EMAIL_DRAWINGS_ORDER_SELECTOR = (os.environ.get("EMAIL_DRAWINGS_ORDER_SELECTOR") or "").strip()
+EMAIL_DRAWINGS_ORDER_SUBMIT_SELECTOR = (os.environ.get("EMAIL_DRAWINGS_ORDER_SUBMIT_SELECTOR") or "").strip()
 EMAIL_DRAWINGS_EMAILS_SELECTOR = (os.environ.get("EMAIL_DRAWINGS_EMAILS_SELECTOR") or "").strip()
 EMAIL_DRAWINGS_ATTACH_SELECTOR = (os.environ.get("EMAIL_DRAWINGS_ATTACH_SELECTOR") or "").strip()
 EMAIL_DRAWINGS_SUBMIT_SELECTOR = (os.environ.get("EMAIL_DRAWINGS_SUBMIT_SELECTOR") or "").strip()
