@@ -34,6 +34,7 @@ import logging
 import sys
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import urljoin
 
 from config import (
     CBC_URL, EMAIL_DRAWINGS_URL, STORAGE_STATE_PATH, TRANSMITTAL_MODE,
@@ -60,11 +61,38 @@ def _require_session() -> None:
         )
 
 
+def _click_email_drawings_link(page) -> bool:
+    """From the CBC landing page, reach the Email Drawings form by following the
+    'Email Drawings' nav link (under Engineering). The link lives in the DOM even
+    when its menu isn't hovered, so we read its href and navigate, falling back
+    to a JS click for __doPostBack-style links. Returns True on success."""
+    try:
+        link = page.get_by_role("link", name="Email Drawings", exact=True).first
+        href = link.get_attribute("href")
+    except Exception:  # noqa: BLE001 - link not found
+        return False
+    try:
+        if href and not href.lower().startswith("javascript"):
+            page.goto(urljoin(page.url, href), wait_until="domcontentloaded", timeout=30000)
+        else:
+            link.evaluate("el => el.click()")  # bypasses menu-hover visibility
+            page.wait_for_load_state("domcontentloaded", timeout=30000)
+        try:
+            page.wait_for_load_state("networkidle", timeout=8000)
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+    except Exception as e:  # noqa: BLE001
+        log.warning("Could not follow the Email Drawings link: %s", e)
+        return False
+
+
 def _goto_form(page, order: Optional[str] = None) -> None:
-    """Navigate to the Email Drawings page (or the CBC landing page if its URL
-    isn't configured yet, so the probe can still be pointed at it by hand)."""
+    """Navigate to the Email Drawings page. If EMAIL_DRAWINGS_URL is set, go
+    straight there; otherwise load the CBC landing page and follow the
+    'Email Drawings' nav link so the probe still reaches the real form."""
     target = EMAIL_DRAWINGS_URL or CBC_URL
-    log.info("Loading Email Drawings form with saved session: %s", target)
+    log.info("Loading with saved session: %s", target)
     page.goto(target, wait_until="domcontentloaded", timeout=30000)
     try:
         page.wait_for_load_state("networkidle", timeout=10000)
@@ -75,6 +103,13 @@ def _goto_form(page, order: Optional[str] = None) -> None:
             "Saved session has expired (landed on the login page). "
             "Run `python login.py` again to refresh it."
         )
+    if not EMAIL_DRAWINGS_URL:
+        if _click_email_drawings_link(page):
+            print(f"\n>>> Email Drawings form is at: {page.url}")
+            print(">>> Set EMAIL_DRAWINGS_URL to that in .env so future runs go straight there.\n")
+        else:
+            print("\n! Could not auto-find the 'Email Drawings' link. Navigate there by hand in")
+            print("  the open window, copy the URL, and set EMAIL_DRAWINGS_URL in .env.\n")
 
 
 # --------------------------------------------------------------------------- #
@@ -142,11 +177,6 @@ def probe(order: Optional[str] = None, headless: bool = False) -> None:
         page = context.new_page()
         try:
             _goto_form(page, order)
-            if not EMAIL_DRAWINGS_URL:
-                print("\n! EMAIL_DRAWINGS_URL is not set in .env, so this opened the CBC landing")
-                print("  page. Navigate to Engineering -> Email Drawings in the open window, then")
-                print("  re-run --probe with that URL in EMAIL_DRAWINGS_URL for an accurate dump.\n")
-
             _dump_fields(page, "PAGE 1 (order lookup)")
             print("\nFrom page 1, set EMAIL_DRAWINGS_ORDER_SELECTOR (the order # input) and, if a")
             print("button — not Enter — advances, EMAIL_DRAWINGS_ORDER_SUBMIT_SELECTOR.")
@@ -237,27 +267,30 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
         description="CBC Insider Email Drawings probe / pre-fill (never sends).")
     ap.add_argument("order", nargs="?", help="order number to pre-fill the form for")
+    ap.add_argument("--order", dest="order_opt", default=None,
+                    help="order number (same as the positional; either works)")
     ap.add_argument("--probe", action="store_true", help="dump the form's fields/selectors (read-only)")
     ap.add_argument("--headless", action="store_true", help="run without a visible window")
     args = ap.parse_args(argv)
+    order = args.order_opt or args.order
 
     if args.probe:
-        probe(order=args.order, headless=args.headless)
+        probe(order=order, headless=args.headless)
         return 0
 
-    if not args.order:
+    if not order:
         ap.error("give an order number, or use --probe")
 
     # Gather the recipients + files from the order, then pre-fill (no send).
     import transmittal_data as td
-    data = td.gather(args.order)
+    data = td.gather(order)
     if not data.emails:
         print("! No recipient emails found for this order — nothing to pre-fill. "
               "Check the Sales Order's Additional Features / Notes block.")
         for w in data.warnings:
             print(f"  ! {w}")
         return 1
-    prepare(args.order, data.emails, data.attachments, headless=args.headless)
+    prepare(order, data.emails, data.attachments, headless=args.headless)
     return 0
 
 
