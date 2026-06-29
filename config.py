@@ -18,6 +18,40 @@ CBC_WORK_CENTER = os.environ.get("CBC_WORK_CENTER", "")
 # the optional selector of a search button to click when Enter doesn't submit.
 CBC_SEARCH_SELECTOR = os.environ.get("CBC_SEARCH_SELECTOR", "").strip()
 CBC_SEARCH_BUTTON = os.environ.get("CBC_SEARCH_BUTTON", "").strip()
+
+# --------------------------------------------------------------------------- #
+# Drawing-transmittal send (email_drawings.py) — DISABLED by design            #
+# --------------------------------------------------------------------------- #
+# The transmittal tooling fills the Word doc and can pre-fill the CBC Insider
+# "Email Drawings" form, but the actual SEND is hard-disabled in code (the submit
+# click is commented out) so a transmittal can never be mailed to a customer by
+# accident. TRANSMITTAL_MODE only ever reaches "preview"/"review"; "send" is
+# intentionally inert. Leave this alone unless you are deliberately enabling
+# sends and have re-instated the submit code in email_drawings.py.
+TRANSMITTAL_MODE = (os.environ.get("TRANSMITTAL_MODE", "preview").strip().lower() or "preview")
+# The CBC Insider "Email Drawings" page URL (Engineering -> Email Drawings).
+# Defaults to the known transmittal page so the tooling navigates straight there
+# without having to hunt for the nav link (which is in a hover menu and flaky to
+# click). Override in .env if your instance differs.
+EMAIL_DRAWINGS_URL = (os.environ.get("EMAIL_DRAWINGS_URL")
+                      or "https://www.cbcinsider.com/intranet/engineering/transmittal.aspx").strip()
+# Optional CSS-selector overrides for the Email Drawings flow, filled in after
+# running `python email_drawings.py --probe`. Blank => unknown / not set.
+# The flow is TWO pages:
+#   Page 1 (order lookup): type the order # and submit to advance.
+#     EMAIL_DRAWINGS_ORDER_SELECTOR        the order # input on page 1
+#     EMAIL_DRAWINGS_ORDER_SUBMIT_SELECTOR the button/link that advances to page 2
+#                                          (leave blank to submit with Enter)
+#   Page 2 (the email form, has the Send button we DON'T press):
+#     EMAIL_DRAWINGS_EMAILS_SELECTOR       the recipients field
+#     EMAIL_DRAWINGS_ATTACH_SELECTOR       the file <input type=file>
+#     EMAIL_DRAWINGS_SUBMIT_SELECTOR       the SEND button — recorded so we know
+#                                          what NOT to click; sending is disabled.
+EMAIL_DRAWINGS_ORDER_SELECTOR = (os.environ.get("EMAIL_DRAWINGS_ORDER_SELECTOR") or "").strip()
+EMAIL_DRAWINGS_ORDER_SUBMIT_SELECTOR = (os.environ.get("EMAIL_DRAWINGS_ORDER_SUBMIT_SELECTOR") or "").strip()
+EMAIL_DRAWINGS_EMAILS_SELECTOR = (os.environ.get("EMAIL_DRAWINGS_EMAILS_SELECTOR") or "").strip()
+EMAIL_DRAWINGS_ATTACH_SELECTOR = (os.environ.get("EMAIL_DRAWINGS_ATTACH_SELECTOR") or "").strip()
+EMAIL_DRAWINGS_SUBMIT_SELECTOR = (os.environ.get("EMAIL_DRAWINGS_SUBMIT_SELECTOR") or "").strip()
 # Saved browser session (cookies) from login.py — no password is ever stored.
 STORAGE_STATE_PATH = Path(os.path.expandvars(os.path.expanduser(
     os.environ.get("STORAGE_STATE_PATH", "./cbc_session.json")
