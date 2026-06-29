@@ -126,6 +126,9 @@ It opens `launcher.py`, a standard-library Windows desktop app that:
 - lets you stop a launcher-started process,
 - shows live console output and writes per-run logs under `launcher_logs/`,
 - remembers last-used options in `.launcher_state.json`,
+- has a **Git Update…** button that opens a small window where you pick a
+  branch from a drop-down and pull the latest code from GitHub (it fetches,
+  optionally checks the branch out, then pulls, streaming git's output),
 - provides a Developer tab for the direct-script test files.
 
 To create a desktop shortcut, double-click:
@@ -329,6 +332,7 @@ toasts):
 Daily-Queue-Update/
 ├── login.py            # Run once — log in by hand, save session (no password stored)
 ├── launcher.py         # Desktop GUI launcher for running/stopping the scripts
+├── git_update.py       # Branch/pull helpers behind the launcher's Git Update button
 ├── RunLauncher.vbs     # Quiet double-click launcher startup
 ├── RunLauncher.bat     # Console fallback startup (uses venv/pyw when present)
 ├── CreateLauncherShortcut.bat # Creates a desktop shortcut to the launcher

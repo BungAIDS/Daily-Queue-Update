@@ -24,6 +24,8 @@ from typing import Any, Iterable
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+import git_update
+
 
 ROOT = Path(__file__).resolve().parent
 STATE_PATH = ROOT / ".launcher_state.json"
@@ -496,6 +498,7 @@ class LauncherApp(tk.Tk):
         self.listboxes: dict[str, tk.Listbox] = {}
         self.listbox_items: dict[str, list[str]] = {}
         self.current_action_id: str | None = None
+        self._git_dialog: GitUpdateDialog | None = None
         self.state = self._load_state()
 
         self.python_path = self._find_python()
@@ -557,6 +560,10 @@ class LauncherApp(tk.Tk):
         )
         send_check.pack(side="right")
         ToolTip(send_check, "Required before running commands that can send email or prefill email forms.")
+
+        git_button = ttk.Button(header, text="Git Update…", command=self._open_git_update)
+        git_button.pack(side="right", padx=(0, 16))
+        ToolTip(git_button, "Pull the latest code from a chosen Git branch.")
 
         main = ttk.PanedWindow(self, orient="horizontal")
         main.pack(fill="both", expand=True, padx=12, pady=(4, 12))
@@ -932,6 +939,14 @@ class LauncherApp(tk.Tk):
             self.logs[self.current_action_id] = []
             self._render_output(self.current_action_id)
 
+    def _open_git_update(self) -> None:
+        if self._git_dialog is not None and self._git_dialog.winfo_exists():
+            self._git_dialog.deiconify()
+            self._git_dialog.lift()
+            self._git_dialog.focus_set()
+            return
+        self._git_dialog = GitUpdateDialog(self)
+
     def _open_logs_folder(self) -> None:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         try:
@@ -1066,6 +1081,194 @@ class LauncherApp(tk.Tk):
             ):
                 return
         self._save_state()
+        self.destroy()
+
+
+class GitUpdateDialog(tk.Toplevel):
+    """A small window to pull the latest code from a chosen Git branch.
+
+    Branch discovery and the pull itself run on worker threads; results come
+    back through a queue so the Tk UI stays responsive. The heavy lifting lives
+    in the import-light ``git_update`` module.
+    """
+
+    def __init__(self, parent: "LauncherApp") -> None:
+        super().__init__(parent)
+        self.title("Git Update")
+        self.geometry("760x540")
+        self.minsize(620, 420)
+        self.transient(parent)
+
+        self._queue: queue.Queue[tuple[str, Any]] = queue.Queue()
+        self._busy = False
+        self._current_branch = ""
+        self.current_var = tk.StringVar(value="Current branch: …")
+        self.branch_var = tk.StringVar()
+        self.switch_var = tk.BooleanVar(value=True)
+
+        self._build_ui()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.after(100, self._poll_queue)
+        self.refresh_branches()
+
+    def _build_ui(self) -> None:
+        body = ttk.Frame(self, padding=12)
+        body.pack(fill="both", expand=True)
+
+        ttk.Label(body, textvariable=self.current_var, font=("Segoe UI", 10, "bold")).pack(anchor="w")
+        ttk.Label(
+            body,
+            text="Choose a branch and click Pull to update this folder's code from GitHub.",
+            foreground="#555",
+        ).pack(anchor="w", pady=(2, 8))
+
+        pick = ttk.Frame(body)
+        pick.pack(fill="x")
+        ttk.Label(pick, text="Pull from branch:").pack(side="left")
+        self.branch_combo = ttk.Combobox(pick, textvariable=self.branch_var, state="readonly", width=42)
+        self.branch_combo.pack(side="left", padx=(8, 8))
+        self.refresh_button = ttk.Button(pick, text="Refresh", command=lambda: self.refresh_branches(fetch=True))
+        self.refresh_button.pack(side="left")
+        ToolTip(self.refresh_button, "Fetch from origin and reload the branch list.")
+
+        self.switch_check = ttk.Checkbutton(
+            body,
+            text="Switch to this branch (checkout) before pulling",
+            variable=self.switch_var,
+        )
+        self.switch_check.pack(anchor="w", pady=(8, 8))
+        ToolTip(
+            self.switch_check,
+            "On: end up on the chosen branch (checkout, then pull).\n"
+            "Off: merge the chosen branch into the branch you are already on.",
+        )
+
+        actions = ttk.Frame(body)
+        actions.pack(fill="x", pady=(0, 8))
+        self.pull_button = ttk.Button(actions, text="Pull", style="Action.TButton", command=self.start_pull)
+        self.pull_button.pack(side="left")
+        self.close_button = ttk.Button(actions, text="Close", command=self._on_close)
+        self.close_button.pack(side="right")
+
+        out_frame = ttk.LabelFrame(body, text="Git output", padding=6)
+        out_frame.pack(fill="both", expand=True)
+        self.output = tk.Text(out_frame, wrap="word", relief="solid", borderwidth=1, height=14)
+        self.output.pack(side="left", fill="both", expand=True)
+        scroll = ttk.Scrollbar(out_frame, orient="vertical", command=self.output.yview)
+        scroll.pack(side="right", fill="y")
+        self.output.configure(yscrollcommand=scroll.set, state="disabled")
+
+    def _log(self, text: str) -> None:
+        self.output.configure(state="normal")
+        self.output.insert(tk.END, text)
+        self.output.configure(state="disabled")
+        self.output.see(tk.END)
+
+    def _set_busy(self, busy: bool) -> None:
+        self._busy = busy
+        state = "disabled" if busy else "normal"
+        self.pull_button.configure(state=state)
+        self.refresh_button.configure(state=state)
+        self.switch_check.configure(state=state)
+        self.branch_combo.configure(state="disabled" if busy else "readonly")
+
+    def refresh_branches(self, *, fetch: bool = False) -> None:
+        if self._busy:
+            return
+        self._set_busy(True)
+        if fetch:
+            self._log("[git] Fetching and reloading branches…\n")
+        threading.Thread(target=self._load_branches_worker, args=(fetch,), daemon=True).start()
+
+    def _load_branches_worker(self, fetch: bool) -> None:
+        try:
+            if not git_update.git_available():
+                self._queue.put(("error", "Git is not installed or not on PATH."))
+                return
+            if not git_update.is_git_repo():
+                self._queue.put(("error", "This folder is not a Git repository."))
+                return
+            if fetch:
+                result = git_update.run_git(["fetch", "--all", "--prune"], timeout=120)
+                for stream in (result.stdout, result.stderr):
+                    if stream.strip():
+                        self._queue.put(("line", stream if stream.endswith("\n") else stream + "\n"))
+            current = git_update.current_branch()
+            branches = git_update.list_branches()
+            self._queue.put(("branches", (current, branches)))
+        except Exception as exc:  # pragma: no cover - defensive UI guard
+            self._queue.put(("error", f"Could not read branches: {exc}"))
+
+    def _apply_branches(self, current: str, branches: list[str]) -> None:
+        self._current_branch = current
+        self.current_var.set(f"Current branch: {current or '(unknown)'}")
+        self.branch_combo.configure(values=branches)
+        chosen = self.branch_var.get().strip()
+        if chosen not in branches:
+            if current in branches:
+                self.branch_var.set(current)
+            elif branches:
+                self.branch_var.set(branches[0])
+            else:
+                self.branch_var.set("")
+
+    def start_pull(self) -> None:
+        if self._busy:
+            return
+        branch = self.branch_var.get().strip()
+        if not branch:
+            messagebox.showwarning("No branch", "Choose a branch to pull.", parent=self)
+            return
+        try:
+            steps = git_update.build_pull_steps(branch, self._current_branch, switch=bool(self.switch_var.get()))
+        except ValueError as exc:
+            messagebox.showwarning("Cannot pull", str(exc), parent=self)
+            return
+        preview = "\n".join("git " + " ".join(step) for step in steps)
+        if not messagebox.askyesno("Confirm pull", f"Run these git commands?\n\n{preview}", parent=self):
+            return
+        self._set_busy(True)
+        self._log(f"\n=== Pulling '{branch}' ===\n")
+        threading.Thread(target=self._pull_worker, args=(steps,), daemon=True).start()
+
+    def _pull_worker(self, steps: list[list[str]]) -> None:
+        code = git_update.run_pull_steps(steps, lambda line: self._queue.put(("line", line)))
+        self._queue.put(("done", code))
+
+    def _poll_queue(self) -> None:
+        try:
+            while True:
+                kind, payload = self._queue.get_nowait()
+                if kind == "line":
+                    self._log(str(payload))
+                elif kind == "branches":
+                    current, branches = payload
+                    self._apply_branches(current, branches)
+                    self._set_busy(False)
+                elif kind == "error":
+                    self._log(f"[git] {payload}\n")
+                    self._set_busy(False)
+                    messagebox.showerror("Git", str(payload), parent=self)
+                elif kind == "done":
+                    code = int(payload)
+                    if code == 0:
+                        self._log("\n[git] Done. Your code is up to date.\n")
+                    else:
+                        self._log(f"\n[git] Finished with exit code {code}.\n")
+                    self._set_busy(False)
+                    self.refresh_branches()  # reflect any branch switch in the label
+        except queue.Empty:
+            pass
+        if self.winfo_exists():
+            self.after(100, self._poll_queue)
+
+    def _on_close(self) -> None:
+        if self._busy and not messagebox.askyesno(
+            "Git running",
+            "A git operation is still running. Close this window anyway?",
+            parent=self,
+        ):
+            return
         self.destroy()
 
 
