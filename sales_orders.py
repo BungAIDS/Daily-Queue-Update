@@ -903,3 +903,39 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2,
                  "pid types seen on the board: %s — a run filed under another "
                  "type/name needs adding to those settings in .env.",
                  DRIVE_RUN_TYPES, sorted(seen_types))
+
+
+def _stamp_verified_today(order: str) -> None:
+    """Record that this order's Sales Order was just (re-)read, in the watcher's
+    per-day live state — the same `verified_at` the watcher writes — so a
+    'read today' check sees it. Best-effort; a stamp failure never breaks a
+    refresh. Lazy-imports live_state to avoid an import cycle at module load."""
+    try:
+        import live_state
+        from datetime import date, datetime
+        d = date.today()
+        state = live_state.load_state(d)
+        entry = state.get(str(order)) or {}
+        entry["verified_at"] = datetime.now().isoformat(timespec="seconds")
+        state[str(order)] = entry
+        live_state.save_state(state, d)
+    except Exception as e:  # noqa: BLE001
+        log.warning("Could not stamp verified_at for %s: %s", order, e)
+
+
+def refresh_order_so(order: str, job: Dict[str, Any] | None = None,
+                     deep_folders: bool = False) -> Dict[str, Any]:
+    """Fetch ONE order's Sales Order online and re-parse it, returning the
+    enriched job dict (so_pdf, so_emails, so_po, so_released, so_imi, …). This is
+    the single-order entry point for anything that needs a fresh SO on demand —
+    e.g. the transmittal flow when an order's SO hasn't been re-read today. It
+    reuses enrich_with_sales_orders (the same fetch the watcher/daily run use) and
+    stamps the order's verified_at so the read is recorded.
+
+    The order must be reachable on the board (the live queue) for the fetch to
+    open its detail modal. Raises if there's no saved session."""
+    j = dict(job or {})
+    j.setdefault("job", str(order))
+    enrich_with_sales_orders([j], deep_folders=deep_folders)
+    _stamp_verified_today(str(order))
+    return j

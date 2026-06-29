@@ -470,12 +470,39 @@ def find_attachments(folder: Optional[Path], order: str, imi_number: str = "") -
     return out
 
 
-def gather(order: str, customer: str = "", flags: str = "") -> TransmittalData:
+def _refresh_so(order: str) -> bool:
+    """Fetch this order's SO fresh online (reusing the watcher/daily-run fetch via
+    sales_orders.refresh_order_so) so the transmittal reads the latest revision.
+    Lazy-imported so transmittal_data still loads without the browser stack;
+    returns True on success, False (with a logged reason) if it couldn't run —
+    no saved session, the order isn't on the board, the network, etc."""
+    try:
+        import sales_orders  # lazy: pulls in Playwright only when we actually refresh
+        sales_orders.refresh_order_so(order)
+        return True
+    except Exception as e:  # noqa: BLE001 - a failed refresh must not break preview
+        log.warning("Could not refresh the SO for %s online: %s", order, e)
+        return False
+
+
+def gather(order: str, customer: str = "", flags: str = "",
+           refresh_stale: bool = True) -> TransmittalData:
     """Full pipeline for one order: locate the SO PDF + AutoCAD folder, read the
     IMI number and candidate attachments, and build the TransmittalData. Picks
     the assembly suffix (-01 CW / -02 CCW) by which drawing the folder actually
-    has. Never sends anything."""
+    has. Never sends anything.
+
+    If the order's SO hasn't been re-read today (per the watcher's verified_at)
+    and `refresh_stale` is set, it fetches a fresh SO first so the transmittal is
+    built from the latest revision."""
     order = str(order)
+
+    # Confirm today's SO; if stale, pull a fresh one before reading anything.
+    refreshed = False
+    if refresh_stale and not so_read_today(order):
+        log.info("SO for %s not re-read today — fetching a fresh copy...", order)
+        refreshed = _refresh_so(order)
+
     so_pdf = find_so_pdf(order)
     folder = find_job_folder(order)
     imi = find_imi_number(folder)
@@ -495,14 +522,15 @@ def gather(order: str, customer: str = "", flags: str = "") -> TransmittalData:
     d.folder = str(folder) if folder else None
     d.attachments = [str(p) for p in find_attachments(folder, order, imi)]
 
-    # Confirm the SO we're reading was re-read by the watcher today, so the
-    # transmittal reflects the latest revision rather than a stale download.
+    # Re-check freshness: after a successful refresh this is now today's SO.
     d.so_verified_at = so_last_verified(order)
     d.so_read_today = so_read_today(order)
     if not d.so_read_today:
         when = d.so_verified_at or "not since the watcher last ran"
-        d.warn(f"This order's Sales Order has NOT been re-read today (last: {when}). "
-               "Re-read/refresh the order before sending so the transmittal uses the latest SO.")
+        detail = ("an auto-refresh was attempted but failed — check the saved session / "
+                  "that the order is on the board") if refresh_stale else "auto-refresh was off"
+        d.warn(f"This order's Sales Order has NOT been re-read today (last: {when}); "
+               f"{detail}. Verify the order is current before sending.")
 
     if not so_pdf:
         d.warn(f"No archived Sales Order PDF found under {SALES_ORDER_DIR / order}.")
@@ -547,12 +575,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Show the data a transmittal would be built from.")
     ap.add_argument("orders", nargs="+", help="order number(s)")
     ap.add_argument("--backtest", action="store_true",
-                    help="(same output; intended for diffing against the real …TRANSMITTAL-01.doc)")
+                    help="offline read of historical orders (no online SO refresh) for diffing "
+                         "against the real …TRANSMITTAL-01.doc")
+    ap.add_argument("--no-refresh", action="store_true",
+                    help="don't fetch a fresh SO even if it wasn't re-read today")
     ap.add_argument("--customer", default="", help="override customer (else read from SO)")
     args = ap.parse_args(argv)
 
+    # Back-test diffs history offline; otherwise refresh a stale SO before reading.
+    refresh = not (args.backtest or args.no_refresh)
     for order in args.orders:
-        d = gather(order, customer=args.customer)
+        d = gather(order, customer=args.customer, refresh_stale=refresh)
         _print(d)
     return 0
 
