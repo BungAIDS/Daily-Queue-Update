@@ -412,6 +412,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="order number (same as the positional; either works)")
     ap.add_argument("--probe", action="store_true", help="dump the form's fields/selectors (read-only)")
     ap.add_argument("--headless", action="store_true", help="run without a visible window")
+    ap.add_argument("--initials", default="", help="signature for the transmittal doc (default: from the Windows login)")
+    ap.add_argument("--no-doc", action="store_true",
+                    help="don't generate/attach the filled transmittal doc (drawings only)")
     args = ap.parse_args(argv)
     order = args.order_opt or args.order
 
@@ -422,7 +425,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not order:
         ap.error("give an order number, or use --probe")
 
-    # Gather the recipients + files from the order, then pre-fill (no send).
+    # Gather the recipients + files from the order (auto-refreshing a stale SO).
     import transmittal_data as td
     data = td.gather(order)
     if not data.emails:
@@ -431,7 +434,27 @@ def main(argv: Optional[List[str]] = None) -> int:
         for w in data.warnings:
             print(f"  ! {w}")
         return 1
-    prepare(order, data.emails, data.attachments, headless=args.headless)
+
+    # Fill the transmittal Word doc and attach it FIRST, ahead of the drawings —
+    # the process attaches the filled transmittal along with the files.
+    files = list(data.attachments)
+    if not args.no_doc:
+        try:
+            import transmittal_doc
+            import engineers
+            initials = args.initials or engineers.signature_for_user()
+            doc_path, plan = transmittal_doc.fill_transmittal(data, initials=initials)
+            files.insert(0, str(doc_path))
+            print(f"Filled transmittal: {doc_path}")
+            for w in plan.warnings:
+                print(f"  ! {w}")
+        except ImportError:
+            print("! Word COM (win32com) not available here — skipping the transmittal doc; "
+                  "attaching drawings only. (Run on the Windows box, or pass --no-doc.)")
+        except Exception as e:  # noqa: BLE001 - doc fill must not block the preview
+            print(f"! Could not fill the transmittal doc ({e}); attaching drawings only.")
+
+    prepare(order, data.emails, files, headless=args.headless)
     return 0
 
 
