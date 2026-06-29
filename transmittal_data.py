@@ -248,8 +248,10 @@ def _emailed(mark: str) -> bool:
 
 
 def _mailed(mark: str) -> bool:
+    # Only a mailed-ONLY mark prints. On real transmittals a "Both" (or a bare
+    # "X") still renders as EMAIL-only — see job 421693 — so "both" is not print.
     m = mark.lower()
-    return ("mail" in m and "email" not in m) or ("both" in m)
+    return "mail" in m and "email" not in m and "both" not in m
 
 
 def has_step(lines: List[str]) -> bool:
