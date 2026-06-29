@@ -29,6 +29,18 @@ STATE_PATH = ROOT / ".launcher_state.json"
 LOG_DIR = ROOT / "launcher_logs"
 
 
+def hidden_console_kwargs() -> dict[str, Any]:
+    if os.name != "nt":
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = 0
+    return {
+        "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        "startupinfo": startupinfo,
+    }
+
+
 @dataclass(frozen=True)
 class OptionSpec:
     key: str
@@ -977,6 +989,7 @@ class LauncherApp(tk.Tk):
                 errors="replace",
                 stderr=subprocess.DEVNULL,
                 timeout=3,
+                **hidden_console_kwargs(),
             )
         except Exception:
             output = ""
