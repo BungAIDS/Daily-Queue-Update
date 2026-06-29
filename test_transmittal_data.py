@@ -6,6 +6,8 @@ the field mapping decoded from those documents.
 """
 from __future__ import annotations
 
+import json
+
 import transmittal_data as td
 
 # A faithful slice of a real SO's reconstructed lines (job 421473 dump), with the
@@ -152,3 +154,22 @@ def test_build_transmittal_data_end_to_end():
 def test_warns_when_om_but_no_imi():
     d = td.build_transmittal_data(SO_473, order="421473", imi_number="")
     assert any("IMI" in w for w in d.warnings)
+
+
+def test_so_read_today_uses_watcher_state(tmp_path, monkeypatch):
+    """so_read_today reads the watcher's per-day live_state verified_at."""
+    from datetime import date
+    monkeypatch.setattr(td, "SNAPSHOT_DIR", tmp_path)
+    ref = date(2026, 6, 29)
+    # No state file yet -> not read today, no timestamp.
+    assert td.so_read_today("421693", ref) is False
+    assert td.so_last_verified("421693", ref) is None
+    # Watcher verified it earlier today -> read today.
+    (tmp_path / "live_state_2026-06-29.json").write_text(json.dumps({
+        "421693": {"verified_at": "2026-06-29T08:15:00"},
+        "421800": {"verified_at": "2026-06-28T16:00:00"},   # yesterday
+    }))
+    assert td.so_read_today("421693", ref) is True
+    assert td.so_last_verified("421693", ref) == "2026-06-29T08:15:00"
+    # Verified yesterday only -> not today.
+    assert td.so_read_today("421800", ref) is False

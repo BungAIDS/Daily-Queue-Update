@@ -32,14 +32,16 @@ sit at the bottom. Nothing here sends anything — see TRANSMITTAL_MODE.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import re
 import sys
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from config import AUTOCAD_JOBS_DIR, SALES_ORDER_DIR
+from config import AUTOCAD_JOBS_DIR, SALES_ORDER_DIR, SNAPSHOT_DIR
 
 log = logging.getLogger(__name__)
 
@@ -107,6 +109,8 @@ class TransmittalData:
     so_pdf: Optional[str] = None
     folder: Optional[str] = None
     attachments: List[str] = field(default_factory=list)
+    so_verified_at: Optional[str] = None   # when the watcher last read this order's SO
+    so_read_today: bool = False            # was that read today?
     warnings: List[str] = field(default_factory=list)
 
     def warn(self, msg: str) -> None:
@@ -397,6 +401,33 @@ def find_imi_number(folder: Optional[Path]) -> str:
     return ""
 
 
+def so_last_verified(order: str, ref: Optional[date] = None) -> Optional[str]:
+    """When the watcher last read (re-verified) this order's Sales Order, from the
+    per-day live state file it writes (`verified_at`). Returns the ISO timestamp,
+    or None if the order hasn't been verified in that day's state. Reads the JSON
+    directly so this stays decoupled from the watcher's (browser) imports."""
+    ref = ref or date.today()
+    path = SNAPSHOT_DIR / f"live_state_{ref.isoformat()}.json"
+    if not path.exists():
+        return None
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    entry = state.get(str(order)) if isinstance(state, dict) else None
+    va = (entry or {}).get("verified_at") if isinstance(entry, dict) else None
+    return va or None
+
+
+def so_read_today(order: str, ref: Optional[date] = None) -> bool:
+    """True if the watcher read this order's SO today (per the recorded
+    verified_at). The transmittal should be built from a SO confirmed current
+    today, so a False here is a warning to refresh the order first."""
+    ref = ref or date.today()
+    va = so_last_verified(order, ref)
+    return bool(va) and va[:10] == ref.isoformat()
+
+
 def find_so_pdf(job: str) -> Optional[Path]:
     """The latest archived Sales Order PDF for a job (SALES_ORDER_DIR/<job>/…).
 
@@ -464,6 +495,15 @@ def gather(order: str, customer: str = "", flags: str = "") -> TransmittalData:
     d.folder = str(folder) if folder else None
     d.attachments = [str(p) for p in find_attachments(folder, order, imi)]
 
+    # Confirm the SO we're reading was re-read by the watcher today, so the
+    # transmittal reflects the latest revision rather than a stale download.
+    d.so_verified_at = so_last_verified(order)
+    d.so_read_today = so_read_today(order)
+    if not d.so_read_today:
+        when = d.so_verified_at or "not since the watcher last ran"
+        d.warn(f"This order's Sales Order has NOT been re-read today (last: {when}). "
+               "Re-read/refresh the order before sending so the transmittal uses the latest SO.")
+
     if not so_pdf:
         d.warn(f"No archived Sales Order PDF found under {SALES_ORDER_DIR / order}.")
     if not folder:
@@ -491,6 +531,7 @@ def _print(d: TransmittalData) -> None:
         print(f"  Attachments ({len(d.attachments)}):")
         for a in d.attachments:
             print(f"     - {a}")
+    print(f"  SO today : {'yes' if d.so_read_today else 'NO'}  (last verified: {d.so_verified_at or 'never'})")
     if d.so_pdf:
         print(f"  SO PDF   : {d.so_pdf}")
     if d.folder:
