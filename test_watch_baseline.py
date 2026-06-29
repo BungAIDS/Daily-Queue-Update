@@ -102,6 +102,26 @@ def test_normal_poll_still_logs_a_real_change():
     assert events[0]["old"] == "07/01/2026" and events[0]["new"] == "07/20/2026"
 
 
+def test_so_recheck_only_if_not_reread_today():
+    """The background SO re-verifier re-reads an order at most once a day: one
+    already re-read today is skipped; never-verified and yesterday's are queued."""
+    now = datetime(2026, 6, 25, 9, 0, 0)
+    state = {
+        "421690": {"present": True, "enriched": True, "job": {"job": "421690"},
+                   "verified_at": "2026-06-25T07:30:00"},   # already today -> skip
+        "421691": {"present": True, "enriched": True, "job": {"job": "421691"},
+                   "verified_at": "2026-06-24T16:00:00"},   # yesterday -> queue
+        "421692": {"present": True, "enriched": True, "job": {"job": "421692"},
+                   "verified_at": ""},                       # never -> queue
+    }
+    with mock.patch.object(watch, "SO_REVERIFY_PER_POLL", 5):
+        n = watch._queue_stale_so_rechecks(state, now)
+    assert n == 2
+    assert state["421690"]["enriched"] is True              # not re-read again today
+    assert state["421691"]["enriched"] is False             # flagged for re-read
+    assert state["421692"]["enriched"] is False             # flagged for re-read
+
+
 def main() -> int:
     passed = 0
     for name, fn in sorted(globals().items()):
