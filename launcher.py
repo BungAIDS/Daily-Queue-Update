@@ -486,6 +486,7 @@ class LauncherApp(tk.Tk):
 
         self.actions = base_actions()
         self.actions_by_id = {a.id: a for a in self.actions}
+        self._exclusion_args = self._compute_exclusion_args()
         self.processes: dict[str, ProcessInfo] = {}
         self.external_running: set[str] = set()
         self.last_exit: dict[str, int] = {}
@@ -794,7 +795,10 @@ class LauncherApp(tk.Tk):
         return command
 
     def _command_text(self, command: Iterable[str]) -> str:
-        return " ".join(shlex.quote(str(part)) for part in command)
+        # Render the way subprocess actually builds the command line on
+        # Windows, so the preview, confirm dialog, and log header all show a
+        # runnable command rather than posix-style single-quoting.
+        return subprocess.list2cmdline([str(part) for part in command])
 
     def _update_command_preview(self) -> None:
         if not self.current_action_id:
@@ -1032,14 +1036,44 @@ class LauncherApp(tk.Tk):
             return []
         return [line.lower() for line in output.splitlines() if line.strip()]
 
+    def _compute_exclusion_args(self) -> dict[str, set[str]]:
+        """Args that disqualify a command line from matching an action.
+
+        Some actions share a script and differ only by default args (e.g.
+        the all-day ``watch`` vs. the one-shot ``watch.py --once``). When
+        scanning external processes we match by script name, so without this
+        a ``--once`` run would light up the long-running ``watch`` action.
+        For each action we collect the default args used by *other* actions
+        on the same script but not by this one.
+        """
+        by_script: dict[str, list[LauncherAction]] = {}
+        for action in self.actions:
+            if action.script:
+                by_script.setdefault(Path(action.script).name.lower(), []).append(action)
+        exclusion: dict[str, set[str]] = {}
+        for action in self.actions:
+            if not action.script:
+                continue
+            own = set(action.default_args)
+            siblings = by_script.get(Path(action.script).name.lower(), [])
+            others = {arg for sib in siblings if sib.id != action.id for arg in sib.default_args}
+            exclusion[action.id] = {a.lower() for a in others - own}
+        return exclusion
+
     def _refresh_external_status(self, schedule: bool = True) -> None:
         running: set[str] = set()
         process_lines = self._running_python_command_lines()
         for action in self.actions:
             if not action.long_running or not action.script or self._is_running(action.id):
                 continue
-            if any(process_line_matches_script(line, action.script) for line in process_lines):
+            exclude = self._exclusion_args.get(action.id, set())
+            for line in process_lines:
+                if not process_line_matches_script(line, action.script):
+                    continue
+                if any(token in line for token in exclude):
+                    continue
                 running.add(action.id)
+                break
         self.external_running = running
         self._update_all_statuses()
         if schedule:
