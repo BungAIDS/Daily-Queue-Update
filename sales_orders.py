@@ -197,12 +197,15 @@ def _find_autocad_folders(job_numbers: List[str], deep: bool = True) -> Dict[str
 
     def _record(job: str, folder: Path, jtype: str) -> None:
         info: Dict[str, Any] = {"type": jtype, "path": folder,
-                                "dwg_extras": {}, "dwg_missing_std": False}
+                                "dwg_extras": {}, "dwg_missing_std": False, "imi": ""}
         try:  # live scan of this job's custom DWGs (names only — never opens a file)
             names = [f.name for f in folder.glob("*") if f.is_file()]
             rec = autocad_scan.build_record(job, jtype, str(folder),
                                             autocad_scan.scan_files(names, job))
             info["dwg_extras"], info["dwg_missing_std"] = rec["extras"], rec["missing_std"]
+            # The O&M manual number for the transmittal (a file like IMI-HD_A4).
+            info["imi"] = next((Path(n).stem for n in names
+                                if re.match(r"IMI[-_]", n, re.I)), "")
         except OSError as e:
             log.warning("  could not scan DWGs for %s (%s)", job, e)
         out[job] = info
@@ -278,6 +281,7 @@ def refresh_autocad_folders(jobs: List[Dict[str, Any]]) -> int:
         j["job_folder"] = str(info["path"])
         j["dwg_extras"] = info.get("dwg_extras", {})
         j["dwg_missing_std"] = info.get("dwg_missing_std", False)
+        j["so_imi"] = info.get("imi", "")
         n += 1
     return n
 
@@ -396,7 +400,10 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
     res = {"design_desc": "", "size": "", "arrangement": "", "motor_pos": "", "fan_class": "",
            "rotation": "", "discharge": "", "pct_width": "", "wheel_type": "", "temp": "",
            "design_temp": "", "max_temp": "", "special_temp": "0",
-           "header_co": None, "co_history": [], "line_items": []}
+           "header_co": None, "co_history": [], "line_items": [],
+           # Transmittal fields (see transmittal_data.py): who the drawings go to,
+           # the customer P.O. #, and whether the order is released for production.
+           "emails": [], "customer_po": "", "released": False}
     try:
         import pdfplumber
     except ImportError:
@@ -443,6 +450,13 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
             # the "Additional Features"-style lines — normalized + tagged so
             # orders can be looked up by what's on them (see line_items.py).
             res["line_items"] = line_items.extract_items(recon_all)
+            # Transmittal fields off the same reconstructed text: recipient emails
+            # (Additional Features / Notes -> "E-Mail Prints to:"), the customer
+            # P.O. #, and the released-for-production status.
+            import transmittal_data as _td
+            res["emails"] = _td.parse_emails(recon_all)
+            res["customer_po"] = _td.parse_po(recon_all)
+            res["released"] = _td.parse_approval(recon_all)[1]
             # Special temperature rating from the "Suitable for <temp>" phrase.
             raw_all = "\n".join((page.extract_text() or "") for page in pdf.pages)
             mt = TEMP_RE.search(raw_all)
@@ -812,6 +826,10 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2,
         j["so_max_temp"] = parsed.get("max_temp", "")
         j["so_special_temp"] = parsed.get("special_temp", "") if pdf else ""
         j["so_pdf"] = pdf or ""
+        # Transmittal data carried on every order so it lives in the master.
+        j["so_emails"] = parsed.get("emails", [])
+        j["so_po"] = parsed.get("customer_po", "")
+        j["so_released"] = bool(parsed.get("released", False))
         if pdf:
             n_dl += 1
 
@@ -832,12 +850,14 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2,
             j["job_folder"] = str(info["path"])
             j["dwg_extras"] = info.get("dwg_extras", {})
             j["dwg_missing_std"] = info.get("dwg_missing_std", False)
+            j["so_imi"] = info.get("imi", "")
         else:
             j["job_type"] = ""
             # Fall back to the SO archive folder when there's no AutoCAD folder yet.
             j["job_folder"] = str(SALES_ORDER_DIR / jn) if pdf else ""
             j["dwg_extras"] = {}
             j["dwg_missing_std"] = False
+            j["so_imi"] = ""
 
         # Construction / quote run: presence alone flags a highly-custom fan.
         # Gather every run into the job's Quote-Runs archive — the modal

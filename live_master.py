@@ -133,6 +133,8 @@ _ENRICHMENT_KEEP = (
     "has_drive_run", "drive_run_pdf", "drive_run_count", "drive_run_rev",
     "drive_run", "drive_run_summary", "drive_run_template",
     "job_type", "job_folder", "dwg_extras", "dwg_missing_std",
+    # Transmittal fields — keep them too so a failed SO re-fetch can't blank them.
+    "so_emails", "so_po", "so_released", "so_imi",
 )
 
 
