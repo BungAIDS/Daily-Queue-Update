@@ -50,6 +50,18 @@ log = logging.getLogger(__name__)
 _SEND_HARD_DISABLED = True
 
 
+def _popup(title: str, message: str) -> None:
+    """Show a blocking notice the engineer can't miss: a native Windows message
+    box, with a console banner as the fallback (and always printed too)."""
+    print(f"\n*** {title}: {message} ***\n")
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(0, message, title, 0x30)  # MB_ICONWARNING, blocks on OK
+        except Exception:  # noqa: BLE001 - never let a popup failure stop the run
+            pass
+
+
 # --------------------------------------------------------------------------- #
 # Session / navigation (mirrors scraper.py's saved-session pattern)            #
 # --------------------------------------------------------------------------- #
@@ -434,6 +446,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         for w in data.warnings:
             print(f"  ! {w}")
         return 1
+
+    # Motor prints aren't attached automatically yet — warn loudly so the engineer
+    # attaches the motor print by hand when the SO calls for it.
+    if data.fan_checklist.get("motor_prints"):
+        _popup("Motor print not attached",
+               "This order has Motor Prints checked on the Sales Order, but automatic "
+               "motor-print attachment isn't supported yet. Attach the motor print "
+               "manually before sending if it's needed.")
 
     # Fill the transmittal Word doc and attach it FIRST, ahead of the drawings —
     # the process attaches the filled transmittal along with the files.
