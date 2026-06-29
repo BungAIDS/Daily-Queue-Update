@@ -62,20 +62,33 @@ def _require_session() -> None:
 
 
 def _click_email_drawings_link(page) -> bool:
-    """From the CBC landing page, reach the Email Drawings form by following the
-    'Email Drawings' nav link (under Engineering). The link lives in the DOM even
-    when its menu isn't hovered, so we read its href and navigate, falling back
-    to a JS click for __doPostBack-style links. Returns True on success."""
+    """Fallback for instances where EMAIL_DRAWINGS_URL isn't set: reach the form
+    by following the 'Email Drawings' nav link. Reads the link's href straight
+    from the DOM (more reliable than an accessibility-role lookup against a
+    hover menu) and navigates; falls back to a JS click for __doPostBack links."""
     try:
-        link = page.get_by_role("link", name="Email Drawings", exact=True).first
-        href = link.get_attribute("href")
-    except Exception:  # noqa: BLE001 - link not found
+        href = page.evaluate(
+            """() => {
+                const a = Array.from(document.querySelectorAll('a'))
+                    .find(x => (x.innerText || x.textContent || '').trim() === 'Email Drawings');
+                return a ? (a.getAttribute('href') || '') : null;
+            }"""
+        )
+    except Exception:  # noqa: BLE001
+        href = None
+    if href is None:
         return False
     try:
         if href and not href.lower().startswith("javascript"):
             page.goto(urljoin(page.url, href), wait_until="domcontentloaded", timeout=30000)
         else:
-            link.evaluate("el => el.click()")  # bypasses menu-hover visibility
+            page.evaluate(
+                """() => {
+                    const a = Array.from(document.querySelectorAll('a'))
+                        .find(x => (x.innerText || x.textContent || '').trim() === 'Email Drawings');
+                    if (a) a.click();
+                }"""
+            )
             page.wait_for_load_state("domcontentloaded", timeout=30000)
         try:
             page.wait_for_load_state("networkidle", timeout=8000)

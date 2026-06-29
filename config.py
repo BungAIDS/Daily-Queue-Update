@@ -29,9 +29,12 @@ CBC_SEARCH_BUTTON = os.environ.get("CBC_SEARCH_BUTTON", "").strip()
 # intentionally inert. Leave this alone unless you are deliberately enabling
 # sends and have re-instated the submit code in email_drawings.py.
 TRANSMITTAL_MODE = (os.environ.get("TRANSMITTAL_MODE", "preview").strip().lower() or "preview")
-# The CBC Insider "Email Drawings" page URL (Engineering -> Email Drawings). Set
-# in .env once you know it; the probe can also be pointed straight at it.
-EMAIL_DRAWINGS_URL = (os.environ.get("EMAIL_DRAWINGS_URL") or "").strip()
+# The CBC Insider "Email Drawings" page URL (Engineering -> Email Drawings).
+# Defaults to the known transmittal page so the tooling navigates straight there
+# without having to hunt for the nav link (which is in a hover menu and flaky to
+# click). Override in .env if your instance differs.
+EMAIL_DRAWINGS_URL = (os.environ.get("EMAIL_DRAWINGS_URL")
+                      or "https://www.cbcinsider.com/intranet/engineering/transmittal.aspx").strip()
 # Optional CSS-selector overrides for the Email Drawings flow, filled in after
 # running `python email_drawings.py --probe`. Blank => unknown / not set.
 # The flow is TWO pages:
