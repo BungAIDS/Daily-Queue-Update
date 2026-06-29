@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -26,11 +26,9 @@ import config
 
 config.SNAPSHOT_DIR = Path(tempfile.mkdtemp())
 
-import line_items  # noqa: E402
 import watch  # noqa: E402
 
 NOW = datetime(2026, 6, 25, 9, 0, 0)
-TODAY = NOW.date()
 
 
 def _master_one_order() -> dict:

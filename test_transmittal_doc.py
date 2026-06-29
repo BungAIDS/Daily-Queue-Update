@@ -5,6 +5,7 @@ box; here we lock the semantic plan it consumes.
 """
 from __future__ import annotations
 
+import sys
 from datetime import date
 
 import engineers
@@ -65,3 +66,18 @@ def test_default_out_path_naming():
     p = doc.default_out_path("421693")
     assert p.name == "421693 DWG TRANSMITTAL-01.doc"
     assert p.parent.name == "421693"
+
+
+def main() -> int:
+    passed = 0
+    for name, fn in sorted(globals().items()):
+        if name.startswith("test_") and callable(fn):
+            fn()
+            print(f"  ok  {name}")
+            passed += 1
+    print(f"\n{passed} tests passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

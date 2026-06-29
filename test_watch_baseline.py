@@ -27,7 +27,6 @@ import config
 config.SNAPSHOT_DIR = Path(tempfile.mkdtemp())
 
 import change_log  # noqa: E402  (after SNAPSHOT_DIR is redirected)
-import live_master  # noqa: E402
 import live_state  # noqa: E402
 import watch  # noqa: E402
 

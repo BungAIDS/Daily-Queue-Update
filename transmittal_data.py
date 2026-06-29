@@ -39,7 +39,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from config import AUTOCAD_JOBS_DIR, SALES_ORDER_DIR, SNAPSHOT_DIR
 

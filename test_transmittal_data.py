@@ -7,6 +7,9 @@ the field mapping decoded from those documents.
 from __future__ import annotations
 
 import json
+import sys
+import tempfile
+from pathlib import Path
 
 import transmittal_data as td
 
@@ -168,20 +171,41 @@ def test_warns_when_om_but_no_imi():
     assert any("IMI" in w for w in d.warnings)
 
 
-def test_so_read_today_uses_watcher_state(tmp_path, monkeypatch):
+def test_so_read_today_uses_watcher_state():
     """so_read_today reads the watcher's per-day live_state verified_at."""
     from datetime import date
-    monkeypatch.setattr(td, "SNAPSHOT_DIR", tmp_path)
-    ref = date(2026, 6, 29)
-    # No state file yet -> not read today, no timestamp.
-    assert td.so_read_today("421693", ref) is False
-    assert td.so_last_verified("421693", ref) is None
-    # Watcher verified it earlier today -> read today.
-    (tmp_path / "live_state_2026-06-29.json").write_text(json.dumps({
-        "421693": {"verified_at": "2026-06-29T08:15:00"},
-        "421800": {"verified_at": "2026-06-28T16:00:00"},   # yesterday
-    }))
-    assert td.so_read_today("421693", ref) is True
-    assert td.so_last_verified("421693", ref) == "2026-06-29T08:15:00"
-    # Verified yesterday only -> not today.
-    assert td.so_read_today("421800", ref) is False
+    old_snapshot_dir = td.SNAPSHOT_DIR
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            tmp_path = Path(d)
+            td.SNAPSHOT_DIR = tmp_path
+            ref = date(2026, 6, 29)
+            # No state file yet -> not read today, no timestamp.
+            assert td.so_read_today("421693", ref) is False
+            assert td.so_last_verified("421693", ref) is None
+            # Watcher verified it earlier today -> read today.
+            (tmp_path / "live_state_2026-06-29.json").write_text(json.dumps({
+                "421693": {"verified_at": "2026-06-29T08:15:00"},
+                "421800": {"verified_at": "2026-06-28T16:00:00"},   # yesterday
+            }))
+            assert td.so_read_today("421693", ref) is True
+            assert td.so_last_verified("421693", ref) == "2026-06-29T08:15:00"
+            # Verified yesterday only -> not today.
+            assert td.so_read_today("421800", ref) is False
+    finally:
+        td.SNAPSHOT_DIR = old_snapshot_dir
+
+
+def main() -> int:
+    passed = 0
+    for name, fn in sorted(globals().items()):
+        if name.startswith("test_") and callable(fn):
+            fn()
+            print(f"  ok  {name}")
+            passed += 1
+    print(f"\n{passed} tests passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -21,8 +21,7 @@ from pathlib import Path
 from templates import (
     QuoteRunContext, _design_num, _rtf_to_text, match_template, parse_quote_run,
     kv_from_lines, kv_from_rows, summarize, _parse_chicago_blower,
-    D64WheelConstruction, ChicagoBlowerQtRun, QtRunText, PdfQuoteRun,
-    GenericTextRun, UnknownRun,
+    D64WheelConstruction, ChicagoBlowerQtRun, QtRunText,
 )
 
 
