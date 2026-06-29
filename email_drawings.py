@@ -146,10 +146,12 @@ def _dump_fields(page, label: str) -> None:
 import re as _re
 
 # Heuristics for auto-detecting each control by its id/name/placeholder/label.
-_ORDER_RX = _re.compile(r"order|job|\bso\b|\bwo\b|sales", _re.I)
-_ADVANCE_RX = _re.compile(r"\bgo\b|find|search|submit|lookup|continue|next|view|display|ok|enter", _re.I)
-_EMAIL_RX = _re.compile(r"email|e-?mail|recipient|\bto\b|address|send.?to", _re.I)
-_SEND_RX = _re.compile(r"send|e-?mail|submit|transmit", _re.I)
+_ORDER_RX = _re.compile(r"order|job|search|\bso\b|\bwo\b|sales", _re.I)
+_ADVANCE_RX = _re.compile(r"\bgo\b|find|search|lookup|open\s*order|continue|next|view|display|\bok\b", _re.I)
+# The recipients box (e.g. #MainContent_txtTo) — match a trailing/standalone
+# "to", "recipient", "email", "mail to". NOT the body textarea.
+_RECIP_RX = _re.compile(r"recipient|e-?mail|mail\s*to|send\s*to|txt_?to|to\b|address", _re.I)
+_SEND_RX = _re.compile(r"send|transmit", _re.I)
 
 
 def _detect(page) -> dict:
@@ -183,12 +185,16 @@ def _detect(page) -> dict:
     )
 
 
-def _pick(cands: list, rx) -> Optional[str]:
-    """First candidate whose description matches rx, else the first candidate."""
+def _pick(cands: list, rx, fallback: bool = True) -> Optional[str]:
+    """First candidate whose description matches rx. Falls back to the first
+    candidate only when `fallback` is True (off for fields where a wrong guess —
+    e.g. grabbing the body textarea as the recipients box — is worse than none)."""
     for c in cands:
         if rx.search(c.get("desc", "")):
             return c["sel"]
-    return cands[0]["sel"] if cands else None
+    if fallback:
+        return cands[0]["sel"] if cands else None
+    return None
 
 
 def _guess_page1(d: dict) -> dict:
@@ -200,13 +206,16 @@ def _guess_page1(d: dict) -> dict:
 
 
 def _guess_page2(d: dict) -> dict:
-    """Best-guess selectors for the email form page."""
-    emails = EMAIL_DRAWINGS_EMAILS_SELECTOR or _pick(d["textareas"], _EMAIL_RX) \
-        or _pick(d["texts"], _EMAIL_RX)
+    """Best-guess selectors for the email form page. The recipients box is a text
+    input (e.g. #MainContent_txtTo), so match texts first and never fall back to
+    the body textarea — a wrong recipients guess is worse than none."""
+    emails = (EMAIL_DRAWINGS_EMAILS_SELECTOR
+              or _pick(d["texts"], _RECIP_RX, fallback=False)
+              or _pick(d["textareas"], _RECIP_RX, fallback=False))
     return {
         "emails": emails,
         "attach": EMAIL_DRAWINGS_ATTACH_SELECTOR or (d["files"][0]["sel"] if d["files"] else None),
-        "send": EMAIL_DRAWINGS_SUBMIT_SELECTOR or _pick(d["buttons"], _SEND_RX),
+        "send": EMAIL_DRAWINGS_SUBMIT_SELECTOR or _pick(d["buttons"], _SEND_RX, fallback=False),
     }
 
 
