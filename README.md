@@ -122,6 +122,7 @@ It opens `launcher.py`, a standard-library Windows desktop app that:
 - requires confirmation before every run,
 - keeps email/send actions locked until you check **Allow email / send actions**,
 - shows a green running indicator for long-running tools such as `watch.py`,
+- blocks starting a second copy of an already-running long-running script,
 - lets you stop a launcher-started process,
 - shows live console output and writes per-run logs under `launcher_logs/`,
 - remembers last-used options in `.launcher_state.json`,

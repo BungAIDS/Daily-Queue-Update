@@ -804,6 +804,15 @@ class LauncherApp(tk.Tk):
         if self._is_running(action.id):
             messagebox.showinfo("Already running", f"{action.title} is already running from this launcher.")
             return
+        if action.long_running:
+            self._refresh_external_status(schedule=False)
+            if action.id in self.external_running:
+                messagebox.showwarning(
+                    "Already running",
+                    f"{action.title} already appears to be running outside this launcher.\n\n"
+                    "Stop that copy before starting another one.",
+                )
+                return
         if action.email_risk and not self.allow_send_var.get():
             messagebox.showwarning(
                 "Email action locked",
@@ -1034,11 +1043,13 @@ class LauncherApp(tk.Tk):
                 info = self.processes[action_id]
                 elapsed = int((datetime.now() - info.started_at).total_seconds())
                 status = f"Running ({elapsed}s)"
+                self.run_button.configure(state="disabled")
                 self.stop_button.configure(state="normal")
                 self.enter_button.configure(state="normal")
             elif action_id in self.external_running:
                 color = "#16a34a"
                 status = "Running outside launcher"
+                self.run_button.configure(state="disabled")
             elif action_id in self.last_exit:
                 code = self.last_exit[action_id]
                 color = "#2563eb" if code == 0 else "#dc2626"
