@@ -214,11 +214,40 @@ def apply_fill_word(plan: FillPlan, template: Path, out_path: Path) -> Path:
     return out_path
 
 
-def default_out_path(order: str, base_dir: Optional[Path] = None) -> Path:
-    """Where the filled transmittal is written: <base>/<order>/<order> DWG
-    TRANSMITTAL-01.doc, matching the real naming convention."""
-    base = base_dir or (Path.cwd() / "transmittal_out")
-    return base / str(order) / f"{order} DWG TRANSMITTAL-01.doc"
+def transmittal_dir(data: td.TransmittalData) -> Optional[Path]:
+    """The job's TRANSMITTAL folder (a subfolder of its AutoCAD folder) — where
+    transmittals live and usually already exists. None if the job folder is
+    unknown."""
+    return (Path(data.folder) / "TRANSMITTAL") if data.folder else None
+
+
+def existing_transmittals(tdir: Optional[Path], order: str) -> list[Path]:
+    """Any transmittal Word docs already in the TRANSMITTAL folder for this order
+    (often a semi-filled one started by hand), newest revision last."""
+    if not tdir or not tdir.exists():
+        return []
+    hits = [p for p in tdir.glob("*.doc*")
+            if "transmittal" in p.name.lower() and str(order) in p.name]
+    return sorted(hits)
+
+
+def default_out_path(order: str, data: Optional[td.TransmittalData] = None,
+                     base_dir: Optional[Path] = None) -> Path:
+    """Where the filled transmittal is written. Preferred: the job's
+    <AutoCAD folder>/TRANSMITTAL/ (the real home). Non-destructive — if
+    '<order> DWG TRANSMITTAL-01.doc' already exists (e.g. a semi-filled one),
+    the revision number is bumped (-02, -03, …) so existing work is never
+    overwritten. Falls back to ./transmittal_out/<order>/ when the job folder
+    isn't known."""
+    tdir = transmittal_dir(data) if data is not None else None
+    if tdir is None:
+        tdir = (Path(base_dir) / str(order)) if base_dir else (Path.cwd() / "transmittal_out" / str(order))
+    target = tdir / f"{order} DWG TRANSMITTAL-01.doc"
+    rev = 1
+    while target.exists():
+        rev += 1
+        target = tdir / f"{order} DWG TRANSMITTAL-{rev:02d}.doc"
+    return target
 
 
 def fill_transmittal(
@@ -229,11 +258,14 @@ def fill_transmittal(
     out_path: Optional[Path] = None,
     today: Optional[date] = None,
 ) -> Tuple[Path, FillPlan]:
-    """Gather-to-doc convenience: build the plan and (on Windows) write the doc.
-    Returns (out_path, plan)."""
+    """Gather-to-doc convenience: build the plan and (on Windows) write the doc
+    into the job's TRANSMITTAL folder. Returns (out_path, plan)."""
     initials = initials or engineers.signature_for_user()
     plan = plan_fill(data, initials, today=today)
-    out = out_path or default_out_path(data.order)
+    # Surface (but never clobber) a semi-filled transmittal already in the folder.
+    for p in existing_transmittals(transmittal_dir(data), data.order):
+        plan.warnings.append(f"Existing transmittal in the folder (left as-is): {p.name}")
+    out = out_path or default_out_path(data.order, data=data)
     apply_fill_word(plan, template, out)
     return out, plan
 
@@ -276,7 +308,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.plan_only:
         return 0
 
-    out = Path(args.out) if args.out else default_out_path(args.order)
+    out = Path(args.out) if args.out else default_out_path(args.order, data=data)
     try:
         apply_fill_word(plan, TEMPLATE_PATH, out)
         print(f"\nWrote: {out}")
