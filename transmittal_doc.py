@@ -231,23 +231,27 @@ def existing_transmittals(tdir: Optional[Path], order: str) -> list[Path]:
     return sorted(hits)
 
 
+# Our generated transmittals go in their own subfolder of the job's TRANSMITTAL
+# folder, so they never collide with the hand-made / semi-filled docs sitting
+# alongside. ("for now" — a clean separation while this is being validated.)
+GENERATED_SUBDIR = "AUTO-GENERATED"
+
+
 def default_out_path(order: str, data: Optional[td.TransmittalData] = None,
                      base_dir: Optional[Path] = None) -> Path:
-    """Where the filled transmittal is written. Preferred: the job's
-    <AutoCAD folder>/TRANSMITTAL/ (the real home). Non-destructive — if
-    '<order> DWG TRANSMITTAL-01.doc' already exists (e.g. a semi-filled one),
-    the revision number is bumped (-02, -03, …) so existing work is never
-    overwritten. Falls back to ./transmittal_out/<order>/ when the job folder
-    isn't known."""
+    """Where the filled transmittal is written: the job's
+    <AutoCAD folder>/TRANSMITTAL/AUTO-GENERATED/<order> DWG TRANSMITTAL-01.doc —
+    a dedicated subfolder so our output never clashes with the hand-made docs in
+    the TRANSMITTAL folder. Falls back to ./transmittal_out/<order>/ when the job
+    folder isn't known. Always the same name (overwrites our own prior run)."""
     tdir = transmittal_dir(data) if data is not None else None
-    if tdir is None:
-        tdir = (Path(base_dir) / str(order)) if base_dir else (Path.cwd() / "transmittal_out" / str(order))
-    target = tdir / f"{order} DWG TRANSMITTAL-01.doc"
-    rev = 1
-    while target.exists():
-        rev += 1
-        target = tdir / f"{order} DWG TRANSMITTAL-{rev:02d}.doc"
-    return target
+    if tdir is not None:
+        tdir = tdir / GENERATED_SUBDIR
+    elif base_dir:
+        tdir = Path(base_dir) / str(order)
+    else:
+        tdir = Path.cwd() / "transmittal_out" / str(order)
+    return tdir / f"{order} DWG TRANSMITTAL-01.doc"
 
 
 def fill_transmittal(
