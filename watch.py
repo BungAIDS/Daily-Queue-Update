@@ -116,17 +116,11 @@ def _queue_stale_so_rechecks(state: dict, now: datetime) -> int:
     """Round-robin background re-verification: flag the few on-board orders we've
     gone longest without re-checking for a fresh Sales-Order fetch this poll, so a
     silently-stale SO (e.g. one left at an old revision by an earlier failed
-    fetch) self-corrects, and the transmittal fields read off the SO (emails,
-    P.O., released, IMI) stay current.
-
-    Re-read at most ONCE PER DAY per order: an order whose SO was already re-read
-    today is skipped, so we don't re-open the same order repeatedly. Bounded by
-    SO_REVERIFY_PER_POLL and skips repair orders; the SO_REVERIFY_MIN_AGE_MIN
-    guard still avoids re-reading something done minutes ago (e.g. just after
-    midnight). Returns how many were queued."""
+    fetch) self-corrects within the hour instead of waiting for the next daily
+    run. Bounded by SO_REVERIFY_PER_POLL; skips repair orders and ones re-checked
+    within SO_REVERIFY_MIN_AGE_MIN. Returns how many were queued."""
     if SO_REVERIFY_PER_POLL <= 0:
         return 0
-    today = now.date().isoformat()
     cutoff = (now - timedelta(minutes=SO_REVERIFY_MIN_AGE_MIN)).isoformat(timespec="seconds")
     cands = []
     for jn, e in state.items():
@@ -135,10 +129,8 @@ def _queue_stale_so_rechecks(state: dict, now: datetime) -> int:
         if _is_repair_order(jn):
             continue
         va = e.get("verified_at") or ""
-        if va[:10] == today:
-            continue                       # SO already re-read today — skip
         if va and va > cutoff:
-            continue                       # re-read very recently (across midnight)
+            continue                       # re-checked recently enough
         cands.append((va, jn))             # "" (never verified) sorts first -> oldest
     cands.sort()
     queued = [jn for _, jn in cands[:SO_REVERIFY_PER_POLL]]
@@ -426,12 +418,11 @@ def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce
                 repriced += 1
         if repriced:
             log.info("%d order(s) changed price (possible change order) — re-fetching their SO.", repriced)
-        # Background round-robin: re-verify the few orders whose SO hasn't been
-        # re-read today, so a silently-stale Sales Order self-corrects and the
-        # transmittal fields stay current — at most once per order per day.
+        # Background round-robin: re-verify the few longest-unchecked orders so a
+        # silently-stale Sales Order self-corrects within the hour.
         n_recheck = _queue_stale_so_rechecks(state, now)
         if n_recheck:
-            log.info("Re-reading the SO for %d on-board order(s) not yet re-read today.", n_recheck)
+            log.info("Re-verifying %d on-board order(s) we hadn't re-checked recently.", n_recheck)
 
     enriched_now = _enrich_pending(state)
     # Stamp when each order was last verified, so the round-robin re-check cycles
