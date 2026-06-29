@@ -187,13 +187,19 @@ def apply_fill_word(plan: FillPlan, template: Path, out_path: Path) -> Path:
     (kept as .doc). Windows + Word only."""
     import win32com.client  # lazy: only needed on the Windows box that fills docs
 
+    template = Path(template).resolve()
+    if not template.exists():
+        raise FileNotFoundError(
+            f"Transmittal template not found: {template}. It ships with the code "
+            "(DWG TRANSMITTAL MASTER.doc) — make sure you pulled the latest branch."
+        )
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     word = win32com.client.Dispatch("Word.Application")
     word.Visible = False
     doc = None
     try:
-        doc = word.Documents.Open(str(Path(template).resolve()))
+        doc = word.Documents.Open(str(template))
         _fill_to_block(doc, plan.to_emails)
         _set_paragraph_value(doc, "DATE:", plan.date)
         _set_paragraph_value(doc, "CBC ORDER #:", plan.order)
