@@ -180,21 +180,31 @@ def parse_po(lines: List[str]) -> str:
     return ""
 
 
+def _sold_to_only(t: str) -> str:
+    """The Sold To half of a 'Sold To  Ship To' line that table extraction glued
+    together. The two names sit side by side and usually start the same way, so
+    we cut at the second occurrence of the first word ('JOHN ZINK COMPANY LLC
+    JOHN ZINK COMPANY' -> 'JOHN ZINK COMPANY LLC'). Exact-halves and no-repeat
+    lines fall through unchanged."""
+    words = t.split()
+    if len(words) >= 2:
+        for p in range(1, len(words)):
+            if words[p] == words[0]:
+                return " ".join(words[:p])
+    return t
+
+
 def parse_customer(lines: List[str]) -> str:
     """Customer from the 'Sold To:' line that follows the 'Sold To: Ship To:'
-    header. Sold To and Ship To sit side by side and are usually identical, so we
-    take the first half when the line is two equal halves, else the whole line."""
+    header. Sold To and Ship To sit side by side, so we keep only the Sold To
+    name (see _sold_to_only)."""
     for i, ln in enumerate(lines):
         if re.match(r"\s*sold\s+to\s*:", ln, re.IGNORECASE):
             for nxt in lines[i + 1:i + 3]:
                 t = nxt.strip()
                 if not t:
                     continue
-                half = len(t) // 2
-                left, right = t[:half].strip(), t[half:].strip()
-                if left and left == right:
-                    return left
-                return t
+                return _sold_to_only(t)
             break
     return ""
 

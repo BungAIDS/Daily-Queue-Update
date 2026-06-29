@@ -121,27 +121,25 @@ def _set_paragraph_value(doc, label_substr: str, value: str) -> bool:
 
 
 def _fill_to_block(doc, emails: List[str]) -> None:
-    """Place recipient emails one-per-line into the TO block: the 'TO:' paragraph
-    plus the placeholder 'xxx' lines beneath it."""
-    paras = list(doc.Paragraphs)
-    for i, para in enumerate(paras):
+    """Put every recipient on the TO line (one per line, as line breaks within the
+    one paragraph), then DELETE the leftover 'xxx' placeholder lines so no unused
+    placeholders remain."""
+    linebreak = chr(11)  # vertical tab = a line break inside the paragraph
+    to_text = ("TO: " + linebreak.join(emails)) if emails else "TO:"
+    for para in doc.Paragraphs:
         if para.Range.Text.strip().lower().startswith("to:"):
-            first = emails[0] if emails else ""
             r = para.Range
-            r.End = r.End - 1
-            r.Text = f"TO: {first}".rstrip()
-            # The following placeholder lines ('xxx') take the remaining emails;
-            # any left over are cleared to blank.
-            rest = emails[1:]
-            j = i + 1
-            while j < len(paras) and paras[j].Range.Text.strip().lower() in ("xxx", ""):
-                r2 = paras[j].Range
-                r2.End = r2.End - 1
-                r2.Text = rest.pop(0) if rest else ""
-                if not rest and paras[j].Range.Text.strip() == "":
-                    break
-                j += 1
-            return
+            r.End = r.End - 1            # exclude the trailing paragraph mark
+            r.Text = to_text
+            break
+    # Remove the placeholder 'xxx' lines (the TO block's only standalone 'xxx'
+    # paragraphs — "BY: xxx" is "by: xxx", not a match). Bottom-up so the
+    # collection indices stay valid as we delete.
+    paras = doc.Paragraphs
+    for k in range(paras.Count, 0, -1):
+        p = paras(k)
+        if p.Range.Text.strip().lower() == "xxx":
+            p.Range.Delete()
 
 
 def _check_box(doc, box_index: int) -> None:

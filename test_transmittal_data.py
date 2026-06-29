@@ -76,6 +76,18 @@ def test_customer_from_sold_to():
     assert td.parse_customer(SO_473) == "INNO-VENT INDUSTRIAL INC."
 
 
+def test_customer_dedupes_unequal_sold_ship():
+    # Real 421693 case: Sold To has 'LLC', Ship To doesn't — keep only Sold To.
+    lines = ["Sold To: Ship To:",
+             "JOHN ZINK COMPANY LLC JOHN ZINK COMPANY"]
+    assert td.parse_customer(lines) == "JOHN ZINK COMPANY LLC"
+
+
+def test_customer_no_repeat_passes_through():
+    lines = ["Sold To: Ship To:", "ACME CORP"]
+    assert td.parse_customer(lines) == "ACME CORP"
+
+
 def test_design():
     assert td.parse_design(SO_473) == ("16A", "SW")
     assert td.parse_design(["Design 1904 PFD"]) == ("1904", "PFD")
