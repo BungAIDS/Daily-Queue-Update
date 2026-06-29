@@ -143,17 +143,85 @@ def _dump_fields(page, label: str) -> None:
         print(f"  {f['tag']:<7} type={f['type']:<9} {sel:<36} {descr}")
 
 
-def _advance_to_form(page, order: str) -> bool:
-    """Page 1 -> page 2: type the order # and submit. Returns True if it tried
-    (i.e. the order # selector is configured). Clicks the configured advance
-    control, or presses Enter if none is set."""
-    if not EMAIL_DRAWINGS_ORDER_SELECTOR:
+import re as _re
+
+# Heuristics for auto-detecting each control by its id/name/placeholder/label.
+_ORDER_RX = _re.compile(r"order|job|\bso\b|\bwo\b|sales", _re.I)
+_ADVANCE_RX = _re.compile(r"\bgo\b|find|search|submit|lookup|continue|next|view|display|ok|enter", _re.I)
+_EMAIL_RX = _re.compile(r"email|e-?mail|recipient|\bto\b|address|send.?to", _re.I)
+_SEND_RX = _re.compile(r"send|e-?mail|submit|transmit", _re.I)
+
+
+def _detect(page) -> dict:
+    """Return the page's candidate controls with a computed CSS selector for
+    each (prefer #id, else tag[name=...]). Visible elements only, so hidden
+    ASP.NET state fields and off-screen menu links are ignored."""
+    return page.evaluate(
+        r"""() => {
+            const visible = el => !!(el.offsetParent || el.getClientRects().length);
+            const sel = el => {
+                if (el.id) return '#' + CSS.escape(el.id);
+                const n = el.getAttribute('name');
+                if (n) return el.tagName.toLowerCase() + '[name="' + n + '"]';
+                return null;
+            };
+            const desc = el => ((el.getAttribute('placeholder') || '') + ' ' +
+                                (el.getAttribute('aria-label') || '') + ' ' +
+                                (el.id || '') + ' ' + (el.getAttribute('name') || '') + ' ' +
+                                (el.value || '') + ' ' + (el.innerText || el.textContent || '')).trim();
+            const grab = q => Array.from(document.querySelectorAll(q))
+                .filter(visible).map(el => ({sel: sel(el), desc: desc(el).slice(0, 80),
+                                             type: (el.getAttribute('type') || '').toLowerCase()}))
+                .filter(o => o.sel);
+            return {
+                texts: grab('input:not([type]), input[type=text], input[type=search], input[type=number]'),
+                textareas: grab('textarea'),
+                files: grab('input[type=file]'),
+                buttons: grab('button, input[type=submit], input[type=button]'),
+            };
+        }"""
+    )
+
+
+def _pick(cands: list, rx) -> Optional[str]:
+    """First candidate whose description matches rx, else the first candidate."""
+    for c in cands:
+        if rx.search(c.get("desc", "")):
+            return c["sel"]
+    return cands[0]["sel"] if cands else None
+
+
+def _guess_page1(d: dict) -> dict:
+    """Best-guess selectors for the order-lookup page."""
+    return {
+        "order": EMAIL_DRAWINGS_ORDER_SELECTOR or _pick(d["texts"], _ORDER_RX),
+        "advance": EMAIL_DRAWINGS_ORDER_SUBMIT_SELECTOR or _pick(d["buttons"], _ADVANCE_RX),
+    }
+
+
+def _guess_page2(d: dict) -> dict:
+    """Best-guess selectors for the email form page."""
+    emails = EMAIL_DRAWINGS_EMAILS_SELECTOR or _pick(d["textareas"], _EMAIL_RX) \
+        or _pick(d["texts"], _EMAIL_RX)
+    return {
+        "emails": emails,
+        "attach": EMAIL_DRAWINGS_ATTACH_SELECTOR or (d["files"][0]["sel"] if d["files"] else None),
+        "send": EMAIL_DRAWINGS_SUBMIT_SELECTOR or _pick(d["buttons"], _SEND_RX),
+    }
+
+
+def _advance_to_form(page, order: str, order_sel: Optional[str],
+                     advance_sel: Optional[str]) -> bool:
+    """Page 1 -> page 2: type the order # into `order_sel` and submit (click
+    `advance_sel`, or press Enter if none). Returns False if no order box is
+    known."""
+    if not order_sel:
         return False
-    page.fill(EMAIL_DRAWINGS_ORDER_SELECTOR, str(order))
-    if EMAIL_DRAWINGS_ORDER_SUBMIT_SELECTOR:
-        page.click(EMAIL_DRAWINGS_ORDER_SUBMIT_SELECTOR)
+    page.fill(order_sel, str(order))
+    if advance_sel:
+        page.click(advance_sel)
     else:
-        page.press(EMAIL_DRAWINGS_ORDER_SELECTOR, "Enter")
+        page.press(order_sel, "Enter")
     try:
         page.wait_for_load_state("networkidle", timeout=20000)
     except Exception:  # noqa: BLE001 - AJAX app may not settle
@@ -175,21 +243,46 @@ def probe(order: Optional[str] = None, headless: bool = False) -> None:
         browser = p.chromium.launch(headless=headless)
         context = browser.new_context(storage_state=str(STORAGE_STATE_PATH))
         page = context.new_page()
+        env: dict = {}
         try:
             _goto_form(page, order)
-            _dump_fields(page, "PAGE 1 (order lookup)")
-            print("\nFrom page 1, set EMAIL_DRAWINGS_ORDER_SELECTOR (the order # input) and, if a")
-            print("button — not Enter — advances, EMAIL_DRAWINGS_ORDER_SUBMIT_SELECTOR.")
+            if not EMAIL_DRAWINGS_URL:
+                env["EMAIL_DRAWINGS_URL"] = page.url
 
-            if order and _advance_to_form(page, order):
+            # Page 1: auto-detect the order box + advance control.
+            d1 = _detect(page)
+            g1 = _guess_page1(d1)
+            _dump_fields(page, "PAGE 1 (order lookup)")
+            print(f"\n  -> detected order box : {g1['order'] or '(none found)'}")
+            print(f"  -> detected advance   : {g1['advance'] or '(none — will press Enter)'}")
+            env["EMAIL_DRAWINGS_ORDER_SELECTOR"] = g1["order"] or ""
+            env["EMAIL_DRAWINGS_ORDER_SUBMIT_SELECTOR"] = g1["advance"] or ""
+
+            # Page 2: advance with the test order, then auto-detect the email form.
+            if order and _advance_to_form(page, order, g1["order"], g1["advance"]):
+                d2 = _detect(page)
+                g2 = _guess_page2(d2)
                 _dump_fields(page, "PAGE 2 (email form)")
-                print("\nFrom page 2, set EMAIL_DRAWINGS_EMAILS_SELECTOR (recipients),")
-                print("EMAIL_DRAWINGS_ATTACH_SELECTOR (the file input), and")
-                print("EMAIL_DRAWINGS_SUBMIT_SELECTOR (the Send button — recorded so we know what")
-                print("NOT to click; sending stays disabled).")
+                print(f"\n  -> detected emails box: {g2['emails'] or '(none found)'}")
+                print(f"  -> detected attach    : {g2['attach'] or '(none found)'}")
+                print(f"  -> detected Send btn  : {g2['send'] or '(none found)'}  (never auto-clicked)")
+                env["EMAIL_DRAWINGS_EMAILS_SELECTOR"] = g2["emails"] or ""
+                env["EMAIL_DRAWINGS_ATTACH_SELECTOR"] = g2["attach"] or ""
+                env["EMAIL_DRAWINGS_SUBMIT_SELECTOR"] = g2["send"] or ""
             elif order:
-                print("\n(Set EMAIL_DRAWINGS_ORDER_SELECTOR first, then re-run with --order to reach")
-                print(" page 2 and dump the email form.)")
+                print("\n(No order box detected on page 1, so couldn't advance to page 2.)")
+            else:
+                print("\n(Re-run with an order number — e.g. `--probe --order 421693` — to advance to")
+                print(" page 2 and auto-detect the email form.)")
+
+            # Hand back a ready-to-paste .env block of everything detected.
+            if env:
+                print("\n" + "=" * 64)
+                print("Suggested .env (review the detected selectors above, then paste):")
+                print("=" * 64)
+                for k, v in env.items():
+                    print(f"{k}={v}")
+                print("=" * 64)
 
             if not headless:
                 input("\nReview the open window, then press Enter to close it...")
@@ -204,11 +297,6 @@ def prepare(order: str, emails: List[str], files: List[str], headless: bool = Fa
     """Navigate, fill the order #, paste the emails (';'-joined), and attach the
     files — then stop with the form on screen for a human. Does not submit."""
     _require_session()
-    if not EMAIL_DRAWINGS_URL:
-        raise RuntimeError(
-            "EMAIL_DRAWINGS_URL is not set in .env. Run `python email_drawings.py --probe` "
-            "first, find the Email Drawings page URL + field selectors, and set them."
-        )
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
@@ -218,24 +306,27 @@ def prepare(order: str, emails: List[str], files: List[str], headless: bool = Fa
         try:
             _goto_form(page, order)
 
-            # Page 1: type the order # and advance to the email form (page 2).
-            if not _advance_to_form(page, order):
-                log.warning("EMAIL_DRAWINGS_ORDER_SELECTOR not set — could not advance to the "
-                            "email form. Run `--probe` and set the page-1 selectors first.")
+            # Page 1: type the order # and advance to the email form (page 2),
+            # using configured selectors when set, else auto-detected ones.
+            g1 = _guess_page1(_detect(page))
+            if not _advance_to_form(page, order, g1["order"], g1["advance"]):
+                log.warning("Could not find an order box to advance with. Run `--probe` to check "
+                            "the page, or set EMAIL_DRAWINGS_ORDER_SELECTOR in .env.")
 
-            if EMAIL_DRAWINGS_EMAILS_SELECTOR:
-                page.fill(EMAIL_DRAWINGS_EMAILS_SELECTOR, "; ".join(emails))
+            g2 = _guess_page2(_detect(page))
+            if g2["emails"]:
+                page.fill(g2["emails"], "; ".join(emails))
             else:
-                log.warning("EMAIL_DRAWINGS_EMAILS_SELECTOR not set — skipping emails fill.")
+                log.warning("No recipients field detected — skipping emails fill.")
 
-            if EMAIL_DRAWINGS_ATTACH_SELECTOR:
+            if g2["attach"]:
                 for f in files:
                     if Path(f).exists():
-                        page.set_input_files(EMAIL_DRAWINGS_ATTACH_SELECTOR, f)
+                        page.set_input_files(g2["attach"], f)
                     else:
                         log.warning("Attachment not found, skipping: %s", f)
             else:
-                log.warning("EMAIL_DRAWINGS_ATTACH_SELECTOR not set — skipping attachments.")
+                log.warning("No file-attach control detected — skipping attachments.")
 
             # ----------------------------------------------------------------- #
             # SEND IS HARD-DISABLED. The submit click below is intentionally     #
