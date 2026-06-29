@@ -110,12 +110,13 @@ re-running `brief.py`/`send.py` is safe and never double-counts.
 If you do not want to remember every command, run the desktop launcher:
 
 ```bat
-RunLauncher.bat
+RunLauncher.vbs
 ```
 
 It opens `launcher.py`, a standard-library Windows desktop app that:
 
-- uses `venv\Scripts\python.exe` automatically when the venv exists,
+- uses `venv\Scripts\pythonw.exe`, `.venv\Scripts\pythonw.exe`, or `pyw.exe`
+  automatically so the GUI can open without leaving a command window behind,
 - groups the scripts into Daily Run, Live Watch, Scans / Backfill, Search /
   Inspect, Transmittals, Tools, and Developer tabs,
 - requires confirmation before every run,
@@ -133,8 +134,12 @@ CreateLauncherShortcut.bat
 ```
 
 That creates **Daily Queue Launcher** on your desktop, pointing at
-`RunLauncher.bat`. The launcher state and logs are local runtime files and are
+`RunLauncher.vbs`. The launcher state and logs are local runtime files and are
 ignored by git.
+
+If you run `watch.py` from the launcher and it stops with a missing `EMAIL_TO`
+message, open `.env` and set `EMAIL_TO` first. `watch.py` validates that value
+before starting because it can send notifications during the live watch.
 
 
 ## Scheduling at 5 AM daily
@@ -323,7 +328,8 @@ toasts):
 Daily-Queue-Update/
 ├── login.py            # Run once — log in by hand, save session (no password stored)
 ├── launcher.py         # Desktop GUI launcher for running/stopping the scripts
-├── RunLauncher.bat     # Double-click launcher startup (uses venv when present)
+├── RunLauncher.vbs     # Quiet double-click launcher startup
+├── RunLauncher.bat     # Console fallback startup (uses venv/pyw when present)
 ├── CreateLauncherShortcut.bat # Creates a desktop shortcut to the launcher
 ├── main.py             # The 5 AM job — runs scrape -> brief -> send in one shot
 ├── scrape.py           # Stage 1 — scrape + diff + Excel (no AI, no email)

@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-set "TARGET=%~dp0RunLauncher.bat"
+set "TARGET=%~dp0RunLauncher.vbs"
 set "WORKDIR=%~dp0"
 set "NAME=Daily Queue Launcher.lnk"
 

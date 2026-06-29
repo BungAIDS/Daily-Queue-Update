@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import shlex
 import signal
 import subprocess
@@ -39,6 +40,12 @@ def hidden_console_kwargs() -> dict[str, Any]:
         "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
         "startupinfo": startupinfo,
     }
+
+
+def process_line_matches_script(line: str, script: str) -> bool:
+    script_name = re.escape(Path(script).name.lower())
+    pattern = rf'(?:^|[\s"\'/\\]){script_name}(?:$|[\s"\'])'
+    return bool(re.search(pattern, line.lower()))
 
 
 @dataclass(frozen=True)
@@ -944,6 +951,7 @@ class LauncherApp(tk.Tk):
             elif kind == "exit":
                 code = int(payload)
                 self.last_exit[action_id] = code
+                self.external_running.discard(action_id)
                 info = self.processes.pop(action_id, None)
                 if info:
                     info.log_file.write(f"\n[launcher] Exit code: {code}\n")
@@ -993,12 +1001,11 @@ class LauncherApp(tk.Tk):
             )
         except Exception:
             output = ""
-        low_output = output.lower()
+        process_lines = [line.lower() for line in output.splitlines() if "python" in line.lower()]
         for action in self.actions:
-            if not action.script or self._is_running(action.id):
+            if not action.long_running or not action.script or self._is_running(action.id):
                 continue
-            script_name = str(action.script).lower()
-            if script_name in low_output and "python" in low_output:
+            if any(process_line_matches_script(line, action.script) for line in process_lines):
                 running.add(action.id)
         self.external_running = running
         self._update_all_statuses()
