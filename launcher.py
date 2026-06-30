@@ -1321,7 +1321,42 @@ class LauncherApp(tk.Tk):
             ):
                 return
         self._save_state()
+        self._publish_on_close()
         self.destroy()
+
+    def _publish_on_close(self) -> None:
+        """Publish a final debug report as the launcher shuts down.
+
+        Runs on a NON-daemon thread so the window can close immediately while
+        the push still finishes — the interpreter waits for this thread before
+        exiting, and publish_report has its own timeouts so it cannot hang
+        shutdown indefinitely. Building the report is done in the worker too so
+        the close feels instant. Best effort: failures only go to the debug log.
+        """
+        self._debug(f"close: publishing debug report to {DEBUG_BRANCH}")
+        threading.Thread(target=self._publish_on_close_worker, daemon=False).start()
+
+    def _publish_on_close_worker(self) -> None:
+        try:
+            text = self._build_debug_report_text()
+        except Exception as exc:  # pragma: no cover - defensive
+            self._debug(f"close publish: could not build report: {exc!r}")
+            return
+        try:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            LOCAL_REPORT.write_text(text, encoding="utf-8")
+        except OSError:
+            pass
+        try:
+            ok, detail = git_update.publish_report(
+                text,
+                branch=DEBUG_BRANCH,
+                message=f"Launcher debug report (on close) {datetime.now():%Y-%m-%d %H:%M:%S}",
+                timeout=20,
+            )
+            self._debug(f"close publish {'ok' if ok else 'failed'}: {detail}")
+        except Exception as exc:  # pragma: no cover - defensive
+            self._debug(f"close publish error: {exc!r}")
 
 
 class GitUpdateDialog(tk.Toplevel):

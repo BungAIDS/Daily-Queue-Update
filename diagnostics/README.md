@@ -8,14 +8,16 @@ output has to reach the repo somehow — that is what this folder is for.
 
 ## How to use it
 
-1. In the launcher, click **Publish Debug Report**.
-2. That writes **`launcher_report.txt`** here (a snapshot: OS/Python info, the
-   external-status process scan — which method worked, what it saw, what it
-   detected — launcher-started processes, last exit codes, and the tail of
-   `launcher_debug.log`) and **pushes it to the `debug/launcher` branch**
-   automatically, without touching your current checkout.
-3. If the push fails (e.g. no network), the file is still saved here and can be
-   pushed by hand.
+The launcher publishes a report to the `debug/launcher` branch **automatically
+every time it is closed**, and on demand:
+
+1. In the launcher, click **Publish Debug Report** (or just close the launcher).
+2. That builds a snapshot — OS/Python info, the external-status process scan
+   (which method worked, what it saw, what it detected), launcher-started
+   processes, last exit codes, and the tail of `launcher_debug.log` — and
+   **pushes it to the `debug/launcher` branch** without touching your checkout.
+3. If the push fails (e.g. no network), a local copy is still saved under
+   `launcher_logs/` (git-ignored).
 
 It may contain process command lines and local file paths — glance over it
 before sharing.

@@ -25,14 +25,16 @@ git fetch origin debug/launcher
 git show origin/debug/launcher:diagnostics/launcher_report.txt
 ```
 
-The user produces it by clicking **Publish Debug Report** in the launcher, which
-pushes a fresh `diagnostics/launcher_report.txt` to `debug/launcher`
-automatically (git plumbing — it does not touch their checkout). The report
-contains: OS/Python info, the external-status process scan (method used / error /
-what it saw / what it detected), launcher-started processes, last exit codes, and
-the tail of `launcher_debug.log`. If it is the placeholder or stale, ask the user
-to click **Publish Debug Report** before you keep guessing. (Each publish is a
-new commit, so `git log origin/debug/launcher` shows the history of snapshots.)
+A fresh `diagnostics/launcher_report.txt` is pushed to `debug/launcher`
+automatically **every time the launcher is closed**, and on demand via the
+**Publish Debug Report** button (git plumbing — it does not touch their
+checkout). So the tip of `debug/launcher` normally reflects the end of the
+user's last session. The report contains: OS/Python info, the external-status
+process scan (method used / error / what it saw / what it detected),
+launcher-started processes, last exit codes, and the tail of
+`launcher_debug.log`. If you need a snapshot of a *current* problem, ask the user
+to click **Publish Debug Report** (or just close/reopen the launcher). Each
+publish is a new commit, so `git log origin/debug/launcher` shows the history.
 
 Notable launcher internals:
 - External "running outside the launcher" detection scans process command lines
