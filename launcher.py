@@ -1527,9 +1527,13 @@ class LauncherApp(tk.Tk):
         process_lines = [f"pid={pid} {cmd}" for pid, cmd in pairs]
         detected = sorted(self.external_running)
 
+        branch = git_update.current_branch() or "?"
+        commit = git_update.head_rev()[:10] or "?"
+
         out: list[str] = []
         out.append("# Launcher debug report")
         out.append(f"generated: {datetime.now().isoformat(timespec='seconds')}")
+        out.append(f"code version: branch {branch} @ commit {commit}")
         out.append(f"os.name: {os.name}   platform: {sys.platform}")
         out.append(f"python (launcher): {sys.executable}")
         out.append(f"python (for scripts): {self.python_path}")

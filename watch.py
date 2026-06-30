@@ -40,6 +40,7 @@ from logging.handlers import TimedRotatingFileHandler
 
 import change_log
 import engineers
+import git_update
 import line_items
 import live_master
 import live_sheets
@@ -573,6 +574,12 @@ def _install_stopfile_watcher(stop: "threading.Event") -> None:
 
 def run_watch(ignore_window: bool = False) -> int:
     setup_logging()
+    try:   # record the running code version so the published log confirms it
+        log.info("watch.py version: branch %s @ commit %s  (pid %d)",
+                 git_update.current_branch() or "?", git_update.head_rev()[:10] or "?",
+                 os.getpid())
+    except Exception:  # noqa: BLE001
+        pass
     validate_runtime_config()
     if not LIVE_WORKBOOK_PATH:
         log.warning("LIVE_WORKBOOK_PATH is not set in .env — the watcher will run "

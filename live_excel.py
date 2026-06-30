@@ -154,9 +154,15 @@ def _tuned(app):
             app.Calculate()
         except Exception:  # noqa: BLE001
             pass
-        for attr, val in saved.items():
+        # Restore to known-GOOD values, not the values seen on entry: if a prior
+        # render was force-killed mid-tune, ScreenUpdating/Calculation were left
+        # OFF (the classic "the whole Excel window went blank, but the data is
+        # there") — restoring the stuck value would keep it broken. Resetting to
+        # the normal live state self-heals it on the next successful render.
+        for attr, good in (("ScreenUpdating", True), ("EnableEvents", True),
+                           ("DisplayAlerts", True), ("Calculation", _XL_CALC_AUTOMATIC)):
             try:
-                setattr(app, attr, val)
+                setattr(app, attr, good)
             except Exception:  # noqa: BLE001
                 pass
 
