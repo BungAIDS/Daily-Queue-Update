@@ -1,0 +1,3 @@
+# Launcher debug report
+
+No report has been published yet. Click "Publish Debug Report" in the launcher.
