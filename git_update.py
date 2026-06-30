@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -195,6 +197,102 @@ def stream_git(args: list[str], on_line: Callable[[str], None]) -> int:
     for line in process.stdout:
         on_line(line)
     return process.wait()
+
+
+def _git_text(
+    args: list[str],
+    *,
+    input_text: str | None = None,
+    timeout: float | None = None,
+    env_extra: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
+    """Run git capturing output, never blocking on a credential prompt."""
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"  # fail fast instead of hanging the GUI on auth
+    if env_extra:
+        env.update(env_extra)
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(ROOT),
+        input=input_text,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        env=env,
+        **_hidden_console_kwargs(),
+    )
+
+
+def publish_report(
+    content: str,
+    *,
+    branch: str,
+    rel_path: str = "diagnostics/launcher_report.txt",
+    remote: str = DEFAULT_REMOTE,
+    message: str | None = None,
+    timeout: float = 90,
+) -> tuple[bool, str]:
+    """Commit ``content`` as ``rel_path`` onto ``branch`` and push it.
+
+    Uses git plumbing so the working tree and current checkout are never
+    touched: it writes a blob, builds a tree on top of the branch's current tip
+    (preserving the branch's other files), commits it, and pushes the new commit
+    straight to ``refs/heads/<branch>`` on ``remote``. Returns ``(ok, detail)``.
+    """
+    message = message or f"Launcher debug report {datetime.now():%Y-%m-%d %H:%M:%S}"
+
+    # Latest tip of the branch, if it already exists on the remote.
+    parent = ""
+    fetch = _git_text(["fetch", remote, branch], timeout=timeout)
+    if fetch.returncode == 0:
+        rev = _git_text(["rev-parse", "FETCH_HEAD"], timeout=15)
+        if rev.returncode == 0:
+            parent = rev.stdout.strip()
+
+    blob_res = _git_text(["hash-object", "-w", "--stdin"], input_text=content, timeout=15)
+    if blob_res.returncode != 0:
+        return False, f"hash-object failed: {blob_res.stderr.strip()}"
+    blob = blob_res.stdout.strip()
+
+    with tempfile.TemporaryDirectory() as td:
+        env_idx = {"GIT_INDEX_FILE": str(Path(td) / "index")}
+        if parent:
+            read = _git_text(["read-tree", f"{parent}^{{tree}}"], env_extra=env_idx, timeout=15)
+            if read.returncode != 0:
+                return False, f"read-tree failed: {read.stderr.strip()}"
+        upd = _git_text(
+            ["update-index", "--add", "--cacheinfo", f"100644,{blob},{rel_path}"],
+            env_extra=env_idx,
+            timeout=15,
+        )
+        if upd.returncode != 0:
+            return False, f"update-index failed: {upd.stderr.strip()}"
+        wtree = _git_text(["write-tree"], env_extra=env_idx, timeout=15)
+        if wtree.returncode != 0:
+            return False, f"write-tree failed: {wtree.stderr.strip()}"
+        tree = wtree.stdout.strip()
+
+    commit_args = ["commit-tree", tree, "-m", message]
+    if parent:
+        commit_args[2:2] = ["-p", parent]
+    # A fallback identity so commit-tree never fails on an unconfigured git.
+    identity = {
+        "GIT_AUTHOR_NAME": "Daily Queue Launcher",
+        "GIT_AUTHOR_EMAIL": "launcher@local",
+        "GIT_COMMITTER_NAME": "Daily Queue Launcher",
+        "GIT_COMMITTER_EMAIL": "launcher@local",
+    }
+    commit_res = _git_text(commit_args, env_extra=identity, timeout=15)
+    if commit_res.returncode != 0:
+        return False, f"commit-tree failed: {commit_res.stderr.strip()}"
+    commit = commit_res.stdout.strip()
+
+    push = _git_text(["push", remote, f"{commit}:refs/heads/{branch}"], timeout=timeout)
+    if push.returncode != 0:
+        return False, f"push failed: {push.stderr.strip() or push.stdout.strip()}"
+    return True, f"pushed {commit[:10]} to {remote}/{branch}"
 
 
 def run_pull_steps(steps: list[list[str]], on_line: Callable[[str], None]) -> int:

@@ -16,12 +16,23 @@ Outlook email are Windows-only and unreachable from CI / a cloud container.
 The launcher writes per-run logs to `launcher_logs/`, which is **git-ignored**
 and only exists on the user's Windows PC — you will not see it in this repo.
 
-When debugging the launcher, **read `diagnostics/launcher_report.txt`**. The
-user produces it by clicking **Export Debug Report** in the launcher and pushing
-it. It contains: OS/Python info, the external-status process scan (method used /
-error / what it saw / what it detected), launcher-started processes, last exit
-codes, and the tail of `launcher_debug.log`. If it is stale or the placeholder,
-ask the user to click **Export Debug Report** and push before you keep guessing.
+Launcher debug reports are published to a dedicated **`debug/launcher`** branch
+(kept off feature branches). When debugging the launcher, **read the latest
+report from that branch first**:
+
+```
+git fetch origin debug/launcher
+git show origin/debug/launcher:diagnostics/launcher_report.txt
+```
+
+The user produces it by clicking **Publish Debug Report** in the launcher, which
+pushes a fresh `diagnostics/launcher_report.txt` to `debug/launcher`
+automatically (git plumbing — it does not touch their checkout). The report
+contains: OS/Python info, the external-status process scan (method used / error /
+what it saw / what it detected), launcher-started processes, last exit codes, and
+the tail of `launcher_debug.log`. If it is the placeholder or stale, ask the user
+to click **Publish Debug Report** before you keep guessing. (Each publish is a
+new commit, so `git log origin/debug/launcher` shows the history of snapshots.)
 
 Notable launcher internals:
 - External "running outside the launcher" detection scans process command lines

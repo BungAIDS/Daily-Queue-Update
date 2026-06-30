@@ -125,6 +125,92 @@ def test_run_pull_steps_runs_all_on_success():
     assert len(calls) == 3
 
 
+class _FakeProc:
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def _run_publish_with(fake):
+    calls: list[list[str]] = []
+
+    def wrapper(args, *, input_text=None, timeout=None, env_extra=None):
+        calls.append(args)
+        return fake(args)
+
+    original = git_update._git_text
+    git_update._git_text = wrapper
+    try:
+        ok, detail = git_update.publish_report("report body\n", branch="debug/launcher")
+    finally:
+        git_update._git_text = original
+    return ok, detail, calls
+
+
+def test_publish_report_existing_branch_fast_forwards():
+    def fake(args):
+        if args[0] == "fetch":
+            return _FakeProc(0)
+        if args[:2] == ["rev-parse", "FETCH_HEAD"]:
+            return _FakeProc(0, "PARENTSHA\n")
+        if args[0] == "hash-object":
+            return _FakeProc(0, "BLOBSHA\n")
+        if args[0] == "write-tree":
+            return _FakeProc(0, "TREESHA\n")
+        if args[0] == "commit-tree":
+            return _FakeProc(0, "COMMITSHA\n")
+        return _FakeProc(0)
+
+    ok, detail, calls = _run_publish_with(fake)
+    assert ok, detail
+    commit = next(c for c in calls if c[0] == "commit-tree")
+    assert "-p" in commit and "PARENTSHA" in commit  # builds on the existing tip
+    assert any(c[0] == "read-tree" for c in calls)    # preserves the branch's tree
+    push = next(c for c in calls if c[0] == "push")
+    assert push[-1] == "COMMITSHA:refs/heads/debug/launcher"
+
+
+def test_publish_report_new_branch_has_no_parent():
+    def fake(args):
+        if args[0] == "fetch":
+            return _FakeProc(1, stderr="couldn't find remote ref")
+        if args[0] == "hash-object":
+            return _FakeProc(0, "BLOB\n")
+        if args[0] == "write-tree":
+            return _FakeProc(0, "TREE\n")
+        if args[0] == "commit-tree":
+            return _FakeProc(0, "COMMIT\n")
+        return _FakeProc(0)
+
+    ok, detail, calls = _run_publish_with(fake)
+    assert ok, detail
+    commit = next(c for c in calls if c[0] == "commit-tree")
+    assert "-p" not in commit                          # orphan first commit
+    assert not any(c[0] == "read-tree" for c in calls)  # nothing to base on
+
+
+def test_publish_report_reports_push_failure():
+    def fake(args):
+        if args[0] == "fetch":
+            return _FakeProc(0)
+        if args[:2] == ["rev-parse", "FETCH_HEAD"]:
+            return _FakeProc(0, "P\n")
+        if args[0] == "hash-object":
+            return _FakeProc(0, "B\n")
+        if args[0] == "write-tree":
+            return _FakeProc(0, "T\n")
+        if args[0] == "commit-tree":
+            return _FakeProc(0, "C\n")
+        if args[0] == "push":
+            return _FakeProc(1, stderr="permission denied")
+        return _FakeProc(0)
+
+    ok, detail, _calls = _run_publish_with(fake)
+    assert ok is False
+    assert "push failed" in detail and "permission denied" in detail
+
+
 def main() -> int:
     passed = 0
     for name, fn in sorted(globals().items()):

@@ -8,15 +8,19 @@ output has to reach the repo somehow — that is what this folder is for.
 
 ## How to use it
 
-1. In the launcher, click **Export Debug Report**.
-2. That writes/overwrites **`launcher_report.txt`** here with a snapshot:
-   OS/Python info, the external-status process scan (which method worked, what it
-   saw, what it detected), launcher-started processes, last exit codes, and the
-   tail of `launcher_debug.log`.
-3. Commit and push `launcher_report.txt` so it can be reviewed.
+1. In the launcher, click **Publish Debug Report**.
+2. That writes **`launcher_report.txt`** here (a snapshot: OS/Python info, the
+   external-status process scan — which method worked, what it saw, what it
+   detected — launcher-started processes, last exit codes, and the tail of
+   `launcher_debug.log`) and **pushes it to the `debug/launcher` branch**
+   automatically, without touching your current checkout.
+3. If the push fails (e.g. no network), the file is still saved here and can be
+   pushed by hand.
 
 It may contain process command lines and local file paths — glance over it
 before sharing.
 
-> This folder is tracked on purpose. `launcher_report.txt` is meant to be
-> overwritten and re-committed; git history keeps the previous snapshots.
+> The published copy lives on the **`debug/launcher`** branch, kept separate from
+> feature branches. Read the latest with:
+> `git show origin/debug/launcher:diagnostics/launcher_report.txt`. Each publish
+> is a new commit, so history keeps every snapshot.

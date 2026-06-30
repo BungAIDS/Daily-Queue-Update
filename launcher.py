@@ -34,8 +34,12 @@ DEBUG_LOG = LOG_DIR / "launcher_debug.log"
 # Tracked (committed) folder for shareable debug snapshots. launcher_logs/ is
 # git-ignored and lives only on the workstation, so "Export Debug Report" writes
 # here instead, where it can be pushed and reviewed later.
-DIAG_DIR = ROOT / "diagnostics"
-DIAG_REPORT = DIAG_DIR / "launcher_report.txt"
+# Local (git-ignored) copy for eyeballing; the shared copy is pushed to the
+# debug branch, so we keep this out of the tracked working tree.
+LOCAL_REPORT = LOG_DIR / "launcher_report.txt"
+# Dedicated branch that collects published debug reports, kept off feature
+# branches. The launcher pushes here without disturbing the working checkout.
+DEBUG_BRANCH = "debug/launcher"
 
 
 def hidden_console_kwargs() -> dict[str, Any]:
@@ -636,9 +640,9 @@ class LauncherApp(tk.Tk):
         self.clear_button.pack(side="left", padx=(8, 0))
         self.logs_button = ttk.Button(button_row, text="Open Logs Folder", command=self._open_logs_folder)
         self.logs_button.pack(side="left", padx=(8, 0))
-        self.report_button = ttk.Button(button_row, text="Export Debug Report", command=self._export_debug_report)
+        self.report_button = ttk.Button(button_row, text="Publish Debug Report", command=self._publish_debug_report)
         self.report_button.pack(side="left", padx=(8, 0))
-        ToolTip(self.report_button, "Write diagnostics/launcher_report.txt — a shareable snapshot to commit/push when debugging the launcher.")
+        ToolTip(self.report_button, f"Save diagnostics/launcher_report.txt and push it to the '{DEBUG_BRANCH}' branch for review.")
         self.refresh_button = ttk.Button(button_row, text="Refresh Status", command=lambda: self._refresh_external_status(schedule=False, verbose=True))
         self.refresh_button.pack(side="right")
         ToolTip(self.refresh_button, "Re-scan for tools running outside the launcher and show a diagnostic (also written to launcher_debug.log).")
@@ -1044,7 +1048,27 @@ class LauncherApp(tk.Tk):
                 if self.current_action_id == action_id:
                     self._append_output(line)
                 self._update_all_statuses()
+            elif kind == "publish_result":
+                self._handle_publish_result(*payload)
         self.after(100, self._drain_output)
+
+    def _handle_publish_result(self, ok: bool, detail: str) -> None:
+        self.report_button.configure(state="normal", text="Publish Debug Report")
+        if ok:
+            self._debug(f"publish ok: {detail}")
+            messagebox.showinfo(
+                "Debug report published",
+                f"Pushed the debug report to the '{DEBUG_BRANCH}' branch.\n\n{detail}\n\n"
+                "It is ready to be reviewed.",
+            )
+        else:
+            self._debug(f"publish failed: {detail}")
+            messagebox.showwarning(
+                "Could not publish report",
+                f"The report was saved locally to:\n{LOCAL_REPORT}\n\n"
+                f"but pushing to '{DEBUG_BRANCH}' failed:\n{detail}\n\n"
+                "Check your network/Git sign-in and click Publish Debug Report again.",
+            )
 
     def _render_output(self, action_id: str) -> None:
         self.output.configure(state="normal")
@@ -1178,13 +1202,8 @@ class LauncherApp(tk.Tk):
             return ["  (no debug log yet)"]
         return [f"  {line.rstrip()}" for line in tail] or ["  (debug log empty)"]
 
-    def _export_debug_report(self) -> None:
-        """Write a shareable debug snapshot to diagnostics/launcher_report.txt.
-
-        The diagnostics folder is tracked in git, so this report can be
-        committed and pushed, then read later when diagnosing launcher issues
-        (the per-run launcher_logs/ are git-ignored and never leave the PC).
-        """
+    def _build_debug_report_text(self) -> str:
+        """Build the shareable debug snapshot string (no I/O)."""
         lines, method, error = self._scan_processes()
         process_lines = [line for line in lines]
         detected = sorted(self.external_running)
@@ -1229,22 +1248,33 @@ class LauncherApp(tk.Tk):
         out.append("## Tail of launcher_debug.log (last 120 lines)")
         out.extend(self._tail_debug_log(120))
         out.append("")
+        return "\n".join(out) + "\n"
 
+    def _publish_debug_report(self) -> None:
+        """Save the debug snapshot locally and push it to the debug branch.
+
+        The per-run launcher_logs/ are git-ignored and never leave this PC, so
+        the report is published to the dedicated ``debug/launcher`` branch where
+        it can be reviewed. Pushing runs on a worker thread (git plumbing that
+        does not touch the working checkout).
+        """
+        text = self._build_debug_report_text()
         try:
-            DIAG_DIR.mkdir(parents=True, exist_ok=True)
-            DIAG_REPORT.write_text("\n".join(out) + "\n", encoding="utf-8")
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            LOCAL_REPORT.write_text(text, encoding="utf-8")
         except OSError as exc:
             messagebox.showerror("Could not write report", str(exc))
             return
-        self._debug(f"exported debug report to {DIAG_REPORT}")
-        messagebox.showinfo(
-            "Debug report exported",
-            f"Wrote:\n{DIAG_REPORT}\n\n"
-            "This file is tracked in the repo. Commit and push it (to the branch "
-            "we are working on) so it can be reviewed when debugging the launcher.\n\n"
-            "It includes process command lines and file paths — glance over it "
-            "before sharing.",
-        )
+        self._debug(f"publishing debug report to branch {DEBUG_BRANCH}")
+        self.report_button.configure(state="disabled", text="Publishing…")
+        threading.Thread(target=self._publish_worker, args=(text,), daemon=True).start()
+
+    def _publish_worker(self, text: str) -> None:
+        try:
+            ok, detail = git_update.publish_report(text, branch=DEBUG_BRANCH)
+        except Exception as exc:  # pragma: no cover - defensive
+            ok, detail = False, f"{exc.__class__.__name__}: {exc}"
+        self.output_queue.put(("__publish__", "publish_result", (ok, detail)))
 
     def _tick_status(self) -> None:
         self._update_detail_status()
