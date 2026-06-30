@@ -39,8 +39,11 @@ publish is a new commit, so `git log origin/debug/launcher` shows the history.
 Notable launcher internals:
 - External "running outside the launcher" detection scans process command lines
   via `wmic`, falling back to a PowerShell CIM query (`wmic` is removed on newer
-  Windows) and `ps` off-Windows. A grey/idle dot for something that IS running
-  usually means the scan found nothing — check the report's "method used".
+  Windows) and `ps` off-Windows. Parsing lives in the import-light `procscan.py`
+  (tested by `test_procscan.py`); the scan also captures PIDs so an external copy
+  can be force-stopped (Stop button → `taskkill`, or `stop_any` during a Git
+  Update). A grey/idle dot for something that IS running usually means the scan
+  found nothing — check the report's "method used".
 - A running Python process (watcher OR the launcher itself) keeps the code it
   loaded at startup; a `git pull` only takes effect after a restart. The Git
   Update window offers to stop *all* running programs for the update and

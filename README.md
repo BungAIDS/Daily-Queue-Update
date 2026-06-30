@@ -127,7 +127,8 @@ It opens `launcher.py`, a standard-library Windows desktop app that:
 - **Refresh Status** re-scans and shows a diagnostic of what it found; details
   are written to `launcher_logs/launcher_debug.log` if the dot looks wrong,
 - blocks starting a second copy of an already-running long-running script,
-- lets you stop a launcher-started process,
+- lets you stop a launcher-started process — and can **force-stop a copy running
+  outside the launcher** (by PID) from the Stop button,
 - shows live console output and writes per-run logs under `launcher_logs/`,
 - remembers last-used options in `.launcher_state.json`,
 - has a **Git Update…** button that opens a small window where you pick a

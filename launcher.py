@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import os
 import queue
-import re
 import shlex
 import signal
 import subprocess
@@ -25,17 +24,15 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 import git_update
+import procscan
 
 
 ROOT = Path(__file__).resolve().parent
 STATE_PATH = ROOT / ".launcher_state.json"
 LOG_DIR = ROOT / "launcher_logs"
 DEBUG_LOG = LOG_DIR / "launcher_debug.log"
-# Tracked (committed) folder for shareable debug snapshots. launcher_logs/ is
-# git-ignored and lives only on the workstation, so "Export Debug Report" writes
-# here instead, where it can be pushed and reviewed later.
-# Local (git-ignored) copy for eyeballing; the shared copy is pushed to the
-# debug branch, so we keep this out of the tracked working tree.
+# Local (git-ignored) copy of the debug report for eyeballing; the shared copy
+# is pushed to the debug branch, so we keep this out of the tracked working tree.
 LOCAL_REPORT = LOG_DIR / "launcher_report.txt"
 # Dedicated branch that collects published debug reports, kept off feature
 # branches. The launcher pushes here without disturbing the working checkout.
@@ -52,12 +49,6 @@ def hidden_console_kwargs() -> dict[str, Any]:
         "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
         "startupinfo": startupinfo,
     }
-
-
-def process_line_matches_script(line: str, script: str) -> bool:
-    script_name = re.escape(Path(script).name.lower())
-    pattern = rf'(?:^|[\s"\'/\\]){script_name}(?:$|[\s"\'])'
-    return bool(re.search(pattern, line.lower()))
 
 
 @dataclass(frozen=True)
@@ -498,6 +489,7 @@ class LauncherApp(tk.Tk):
         self.actions_by_id = {a.id: a for a in self.actions}
         self.processes: dict[str, ProcessInfo] = {}
         self.external_running: set[str] = set()
+        self.external_pids: dict[str, list[int]] = {}
         self.last_exit: dict[str, int] = {}
         self.logs: dict[str, list[str]] = {a.id: [] for a in self.actions}
         self.output_queue: queue.Queue[tuple[str, str, Any]] = queue.Queue()
@@ -943,6 +935,22 @@ class LauncherApp(tk.Tk):
                 live.append((action_id, action.title))
         return live
 
+    def stoppable_external_processes(self) -> list[tuple[str, str]]:
+        """(id, title) for external tools we have a PID for and can force-stop."""
+        return [
+            (aid, self.actions_by_id[aid].title)
+            for aid in sorted(self.external_running)
+            if aid in self.actions_by_id and self.external_pids.get(aid)
+        ]
+
+    def unstoppable_external_processes(self) -> list[str]:
+        """Titles of external tools we detected but have no PID to stop."""
+        return [
+            self.actions_by_id[aid].title
+            for aid in sorted(self.external_running)
+            if aid in self.actions_by_id and not self.external_pids.get(aid)
+        ]
+
     def relaunch_self(self) -> bool:
         """Start a fresh copy of the launcher (e.g. to run freshly pulled code).
 
@@ -978,10 +986,6 @@ class LauncherApp(tk.Tk):
         self._debug("relaunching launcher; closing this instance")
         self._save_state()
         self.destroy()
-
-    def live_external_processes(self) -> list[str]:
-        """Titles of long-running tools running outside the launcher (cannot be managed here)."""
-        return [self.actions_by_id[aid].title for aid in self.external_running if aid in self.actions_by_id]
 
     def set_pending_restart(self, action_ids: list[str]) -> None:
         """Remember (persistently) which programs to restart when the launcher reopens."""
@@ -1038,14 +1042,77 @@ class LauncherApp(tk.Tk):
         action = self.actions_by_id[self.current_action_id]
         if not info:
             if action.id in self.external_running:
-                messagebox.showinfo(
-                    "Running outside launcher",
-                    "This appears to be running outside the launcher, so I can show it as running but cannot safely stop it here.",
-                )
+                self._stop_external_interactive(action)
             return
         if not messagebox.askyesno("Confirm stop", f"Stop {action.title}?"):
             return
         self.stop_process(action.id)
+
+    def _stop_external_interactive(self, action: LauncherAction) -> None:
+        """Offer to force-stop a tool that is running outside the launcher."""
+        pids = self.external_pids.get(action.id, [])
+        if not pids:
+            messagebox.showinfo(
+                "Running outside launcher",
+                f"{action.title} is running outside this launcher, but I couldn't read "
+                "its process id to stop it.\n\nClick Refresh Status, or end it in Task "
+                "Manager.",
+            )
+            return
+        pid_text = ", ".join(str(p) for p in pids)
+        if not messagebox.askyesno(
+            "Stop external process",
+            f"{action.title} is running outside this launcher (PID {pid_text}).\n\n"
+            "Force-stop it now? It wasn't started by the launcher, so this is a hard "
+            "stop (like ending it in Task Manager).",
+        ):
+            return
+        killed = self.stop_external(action.id)
+        if killed:
+            self._debug(f"force-stopped external {action.id} ({killed} pid(s))")
+            messagebox.showinfo("Stopped", f"Stopped {action.title} (was running outside the launcher).")
+        else:
+            messagebox.showwarning(
+                "Could not stop",
+                f"Could not stop {action.title}. It may need administrator rights, or it "
+                "already exited. Try Refresh Status.",
+            )
+        self._refresh_external_status(schedule=False)
+
+    def _kill_pid(self, pid: int) -> bool:
+        """Force-stop a process by PID (taskkill on Windows, SIGTERM elsewhere)."""
+        try:
+            if os.name == "nt":
+                result = subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    **hidden_console_kwargs(),
+                )
+                return result.returncode == 0
+            os.kill(pid, signal.SIGTERM)
+            return True
+        except Exception as exc:
+            self._debug(f"kill pid {pid} failed: {exc!r}")
+            return False
+
+    def stop_external(self, action_id: str) -> int:
+        """Force-stop the external process(es) detected for an action. Returns count killed."""
+        killed = 0
+        for pid in self.external_pids.get(action_id, []):
+            if self._kill_pid(pid):
+                killed += 1
+        if killed:
+            self.external_pids.pop(action_id, None)
+            self.external_running.discard(action_id)
+        return killed
+
+    def stop_any(self, action_id: str) -> bool:
+        """Stop a tool whether the launcher started it or it is running externally."""
+        if self.stop_process(action_id):
+            return True
+        return self.stop_external(action_id) > 0
 
     def stop_process(self, action_id: str) -> bool:
         """Ask a launcher-started process to stop (no dialogs). Returns True if a stop was issued.
@@ -1198,14 +1265,14 @@ class LauncherApp(tk.Tk):
         except OSError:
             pass
 
-    def _scan_processes(self) -> tuple[list[str], str | None, str | None]:
-        """List running command lines for external-status detection.
+    def _scan_processes(self) -> tuple[list[tuple[int | None, str]], str | None, str | None]:
+        """List running ``(pid, command_line)`` pairs for external-status detection.
 
-        Returns (python_command_lines, method_used, error). On Windows it tries
-        ``wmic`` first (legacy, removed on newer builds) and falls back to a
-        PowerShell CIM query, which is the supported modern replacement. The
-        error is returned (not swallowed) so the diagnostic can show why a scan
-        came back empty.
+        Returns (pairs, method_used, error). On Windows it tries ``wmic`` first
+        (legacy, removed on newer builds) then a PowerShell CIM query (the
+        supported modern replacement); off-Windows it uses ``ps``. The PID is
+        captured so external copies can be stopped. The error is returned (not
+        swallowed) so the diagnostic can show why a scan came back empty.
         """
         if os.name == "nt":
             ps_query = (
@@ -1217,7 +1284,7 @@ class LauncherApp(tk.Tk):
                 ("powershell-cim", ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_query]),
             ]
         else:
-            candidates = [("ps", ["ps", "-eo", "args"])]
+            candidates = [("ps", ["ps", "-eo", "pid=,args="])]
 
         last_error: str | None = None
         for name, argv in candidates:
@@ -1234,19 +1301,23 @@ class LauncherApp(tk.Tk):
             except Exception as exc:
                 last_error = f"{name}: {exc.__class__.__name__}: {exc}"
                 continue
-            lines = [line for line in output.splitlines() if "python" in line.lower()]
-            return lines, name, None
+            return procscan.parse_scan_output(output.splitlines(), name), name, None
         return [], None, last_error or "no process-listing tool available"
 
     def _refresh_external_status(self, schedule: bool = True, verbose: bool = False) -> None:
-        lines, method, error = self._scan_processes()
-        process_lines = [line.lower() for line in lines]
+        pairs, method, error = self._scan_processes()
+        cmd_lines = [cmd for _pid, cmd in pairs]
         running: set[str] = set()
+        pids_by_action: dict[str, list[int]] = {}
         for action in self.actions:
             if not action.long_running or not action.script or self._is_running(action.id):
                 continue
-            if any(process_line_matches_script(line, action.script) for line in process_lines):
+            matched = [(pid, cmd) for (pid, cmd) in pairs if procscan.process_line_matches_script(cmd, action.script)]
+            if matched:
                 running.add(action.id)
+                pids = [pid for pid, _cmd in matched if pid is not None]
+                if pids:
+                    pids_by_action[action.id] = pids
 
         # Log on the manual diagnostic, or whenever the outcome changes — so the
         # background poll every 5s does not spam the debug log.
@@ -1254,17 +1325,18 @@ class LauncherApp(tk.Tk):
         if verbose or key != self._last_status_key:
             self._debug(
                 f"status scan: method={method or 'none'} error={error or 'none'} "
-                f"python_lines={len(process_lines)} detected={sorted(running) or 'none'}"
+                f"python_lines={len(pairs)} detected={sorted(running) or 'none'}"
             )
             self._last_status_key = key
         if verbose:
-            for line in process_lines[:25]:
-                self._debug(f"  proc: {line.strip()[:300]}")
+            for pid, cmd in pairs[:25]:
+                self._debug(f"  proc: pid={pid} {cmd[:300]}")
 
         self.external_running = running
+        self.external_pids = pids_by_action
         self._update_all_statuses()
         if verbose:
-            self._show_status_diagnostic(method, error, process_lines, running)
+            self._show_status_diagnostic(method, error, cmd_lines, running)
         if schedule:
             self.after(5000, self._refresh_external_status)
 
@@ -1299,8 +1371,8 @@ class LauncherApp(tk.Tk):
 
     def _build_debug_report_text(self) -> str:
         """Build the shareable debug snapshot string (no I/O)."""
-        lines, method, error = self._scan_processes()
-        process_lines = [line for line in lines]
+        pairs, method, error = self._scan_processes()
+        process_lines = [f"pid={pid} {cmd}" for pid, cmd in pairs]
         detected = sorted(self.external_running)
 
         out: list[str] = []
@@ -1610,12 +1682,13 @@ class GitUpdateDialog(tk.Toplevel):
             return
 
         if self._stop_for_update:
-            # Remember (persistently) what to bring back, then stop them.
+            # Remember (persistently) what to bring back, then stop them — whether
+            # launcher-started or running externally.
             self.app.set_pending_restart(self._stop_for_update)
             stopped = ", ".join(self.app.actions_by_id[aid].title for aid in self._stop_for_update)
             self._log(f"[git] Stopping programs before update: {stopped}\n")
             for action_id in self._stop_for_update:
-                self.app.stop_process(action_id)
+                self.app.stop_any(action_id)
 
         self._set_busy(True)
         self._log(f"\n=== Pulling '{branch}' ===\n")
@@ -1624,21 +1697,23 @@ class GitUpdateDialog(tk.Toplevel):
     def _handle_live_processes(self) -> bool:
         """Prompt about running programs. Returns False if the user cancels the pull.
 
-        When the user agrees, every program the launcher started is recorded in
+        Every running program we can stop — launcher-started or external (we have
+        a PID) — is offered for stopping; the chosen ones are recorded in
         ``self._stop_for_update`` (and persisted) to be stopped now and restarted
-        the next time the launcher opens.
+        the next time the launcher opens. External tools with no PID are
+        warn-only.
         """
         self.app._refresh_external_status(schedule=False)
-        managed = self.app.running_launcher_processes()
-        external = self.app.live_external_processes()
+        stoppable = self.app.running_launcher_processes() + self.app.stoppable_external_processes()
+        unstoppable = self.app.unstoppable_external_processes()
 
-        if managed:
-            names = ", ".join(title for _, title in managed)
+        if stoppable:
+            names = ", ".join(title for _, title in stoppable)
             answer = messagebox.askyesnocancel(
                 "Programs are running",
                 f"These programs are running:\n\n{names}\n\n"
-                "Stop them for the update? They will restart automatically when you "
-                "reopen the launcher.\n\n"
+                "Stop them for the update? They will restart automatically when the "
+                "launcher reopens.\n\n"
                 "Yes — stop them now (they restart on reopen)\n"
                 "No — update without stopping them\n"
                 "Cancel — don't update",
@@ -1647,14 +1722,14 @@ class GitUpdateDialog(tk.Toplevel):
             if answer is None:
                 return False
             if answer:
-                self._stop_for_update = [action_id for action_id, _ in managed]
+                self._stop_for_update = [action_id for action_id, _ in stoppable]
 
-        if external:
-            ext_names = ", ".join(external)
+        if unstoppable:
+            ext_names = ", ".join(unstoppable)
             if not messagebox.askyesno(
                 "Tools running outside the launcher",
-                "These are running outside this launcher, so it cannot stop or restart "
-                f"them for you:\n\n{ext_names}\n\n"
+                "These are running outside this launcher and I couldn't read a PID to "
+                f"stop them:\n\n{ext_names}\n\n"
                 "Update anyway? Stop and restart them yourself to pick up the new code.",
                 parent=self,
             ):
