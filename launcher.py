@@ -370,7 +370,7 @@ def base_actions() -> list[LauncherAction]:
             "email_drawings",
             "Transmittals",
             "Prepare Email Drawings Form",
-            "Builds/fills transmittal data and pre-fills CBC Insider's Email Drawings form. The code intentionally does not click Send.",
+            "Builds/fills transmittal data and pre-fills CBC Insider's Email Drawings form. The code intentionally does not click Send. Runs once: it pauses with the form open for you to review, then click 'Send Enter' to close it.",
             "fill_transmittal_insider.py",
             options=(
                 option("order", "Order", "Order number to prepare.", positional=True),
@@ -380,7 +380,6 @@ def base_actions() -> list[LauncherAction]:
                 option("no_doc", "Skip Word transmittal", "Do not generate/fill the Word transmittal document.", kind="check", arg="--no-doc"),
             ),
             email_risk=True,
-            long_running=True,
         ),
         LauncherAction(
             "transmittal_data",
