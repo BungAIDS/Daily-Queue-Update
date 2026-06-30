@@ -22,6 +22,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -973,7 +974,87 @@ def apply_order_history(app, wb, name: str, spec: Dict[str, Any], ops: List,
     return len(updates) + len(appends)
 
 
+# --------------------------------------------------------------------------- #
+# Watchdog: never let a busy/modal Excel hang the watcher                       #
+# --------------------------------------------------------------------------- #
+_EXCEL_WRITE_LOCK = threading.Lock()
+
+
+def _excel_write_timeout() -> float:
+    """Seconds to wait for an Excel write before abandoning it. Generous, so a
+    normal (even slow) render never trips it — only a genuine hang does."""
+    try:
+        return float(os.environ.get("LIVE_WRITE_TIMEOUT", "180"))
+    except ValueError:
+        return 180.0
+
+
+def _run_excel_guarded(label: str, func, default, *args, **kwargs):
+    """Run a COM/Excel call on a worker thread, bounded by a timeout, so a busy
+    or modal Excel (a dialog up, a co-authoring sync in flight, someone typing in
+    a cell) can NEVER hang the watcher's main loop.
+
+    All COM work happens inside the worker (its own CoInitialize), so nothing is
+    marshaled across threads. Only one write runs at a time; if a previous one is
+    still stuck, this call is skipped. On timeout/skip/error it returns `default`
+    — the same "nothing rendered, retry next poll" outcome the callers already
+    expect from a failed write."""
+    if not _EXCEL_WRITE_LOCK.acquire(blocking=False):
+        log.warning("%s skipped: a previous Excel write is still in progress (Excel is "
+                    "likely busy / showing a dialog). Will retry next poll.", label)
+        return default
+
+    box: dict = {}
+
+    def _runner():
+        try:
+            try:
+                import pythoncom  # type: ignore
+                pythoncom.CoInitialize()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                box["value"] = func(*args, **kwargs)
+            except Exception as e:  # noqa: BLE001 - mirror existing best-effort handling
+                box["error"] = e
+            finally:
+                try:
+                    import pythoncom  # type: ignore
+                    pythoncom.CoUninitialize()
+                except Exception:  # noqa: BLE001
+                    pass
+        finally:
+            _EXCEL_WRITE_LOCK.release()
+
+    worker = threading.Thread(target=_runner, name="excel-write", daemon=True)
+    worker.start()
+    timeout = _excel_write_timeout()
+    worker.join(timeout)
+    if worker.is_alive():
+        log.warning("%s exceeded %.0fs and was abandoned — Excel is busy or showing a "
+                    "dialog (co-authoring conflict, 'file in use', a save prompt). The "
+                    "watcher keeps running; the write retries next poll once Excel is free.",
+                    label, timeout)
+        return default
+    if "error" in box:
+        log.warning("%s failed (%s)", label, box["error"])
+        return default
+    return box.get("value", default)
+
+
 def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any],
+                           oh_payload: Dict[str, Any],
+                           changes_sheet: Sheet | None = None) -> set:
+    """Watchdog wrapper: render the master workbook on a bounded worker thread so
+    a busy/modal Excel can never hang the watcher. On timeout it returns an empty
+    set, so those tabs simply re-render next poll (see _update_master_workbook_impl)."""
+    return _run_excel_guarded(
+        "Live workbook update", _update_master_workbook_impl, set(),
+        workbook_path, lq_payload, oh_payload, changes_sheet,
+    )
+
+
+def _update_master_workbook_impl(workbook_path: str | Path, lq_payload: Dict[str, Any],
                            oh_payload: Dict[str, Any],
                            changes_sheet: Sheet | None = None) -> set:
     """Render the master workbook: an incremental upsert for Live Queue, the
