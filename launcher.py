@@ -379,7 +379,6 @@ def base_actions() -> list[LauncherAction]:
                 option("initials", "Initials", "Override signature initials.", arg="--initials"),
                 option("no_doc", "Skip Word transmittal", "Do not generate/fill the Word transmittal document.", kind="check", arg="--no-doc"),
             ),
-            email_risk=True,
         ),
         LauncherAction(
             "transmittal_data",
