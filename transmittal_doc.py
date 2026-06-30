@@ -14,13 +14,22 @@ That makes it Windows + Word only, like those.
 The planning step (`plan_fill`) is pure and unit-tested; the COM step
 (`apply_fill_word`) is a thin applier so the mapping is verifiable without Word.
 
-    python transmittal_doc.py 421693                 # gather + fill (preview)
+The output is numbered from what's already gone out: the suffix on
+`<order> DWG TRANSMITTAL-NN.doc` is one past the highest **sent** transmittal,
+read from the saved Outlook `.msg` emails in the job's TRANSMITTAL folder (a
+saved `.msg` proves it was actually mailed; a `.doc` alone is just a draft).
+After writing, the finished doc is opened in Word so it can be eyeballed.
+
+    python transmittal_doc.py 421693                 # gather + fill, then open it
     python transmittal_doc.py 421693 --initials DAG  # override the signature
+    python transmittal_doc.py 421693 --no-open       # write it but don't open Word
 """
 from __future__ import annotations
 
 import argparse
 import logging
+import os
+import re
 import sys
 from dataclasses import dataclass, field
 from datetime import date
@@ -180,9 +189,52 @@ def _fill_table(doc, rows: List[Tuple[str, str, str, str, str, str]]) -> None:
                 log.warning("Could not write table cell (%d,%d): %s", r, c, e)
 
 
-def apply_fill_word(plan: FillPlan, template: Path, out_path: Path) -> Path:
+def _scrub_placeholders(doc) -> None:
+    """Final safety net: clear any template x-placeholders a field-specific fill
+    didn't catch (``xxx`` / ``xxxxxx`` / the ``xx/xx/xxxx`` date mask), so a
+    generated transmittal never ships with leftover x's.
+
+    Only a run of THREE OR MORE x's (and the date mask) is removed — the single
+    ``X`` marks written into the EMAIL/PRINT/MANUAL table columns are left
+    untouched. Pure x-runs never occur in real transmittal data (emails, customer
+    names, P.O. and drawing numbers), so this is safe to sweep document-wide."""
+    # (Word wildcard pattern, …). Date mask first so its 4-x year isn't half-eaten.
+    patterns = [
+        r"[Xx]{2}/[Xx]{2}/[Xx]{4}",  # the xx/xx/xxxx date mask
+        r"<[Xx]{3,}>",               # a whole "word" that is only x's (3+)
+    ]
+    for pattern in patterns:
+        find = doc.Content.Find
+        find.ClearFormatting()
+        find.Replacement.ClearFormatting()
+        find.Text = pattern
+        find.Replacement.Text = ""
+        find.Forward = True
+        find.Wrap = 1            # wdFindContinue
+        find.MatchWildcards = True
+        try:
+            find.Execute(Replace=2)  # wdReplaceAll
+        except Exception as e:  # noqa: BLE001 - a scrub miss must not fail the fill
+            log.warning("Placeholder scrub for %r did not run: %s", pattern, e)
+
+
+def _open_for_review(path: Path) -> None:
+    """Open the finished transmittal so a human can eyeball it before it goes out.
+    On Windows this launches it in Word; elsewhere it's just logged."""
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(Path(path).resolve()))  # noqa: S606 - opening our own output
+        else:
+            log.info("Transmittal ready for review: %s", path)
+    except Exception as e:  # noqa: BLE001 - never let opening-for-review fail the run
+        log.warning("Could not open the transmittal for review (%s): %s", path, e)
+
+
+def apply_fill_word(plan: FillPlan, template: Path, out_path: Path,
+                    open_after: bool = False) -> Path:
     """Open the template in desktop Word, apply the plan, and save to out_path
-    (kept as .doc). Windows + Word only."""
+    (kept as .doc). When ``open_after`` is set, the saved doc is reopened for the
+    engineer to review. Windows + Word only."""
     import win32com.client  # lazy: only needed on the Windows box that fills docs
 
     template = Path(template).resolve()
@@ -208,6 +260,8 @@ def apply_fill_word(plan: FillPlan, template: Path, out_path: Path) -> Path:
         _set_paragraph_value(doc, "BY:", plan.initials)
         _check_box(doc, plan.box_index)
         _fill_table(doc, plan.rows)
+        # Belt-and-suspenders: wipe any x-placeholder the field fills above missed.
+        _scrub_placeholders(doc)
         # SaveAs2 with the Word 97-2003 format (0) to keep the .doc extension.
         doc.SaveAs(str(out_path.resolve()), FileFormat=0)
         log.info("Wrote transmittal: %s", out_path)
@@ -215,6 +269,10 @@ def apply_fill_word(plan: FillPlan, template: Path, out_path: Path) -> Path:
         if doc is not None:
             doc.Close(SaveChanges=False)
         word.Quit()
+    # Reopen the saved file (outside the automation instance we just quit) so it
+    # comes up in a normal, visible Word window for review.
+    if open_after:
+        _open_for_review(out_path)
     return out_path
 
 
@@ -235,6 +293,42 @@ def existing_transmittals(tdir: Optional[Path], order: str) -> list[Path]:
     return sorted(hits)
 
 
+# A transmittal file is named "<order> DWG TRANSMITTAL-NN[.ext]"; this pulls the
+# NN suffix out of the name (leading zeros tolerated).
+_SUFFIX_RE = re.compile(r"transmittal\s*-\s*0*(\d+)", re.IGNORECASE)
+
+
+def sent_transmittal_numbers(tdir: Optional[Path], order: str) -> list[int]:
+    """The suffix numbers of transmittals already *sent* for this order, read from
+    the saved Outlook emails (``*.msg``) in the job's TRANSMITTAL folder.
+
+    A saved ``.msg`` is the proof a transmittal actually went out — the Word
+    ``.doc`` alone is only a draft that may never have been emailed. So numbering
+    keys off the ``.msg`` files, not the ``.doc`` files. (Outlook hides the
+    ``.msg`` extension in Explorer via NeverShowExt, so these look extension-less
+    there, but on disk they really are ``*.msg``.)"""
+    if not tdir or not tdir.exists():
+        return []
+    nums: list[int] = []
+    for p in tdir.rglob("*.msg"):
+        stem = p.stem
+        if "transmittal" not in stem.lower() or str(order) not in stem:
+            continue
+        m = _SUFFIX_RE.search(stem)
+        if m:
+            nums.append(int(m.group(1)))
+    return sorted(set(nums))
+
+
+def next_transmittal_suffix(tdir: Optional[Path], order: str) -> str:
+    """The two-digit suffix for the NEXT transmittal: one more than the highest
+    already-sent (``.msg``) suffix, or ``01`` when none has been sent yet
+    (e.g. sent -01 and -02 -> the next is ``03``)."""
+    sent = sent_transmittal_numbers(tdir, order)
+    nxt = (max(sent) + 1) if sent else 1
+    return f"{nxt:02d}"
+
+
 # Our generated transmittals go in their own subfolder of the job's TRANSMITTAL
 # folder, so they never collide with the hand-made / semi-filled docs sitting
 # alongside. ("for now" — a clean separation while this is being validated.)
@@ -244,18 +338,21 @@ GENERATED_SUBDIR = "AUTO-GENERATED"
 def default_out_path(order: str, data: Optional[td.TransmittalData] = None,
                      base_dir: Optional[Path] = None) -> Path:
     """Where the filled transmittal is written: the job's
-    <AutoCAD folder>/TRANSMITTAL/AUTO-GENERATED/<order> DWG TRANSMITTAL-01.doc —
+    <AutoCAD folder>/TRANSMITTAL/AUTO-GENERATED/<order> DWG TRANSMITTAL-NN.doc —
     a dedicated subfolder so our output never clashes with the hand-made docs in
-    the TRANSMITTAL folder. Falls back to ./transmittal_out/<order>/ when the job
-    folder isn't known. Always the same name (overwrites our own prior run)."""
+    the TRANSMITTAL folder. The NN suffix is one past the highest already-sent
+    transmittal (see ``next_transmittal_suffix``: it counts the saved ``.msg``
+    emails in the TRANSMITTAL folder). Falls back to ./transmittal_out/<order>/
+    when the job folder isn't known."""
     tdir = transmittal_dir(data) if data is not None else None
+    suffix = next_transmittal_suffix(tdir, order)
     if tdir is not None:
-        tdir = tdir / GENERATED_SUBDIR
+        out_dir = tdir / GENERATED_SUBDIR
     elif base_dir:
-        tdir = Path(base_dir) / str(order)
+        out_dir = Path(base_dir) / str(order)
     else:
-        tdir = Path.cwd() / "transmittal_out" / str(order)
-    return tdir / f"{order} DWG TRANSMITTAL-01.doc"
+        out_dir = Path.cwd() / "transmittal_out" / str(order)
+    return out_dir / f"{order} DWG TRANSMITTAL-{suffix}.doc"
 
 
 def fill_transmittal(
@@ -265,16 +362,18 @@ def fill_transmittal(
     template: Path = TEMPLATE_PATH,
     out_path: Optional[Path] = None,
     today: Optional[date] = None,
+    open_doc: bool = True,
 ) -> Tuple[Path, FillPlan]:
     """Gather-to-doc convenience: build the plan and (on Windows) write the doc
-    into the job's TRANSMITTAL folder. Returns (out_path, plan)."""
+    into the job's TRANSMITTAL folder, then open it for review unless ``open_doc``
+    is False. Returns (out_path, plan)."""
     initials = initials or engineers.signature_for_user()
     plan = plan_fill(data, initials, today=today)
     # Surface (but never clobber) a semi-filled transmittal already in the folder.
     for p in existing_transmittals(transmittal_dir(data), data.order):
         plan.warnings.append(f"Existing transmittal in the folder (left as-is): {p.name}")
     out = out_path or default_out_path(data.order, data=data)
-    apply_fill_word(plan, template, out)
+    apply_fill_word(plan, template, out, open_after=open_doc)
     return out, plan
 
 
@@ -290,6 +389,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--out", default="", help="output .doc path")
     ap.add_argument("--plan-only", action="store_true",
                     help="print the fill plan without opening Word (works off-Windows)")
+    ap.add_argument("--no-open", action="store_true",
+                    help="don't open the finished .doc for review after writing it")
     args = ap.parse_args(argv)
 
     data = td.gather(args.order, customer=args.customer)
@@ -318,7 +419,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     out = Path(args.out) if args.out else default_out_path(args.order, data=data)
     try:
-        apply_fill_word(plan, TEMPLATE_PATH, out)
+        apply_fill_word(plan, TEMPLATE_PATH, out, open_after=not args.no_open)
         print(f"\nWrote: {out}")
     except ImportError:
         print("\n(win32com not available here — run on the Windows box, or use --plan-only.)")

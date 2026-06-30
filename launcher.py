@@ -487,6 +487,7 @@ class LauncherApp(tk.Tk):
 
         self.actions = base_actions()
         self.actions_by_id = {a.id: a for a in self.actions}
+        self._exclusion_args = self._compute_exclusion_args()
         self.processes: dict[str, ProcessInfo] = {}
         self.external_running: set[str] = set()
         self.external_pids: dict[str, list[int]] = {}
@@ -529,13 +530,17 @@ class LauncherApp(tk.Tk):
             return {"options": {}, "last_action": ""}
 
     def _save_state(self) -> None:
+        # Start from previously saved options so actions we never opened this
+        # session keep their remembered values instead of being dropped.
+        options = dict(self.state.get("options") or {})
+        for action_id, vars_by_key in self.option_vars.items():
+            options[action_id] = {k: v.get() for k, v in vars_by_key.items()}
         data = {
-            "options": {},
+            "options": options,
             "last_action": self.current_action_id or "",
             "pending_restart": self.pending_restart,
         }
-        for action_id, vars_by_key in self.option_vars.items():
-            data["options"][action_id] = {k: v.get() for k, v in vars_by_key.items()}
+        self.state = data
         try:
             STATE_PATH.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
         except OSError as exc:
@@ -694,6 +699,11 @@ class LauncherApp(tk.Tk):
     def _select_first_in_current_tab(self) -> None:
         category = self.notebook.tab(self.notebook.select(), "text")
         items = self.listbox_items.get(category) or []
+        # Selecting an action programmatically switches tabs, which fires this
+        # handler. Don't override a selection that already lives in this tab
+        # (e.g. the remembered last action when it isn't first in its list).
+        if self.current_action_id in items:
+            return
         if items:
             self._select_action(items[0])
 
@@ -811,7 +821,10 @@ class LauncherApp(tk.Tk):
         return command
 
     def _command_text(self, command: Iterable[str]) -> str:
-        return " ".join(shlex.quote(str(part)) for part in command)
+        # Render the way subprocess actually builds the command line on
+        # Windows, so the preview, confirm dialog, and log header all show a
+        # runnable command rather than posix-style single-quoting.
+        return subprocess.list2cmdline([str(part) for part in command])
 
     def _update_command_preview(self) -> None:
         if not self.current_action_id:
@@ -1304,6 +1317,30 @@ class LauncherApp(tk.Tk):
             return procscan.parse_scan_output(output.splitlines(), name), name, None
         return [], None, last_error or "no process-listing tool available"
 
+    def _compute_exclusion_args(self) -> dict[str, set[str]]:
+        """Args that disqualify a command line from matching an action.
+
+        Some actions share a script and differ only by default args (e.g.
+        the all-day ``watch`` vs. the one-shot ``watch.py --once``). When
+        scanning external processes we match by script name, so without this
+        a ``--once`` run would light up the long-running ``watch`` action.
+        For each action we collect the default args used by *other* actions
+        on the same script but not by this one.
+        """
+        by_script: dict[str, list[LauncherAction]] = {}
+        for action in self.actions:
+            if action.script:
+                by_script.setdefault(Path(action.script).name.lower(), []).append(action)
+        exclusion: dict[str, set[str]] = {}
+        for action in self.actions:
+            if not action.script:
+                continue
+            own = set(action.default_args)
+            siblings = by_script.get(Path(action.script).name.lower(), [])
+            others = {arg for sib in siblings if sib.id != action.id for arg in sib.default_args}
+            exclusion[action.id] = {a.lower() for a in others - own}
+        return exclusion
+
     def _refresh_external_status(self, schedule: bool = True, verbose: bool = False) -> None:
         pairs, method, error = self._scan_processes()
         cmd_lines = [cmd for _pid, cmd in pairs]
@@ -1312,7 +1349,14 @@ class LauncherApp(tk.Tk):
         for action in self.actions:
             if not action.long_running or not action.script or self._is_running(action.id):
                 continue
-            matched = [(pid, cmd) for (pid, cmd) in pairs if procscan.process_line_matches_script(cmd, action.script)]
+            # Skip shared-script siblings (e.g. watch.py --once vs the long-running watch).
+            exclude = self._exclusion_args.get(action.id, set())
+            matched = [
+                (pid, cmd)
+                for (pid, cmd) in pairs
+                if procscan.process_line_matches_script(cmd, action.script)
+                and not any(token in cmd.lower() for token in exclude)
+            ]
             if matched:
                 running.add(action.id)
                 pids = [pid for pid, _cmd in matched if pid is not None]
@@ -1338,7 +1382,9 @@ class LauncherApp(tk.Tk):
         if verbose:
             self._show_status_diagnostic(method, error, cmd_lines, running)
         if schedule:
-            self.after(5000, self._refresh_external_status)
+            # PowerShell starts slower than wmic did, so poll a little less
+            # often; per-second elapsed time is handled by _tick_status.
+            self.after(8000, self._refresh_external_status)
 
     def _show_status_diagnostic(
         self, method: str | None, error: str | None, process_lines: list[str], running: set[str]

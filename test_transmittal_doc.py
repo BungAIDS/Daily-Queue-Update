@@ -6,7 +6,9 @@ box; here we lock the semantic plan it consumes.
 from __future__ import annotations
 
 import sys
+import tempfile
 from datetime import date
+from pathlib import Path
 
 import engineers
 import transmittal_data as td
@@ -66,6 +68,58 @@ def test_default_out_path_naming():
     p = doc.default_out_path("421693")
     assert p.name == "421693 DWG TRANSMITTAL-01.doc"
     assert p.parent.name == "421693"
+
+
+def _touch(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"")
+
+
+def test_next_suffix_first_when_nothing_sent():
+    with tempfile.TemporaryDirectory() as d:
+        tdir = Path(d) / "TRANSMITTAL"
+        tdir.mkdir()
+        # A draft .doc is NOT proof of sending — it must not bump the number.
+        _touch(tdir / "AUTO-GENERATED" / "419624 DWG TRANSMITTAL-01.doc")
+        assert doc.sent_transmittal_numbers(tdir, "419624") == []
+        assert doc.next_transmittal_suffix(tdir, "419624") == "01"
+
+
+def test_next_suffix_is_one_past_highest_sent_msg():
+    with tempfile.TemporaryDirectory() as d:
+        tdir = Path(d) / "TRANSMITTAL"
+        tdir.mkdir()
+        # Two transmittals were emailed (saved as Outlook .msg) -> next is 03,
+        # even though a -03 draft .doc already exists (it hasn't been sent).
+        _touch(tdir / "419624 DWG TRANSMITTAL-01.msg")
+        _touch(tdir / "419624 DWG TRANSMITTAL-02.msg")
+        _touch(tdir / "419624 DWG TRANSMITTAL-03.doc")
+        assert doc.sent_transmittal_numbers(tdir, "419624") == [1, 2]
+        assert doc.next_transmittal_suffix(tdir, "419624") == "03"
+
+
+def test_next_suffix_ignores_other_orders_and_non_transmittals():
+    with tempfile.TemporaryDirectory() as d:
+        tdir = Path(d) / "TRANSMITTAL"
+        tdir.mkdir()
+        _touch(tdir / "419624 DWG TRANSMITTAL-05.msg")
+        _touch(tdir / "999999 DWG TRANSMITTAL-09.msg")  # different order
+        _touch(tdir / "419624 some other email.msg")    # not a transmittal
+        assert doc.sent_transmittal_numbers(tdir, "419624") == [5]
+        assert doc.next_transmittal_suffix(tdir, "419624") == "06"
+
+
+def test_default_out_path_uses_sent_msg_suffix():
+    with tempfile.TemporaryDirectory() as d:
+        folder = Path(d) / "419624"
+        tdir = folder / "TRANSMITTAL"
+        tdir.mkdir(parents=True)
+        _touch(tdir / "419624 DWG TRANSMITTAL-01.msg")
+        _touch(tdir / "419624 DWG TRANSMITTAL-02.msg")
+        data = td.TransmittalData(order="419624", folder=str(folder))
+        p = doc.default_out_path("419624", data=data)
+        assert p.name == "419624 DWG TRANSMITTAL-03.doc"
+        assert p.parent.name == doc.GENERATED_SUBDIR
 
 
 def main() -> int:
