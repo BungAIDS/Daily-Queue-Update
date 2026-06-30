@@ -133,8 +133,9 @@ It opens `launcher.py`, a standard-library Windows desktop app that:
 - has a **Git Update…** button that opens a small window where you pick a
   branch from a drop-down and pull the latest code from GitHub (it fetches,
   optionally checks the branch out, then pulls, streaming git's output); if
-  programs are running it offers to stop them for the update and restarts them
-  automatically the next time the launcher is reopened,
+  programs are running it offers to stop them, and when the update changes the
+  launcher itself it automatically relaunches onto the new code and resumes the
+  programs it stopped,
 - provides a Developer tab for the direct-script test files.
 
 To create a desktop shortcut, double-click:

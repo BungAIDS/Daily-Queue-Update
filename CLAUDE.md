@@ -43,10 +43,13 @@ Notable launcher internals:
   usually means the scan found nothing — check the report's "method used".
 - A running Python process (watcher OR the launcher itself) keeps the code it
   loaded at startup; a `git pull` only takes effect after a restart. The Git
-  Update window offers to stop *all* running programs for the update, persists
-  them in `.launcher_state.json` under `pending_restart`, and the launcher
-  restarts them on its next startup (`_restart_pending`, skipping `email_risk`
-  actions). It warns when the pull changed the launcher's own files.
+  Update window offers to stop *all* running programs for the update and
+  persists them in `.launcher_state.json` under `pending_restart`. When the pull
+  changes the launcher's own files (or programs were stopped) it auto-relaunches
+  itself (`relaunch_self_and_exit`, after the stopped programs fully exit) and
+  the fresh launcher resumes them on startup (`_restart_pending`, skipping
+  `email_risk` actions). If the user chose to leave programs running, it does
+  NOT auto-relaunch (that would orphan them) and asks them to reopen manually.
 
 ## Git pull logic lives in `git_update.py`
 

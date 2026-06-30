@@ -931,14 +931,53 @@ class LauncherApp(tk.Tk):
             command = self._build_command(action, values=saved)
         self._start_process(action, command)
 
-    def running_launcher_processes(self) -> list[tuple[str, str]]:
+    def running_launcher_processes(self, exclude: Iterable[str] = ()) -> list[tuple[str, str]]:
         """(id, title) for every tool this launcher started that is still alive."""
+        excluded = set(exclude)
         live: list[tuple[str, str]] = []
         for action_id, info in list(self.processes.items()):
+            if action_id in excluded:
+                continue
             action = self.actions_by_id.get(action_id)
             if action and info.process.poll() is None:
                 live.append((action_id, action.title))
         return live
+
+    def relaunch_self(self) -> bool:
+        """Start a fresh copy of the launcher (e.g. to run freshly pulled code).
+
+        Spawns a new, detached process using the same interpreter that is
+        running this launcher, so it keeps the windowed/console behaviour of the
+        original. Returns True if the new process started.
+        """
+        cmd = [sys.executable, str(Path(__file__).resolve())]
+        kwargs: dict[str, Any] = {"cwd": str(ROOT), "close_fds": True}
+        if os.name == "nt":
+            kwargs["creationflags"] = (
+                getattr(subprocess, "DETACHED_PROCESS", 0)
+                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            )
+        else:
+            kwargs["start_new_session"] = True
+        try:
+            subprocess.Popen(cmd, **kwargs)
+            return True
+        except OSError as exc:
+            self._debug(f"relaunch failed: {exc!r}")
+            return False
+
+    def relaunch_self_and_exit(self) -> None:
+        """Spawn a fresh launcher on the new code and close this one."""
+        if not self.relaunch_self():
+            messagebox.showwarning(
+                "Could not relaunch",
+                "The update was applied, but the launcher could not relaunch "
+                "itself. Please close and reopen it manually.",
+            )
+            return
+        self._debug("relaunching launcher; closing this instance")
+        self._save_state()
+        self.destroy()
 
     def live_external_processes(self) -> list[str]:
         """Titles of long-running tools running outside the launcher (cannot be managed here)."""
@@ -1652,51 +1691,64 @@ class GitUpdateDialog(tk.Toplevel):
                         self._log(f"\n[git] Finished with exit code {code}.\n")
                     self._set_busy(False)
                     self.refresh_branches()  # reflect any branch switch in the label
-                    self._announce_reopen(code, changed)
+                    self._after_pull(code, changed)
         except queue.Empty:
             pass
         if self.winfo_exists():
             self.after(100, self._poll_queue)
 
-    def _announce_reopen(self, code: int, changed: list[str]) -> None:
-        """Tell the user to reopen the launcher so the update applies and programs resume."""
-        stopped = bool(self._stop_for_update)
-        launcher_changed = code == 0 and git_update.launcher_needs_restart(changed)
-        if stopped:
-            self._log(
-                "[git] The programs you stopped will restart automatically when you "
-                "reopen the launcher.\n"
-            )
-        if launcher_changed:
-            self._log(
-                "[git] NOTE: this update changed the launcher itself — reopen it to run "
-                "the new version.\n"
-            )
+    def _after_pull(self, code: int, changed: list[str]) -> None:
+        """After a successful pull, relaunch the launcher so the new code takes effect.
 
-        if launcher_changed:
-            extra = " The programs you stopped will restart automatically when it reopens." if stopped else ""
+        Programs that were stopped are persisted and resume in the fresh
+        launcher. We only auto-relaunch when it is safe: a clean pull that
+        actually changed something, with nothing the user chose to leave
+        running (relaunching would orphan those).
+        """
+        if code != 0:
+            if self._stop_for_update:
+                messagebox.showwarning(
+                    "Update did not complete",
+                    "The update did not finish cleanly (see the output above).\n\n"
+                    "The programs you stopped will restart when you reopen the launcher.",
+                    parent=self,
+                )
+            return
+
+        # Relaunch only when it actually matters: the launcher's own code changed,
+        # or programs were stopped and need to come back. Other script changes are
+        # picked up the next time those scripts run, so no relaunch is needed.
+        if not (git_update.launcher_needs_restart(changed) or self._stop_for_update):
+            if changed:
+                self._log("[git] Update applied; scripts will use the new code next run.\n")
+            else:
+                self._log("[git] Already up to date; nothing to apply.\n")
+            return
+
+        # Programs the user chose to leave running would be orphaned by a relaunch.
+        leftover = self.app.running_launcher_processes(exclude=self._stop_for_update)
+        if leftover:
+            names = ", ".join(title for _, title in leftover)
+            self._log(f"[git] Not auto-relaunching — still running on old code: {names}\n")
             messagebox.showinfo(
-                "Restart the launcher",
-                "This update changed the launcher program itself.\n\n"
-                "Close and reopen the launcher (RunLauncher) so it runs the new "
-                f"version — the running window is still on the old code.{extra}",
+                "Reopen when ready",
+                "The update was applied, but these programs are still running on the "
+                f"old code:\n\n{names}\n\nReopen the launcher yourself once they finish "
+                "to pick up the new version.",
                 parent=self,
             )
-        elif stopped and code == 0:
-            messagebox.showinfo(
-                "Reopen to resume",
-                "Update complete. Close and reopen the launcher to restart the "
-                "programs you stopped.",
-                parent=self,
-            )
-        elif stopped:  # pull did not finish cleanly, but programs are already stopped
-            messagebox.showwarning(
-                "Update did not complete",
-                "The update did not finish cleanly (see the output above).\n\n"
-                "The programs you stopped will still restart when you reopen the "
-                "launcher.",
-                parent=self,
-            )
+            return
+
+        self._log("[git] Update complete — relaunching the launcher to apply it…\n")
+        self._relaunch_when_clear(attempts=0)
+
+    def _relaunch_when_clear(self, attempts: int) -> None:
+        """Wait for the stopped programs to fully exit, then relaunch the launcher."""
+        still_running = [aid for aid in self._stop_for_update if self.app._is_running(aid)]
+        if still_running and attempts < 40:  # up to ~10s at 250ms
+            self.after(250, lambda: self._relaunch_when_clear(attempts + 1))
+            return
+        self.app.relaunch_self_and_exit()
 
     def _on_close(self) -> None:
         if self._busy and not messagebox.askyesno(
