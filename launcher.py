@@ -41,6 +41,8 @@ DEBUG_BRANCH = "debug/launcher"
 # How long to let a graceful Stop finish (its current poll can run a while) before
 # the backstop force-kill steps in. A second Stop click forces immediately.
 GRACEFUL_STOP_SECONDS = 150
+# Single-instance lock: holds the PID of the running launcher.
+LOCK_PATH = ROOT / ".launcher.lock"
 
 
 def hidden_console_kwargs() -> dict[str, Any]:
@@ -53,6 +55,31 @@ def hidden_console_kwargs() -> dict[str, Any]:
         "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
         "startupinfo": startupinfo,
     }
+
+
+def pid_alive(pid: int) -> bool:
+    """Best-effort: is a process with this PID currently running?"""
+    if pid <= 0:
+        return False
+    try:
+        if os.name == "nt":
+            import ctypes
+
+            still_active = 259
+            query = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
+            handle = ctypes.windll.kernel32.OpenProcess(query, False, pid)
+            if not handle:
+                return False
+            try:
+                code = ctypes.c_ulong()
+                ok = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+                return bool(ok) and code.value == still_active
+            finally:
+                ctypes.windll.kernel32.CloseHandle(handle)
+        os.kill(pid, 0)
+        return True
+    except Exception:
+        return False
 
 
 def windows_has_console() -> bool:
@@ -507,6 +534,11 @@ class LauncherApp(tk.Tk):
         self.geometry("1180x760")
         self.minsize(980, 620)
 
+        self.version_str = self._compute_version()
+        if not self._acquire_single_instance():
+            self.destroy()
+            raise SystemExit(0)
+
         self.actions = base_actions()
         self.actions_by_id = {a.id: a for a in self.actions}
         self._exclusion_args = self._compute_exclusion_args()
@@ -536,7 +568,7 @@ class LauncherApp(tk.Tk):
         self.python_path = self._find_python()
         self.allow_send_var = tk.BooleanVar(value=False)
 
-        self._debug(f"launcher started (os={os.name}, python={self.python_path})")
+        self._debug(f"launcher started (os={os.name}, python={self.python_path}, version={self.version_str})")
         self._build_ui()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._select_initial_action()
@@ -545,6 +577,58 @@ class LauncherApp(tk.Tk):
         self._tick_status()
         if self.pending_restart:
             self.after(800, self._restart_pending)
+
+    def _compute_version(self) -> str:
+        try:
+            commit = git_update.head_rev()[:8]
+            branch = git_update.current_branch()
+        except Exception:  # pragma: no cover - defensive
+            return "unknown"
+        if commit and branch:
+            return f"{branch}@{commit}"
+        return commit or branch or "unknown"
+
+    # ----- single-instance lock ------------------------------------------- #
+    def _read_lock_pid(self) -> int | None:
+        try:
+            return int(LOCK_PATH.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            return None
+
+    def _write_lock(self) -> None:
+        try:
+            LOCK_PATH.write_text(str(os.getpid()), encoding="utf-8")
+        except OSError:
+            pass
+
+    def _release_lock(self) -> None:
+        if self._read_lock_pid() == os.getpid():
+            try:
+                LOCK_PATH.unlink()
+            except OSError:
+                pass
+
+    def _acquire_single_instance(self) -> bool:
+        """Refuse to open a second launcher. Returns False if the user declines.
+
+        Tolerates a relaunch handoff: if the lock's PID is alive it waits briefly
+        for it to exit (a relaunching launcher dies within ~1s) before deciding."""
+        other = self._read_lock_pid()
+        if other and other != os.getpid() and pid_alive(other):
+            for _ in range(20):  # ~5s for a relaunch handoff to complete
+                time.sleep(0.25)
+                if not pid_alive(other):
+                    break
+            else:
+                if not messagebox.askyesno(
+                    "Launcher already running",
+                    "Another Daily Queue Launcher is already running.\n\n"
+                    "Running two at once causes duplicate watchers and Excel conflicts.\n\n"
+                    "Open this one anyway?",
+                ):
+                    return False
+        self._write_lock()
+        return True
 
     def _load_state(self) -> dict[str, Any]:
         if not STATE_PATH.exists():
@@ -595,6 +679,9 @@ class LauncherApp(tk.Tk):
         header.pack(fill="x")
         ttk.Label(header, text="Daily Queue Script Launcher", style="Title.TLabel").pack(side="left")
         ttk.Label(header, text=f"Python: {self.python_path}", foreground="#555").pack(side="left", padx=(18, 0))
+        version_label = ttk.Label(header, text=f"version: {self.version_str}", foreground="#999")
+        version_label.pack(side="left", padx=(18, 0))
+        ToolTip(version_label, "The git branch@commit this launcher is running. Use Git Update to change it.")
         send_check = ttk.Checkbutton(
             header,
             text="Allow email / send actions",
@@ -1034,6 +1121,7 @@ class LauncherApp(tk.Tk):
             return
         self._debug("relaunching launcher; closing this instance")
         self._save_state()
+        self._release_lock()   # let the fresh launcher take the single-instance lock
         self.destroy()
 
     def set_pending_restart(self, action_ids: list[str]) -> None:
@@ -1643,14 +1731,23 @@ class LauncherApp(tk.Tk):
         self.status_var.set(status)
 
     def _on_close(self) -> None:
-        if self.processes:
-            names = ", ".join(self.actions_by_id[aid].title for aid in self.processes)
+        running = [aid for aid in list(self.processes) if self._is_running(aid)]
+        # Only ask before closing a long-running tool (the all-day watcher);
+        # transient ones (e.g. the Email Drawings form paused on input) are just
+        # stopped quietly so they don't linger or warn.
+        long_running = [aid for aid in running if self.actions_by_id[aid].long_running]
+        if long_running:
+            names = ", ".join(self.actions_by_id[aid].title for aid in long_running)
             if not messagebox.askyesno(
-                "Processes still running",
-                f"These launcher-started processes are still running:\n\n{names}\n\nClose the launcher anyway?",
+                "Stop running programs?",
+                f"These programs are still running:\n\n{names}\n\n"
+                "Stop them and close the launcher?",
             ):
                 return
+        for action_id in running:               # end every launcher-started process
+            self.stop_process(action_id, force=True)
         self._save_state()
+        self._release_lock()
         self._publish_on_close()
         self.destroy()
 

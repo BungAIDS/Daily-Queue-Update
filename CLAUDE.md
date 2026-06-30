@@ -49,6 +49,11 @@ Notable launcher internals:
   Run/Pull pre-checks scan synchronously (`_scan_now_sync`).
 - Stopping a tool from the launcher records it in `_stop_requested`, so its
   non-zero exit shows as `[STOPPED]` (neutral) rather than `[FAIL]` (red).
+- Single-instance: `_acquire_single_instance` holds `.launcher.lock` (its PID);
+  a second launch waits ~5s (relaunch handoff) then warns. Closing the launcher
+  stops *all* launcher-started processes (`_on_close`, force) and releases the
+  lock. The header shows `version: branch@commit` (and it's in the debug report
+  + watch.py's startup log) so the running commit is always visible.
 - The launcher runs under `pythonw` (no console) so it can't deliver Ctrl+Break.
   For a `graceful_stop` action (watch.py) the Stop button drops a per-PID flag
   file (`stop_signal.py`, `.launcher_stops/`) that the script polls and treats

@@ -983,7 +983,8 @@ def apply_order_history(app, wb, name: str, spec: Dict[str, Any], ops: List,
 # --------------------------------------------------------------------------- #
 # Watchdog: never let a busy/modal Excel hang the watcher                       #
 # --------------------------------------------------------------------------- #
-_EXCEL_WRITE_LOCK = threading.Lock()
+_EXCEL_WRITE_GUARD = threading.Lock()   # protects _excel_write_active
+_excel_write_active = [0.0]             # monotonic start of the in-flight write (0 = none)
 
 
 def _excel_write_timeout() -> float:
@@ -1001,14 +1002,22 @@ def _run_excel_guarded(label: str, func, default, *args, **kwargs):
     a cell) can NEVER hang the watcher's main loop.
 
     All COM work happens inside the worker (its own CoInitialize), so nothing is
-    marshaled across threads. Only one write runs at a time; if a previous one is
-    still stuck, this call is skipped. On timeout/skip/error it returns `default`
-    — the same "nothing rendered, retry next poll" outcome the callers already
-    expect from a failed write."""
-    if not _EXCEL_WRITE_LOCK.acquire(blocking=False):
-        log.warning("%s skipped: a previous Excel write is still in progress (Excel is "
-                    "likely busy / showing a dialog). Will retry next poll.", label)
-        return default
+    marshaled across threads. A new write is skipped only while a previous one is
+    *still within its timeout*; once a write exceeds the timeout it is treated as
+    abandoned and the next poll is allowed to try again — so a permanently stuck
+    write (Excel left showing a dialog) can't block every future write forever.
+    On timeout/skip/error it returns `default` — the same "nothing rendered,
+    retry next poll" outcome the callers already expect from a failed write."""
+    timeout = _excel_write_timeout()
+    now = time.monotonic()
+    with _EXCEL_WRITE_GUARD:
+        active = _excel_write_active[0]
+        if active and (now - active) < timeout:
+            log.warning("%s skipped: a previous Excel write is still in progress (Excel is "
+                        "likely busy / showing a dialog). Will retry next poll.", label)
+            return default
+        my_start = now
+        _excel_write_active[0] = my_start   # claim the slot (also reclaims a stale one)
 
     box: dict = {}
 
@@ -1030,11 +1039,12 @@ def _run_excel_guarded(label: str, func, default, *args, **kwargs):
                 except Exception:  # noqa: BLE001
                     pass
         finally:
-            _EXCEL_WRITE_LOCK.release()
+            with _EXCEL_WRITE_GUARD:
+                if _excel_write_active[0] == my_start:   # only if a newer write hasn't taken over
+                    _excel_write_active[0] = 0.0
 
     worker = threading.Thread(target=_runner, name="excel-write", daemon=True)
     worker.start()
-    timeout = _excel_write_timeout()
     worker.join(timeout)
     if worker.is_alive():
         log.warning("%s exceeded %.0fs and was abandoned — Excel is busy or showing a "
