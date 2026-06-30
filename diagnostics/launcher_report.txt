@@ -1,5 +1,6 @@
 # Launcher debug report
-generated: 2026-06-30T12:19:33
+generated: 2026-06-30T12:23:19
+code version: branch claude/gui-git-pull-dropdown-y86ajl @ commit bbbe07fb25
 os.name: nt   platform: win32
 python (launcher): C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\pythonw.exe
 python (for scripts): C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe
@@ -7,35 +8,23 @@ python (for scripts): C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe
 ## Process scan (external-status detection)
 method used: wmic
 error: none
-python process lines seen: 6
+python process lines seen: 4
 detected running outside launcher: none
 
 ### python process command lines (up to 40)
-  pid=2644 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\pythonw.exe" "C:\CBC INSIDER GL QUEUE CHECKER\launcher.py"
-  pid=38140 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\pythonw.exe" "C:\CBC INSIDER GL QUEUE CHECKER\launcher.py"
-  pid=39252 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
-  pid=83708 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
-  pid=106020 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" fill_transmittal_insider.py 421473
-  pid=28188 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" fill_transmittal_insider.py 421473
+  pid=38816 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\pythonw.exe" "C:\CBC INSIDER GL QUEUE CHECKER\launcher.py"
+  pid=128772 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\pythonw.exe" "C:\CBC INSIDER GL QUEUE CHECKER\launcher.py"
+  pid=111112 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
+  pid=126368 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
 
 ## Launcher-started processes
-  watch: pid=39252 alive=True started=2026-06-30 11:02:22
+  watch: pid=111112 alive=True started=2026-06-30 12:21:39
       cmd: "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
-  email_drawings: pid=106020 alive=True started=2026-06-30 12:01:43
-      cmd: "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" fill_transmittal_insider.py 421473
 
 ## Last exit codes
   (none yet)
 
 ## Tail of launcher_debug.log (last 120 lines)
-  2026-06-30 10:33:49 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-06-30 10:34:04 status scan: method=wmic error=none python_lines=2 detected=none
-  2026-06-30 10:34:21 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-06-30 10:34:53 status scan: method=wmic error=none python_lines=2 detected=none
-  2026-06-30 10:35:09 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-06-30 10:35:41 status scan: method=wmic error=none python_lines=2 detected=none
-  2026-06-30 10:35:57 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-06-30 10:36:13 status scan: method=wmic error=none python_lines=2 detected=none
   2026-06-30 10:36:38 status scan: method=powershell-cim error=none python_lines=2 detected=none
   2026-06-30 10:36:53 status scan: method=wmic error=none python_lines=2 detected=none
   2026-06-30 10:37:18 status scan: method=powershell-cim error=none python_lines=2 detected=none
@@ -148,4 +137,12 @@ detected running outside launcher: none
   2026-06-30 12:18:07 status scan: method=powershell-cim error=none python_lines=6 detected=none
   2026-06-30 12:18:38 status scan: method=wmic error=none python_lines=6 detected=none
   2026-06-30 12:19:25 close: publishing debug report to debug/launcher
+  2026-06-30 12:19:35 close publish ok: pushed 36fe170ff3 to origin/debug/launcher
+  2026-06-30 12:20:51 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe)
+  2026-06-30 12:20:58 status scan: method=wmic error=none python_lines=4 detected=['watch']
+  2026-06-30 12:21:38 relaunching launcher; closing this instance
+  2026-06-30 12:21:39 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe)
+  2026-06-30 12:21:39 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-06-30 12:21:48 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 12:22:02 status scan: method=wmic error=none python_lines=4 detected=none
 
