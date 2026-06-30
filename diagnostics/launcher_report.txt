@@ -1,3 +1,147 @@
 # Launcher debug report
+generated: 2026-06-30T11:03:38
+os.name: nt   platform: win32
+python (launcher): C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\pythonw.exe
+python (for scripts): C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe
 
-No report has been published yet. Click "Publish Debug Report" in the launcher.
+## Process scan (external-status detection)
+method used: powershell-cim
+error: none
+python process lines seen: 4
+detected running outside launcher: none
+
+### python process command lines (up to 40)
+  pid=2644 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\pythonw.exe" "C:\CBC INSIDER GL QUEUE CHECKER\launcher.py"
+  pid=38140 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\pythonw.exe" "C:\CBC INSIDER GL QUEUE CHECKER\launcher.py"
+  pid=39252 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
+  pid=83708 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
+
+## Launcher-started processes
+  watch: pid=39252 alive=True started=2026-06-30 11:02:22
+      cmd: "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
+
+## Last exit codes
+  (none yet)
+
+## Tail of launcher_debug.log (last 120 lines)
+  2026-06-30 09:50:16 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 09:50:30 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 09:50:43 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 09:51:35 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 09:52:02 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 09:52:41 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 09:52:53 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 09:53:20 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 09:54:01 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 09:54:14 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 09:54:41 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 09:56:47 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 09:57:00 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 09:57:27 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 09:57:39 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 09:58:05 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 09:58:18 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 09:59:23 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:06:20 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 10:06:34 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:06:47 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 10:07:14 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:07:41 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:07:54 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:08:07 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:09:38 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:09:51 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:11:35 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:11:48 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:12:15 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:12:28 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:12:55 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:13:08 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:13:34 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:13:47 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:14:14 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:14:54 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:16:36 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:16:49 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:24:21 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe)
+  2026-06-30 10:24:29 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:25:17 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:25:33 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:25:50 relaunching launcher; closing this instance
+  2026-06-30 10:25:51 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe)
+  2026-06-30 10:25:59 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:27:17 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:27:48 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 10:28:37 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:28:52 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 10:29:25 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:29:40 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 10:30:05 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:30:52 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 10:31:09 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:31:24 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 10:31:41 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:32:12 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 10:32:29 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:32:44 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 10:33:01 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:33:32 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:33:49 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:34:04 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:34:21 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:34:53 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:35:09 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:35:41 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:35:57 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:36:13 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:36:38 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:36:53 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:37:18 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:37:33 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:38:06 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:38:21 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:39:26 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:39:41 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:40:14 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:40:29 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:41:18 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:41:49 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:42:06 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:43:09 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:45:42 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:45:58 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:46:14 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-06-30 10:47:12 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 10:47:29 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:48:00 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 10:48:17 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:48:32 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 10:49:05 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:49:20 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 10:50:33 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:50:48 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 10:52:17 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:52:48 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 10:53:15 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:53:23 relaunching launcher; closing this instance
+  2026-06-30 10:53:23 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe)
+  2026-06-30 10:53:24 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-06-30 10:53:31 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-06-30 10:53:56 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:54:27 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 10:54:44 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:56:20 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 10:57:25 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:57:40 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 10:57:57 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 10:58:12 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 10:59:17 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 11:00:20 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 11:00:45 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 11:01:00 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-06-30 11:01:25 status scan: method=powershell-cim error=none python_lines=4 detected=none
+  2026-06-30 11:02:21 relaunching launcher; closing this instance
+  2026-06-30 11:02:21 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe)
+  2026-06-30 11:02:22 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-06-30 11:02:30 status scan: method=powershell-cim error=none python_lines=4 detected=none
+
