@@ -608,13 +608,31 @@ class LauncherApp(tk.Tk):
             except OSError:
                 pass
 
+    def _another_launcher_pid(self) -> int | None:
+        """PID of another running launcher, or None. Checks the lock file first
+        (fast) and falls back to a process scan, so it also catches a launcher
+        that predates the lock (e.g. one left over from before this feature)."""
+        me = os.getpid()
+        pid = self._read_lock_pid()
+        if pid and pid != me and pid_alive(pid):
+            return pid
+        try:
+            pairs, _method, _error = self._scan_processes()
+        except Exception:  # pragma: no cover - defensive
+            return None
+        for other_pid, cmd in pairs:
+            if (other_pid and other_pid != me and pid_alive(other_pid)
+                    and procscan.process_line_matches_script(cmd, "launcher.py")):
+                return other_pid
+        return None
+
     def _acquire_single_instance(self) -> bool:
         """Refuse to open a second launcher. Returns False if the user declines.
 
-        Tolerates a relaunch handoff: if the lock's PID is alive it waits briefly
+        Tolerates a relaunch handoff: if another launcher is alive it waits briefly
         for it to exit (a relaunching launcher dies within ~1s) before deciding."""
-        other = self._read_lock_pid()
-        if other and other != os.getpid() and pid_alive(other):
+        other = self._another_launcher_pid()
+        if other:
             for _ in range(20):  # ~5s for a relaunch handoff to complete
                 time.sleep(0.25)
                 if not pid_alive(other):
@@ -1135,6 +1153,9 @@ class LauncherApp(tk.Tk):
         # Clear and persist first so a failure can't make us loop-restart forever.
         self.pending_restart = []
         self._save_state()
+        if not pending:
+            return
+        self._scan_now_sync()  # see what's already running externally before restarting
 
         restarted: list[str] = []
         skipped: list[str] = []
@@ -1142,6 +1163,9 @@ class LauncherApp(tk.Tk):
         for action_id in pending:
             action = self.actions_by_id.get(action_id)
             if action is None or self._is_running(action_id):
+                continue
+            if action_id in self.external_running:  # already running elsewhere — don't duplicate
+                skipped.append(f"{action.title} (already running)")
                 continue
             if action.email_risk:  # never auto-launch something that can send email
                 skipped.append(action.title)
