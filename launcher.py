@@ -492,6 +492,9 @@ class LauncherApp(tk.Tk):
         self.external_running: set[str] = set()
         self.external_pids: dict[str, list[int]] = {}
         self.last_exit: dict[str, int] = {}
+        self._stop_requested: set[str] = set()   # ids we asked to stop (don't flag as FAIL)
+        self.stopped_actions: set[str] = set()    # ids that exited because we stopped them
+        self._scan_in_progress = False            # a background process scan is running
         self.logs: dict[str, list[str]] = {a.id: [] for a in self.actions}
         self.output_queue: queue.Queue[tuple[str, str, Any]] = queue.Queue()
         self.option_vars: dict[str, dict[str, tk.Variable]] = {}
@@ -685,6 +688,8 @@ class LauncherApp(tk.Tk):
             return f"[RUNNING] {action.title}"
         if action.id in self.external_running:
             return f"[EXTERNAL] {action.title}"
+        if action.id in self.stopped_actions:
+            return f"[STOPPED] {action.title}"
         if action.id in self.last_exit:
             return f"[OK] {action.title}" if self.last_exit[action.id] == 0 else f"[FAIL] {action.title}"
         return action.title
@@ -844,7 +849,7 @@ class LauncherApp(tk.Tk):
             messagebox.showinfo("Already running", f"{action.title} is already running from this launcher.")
             return
         if action.long_running:
-            self._refresh_external_status(schedule=False)
+            self._scan_now_sync()
             if action.id in self.external_running:
                 messagebox.showwarning(
                     "Already running",
@@ -913,6 +918,10 @@ class LauncherApp(tk.Tk):
             log_file.close()
             raise
 
+        # Fresh run clears any prior stopped/failed status for this action.
+        self.stopped_actions.discard(action.id)
+        self._stop_requested.discard(action.id)
+        self.last_exit.pop(action.id, None)
         self.processes[action.id] = ProcessInfo(action.id, process, log_file, log_path, command)
         self.logs[action.id] = [f"$ {self._command_text(command)}\n", f"[launcher] Log: {log_path}\n"]
         if self.current_action_id == action.id:
@@ -1137,6 +1146,7 @@ class LauncherApp(tk.Tk):
         info = self.processes.get(action_id)
         if not info or info.process.poll() is not None:
             return False
+        self._stop_requested.add(action_id)  # so the exit isn't flagged as a failure
         proc = info.process
         try:
             if os.name == "nt":
@@ -1212,17 +1222,29 @@ class LauncherApp(tk.Tk):
                     self._append_output(line)
             elif kind == "exit":
                 code = int(payload)
-                self.last_exit[action_id] = code
                 self.external_running.discard(action_id)
                 info = self.processes.pop(action_id, None)
+                requested_stop = action_id in self._stop_requested
+                self._stop_requested.discard(action_id)
+                if requested_stop:
+                    # We asked it to stop, so a non-zero code is expected — show
+                    # it as stopped, not a failure.
+                    self.stopped_actions.add(action_id)
+                    self.last_exit.pop(action_id, None)
+                    line = f"\n[launcher] Stopped (exit code {code}).\n"
+                else:
+                    self.stopped_actions.discard(action_id)
+                    self.last_exit[action_id] = code
+                    line = f"\n[launcher] Exit code: {code}\n"
                 if info:
-                    info.log_file.write(f"\n[launcher] Exit code: {code}\n")
+                    info.log_file.write(line)
                     info.log_file.close()
-                line = f"\n[launcher] Exit code: {code}\n"
                 self.logs.setdefault(action_id, []).append(line)
                 if self.current_action_id == action_id:
                     self._append_output(line)
                 self._update_all_statuses()
+            elif kind == "scan_result":
+                self._apply_scan_result(*payload)
             elif kind == "publish_result":
                 self._handle_publish_result(*payload)
         self.after(100, self._drain_output)
@@ -1342,7 +1364,46 @@ class LauncherApp(tk.Tk):
         return exclusion
 
     def _refresh_external_status(self, schedule: bool = True, verbose: bool = False) -> None:
-        pairs, method, error = self._scan_processes()
+        # The process scan shells out to PowerShell/wmic/ps, which can be slow or
+        # even hang. Run it on a worker thread so it can NEVER freeze the UI; the
+        # result is applied back on the main thread via the output queue. Skip a
+        # background poll while one is already in flight (a manual/verbose request
+        # always runs).
+        if verbose or not self._scan_in_progress:
+            if not verbose:
+                self._scan_in_progress = True
+            threading.Thread(target=self._scan_worker, args=(verbose,), daemon=True).start()
+        if schedule:
+            # PowerShell starts slower than wmic did, so poll a little less
+            # often; per-second elapsed time is handled by _tick_status.
+            self.after(8000, self._refresh_external_status)
+
+    def _scan_worker(self, verbose: bool) -> None:
+        try:
+            pairs, method, error = self._scan_processes()
+        except Exception as exc:  # pragma: no cover - defensive
+            pairs, method, error = [], None, f"scan crashed: {exc!r}"
+        self.output_queue.put(("__scan__", "scan_result", (pairs, method, error, verbose)))
+
+    def _scan_now_sync(self) -> None:
+        """Scan and apply synchronously, for the rare one-off checks (Run/Pull)
+        that must see fresh external state before deciding. Infrequent and
+        user-initiated, so a brief pause here is acceptable — unlike the
+        recurring background poll, which must never block the UI."""
+        try:
+            pairs, method, error = self._scan_processes()
+        except Exception as exc:  # pragma: no cover - defensive
+            pairs, method, error = [], None, f"scan crashed: {exc!r}"
+        self._apply_scan_result(pairs, method, error, verbose=False)
+
+    def _apply_scan_result(
+        self,
+        pairs: list[tuple[int | None, str]],
+        method: str | None,
+        error: str | None,
+        verbose: bool,
+    ) -> None:
+        self._scan_in_progress = False
         cmd_lines = [cmd for _pid, cmd in pairs]
         running: set[str] = set()
         pids_by_action: dict[str, list[int]] = {}
@@ -1364,7 +1425,7 @@ class LauncherApp(tk.Tk):
                     pids_by_action[action.id] = pids
 
         # Log on the manual diagnostic, or whenever the outcome changes — so the
-        # background poll every 5s does not spam the debug log.
+        # background poll does not spam the debug log.
         key = (method, error, tuple(sorted(running)))
         if verbose or key != self._last_status_key:
             self._debug(
@@ -1381,10 +1442,6 @@ class LauncherApp(tk.Tk):
         self._update_all_statuses()
         if verbose:
             self._show_status_diagnostic(method, error, cmd_lines, running)
-        if schedule:
-            # PowerShell starts slower than wmic did, so poll a little less
-            # often; per-second elapsed time is handled by _tick_status.
-            self.after(8000, self._refresh_external_status)
 
     def _show_status_diagnostic(
         self, method: str | None, error: str | None, process_lines: list[str], running: set[str]
@@ -1518,6 +1575,9 @@ class LauncherApp(tk.Tk):
                 color = "#16a34a"
                 status = "Running outside launcher"
                 self.run_button.configure(state="disabled")
+            elif action_id in self.stopped_actions:
+                color = "#9ca3af"
+                status = "Stopped"
             elif action_id in self.last_exit:
                 code = self.last_exit[action_id]
                 color = "#2563eb" if code == 0 else "#dc2626"
@@ -1749,7 +1809,7 @@ class GitUpdateDialog(tk.Toplevel):
         the next time the launcher opens. External tools with no PID are
         warn-only.
         """
-        self.app._refresh_external_status(schedule=False)
+        self.app._scan_now_sync()
         stoppable = self.app.running_launcher_processes() + self.app.stoppable_external_processes()
         unstoppable = self.app.unstoppable_external_processes()
 

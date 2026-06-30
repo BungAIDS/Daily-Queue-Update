@@ -43,7 +43,12 @@ Notable launcher internals:
   (tested by `test_procscan.py`); the scan also captures PIDs so an external copy
   can be force-stopped (Stop button → `taskkill`, or `stop_any` during a Git
   Update). A grey/idle dot for something that IS running usually means the scan
-  found nothing — check the report's "method used".
+  found nothing — check the report's "method used". The recurring poll runs the
+  scan on a worker thread (`_scan_worker` → `scan_result` → `_apply_scan_result`)
+  so a slow/hung PowerShell call can never freeze the UI; only the rare one-off
+  Run/Pull pre-checks scan synchronously (`_scan_now_sync`).
+- Stopping a tool from the launcher records it in `_stop_requested`, so its
+  non-zero exit shows as `[STOPPED]` (neutral) rather than `[FAIL]` (red).
 - A running Python process (watcher OR the launcher itself) keeps the code it
   loaded at startup; a `git pull` only takes effect after a restart. The Git
   Update window offers to stop *all* running programs for the update and
