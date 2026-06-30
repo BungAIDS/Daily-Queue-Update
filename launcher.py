@@ -1988,10 +1988,10 @@ class GitUpdateDialog(tk.Toplevel):
             answer = messagebox.askyesnocancel(
                 "Programs are running",
                 f"These programs are running:\n\n{names}\n\n"
-                "Stop them for the update? They will restart automatically when the "
-                "launcher reopens.\n\n"
-                "Yes — stop them now (they restart on reopen)\n"
-                "No — update without stopping them\n"
+                "Stop them for the update and bring the SAME ones back after? "
+                "(This is a clean restart of what's already running — not a second copy.)\n\n"
+                "Yes — stop now, then bring them back when the launcher reopens\n"
+                "No — leave them running and update around them\n"
                 "Cancel — don't update",
                 parent=self,
             )
@@ -2076,19 +2076,23 @@ class GitUpdateDialog(tk.Toplevel):
                 self._log("[git] Already up to date; nothing to apply.\n")
             return
 
-        # Programs the user chose to leave running would be orphaned by a relaunch.
+        # Programs the user chose to leave running would become "external" after a
+        # relaunch (they're children of this launcher). Don't silently refuse —
+        # ask, so the launcher still updates if the user wants it to.
         leftover = self.app.running_launcher_processes(exclude=self._stop_for_update)
         if leftover:
             names = ", ".join(title for _, title in leftover)
-            self._log(f"[git] Not auto-relaunching — still running on old code: {names}\n")
-            messagebox.showinfo(
-                "Reopen when ready",
-                "The update was applied, but these programs are still running on the "
-                f"old code:\n\n{names}\n\nReopen the launcher yourself once they finish "
-                "to pick up the new version.",
+            if not messagebox.askyesno(
+                "Reopen the launcher now?",
+                "The update is downloaded, but the launcher only runs the new code "
+                "after it reopens.\n\n"
+                f"These programs are still running:\n\n{names}\n\n"
+                "Reopen now? They will keep running, but show as 'running outside the "
+                "launcher' afterward (stop and restart them to put them back under it).",
                 parent=self,
-            )
-            return
+            ):
+                self._log("[git] Update downloaded; reopen the launcher yourself to apply it.\n")
+                return
 
         self._log("[git] Update complete — relaunching the launcher to apply it…\n")
         self._relaunch_when_clear(attempts=0)
