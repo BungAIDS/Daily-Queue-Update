@@ -509,6 +509,11 @@ class LauncherApp(tk.Tk):
         self._git_dialog: GitUpdateDialog | None = None
         self._last_status_key: Any = None
         self.state = self._load_state()
+        # Programs stopped for a git update, persisted so they can be restarted
+        # the next time the launcher opens (after the new code is in place).
+        self.pending_restart: list[str] = [
+            aid for aid in (self.state.get("pending_restart") or []) if aid in self.actions_by_id
+        ]
 
         self.python_path = self._find_python()
         self.allow_send_var = tk.BooleanVar(value=False)
@@ -520,6 +525,8 @@ class LauncherApp(tk.Tk):
         self._drain_output()
         self._refresh_external_status()
         self._tick_status()
+        if self.pending_restart:
+            self.after(800, self._restart_pending)
 
     def _load_state(self) -> dict[str, Any]:
         if not STATE_PATH.exists():
@@ -530,7 +537,11 @@ class LauncherApp(tk.Tk):
             return {"options": {}, "last_action": ""}
 
     def _save_state(self) -> None:
-        data = {"options": {}, "last_action": self.current_action_id or ""}
+        data = {
+            "options": {},
+            "last_action": self.current_action_id or "",
+            "pending_restart": self.pending_restart,
+        }
         for action_id, vars_by_key in self.option_vars.items():
             data["options"][action_id] = {k: v.get() for k, v in vars_by_key.items()}
         try:
@@ -768,10 +779,15 @@ class LauncherApp(tk.Tk):
         if value:
             var.set(value)
 
-    def _build_command(self, action: LauncherAction) -> list[str]:
+    def _build_command(self, action: LauncherAction, values: dict[str, Any] | None = None) -> list[str]:
+        # Default to the live UI option values; callers (e.g. restart) can pass a
+        # saved-state mapping when the action's widgets aren't currently built.
+        if values is None:
+            values = {k: v.get() for k, v in self.option_vars.get(action.id, {}).items()}
+
         script = action.script
         if action.script_option:
-            raw_script = str(self.option_vars[action.id][action.script_option].get()).strip()
+            raw_script = str(values.get(action.script_option, "")).strip()
             if not raw_script:
                 raise ValueError("Choose a script first.")
             path = Path(raw_script)
@@ -785,24 +801,21 @@ class LauncherApp(tk.Tk):
 
         command = [str(self.python_path), str(script)]
         command.extend(action.default_args)
-        vars_by_key = self.option_vars.get(action.id, {})
         for spec in action.options:
-            if spec.key == action.script_option:
+            if spec.key == action.script_option or spec.key not in values:
                 continue
-            var = vars_by_key.get(spec.key)
-            if var is None:
-                continue
+            value = values[spec.key]
             if spec.kind == "check":
-                if bool(var.get()) and spec.arg:
+                if bool(value) and spec.arg:
                     command.append(spec.arg)
                 continue
-            raw = str(var.get()).strip()
+            raw = str(value).strip()
             if not raw:
                 continue
             pieces = shlex.split(raw, posix=False) if spec.split else [raw]
             if spec.arg:
                 command.append(spec.arg)
-            command.extend(pieces if spec.positional or spec.arg else pieces)
+            command.extend(pieces)
         return command
 
     def _command_text(self, command: Iterable[str]) -> str:
@@ -904,28 +917,71 @@ class LauncherApp(tk.Tk):
         threading.Thread(target=self._waiter_thread, args=(action.id, process), daemon=True).start()
 
     def restart_action(self, action_id: str) -> None:
-        """Rebuild an action's command from its saved options and start it.
+        """Rebuild an action's command and start it.
 
-        Used by the Git Update window to bring a live tool (e.g. watch.py)
-        back up on the freshly pulled code. Raises on failure so the caller
-        can report it.
+        Uses the live option widgets when they exist, otherwise the saved
+        options from the state file (so a restart can happen at startup before
+        the action has been selected). Raises on failure so the caller reports it.
         """
         action = self.actions_by_id[action_id]
-        command = self._build_command(action)
+        if action.id in self.option_vars:
+            command = self._build_command(action)
+        else:
+            saved = (self.state.get("options") or {}).get(action.id, {})
+            command = self._build_command(action, values=saved)
         self._start_process(action, command)
 
-    def live_launcher_processes(self) -> list[tuple[str, str]]:
-        """(id, title) for long-running tools this launcher started and that are still alive."""
+    def running_launcher_processes(self) -> list[tuple[str, str]]:
+        """(id, title) for every tool this launcher started that is still alive."""
         live: list[tuple[str, str]] = []
         for action_id, info in list(self.processes.items()):
             action = self.actions_by_id.get(action_id)
-            if action and action.long_running and info.process.poll() is None:
+            if action and info.process.poll() is None:
                 live.append((action_id, action.title))
         return live
 
     def live_external_processes(self) -> list[str]:
         """Titles of long-running tools running outside the launcher (cannot be managed here)."""
         return [self.actions_by_id[aid].title for aid in self.external_running if aid in self.actions_by_id]
+
+    def set_pending_restart(self, action_ids: list[str]) -> None:
+        """Remember (persistently) which programs to restart when the launcher reopens."""
+        self.pending_restart = list(action_ids)
+        self._save_state()
+
+    def _restart_pending(self) -> None:
+        """Restart the programs that were stopped for a git update last session."""
+        pending = list(self.pending_restart)
+        # Clear and persist first so a failure can't make us loop-restart forever.
+        self.pending_restart = []
+        self._save_state()
+
+        restarted: list[str] = []
+        skipped: list[str] = []
+        failed: list[str] = []
+        for action_id in pending:
+            action = self.actions_by_id.get(action_id)
+            if action is None or self._is_running(action_id):
+                continue
+            if action.email_risk:  # never auto-launch something that can send email
+                skipped.append(action.title)
+                continue
+            try:
+                self.restart_action(action_id)
+                restarted.append(action.title)
+            except Exception as exc:
+                failed.append(f"{action.title}: {exc}")
+
+        self._debug(f"pending restart: restarted={restarted} skipped={skipped} failed={failed}")
+        parts = []
+        if restarted:
+            parts.append("Restarted after the update:\n  " + "\n  ".join(restarted))
+        if skipped:
+            parts.append("Not auto-restarted (can send email — start manually):\n  " + "\n  ".join(skipped))
+        if failed:
+            parts.append("Could not restart:\n  " + "\n  ".join(failed))
+        if parts:
+            messagebox.showinfo("Resumed programs", "\n\n".join(parts))
 
     def _reader_thread(self, action_id: str, process: subprocess.Popen) -> None:
         assert process.stdout is not None
@@ -1378,7 +1434,7 @@ class GitUpdateDialog(tk.Toplevel):
         self._queue: queue.Queue[tuple[str, Any]] = queue.Queue()
         self._busy = False
         self._current_branch = ""
-        self._restart_after_pull: list[str] = []
+        self._stop_for_update: list[str] = []
         self.current_var = tk.StringVar(value="Current branch: …")
         self.branch_var = tk.StringVar()
         self.switch_var = tk.BooleanVar(value=True)
@@ -1502,21 +1558,24 @@ class GitUpdateDialog(tk.Toplevel):
             messagebox.showwarning("Cannot pull", str(exc), parent=self)
             return
 
-        # A running tool keeps executing the *old* code until it is restarted,
-        # so offer to stop live tools before the pull and bring them back after.
-        self._restart_after_pull = []
+        # Running programs keep executing the OLD code until restarted, and the
+        # launcher itself only picks up changes when reopened — so offer to stop
+        # everything now and have it restart when the launcher next opens.
+        self._stop_for_update = []
         if not self._handle_live_processes():
             return
 
         preview = "\n".join("git " + " ".join(step) for step in steps)
         if not messagebox.askyesno("Confirm pull", f"Run these git commands?\n\n{preview}", parent=self):
-            self._restart_after_pull = []
+            self._stop_for_update = []
             return
 
-        if self._restart_after_pull:
-            stopped = ", ".join(self.app.actions_by_id[aid].title for aid in self._restart_after_pull)
-            self._log(f"[git] Stopping live tools before update: {stopped}\n")
-            for action_id in self._restart_after_pull:
+        if self._stop_for_update:
+            # Remember (persistently) what to bring back, then stop them.
+            self.app.set_pending_restart(self._stop_for_update)
+            stopped = ", ".join(self.app.actions_by_id[aid].title for aid in self._stop_for_update)
+            self._log(f"[git] Stopping programs before update: {stopped}\n")
+            for action_id in self._stop_for_update:
                 self.app.stop_process(action_id)
 
         self._set_busy(True)
@@ -1524,32 +1583,32 @@ class GitUpdateDialog(tk.Toplevel):
         threading.Thread(target=self._pull_worker, args=(steps,), daemon=True).start()
 
     def _handle_live_processes(self) -> bool:
-        """Prompt about running live tools. Returns False if the user cancels the pull.
+        """Prompt about running programs. Returns False if the user cancels the pull.
 
-        When the user agrees, the launcher-started tools are recorded in
-        ``self._restart_after_pull`` to be stopped now and restarted after the
-        pull succeeds.
+        When the user agrees, every program the launcher started is recorded in
+        ``self._stop_for_update`` (and persisted) to be stopped now and restarted
+        the next time the launcher opens.
         """
         self.app._refresh_external_status(schedule=False)
-        managed = self.app.live_launcher_processes()
+        managed = self.app.running_launcher_processes()
         external = self.app.live_external_processes()
 
         if managed:
             names = ", ".join(title for _, title in managed)
             answer = messagebox.askyesnocancel(
-                "Live tools are running",
-                "These live tools are running and will keep using the OLD code until "
-                f"they are restarted:\n\n{names}\n\n"
-                "Stop them now, run the update, then restart them automatically?\n\n"
-                "Yes — stop, update, then restart them\n"
-                "No — update without touching them (restart them yourself later)\n"
+                "Programs are running",
+                f"These programs are running:\n\n{names}\n\n"
+                "Stop them for the update? They will restart automatically when you "
+                "reopen the launcher.\n\n"
+                "Yes — stop them now (they restart on reopen)\n"
+                "No — update without stopping them\n"
                 "Cancel — don't update",
                 parent=self,
             )
             if answer is None:
                 return False
             if answer:
-                self._restart_after_pull = [action_id for action_id, _ in managed]
+                self._stop_for_update = [action_id for action_id, _ in managed]
 
         if external:
             ext_names = ", ".join(external)
@@ -1557,7 +1616,7 @@ class GitUpdateDialog(tk.Toplevel):
                 "Tools running outside the launcher",
                 "These are running outside this launcher, so it cannot stop or restart "
                 f"them for you:\n\n{ext_names}\n\n"
-                "Update anyway? Restart them yourself afterward to pick up the new code.",
+                "Update anyway? Stop and restart them yourself to pick up the new code.",
                 parent=self,
             ):
                 return False
@@ -1593,55 +1652,51 @@ class GitUpdateDialog(tk.Toplevel):
                         self._log(f"\n[git] Finished with exit code {code}.\n")
                     self._set_busy(False)
                     self.refresh_branches()  # reflect any branch switch in the label
-                    self._after_pull(code)
-                    if code == 0 and git_update.launcher_needs_restart(changed):
-                        self._log(
-                            "\n[git] NOTE: this update changed the launcher itself. "
-                            "Close and reopen the launcher to run the new version.\n"
-                        )
-                        messagebox.showinfo(
-                            "Restart the launcher",
-                            "This update changed the launcher program itself.\n\n"
-                            "Close and reopen the launcher (RunLauncher) so it runs the "
-                            "new version — the running window is still on the old code.",
-                            parent=self,
-                        )
+                    self._announce_reopen(code, changed)
         except queue.Empty:
             pass
         if self.winfo_exists():
             self.after(100, self._poll_queue)
 
-    def _after_pull(self, code: int) -> None:
-        """Restart any tools we stopped for the update (only if the pull succeeded)."""
-        pending = self._restart_after_pull
-        self._restart_after_pull = []
-        if not pending:
-            return
-        if code != 0:
-            titles = ", ".join(self.app.actions_by_id[aid].title for aid in pending)
+    def _announce_reopen(self, code: int, changed: list[str]) -> None:
+        """Tell the user to reopen the launcher so the update applies and programs resume."""
+        stopped = bool(self._stop_for_update)
+        launcher_changed = code == 0 and git_update.launcher_needs_restart(changed)
+        if stopped:
             self._log(
-                f"[git] Update failed (exit {code}); leaving stopped tools off. "
-                f"Restart when ready: {titles}\n"
+                "[git] The programs you stopped will restart automatically when you "
+                "reopen the launcher.\n"
             )
-            return
-        self._wait_then_restart(pending, attempts=0)
+        if launcher_changed:
+            self._log(
+                "[git] NOTE: this update changed the launcher itself — reopen it to run "
+                "the new version.\n"
+            )
 
-    def _wait_then_restart(self, pending: list[str], attempts: int) -> None:
-        """Wait (without freezing the UI) for stopped tools to exit, then relaunch them."""
-        still_running = [aid for aid in pending if self.app._is_running(aid)]
-        if still_running and attempts < 40:  # up to ~10s at 250ms
-            self.after(250, lambda: self._wait_then_restart(pending, attempts + 1))
-            return
-        for action_id in pending:
-            title = self.app.actions_by_id[action_id].title
-            if self.app._is_running(action_id):
-                self._log(f"[git] {title} did not stop in time; not restarting it.\n")
-                continue
-            try:
-                self.app.restart_action(action_id)
-                self._log(f"[git] Restarted: {title}\n")
-            except Exception as exc:
-                self._log(f"[git] Could not restart {title}: {exc}\n")
+        if launcher_changed:
+            extra = " The programs you stopped will restart automatically when it reopens." if stopped else ""
+            messagebox.showinfo(
+                "Restart the launcher",
+                "This update changed the launcher program itself.\n\n"
+                "Close and reopen the launcher (RunLauncher) so it runs the new "
+                f"version — the running window is still on the old code.{extra}",
+                parent=self,
+            )
+        elif stopped and code == 0:
+            messagebox.showinfo(
+                "Reopen to resume",
+                "Update complete. Close and reopen the launcher to restart the "
+                "programs you stopped.",
+                parent=self,
+            )
+        elif stopped:  # pull did not finish cleanly, but programs are already stopped
+            messagebox.showwarning(
+                "Update did not complete",
+                "The update did not finish cleanly (see the output above).\n\n"
+                "The programs you stopped will still restart when you reopen the "
+                "launcher.",
+                parent=self,
+            )
 
     def _on_close(self) -> None:
         if self._busy and not messagebox.askyesno(
