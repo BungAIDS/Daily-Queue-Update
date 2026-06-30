@@ -49,6 +49,12 @@ Notable launcher internals:
   Run/Pull pre-checks scan synchronously (`_scan_now_sync`).
 - Stopping a tool from the launcher records it in `_stop_requested`, so its
   non-zero exit shows as `[STOPPED]` (neutral) rather than `[FAIL]` (red).
+- The launcher runs under `pythonw` (no console) so it can't deliver Ctrl+Break.
+  For a `graceful_stop` action (watch.py) the Stop button drops a per-PID flag
+  file (`stop_signal.py`, `.launcher_stops/`) that the script polls and treats
+  like Ctrl+C — finishing the poll, saving state, publishing logs — with a
+  150s backstop force-kill; a second Stop click (or the Git Update flow, which
+  passes `force=True`) kills immediately.
 - A running Python process (watcher OR the launcher itself) keeps the code it
   loaded at startup; a `git pull` only takes effect after a restart. The Git
   Update window offers to stop *all* running programs for the update and

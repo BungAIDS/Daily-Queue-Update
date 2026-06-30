@@ -25,6 +25,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import git_update
 import procscan
+import stop_signal
 
 
 ROOT = Path(__file__).resolve().parent
@@ -37,6 +38,9 @@ LOCAL_REPORT = LOG_DIR / "launcher_report.txt"
 # Dedicated branch that collects published debug reports, kept off feature
 # branches. The launcher pushes here without disturbing the working checkout.
 DEBUG_BRANCH = "debug/launcher"
+# How long to let a graceful Stop finish (its current poll can run a while) before
+# the backstop force-kill steps in. A second Stop click forces immediately.
+GRACEFUL_STOP_SECONDS = 150
 
 
 def hidden_console_kwargs() -> dict[str, Any]:
@@ -92,6 +96,7 @@ class LauncherAction:
     long_running: bool = False
     email_risk: bool = False
     script_option: str | None = None
+    graceful_stop: bool = False   # Stop asks it to finish cleanly (via stop_signal) first
 
 
 @dataclass
@@ -239,6 +244,7 @@ def base_actions() -> list[LauncherAction]:
             "watch.py",
             options=(option("now", "Start now / ignore time window", "Start immediately instead of waiting for the configured watch window.", kind="check", arg="--now"),),
             long_running=True,
+            graceful_stop=True,
         ),
         LauncherAction(
             "watch_once",
@@ -1151,35 +1157,56 @@ class LauncherApp(tk.Tk):
             self.external_running.discard(action_id)
         return killed
 
-    def stop_any(self, action_id: str) -> bool:
+    def stop_any(self, action_id: str, *, force: bool = False) -> bool:
         """Stop a tool whether the launcher started it or it is running externally."""
-        if self.stop_process(action_id):
+        if self.stop_process(action_id, force=force):
             return True
         return self.stop_external(action_id) > 0
 
-    def stop_process(self, action_id: str) -> bool:
-        """Ask a launcher-started process to stop (no dialogs). Returns True if a stop was issued.
+    def stop_process(self, action_id: str, *, force: bool = False) -> bool:
+        """Stop a launcher-started process. Returns True if a stop was issued.
 
-        Sends CTRL_BREAK on Windows / terminate elsewhere, then force-kills
-        after a timeout if it is still alive. Shared by the Stop button and the
-        Git Update auto-stop.
+        For an action that supports a clean shutdown (``graceful_stop``, e.g.
+        watch.py) the FIRST stop drops a stop-flag file the script watches for —
+        so it finishes the current poll, saves state and publishes logs before
+        exiting — with a generous backstop force-kill. A second Stop (or
+        ``force=True``, used by the Git Update flow) kills it now. Other tools
+        are terminated immediately as before.
         """
         info = self.processes.get(action_id)
         if not info or info.process.poll() is not None:
             return False
-        self._stop_requested.add(action_id)  # so the exit isn't flagged as a failure
         proc = info.process
+        action = self.actions_by_id.get(action_id)
+        graceful = bool(action and action.graceful_stop)
+        second_press = action_id in self._stop_requested
+        self._stop_requested.add(action_id)  # so the exit isn't flagged as a failure
+
+        if graceful and not force and not second_press:
+            stop_signal.request_stop(proc.pid)
+            try:  # also nudge via console signal in case we do have a console
+                proc.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGINT)
+            except Exception:
+                pass
+            self.logs.setdefault(action_id, []).append(
+                "[launcher] Stop requested — finishing the current poll, then saving "
+                "state and publishing logs before exiting. Click Stop again to force-quit.\n"
+            )
+            self._schedule_force_kill(proc, action_id, GRACEFUL_STOP_SECONDS)
+            return True
+
+        # Force / non-graceful / second press: stop now.
         try:
-            if os.name == "nt":
-                proc.send_signal(signal.CTRL_BREAK_EVENT)
-            else:
-                proc.terminate()
-            self.logs.setdefault(action_id, []).append("[launcher] Stop requested.\n")
+            proc.terminate()  # TerminateProcess on Windows — reliable without a console
+            self.logs.setdefault(action_id, []).append("[launcher] Stopping now.\n")
         except Exception:
             proc.terminate()
+        self._schedule_force_kill(proc, action_id, 8)
+        return True
 
+    def _schedule_force_kill(self, proc: subprocess.Popen, action_id: str, delay: float) -> None:
         def force_kill() -> None:
-            time.sleep(8)
+            time.sleep(delay)
             if proc.poll() is None:
                 try:
                     proc.kill()
@@ -1188,7 +1215,6 @@ class LauncherApp(tk.Tk):
                     pass
 
         threading.Thread(target=force_kill, daemon=True).start()
-        return True
 
     def _send_enter(self) -> None:
         if not self.current_action_id:
@@ -1245,6 +1271,8 @@ class LauncherApp(tk.Tk):
                 code = int(payload)
                 self.external_running.discard(action_id)
                 info = self.processes.pop(action_id, None)
+                if info is not None:
+                    stop_signal.clear_stop(info.process.pid)  # tidy up any stop-flag
                 requested_stop = action_id in self._stop_requested
                 self._stop_requested.discard(action_id)
                 if requested_stop:
@@ -1588,7 +1616,11 @@ class LauncherApp(tk.Tk):
                 color = "#16a34a"
                 info = self.processes[action_id]
                 elapsed = int((datetime.now() - info.started_at).total_seconds())
-                status = f"Running ({elapsed}s)"
+                if action_id in self._stop_requested:
+                    color = "#d97706"  # amber: stop requested, finishing up
+                    status = f"Stopping… ({elapsed}s)"
+                else:
+                    status = f"Running ({elapsed}s)"
                 self.run_button.configure(state="disabled")
                 self.stop_button.configure(state="normal")
                 self.enter_button.configure(state="normal")
@@ -1815,7 +1847,7 @@ class GitUpdateDialog(tk.Toplevel):
             stopped = ", ".join(self.app.actions_by_id[aid].title for aid in self._stop_for_update)
             self._log(f"[git] Stopping programs before update: {stopped}\n")
             for action_id in self._stop_for_update:
-                self.app.stop_any(action_id)
+                self.app.stop_any(action_id, force=True)  # fast: they're restarted fresh after the pull
 
         self._set_busy(True)
         self._log(f"\n=== Pulling '{branch}' ===\n")
