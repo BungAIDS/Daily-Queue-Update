@@ -371,7 +371,7 @@ def base_actions() -> list[LauncherAction]:
             "Transmittals",
             "Prepare Email Drawings Form",
             "Builds/fills transmittal data and pre-fills CBC Insider's Email Drawings form. The code intentionally does not click Send.",
-            "email_drawings.py",
+            "fill_transmittal_insider.py",
             options=(
                 option("order", "Order", "Order number to prepare.", positional=True),
                 option("probe", "Probe form fields", "Read-only selector discovery mode.", kind="check", arg="--probe"),
