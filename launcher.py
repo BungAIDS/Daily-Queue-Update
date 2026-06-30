@@ -51,6 +51,22 @@ def hidden_console_kwargs() -> dict[str, Any]:
     }
 
 
+def windows_has_console() -> bool:
+    """True if this process owns a console (False when launched via pythonw).
+
+    When the launcher has no console of its own, a console-subsystem child
+    (python.exe running a script) would otherwise pop its own black window.
+    """
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.kernel32.GetConsoleWindow())
+    except Exception:
+        return False
+
+
 @dataclass(frozen=True)
 class OptionSpec:
     key: str
@@ -901,6 +917,11 @@ class LauncherApp(tk.Tk):
         creationflags = 0
         if os.name == "nt":
             creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            # Under pythonw (no console of our own) a console child pops its own
+            # window — hide it. When we DO have a console, the child shares it
+            # (no new window) and Ctrl+Break can still reach it for a graceful Stop.
+            if not windows_has_console():
+                creationflags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
         try:
             process = subprocess.Popen(
                 command,
