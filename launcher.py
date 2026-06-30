@@ -30,6 +30,7 @@ import git_update
 ROOT = Path(__file__).resolve().parent
 STATE_PATH = ROOT / ".launcher_state.json"
 LOG_DIR = ROOT / "launcher_logs"
+DEBUG_LOG = LOG_DIR / "launcher_debug.log"
 
 
 def hidden_console_kwargs() -> dict[str, Any]:
@@ -497,11 +498,13 @@ class LauncherApp(tk.Tk):
         self.listbox_items: dict[str, list[str]] = {}
         self.current_action_id: str | None = None
         self._git_dialog: GitUpdateDialog | None = None
+        self._last_status_key: Any = None
         self.state = self._load_state()
 
         self.python_path = self._find_python()
         self.allow_send_var = tk.BooleanVar(value=False)
 
+        self._debug(f"launcher started (os={os.name}, python={self.python_path})")
         self._build_ui()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._select_initial_action()
@@ -628,8 +631,9 @@ class LauncherApp(tk.Tk):
         self.clear_button.pack(side="left", padx=(8, 0))
         self.logs_button = ttk.Button(button_row, text="Open Logs Folder", command=self._open_logs_folder)
         self.logs_button.pack(side="left", padx=(8, 0))
-        self.refresh_button = ttk.Button(button_row, text="Refresh Status", command=lambda: self._refresh_external_status(schedule=False))
+        self.refresh_button = ttk.Button(button_row, text="Refresh Status", command=lambda: self._refresh_external_status(schedule=False, verbose=True))
         self.refresh_button.pack(side="right")
+        ToolTip(self.refresh_button, "Re-scan for tools running outside the launcher and show a diagnostic (also written to launcher_debug.log).")
 
         output_frame = ttk.LabelFrame(right, text="Output", padding=8)
         output_frame.pack(fill="both", expand=True)
@@ -1057,31 +1061,106 @@ class LauncherApp(tk.Tk):
         info = self.processes.get(action_id)
         return bool(info and info.process.poll() is None)
 
-    def _refresh_external_status(self, schedule: bool = True) -> None:
-        running: set[str] = set()
-        output = ""
+    def _debug(self, message: str) -> None:
+        """Append one timestamped line to launcher_logs/launcher_debug.log (best effort)."""
         try:
-            output = subprocess.check_output(
-                ["wmic", "path", "win32_process", "get", "ProcessId,CommandLine"],
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                stderr=subprocess.DEVNULL,
-                timeout=3,
-                **hidden_console_kwargs(),
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with DEBUG_LOG.open("a", encoding="utf-8", errors="replace") as fh:
+                fh.write(f"{stamp} {message}\n")
+        except OSError:
+            pass
+
+    def _scan_processes(self) -> tuple[list[str], str | None, str | None]:
+        """List running command lines for external-status detection.
+
+        Returns (python_command_lines, method_used, error). On Windows it tries
+        ``wmic`` first (legacy, removed on newer builds) and falls back to a
+        PowerShell CIM query, which is the supported modern replacement. The
+        error is returned (not swallowed) so the diagnostic can show why a scan
+        came back empty.
+        """
+        if os.name == "nt":
+            ps_query = (
+                "Get-CimInstance Win32_Process | "
+                "ForEach-Object { \"$($_.ProcessId) $($_.CommandLine)\" }"
             )
-        except Exception:
-            output = ""
-        process_lines = [line.lower() for line in output.splitlines() if "python" in line.lower()]
+            candidates = [
+                ("wmic", ["wmic", "path", "win32_process", "get", "ProcessId,CommandLine"]),
+                ("powershell-cim", ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_query]),
+            ]
+        else:
+            candidates = [("ps", ["ps", "-eo", "args"])]
+
+        last_error: str | None = None
+        for name, argv in candidates:
+            try:
+                output = subprocess.check_output(
+                    argv,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    stderr=subprocess.DEVNULL,
+                    timeout=8,
+                    **hidden_console_kwargs(),
+                )
+            except Exception as exc:
+                last_error = f"{name}: {exc.__class__.__name__}: {exc}"
+                continue
+            lines = [line for line in output.splitlines() if "python" in line.lower()]
+            return lines, name, None
+        return [], None, last_error or "no process-listing tool available"
+
+    def _refresh_external_status(self, schedule: bool = True, verbose: bool = False) -> None:
+        lines, method, error = self._scan_processes()
+        process_lines = [line.lower() for line in lines]
+        running: set[str] = set()
         for action in self.actions:
             if not action.long_running or not action.script or self._is_running(action.id):
                 continue
             if any(process_line_matches_script(line, action.script) for line in process_lines):
                 running.add(action.id)
+
+        # Log on the manual diagnostic, or whenever the outcome changes — so the
+        # background poll every 5s does not spam the debug log.
+        key = (method, error, tuple(sorted(running)))
+        if verbose or key != self._last_status_key:
+            self._debug(
+                f"status scan: method={method or 'none'} error={error or 'none'} "
+                f"python_lines={len(process_lines)} detected={sorted(running) or 'none'}"
+            )
+            self._last_status_key = key
+        if verbose:
+            for line in process_lines[:25]:
+                self._debug(f"  proc: {line.strip()[:300]}")
+
         self.external_running = running
         self._update_all_statuses()
+        if verbose:
+            self._show_status_diagnostic(method, error, process_lines, running)
         if schedule:
             self.after(5000, self._refresh_external_status)
+
+    def _show_status_diagnostic(
+        self, method: str | None, error: str | None, process_lines: list[str], running: set[str]
+    ) -> None:
+        if method:
+            head = f"Process scan used: {method}\nPython processes seen: {len(process_lines)}"
+        else:
+            head = (
+                "Process scan FAILED — no method worked.\n"
+                "On newer Windows 'wmic' is removed; the PowerShell fallback also "
+                "did not run."
+            )
+        if error:
+            head += f"\nLast error: {error}"
+        if running:
+            names = ", ".join(self.actions_by_id[a].title for a in sorted(running))
+            body = f"\n\nDetected running outside the launcher:\n{names}"
+        else:
+            body = "\n\nNo long-running tools detected running outside the launcher."
+        body += f"\n\nFull details were written to:\n{DEBUG_LOG}"
+        messagebox.showinfo("Status diagnostic", head + body)
 
     def _tick_status(self) -> None:
         self._update_detail_status()

@@ -122,6 +122,10 @@ It opens `launcher.py`, a standard-library Windows desktop app that:
 - requires confirmation before every run,
 - keeps email/send actions locked until you check **Allow email / send actions**,
 - shows a green running indicator for long-running tools such as `watch.py`,
+  including copies left running outside the launcher (detected via `wmic`,
+  falling back to PowerShell on newer Windows where `wmic` is removed),
+- **Refresh Status** re-scans and shows a diagnostic of what it found; details
+  are written to `launcher_logs/launcher_debug.log` if the dot looks wrong,
 - blocks starting a second copy of an already-running long-running script,
 - lets you stop a launcher-started process,
 - shows live console output and writes per-run logs under `launcher_logs/`,
