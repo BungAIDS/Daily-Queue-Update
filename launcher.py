@@ -41,8 +41,6 @@ DEBUG_BRANCH = "debug/launcher"
 # How long to let a graceful Stop finish (its current poll can run a while) before
 # the backstop force-kill steps in. A second Stop click forces immediately.
 GRACEFUL_STOP_SECONDS = 150
-# Single-instance lock: holds the PID of the running launcher.
-LOCK_PATH = ROOT / ".launcher.lock"
 
 
 def hidden_console_kwargs() -> dict[str, Any]:
@@ -64,18 +62,25 @@ def pid_alive(pid: int) -> bool:
     try:
         if os.name == "nt":
             import ctypes
+            from ctypes import wintypes
+
+            kernel32 = ctypes.windll.kernel32
+            kernel32.OpenProcess.restype = wintypes.HANDLE  # 64-bit safe (no truncation)
+            kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 
             still_active = 259
             query = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
-            handle = ctypes.windll.kernel32.OpenProcess(query, False, pid)
+            handle = kernel32.OpenProcess(query, False, pid)
             if not handle:
                 return False
             try:
-                code = ctypes.c_ulong()
-                ok = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+                code = wintypes.DWORD()
+                ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
                 return bool(ok) and code.value == still_active
             finally:
-                ctypes.windll.kernel32.CloseHandle(handle)
+                kernel32.CloseHandle(handle)
         os.kill(pid, 0)
         return True
     except Exception:
@@ -587,41 +592,22 @@ class LauncherApp(tk.Tk):
             return f"{branch}@{commit}"
         return commit or branch or "unknown"
 
-    # ----- single-instance lock ------------------------------------------- #
-    def _read_lock_pid(self) -> int | None:
-        try:
-            return int(LOCK_PATH.read_text(encoding="utf-8").strip())
-        except (OSError, ValueError):
-            return None
-
-    def _write_lock(self) -> None:
-        try:
-            LOCK_PATH.write_text(str(os.getpid()), encoding="utf-8")
-        except OSError:
-            pass
-
-    def _release_lock(self) -> None:
-        if self._read_lock_pid() == os.getpid():
-            try:
-                LOCK_PATH.unlink()
-            except OSError:
-                pass
-
+    # ----- single instance ------------------------------------------------ #
     def _another_launcher_pid(self) -> int | None:
-        """PID of another running launcher, or None. Checks the lock file first
-        (fast) and falls back to a process scan, so it also catches a launcher
-        that predates the lock (e.g. one left over from before this feature)."""
+        """PID of *another* running launcher.py, or None.
+
+        Detection is by process scan only — we verify the command line really is
+        launcher.py — so we never block on a stale PID. (An earlier lock-file
+        approach falsely fired when a killed launcher's PID got reused by an
+        unrelated process.) If the scan can't run, we fail open and let the
+        launcher start."""
         me = os.getpid()
-        pid = self._read_lock_pid()
-        if pid and pid != me and pid_alive(pid):
-            return pid
         try:
             pairs, _method, _error = self._scan_processes()
         except Exception:  # pragma: no cover - defensive
             return None
         for other_pid, cmd in pairs:
-            if (other_pid and other_pid != me and pid_alive(other_pid)
-                    and procscan.process_line_matches_script(cmd, "launcher.py")):
+            if other_pid and other_pid != me and procscan.process_line_matches_script(cmd, "launcher.py"):
                 return other_pid
         return None
 
@@ -644,7 +630,6 @@ class LauncherApp(tk.Tk):
                     "Open this one anyway?",
                 ):
                     return False
-        self._write_lock()
         return True
 
     def _load_state(self) -> dict[str, Any]:
@@ -1131,7 +1116,6 @@ class LauncherApp(tk.Tk):
             return
         self._debug("relaunching launcher; closing this instance")
         self._save_state()
-        self._release_lock()   # let the fresh launcher take the single-instance lock
         self.destroy()
 
     def set_pending_restart(self, action_ids: list[str]) -> None:
@@ -1763,7 +1747,6 @@ class LauncherApp(tk.Tk):
         for action_id in running:               # end every launcher-started process
             self.stop_process(action_id, force=True)
         self._save_state()
-        self._release_lock()
         self._publish_on_close()
         self.destroy()
 
