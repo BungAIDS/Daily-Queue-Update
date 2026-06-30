@@ -15,6 +15,11 @@ from typing import Callable
 ROOT = Path(__file__).resolve().parent
 DEFAULT_REMOTE = "origin"
 
+# Files that make up the launcher program itself. A running launcher loads these
+# into memory at startup, so a pull that changes them only takes effect after the
+# launcher is closed and reopened.
+LAUNCHER_FILES = ("launcher.py", "git_update.py")
+
 
 def _hidden_console_kwargs() -> dict[str, object]:
     """On Windows, keep git from flashing its own console window."""
@@ -110,6 +115,33 @@ def list_branches(*, remote: str = DEFAULT_REMOTE) -> list[str]:
     local = run_git(["branch"], timeout=10)
     remote_out = run_git(["branch", "-r"], timeout=10)
     return parse_branches(local.stdout, remote_out.stdout, remote=remote)
+
+
+def head_rev() -> str:
+    """The current HEAD commit hash, or empty string if it cannot be read."""
+    try:
+        result = run_git(["rev-parse", "HEAD"], timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def changed_files(old_rev: str, new_rev: str) -> list[str]:
+    """Repo-relative paths that differ between two commits (empty on any problem)."""
+    if not old_rev or not new_rev or old_rev == new_rev:
+        return []
+    try:
+        result = run_git(["diff", "--name-only", old_rev, new_rev], timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def launcher_needs_restart(paths: list[str]) -> bool:
+    """True when any changed path is one of the launcher's own program files."""
+    return any(Path(p).name in LAUNCHER_FILES for p in paths)
 
 
 def build_pull_steps(

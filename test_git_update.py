@@ -68,6 +68,18 @@ def test_build_pull_steps_requires_a_branch():
             raise AssertionError(f"expected ValueError for branch {bad!r}")
 
 
+def test_launcher_needs_restart_detects_program_files():
+    assert git_update.launcher_needs_restart(["launcher.py"]) is True
+    assert git_update.launcher_needs_restart(["git_update.py"]) is True
+    # Match on the file name even when git reports a path.
+    assert git_update.launcher_needs_restart(["subdir/launcher.py", "watch.py"]) is True
+
+
+def test_launcher_needs_restart_ignores_other_files():
+    assert git_update.launcher_needs_restart([]) is False
+    assert git_update.launcher_needs_restart(["watch.py", "config.py", "README.md"]) is False
+
+
 def test_run_pull_steps_stops_at_first_failure():
     calls: list[list[str]] = []
 

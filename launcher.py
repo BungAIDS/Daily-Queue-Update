@@ -840,6 +840,18 @@ class LauncherApp(tk.Tk):
             return
 
         self._save_state()
+        try:
+            self._start_process(action, command)
+        except OSError as exc:
+            messagebox.showerror("Could not start command", str(exc))
+
+    def _start_process(self, action: LauncherAction, command: list[str]) -> None:
+        """Launch ``command`` for ``action`` and wire up logging/output threads.
+
+        This is the shared core behind the Run button and the Git Update
+        auto-restart. It performs no confirmation or gating — callers do that.
+        Raises ``OSError`` if the process cannot be started.
+        """
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_path = LOG_DIR / f"{stamp}_{action.id}.log"
@@ -863,17 +875,41 @@ class LauncherApp(tk.Tk):
                 bufsize=1,
                 creationflags=creationflags,
             )
-        except OSError as exc:
+        except OSError:
             log_file.close()
-            messagebox.showerror("Could not start command", str(exc))
-            return
+            raise
 
         self.processes[action.id] = ProcessInfo(action.id, process, log_file, log_path, command)
         self.logs[action.id] = [f"$ {self._command_text(command)}\n", f"[launcher] Log: {log_path}\n"]
-        self._render_output(action.id)
+        if self.current_action_id == action.id:
+            self._render_output(action.id)
         self._update_all_statuses()
         threading.Thread(target=self._reader_thread, args=(action.id, process), daemon=True).start()
         threading.Thread(target=self._waiter_thread, args=(action.id, process), daemon=True).start()
+
+    def restart_action(self, action_id: str) -> None:
+        """Rebuild an action's command from its saved options and start it.
+
+        Used by the Git Update window to bring a live tool (e.g. watch.py)
+        back up on the freshly pulled code. Raises on failure so the caller
+        can report it.
+        """
+        action = self.actions_by_id[action_id]
+        command = self._build_command(action)
+        self._start_process(action, command)
+
+    def live_launcher_processes(self) -> list[tuple[str, str]]:
+        """(id, title) for long-running tools this launcher started and that are still alive."""
+        live: list[tuple[str, str]] = []
+        for action_id, info in list(self.processes.items()):
+            action = self.actions_by_id.get(action_id)
+            if action and action.long_running and info.process.poll() is None:
+                live.append((action_id, action.title))
+        return live
+
+    def live_external_processes(self) -> list[str]:
+        """Titles of long-running tools running outside the launcher (cannot be managed here)."""
+        return [self.actions_by_id[aid].title for aid in self.external_running if aid in self.actions_by_id]
 
     def _reader_thread(self, action_id: str, process: subprocess.Popen) -> None:
         assert process.stdout is not None
@@ -898,13 +934,25 @@ class LauncherApp(tk.Tk):
             return
         if not messagebox.askyesno("Confirm stop", f"Stop {action.title}?"):
             return
+        self.stop_process(action.id)
+
+    def stop_process(self, action_id: str) -> bool:
+        """Ask a launcher-started process to stop (no dialogs). Returns True if a stop was issued.
+
+        Sends CTRL_BREAK on Windows / terminate elsewhere, then force-kills
+        after a timeout if it is still alive. Shared by the Stop button and the
+        Git Update auto-stop.
+        """
+        info = self.processes.get(action_id)
+        if not info or info.process.poll() is not None:
+            return False
         proc = info.process
         try:
             if os.name == "nt":
                 proc.send_signal(signal.CTRL_BREAK_EVENT)
             else:
                 proc.terminate()
-            self.logs[action.id].append("[launcher] Stop requested.\n")
+            self.logs.setdefault(action_id, []).append("[launcher] Stop requested.\n")
         except Exception:
             proc.terminate()
 
@@ -913,11 +961,12 @@ class LauncherApp(tk.Tk):
             if proc.poll() is None:
                 try:
                     proc.kill()
-                    self.output_queue.put((action.id, "line", "[launcher] Force killed after stop timeout.\n"))
+                    self.output_queue.put((action_id, "line", "[launcher] Force killed after stop timeout.\n"))
                 except OSError:
                     pass
 
         threading.Thread(target=force_kill, daemon=True).start()
+        return True
 
     def _send_enter(self) -> None:
         if not self.current_action_id:
@@ -1092,6 +1141,7 @@ class GitUpdateDialog(tk.Toplevel):
 
     def __init__(self, parent: "LauncherApp") -> None:
         super().__init__(parent)
+        self.app = parent
         self.title("Git Update")
         self.geometry("760x540")
         self.minsize(620, 420)
@@ -1100,6 +1150,7 @@ class GitUpdateDialog(tk.Toplevel):
         self._queue: queue.Queue[tuple[str, Any]] = queue.Queue()
         self._busy = False
         self._current_branch = ""
+        self._restart_after_pull: list[str] = []
         self.current_var = tk.StringVar(value="Current branch: …")
         self.branch_var = tk.StringVar()
         self.switch_var = tk.BooleanVar(value=True)
@@ -1222,16 +1273,75 @@ class GitUpdateDialog(tk.Toplevel):
         except ValueError as exc:
             messagebox.showwarning("Cannot pull", str(exc), parent=self)
             return
+
+        # A running tool keeps executing the *old* code until it is restarted,
+        # so offer to stop live tools before the pull and bring them back after.
+        self._restart_after_pull = []
+        if not self._handle_live_processes():
+            return
+
         preview = "\n".join("git " + " ".join(step) for step in steps)
         if not messagebox.askyesno("Confirm pull", f"Run these git commands?\n\n{preview}", parent=self):
+            self._restart_after_pull = []
             return
+
+        if self._restart_after_pull:
+            stopped = ", ".join(self.app.actions_by_id[aid].title for aid in self._restart_after_pull)
+            self._log(f"[git] Stopping live tools before update: {stopped}\n")
+            for action_id in self._restart_after_pull:
+                self.app.stop_process(action_id)
+
         self._set_busy(True)
         self._log(f"\n=== Pulling '{branch}' ===\n")
         threading.Thread(target=self._pull_worker, args=(steps,), daemon=True).start()
 
+    def _handle_live_processes(self) -> bool:
+        """Prompt about running live tools. Returns False if the user cancels the pull.
+
+        When the user agrees, the launcher-started tools are recorded in
+        ``self._restart_after_pull`` to be stopped now and restarted after the
+        pull succeeds.
+        """
+        self.app._refresh_external_status(schedule=False)
+        managed = self.app.live_launcher_processes()
+        external = self.app.live_external_processes()
+
+        if managed:
+            names = ", ".join(title for _, title in managed)
+            answer = messagebox.askyesnocancel(
+                "Live tools are running",
+                "These live tools are running and will keep using the OLD code until "
+                f"they are restarted:\n\n{names}\n\n"
+                "Stop them now, run the update, then restart them automatically?\n\n"
+                "Yes — stop, update, then restart them\n"
+                "No — update without touching them (restart them yourself later)\n"
+                "Cancel — don't update",
+                parent=self,
+            )
+            if answer is None:
+                return False
+            if answer:
+                self._restart_after_pull = [action_id for action_id, _ in managed]
+
+        if external:
+            ext_names = ", ".join(external)
+            if not messagebox.askyesno(
+                "Tools running outside the launcher",
+                "These are running outside this launcher, so it cannot stop or restart "
+                f"them for you:\n\n{ext_names}\n\n"
+                "Update anyway? Restart them yourself afterward to pick up the new code.",
+                parent=self,
+            ):
+                return False
+
+        return True
+
     def _pull_worker(self, steps: list[list[str]]) -> None:
+        before = git_update.head_rev()
         code = git_update.run_pull_steps(steps, lambda line: self._queue.put(("line", line)))
-        self._queue.put(("done", code))
+        after = git_update.head_rev()
+        changed = git_update.changed_files(before, after)
+        self._queue.put(("done", (code, changed)))
 
     def _poll_queue(self) -> None:
         try:
@@ -1248,17 +1358,62 @@ class GitUpdateDialog(tk.Toplevel):
                     self._set_busy(False)
                     messagebox.showerror("Git", str(payload), parent=self)
                 elif kind == "done":
-                    code = int(payload)
+                    code, changed = payload
                     if code == 0:
                         self._log("\n[git] Done. Your code is up to date.\n")
                     else:
                         self._log(f"\n[git] Finished with exit code {code}.\n")
                     self._set_busy(False)
                     self.refresh_branches()  # reflect any branch switch in the label
+                    self._after_pull(code)
+                    if code == 0 and git_update.launcher_needs_restart(changed):
+                        self._log(
+                            "\n[git] NOTE: this update changed the launcher itself. "
+                            "Close and reopen the launcher to run the new version.\n"
+                        )
+                        messagebox.showinfo(
+                            "Restart the launcher",
+                            "This update changed the launcher program itself.\n\n"
+                            "Close and reopen the launcher (RunLauncher) so it runs the "
+                            "new version — the running window is still on the old code.",
+                            parent=self,
+                        )
         except queue.Empty:
             pass
         if self.winfo_exists():
             self.after(100, self._poll_queue)
+
+    def _after_pull(self, code: int) -> None:
+        """Restart any tools we stopped for the update (only if the pull succeeded)."""
+        pending = self._restart_after_pull
+        self._restart_after_pull = []
+        if not pending:
+            return
+        if code != 0:
+            titles = ", ".join(self.app.actions_by_id[aid].title for aid in pending)
+            self._log(
+                f"[git] Update failed (exit {code}); leaving stopped tools off. "
+                f"Restart when ready: {titles}\n"
+            )
+            return
+        self._wait_then_restart(pending, attempts=0)
+
+    def _wait_then_restart(self, pending: list[str], attempts: int) -> None:
+        """Wait (without freezing the UI) for stopped tools to exit, then relaunch them."""
+        still_running = [aid for aid in pending if self.app._is_running(aid)]
+        if still_running and attempts < 40:  # up to ~10s at 250ms
+            self.after(250, lambda: self._wait_then_restart(pending, attempts + 1))
+            return
+        for action_id in pending:
+            title = self.app.actions_by_id[action_id].title
+            if self.app._is_running(action_id):
+                self._log(f"[git] {title} did not stop in time; not restarting it.\n")
+                continue
+            try:
+                self.app.restart_action(action_id)
+                self._log(f"[git] Restarted: {title}\n")
+            except Exception as exc:
+                self._log(f"[git] Could not restart {title}: {exc}\n")
 
     def _on_close(self) -> None:
         if self._busy and not messagebox.askyesno(
