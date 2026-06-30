@@ -566,7 +566,6 @@ class LauncherApp(tk.Tk):
         ]
 
         self.python_path = self._find_python()
-        self.allow_send_var = tk.BooleanVar(value=False)
 
         self._debug(f"launcher started (os={os.name}, python={self.python_path}, version={self.version_str})")
         self._build_ui()
@@ -691,7 +690,6 @@ class LauncherApp(tk.Tk):
             pass
         style.configure("Title.TLabel", font=("Segoe UI", 14, "bold"))
         style.configure("Action.TButton", padding=(12, 6))
-        style.configure("Danger.TCheckbutton", foreground="#7a1f1f")
 
         header = ttk.Frame(self, padding=(12, 10, 12, 4))
         header.pack(fill="x")
@@ -700,14 +698,6 @@ class LauncherApp(tk.Tk):
         version_label = ttk.Label(header, text=f"version: {self.version_str}", foreground="#999")
         version_label.pack(side="left", padx=(18, 0))
         ToolTip(version_label, "The git branch@commit this launcher is running. Use Git Update to change it.")
-        send_check = ttk.Checkbutton(
-            header,
-            text="Allow email / send actions",
-            variable=self.allow_send_var,
-            style="Danger.TCheckbutton",
-        )
-        send_check.pack(side="right")
-        ToolTip(send_check, "Required before running commands that can send email or prefill email forms.")
 
         git_button = ttk.Button(header, text="Git Update…", command=self._open_git_update)
         git_button.pack(side="right", padx=(0, 16))
@@ -984,12 +974,6 @@ class LauncherApp(tk.Tk):
                     "Stop that copy before starting another one.",
                 )
                 return
-        if action.email_risk and not self.allow_send_var.get():
-            messagebox.showwarning(
-                "Email action locked",
-                "Check 'Allow email / send actions' before running this command.",
-            )
-            return
         try:
             command = self._build_command(action)
         except ValueError as exc:
@@ -1000,6 +984,14 @@ class LauncherApp(tk.Tk):
             if spec.confirm and bool(self.option_vars[action.id][spec.key].get()):
                 if not messagebox.askyesno("Extra confirmation", spec.confirm):
                     return
+
+        if action.email_risk and not messagebox.askyesno(
+            "This can send email",
+            f"{action.title} can send email to recipients (e.g. customers).\n\n"
+            "Are you sure you want to run it?",
+            icon="warning",
+        ):
+            return
 
         message = f"Run this command?\n\n{self._command_text(command)}"
         if not messagebox.askyesno("Confirm run", message):

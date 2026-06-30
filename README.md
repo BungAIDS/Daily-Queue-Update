@@ -119,8 +119,8 @@ It opens `launcher.py`, a standard-library Windows desktop app that:
   automatically so the GUI can open without leaving a command window behind,
 - groups the scripts into Daily Run, Live Watch, Scans / Backfill, Search /
   Inspect, Transmittals, Tools, and Developer tabs,
-- requires confirmation before every run,
-- keeps email/send actions locked until you check **Allow email / send actions**,
+- requires confirmation before every run, with an extra "this can send email"
+  prompt for the actions that email recipients (the full daily run and Send),
 - shows a green running indicator for long-running tools such as `watch.py`,
   including copies left running outside the launcher (detected via `wmic`,
   falling back to PowerShell on newer Windows where `wmic` is removed),
