@@ -31,6 +31,11 @@ ROOT = Path(__file__).resolve().parent
 STATE_PATH = ROOT / ".launcher_state.json"
 LOG_DIR = ROOT / "launcher_logs"
 DEBUG_LOG = LOG_DIR / "launcher_debug.log"
+# Tracked (committed) folder for shareable debug snapshots. launcher_logs/ is
+# git-ignored and lives only on the workstation, so "Export Debug Report" writes
+# here instead, where it can be pushed and reviewed later.
+DIAG_DIR = ROOT / "diagnostics"
+DIAG_REPORT = DIAG_DIR / "launcher_report.txt"
 
 
 def hidden_console_kwargs() -> dict[str, Any]:
@@ -631,6 +636,9 @@ class LauncherApp(tk.Tk):
         self.clear_button.pack(side="left", padx=(8, 0))
         self.logs_button = ttk.Button(button_row, text="Open Logs Folder", command=self._open_logs_folder)
         self.logs_button.pack(side="left", padx=(8, 0))
+        self.report_button = ttk.Button(button_row, text="Export Debug Report", command=self._export_debug_report)
+        self.report_button.pack(side="left", padx=(8, 0))
+        ToolTip(self.report_button, "Write diagnostics/launcher_report.txt — a shareable snapshot to commit/push when debugging the launcher.")
         self.refresh_button = ttk.Button(button_row, text="Refresh Status", command=lambda: self._refresh_external_status(schedule=False, verbose=True))
         self.refresh_button.pack(side="right")
         ToolTip(self.refresh_button, "Re-scan for tools running outside the launcher and show a diagnostic (also written to launcher_debug.log).")
@@ -1161,6 +1169,82 @@ class LauncherApp(tk.Tk):
             body = "\n\nNo long-running tools detected running outside the launcher."
         body += f"\n\nFull details were written to:\n{DEBUG_LOG}"
         messagebox.showinfo("Status diagnostic", head + body)
+
+    def _tail_debug_log(self, count: int) -> list[str]:
+        try:
+            with DEBUG_LOG.open("r", encoding="utf-8", errors="replace") as fh:
+                tail = fh.readlines()[-count:]
+        except OSError:
+            return ["  (no debug log yet)"]
+        return [f"  {line.rstrip()}" for line in tail] or ["  (debug log empty)"]
+
+    def _export_debug_report(self) -> None:
+        """Write a shareable debug snapshot to diagnostics/launcher_report.txt.
+
+        The diagnostics folder is tracked in git, so this report can be
+        committed and pushed, then read later when diagnosing launcher issues
+        (the per-run launcher_logs/ are git-ignored and never leave the PC).
+        """
+        lines, method, error = self._scan_processes()
+        process_lines = [line for line in lines]
+        detected = sorted(self.external_running)
+
+        out: list[str] = []
+        out.append("# Launcher debug report")
+        out.append(f"generated: {datetime.now().isoformat(timespec='seconds')}")
+        out.append(f"os.name: {os.name}   platform: {sys.platform}")
+        out.append(f"python (launcher): {sys.executable}")
+        out.append(f"python (for scripts): {self.python_path}")
+        out.append("")
+        out.append("## Process scan (external-status detection)")
+        out.append(f"method used: {method or 'NONE - all scanners failed'}")
+        out.append(f"error: {error or 'none'}")
+        out.append(f"python process lines seen: {len(process_lines)}")
+        out.append(f"detected running outside launcher: {detected or 'none'}")
+        out.append("")
+        out.append("### python process command lines (up to 40)")
+        out.extend(f"  {line.strip()[:400]}" for line in process_lines[:40])
+        if not process_lines:
+            out.append("  (none seen — scanner returned nothing)")
+        out.append("")
+        out.append("## Launcher-started processes")
+        started_any = False
+        for action_id, info in self.processes.items():
+            started_any = True
+            alive = info.process.poll() is None
+            out.append(
+                f"  {action_id}: pid={info.process.pid} alive={alive} "
+                f"started={info.started_at:%Y-%m-%d %H:%M:%S}"
+            )
+            out.append(f"      cmd: {self._command_text(info.command)}")
+        if not started_any:
+            out.append("  (none)")
+        out.append("")
+        out.append("## Last exit codes")
+        if self.last_exit:
+            out.extend(f"  {action_id}: {code}" for action_id, code in sorted(self.last_exit.items()))
+        else:
+            out.append("  (none yet)")
+        out.append("")
+        out.append("## Tail of launcher_debug.log (last 120 lines)")
+        out.extend(self._tail_debug_log(120))
+        out.append("")
+
+        try:
+            DIAG_DIR.mkdir(parents=True, exist_ok=True)
+            DIAG_REPORT.write_text("\n".join(out) + "\n", encoding="utf-8")
+        except OSError as exc:
+            messagebox.showerror("Could not write report", str(exc))
+            return
+        self._debug(f"exported debug report to {DIAG_REPORT}")
+        messagebox.showinfo(
+            "Debug report exported",
+            f"Wrote:\n{DIAG_REPORT}\n\n"
+            "This file is tracked in the repo. Commit and push it (to the branch "
+            "we are working on) so it can be reviewed when debugging the launcher.\n\n"
+            "It includes process command lines and file paths — glance over it "
+            "before sharing.",
+        )
 
     def _tick_status(self) -> None:
         self._update_detail_status()

@@ -1,0 +1,6 @@
+# Launcher debug report
+
+No report has been exported yet.
+
+To create one: open the launcher, click "Export Debug Report", then commit and
+push this file. It will be overwritten with a fresh snapshot each time.

@@ -1,0 +1,56 @@
+# CLAUDE.md
+
+Guidance for working in this repo. Read this before debugging the launcher or
+touching GUI/Git code.
+
+## What this project is
+
+Tooling around a daily sales-order/queue workflow: scrapers, Excel reporting,
+AutoCAD/transmittal helpers, an all-day live watcher (`watch.py`), and a
+standard-library Tkinter desktop launcher (`launcher.py`) that runs/stops the
+scripts. Most modules are plain-Python logic; the live scrape, Z: drive, and
+Outlook email are Windows-only and unreachable from CI / a cloud container.
+
+## Debugging the launcher — CHECK HERE FIRST
+
+The launcher writes per-run logs to `launcher_logs/`, which is **git-ignored**
+and only exists on the user's Windows PC — you will not see it in this repo.
+
+When debugging the launcher, **read `diagnostics/launcher_report.txt`**. The
+user produces it by clicking **Export Debug Report** in the launcher and pushing
+it. It contains: OS/Python info, the external-status process scan (method used /
+error / what it saw / what it detected), launcher-started processes, last exit
+codes, and the tail of `launcher_debug.log`. If it is stale or the placeholder,
+ask the user to click **Export Debug Report** and push before you keep guessing.
+
+Notable launcher internals:
+- External "running outside the launcher" detection scans process command lines
+  via `wmic`, falling back to a PowerShell CIM query (`wmic` is removed on newer
+  Windows) and `ps` off-Windows. A grey/idle dot for something that IS running
+  usually means the scan found nothing — check the report's "method used".
+- A running Python process (watcher OR the launcher itself) keeps the code it
+  loaded at startup; a `git pull` only takes effect after a restart. The Git
+  Update window handles stopping/restarting live tools and warns when the pull
+  changed the launcher's own files.
+
+## Git pull logic lives in `git_update.py`
+
+Pure, import-light (no tkinter) so it is unit-testable without a display. The Tk
+`GitUpdateDialog` in `launcher.py` drives it. Keep new pull/branch logic in
+`git_update.py` with the GUI thin on top.
+
+## Tests
+
+Plain scripts, not pytest. Each `test_*.py` has `test_*` functions and a
+`main()` runner; run with `python test_<name>.py`. CI (`.github/workflows/
+tests.yml`) runs the pure-logic suites. **`tkinter` is not always installed**
+(it is absent in this container and may be in CI), so do not write tests that
+`import launcher`; test the import-light modules (e.g. `git_update.py`,
+`test_git_update.py`) instead.
+
+## Conventions
+
+- Keep `launcher.py` standard-library only (no new pip deps for the GUI).
+- When you rename a script, update the launcher action's `script=` path and any
+  doc-comment references; the launcher action `id` is a separate stable key and
+  does not need to match the filename.
