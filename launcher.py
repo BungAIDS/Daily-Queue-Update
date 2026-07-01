@@ -619,7 +619,14 @@ class LauncherApp(tk.Tk):
         for it to exit (a relaunching launcher dies within ~1s) before deciding."""
         other = self._another_launcher_pid()
         if other:
-            for _ in range(20):  # ~5s for a relaunch handoff to complete
+            # A launcher closed via the window's X doesn't exit instantly: it
+            # publishes a final debug report on a daemon thread (a git push,
+            # ~8s) that __main__ joins for up to 10s, so a just-closed launcher
+            # can stay alive ~10s. Poll a little past that for the old PID to
+            # die, breaking the instant it does — so the normal "already gone"
+            # case is immediate and we only warn about a copy that is still
+            # alive well beyond a normal shutdown (a genuine second launcher).
+            for _ in range(52):  # ~13s, comfortably outlasts the on-close publish
                 time.sleep(0.25)
                 if not pid_alive(other):
                     break
