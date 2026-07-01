@@ -625,9 +625,11 @@ class LauncherApp(tk.Tk):
             else:
                 if not messagebox.askyesno(
                     "Launcher already running",
-                    "Another Daily Queue Launcher is already running.\n\n"
-                    "Running two at once causes duplicate watchers and Excel conflicts.\n\n"
-                    "Open this one anyway?",
+                    "Another Daily Queue Launcher appears to be running.\n\n"
+                    "If you just closed one, it may still be finishing up (publishing its "
+                    "debug report) — in that case it's safe to open this one.\n\n"
+                    "Running two REAL copies at once causes duplicate watchers and Excel "
+                    "conflicts.\n\nOpen this one anyway?",
                 ):
                     return False
         return True
@@ -1778,7 +1780,7 @@ class LauncherApp(tk.Tk):
                 text,
                 branch=DEBUG_BRANCH,
                 message=f"Launcher debug report (on close) {datetime.now():%Y-%m-%d %H:%M:%S}",
-                timeout=20,
+                timeout=8,  # keep the just-closed process from lingering long
             )
             self._debug(f"close publish {'ok' if ok else 'failed'}: {detail}")
         except Exception as exc:  # pragma: no cover - defensive
