@@ -289,6 +289,45 @@ def test_chicago_blower_fields():
     assert "DA" not in f and "DK" not in f and "A" not in f
 
 
+# The shaft/bearing + outline section from the full job-421579 run (the part
+# below BRG CENTERS the earlier trimmed sample dropped): the comma-delimited
+# shaft-geometry line (LENGTH/OH/BX/STB/TG&P), STH, the bearing spec block, and
+# the AXIAL/SIDE VIEW outline dimensions (N = housing width, F/2 = base to CL).
+REAL_CBC_QT_RUN_421579_TAIL = """\
+ SHAFT DIA  2 15/16, BRG CENTERS 12, CRITICAL SPEED  5119 RPM
+  ROTOR WR2   267 LB-FT2, ROTOR MAX RPM 3000, MTL. 1045 STEEL
+  STRESS RATIO AT HUB 0.17, AT BEARING 0.47
+  LENGTH 35  3/8 ,OH  8.64,BX 15  3/8 , STB  12     , TG&P  68     880
+  STH  2.12
+  CHECK MOTOR WR2 >   516 LB-FT2
+
+ SIZE  2 15/16 BEARINGS, LINK BELT SERIES 6800
+    SIDE    STATIC  DYN. THRUST  L10 HR   P/C
+ DRIVE-FLOAT  1534    33      0  400000 0.0320
+ OTHER-FIXED   457    80    183  400000 0.0224              84    3158
+  N   HSG WIDTH OS                            22  3/4       578
+F/2   BASE TO CL                              23  7/8       606
+"""
+
+
+def test_chicago_blower_shaft_bearing_and_outline_fields():
+    f = _parse_chicago_blower(REAL_CBC_QT_RUN_421579_TAIL)
+    # Shaft/rotor geometry line (the "BX STB ... and everything near there").
+    assert f["Shaft Length"] == "35 3/8"
+    assert f["OH"] == "8.64"
+    assert f["BX"] == "15 3/8"
+    assert f["STB"] == "12"
+    assert f["TG&P"] == "68"          # the price column after it is not captured
+    assert f["STH"] == "2.12"
+    # Bearing spec block.
+    assert f["Bearing Size"] == "2 15/16"
+    assert f["Bearing Series"] == "LINK BELT SERIES 6800"
+    assert f["Bearing L10 Hr"] == "400000"
+    # Outline dimensions (the "N F etc." section) — full inches incl. fraction.
+    assert f["Housing Width (N)"] == "22 3/4"
+    assert f["Base to CL (F)"] == "23 7/8"
+
+
 def test_chicago_blower_matches_and_parses_end_to_end(tmp: Path):
     # Even named just "QT RUN.txt" (the AutoCAD-folder copy), the CB content
     # marker routes it to the CB template over the generic qt_run_text.

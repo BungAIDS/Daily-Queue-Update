@@ -3,6 +3,32 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-07-01 — Shaft/bearing geometry + outline dims (BX/STB/N/F etc.)
+
+DG pointed at the full job-421579 run (the earlier samples were trimmed above
+BRG CENTERS). Added the shaft/bearing + outline fields DG asked for, all
+grounded and tested against the real text — including a run against the FULL
+noisy document to prove no false matches from the part-cost tables, the
+factory-use number block, or the decoy `OUTLET N X A:` / flange-punching `N =`
+lines.
+
+New CB fields (`templates.py` `_CB_PATTERNS`):
+- Shaft/rotor geometry line `LENGTH .. ,OH .. ,BX .. , STB .. , TG&P ..` + `STH`
+  → **Shaft Length, OH, BX, STB, TG&P, STH**.
+- Bearing spec block → **Bearing Size, Bearing Series, Bearing L10 Hr**
+  (from the DRIVE-FLOAT row).
+- Outline dims (AXIAL/SIDE VIEW), anchored on code+description so a bare letter
+  can't false-match → **Housing Width (N)**, **Base to CL (F)** (=F/2).
+
+Surfaced BX/STB/OH/STH/Bearing Size/Series/N/F in `_CB_SUMMARY_ORDER` (the Quote
+Run Details column); all new fields added to `quote_run_scan.CORE_FIELDS`.
+Test: `test_chicago_blower_shaft_bearing_and_outline_fields` on the real 421579
+tail fixture.
+
+STILL OPEN: the outline table has ~14 more coded dims (A/W/KK/E/RB/RM/H/TV/…) —
+only N and F pulled so far per DG's "N F etc."; can extend the whole table on
+request (ideally with a 2nd arrangement's run to keep it robust).
+
 ## 2026-07-01 — Extract wheel-construction gauges + surface construction detail
 
 Per DG, the report needs the wheel construction detail, not the aero fields

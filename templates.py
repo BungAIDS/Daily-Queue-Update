@@ -273,6 +273,24 @@ _CB_PATTERNS = [
     ("Shaft Dia", r"SHAFT DIA\s+([\d /]+?)\s*,"),
     ("Brg Centers", r"BRG CENTERS\s+([\d.]+)"),
     ("Critical Speed RPM", r"CRITICAL SPEED\s+([\d.]+)"),
+    # Shaft/rotor geometry line, comma-delimited under the bearing line:
+    #   LENGTH 35 3/8 ,OH 8.64,BX 15 3/8 , STB 12 , TG&P 68   +   STH 2.12
+    ("Shaft Length", r"\bLENGTH\s+([\d./ ]+?)\s*,"),
+    ("OH", r"\bOH\s+([\d.]+)"),
+    ("BX", r"\bBX\s+([\d./ ]+?)\s*,"),
+    ("STB", r"\bSTB\s+([\d./ ]+?)\s*,"),
+    ("TG&P", r"TG&P\s+(\d+(?:\s+\d+/\d+)?)"),
+    ("STH", r"^\s*STH\s+([\d.]+)"),
+    # Bearing spec block: "SIZE 2 15/16 BEARINGS, LINK BELT SERIES 6800" and the
+    # DRIVE-FLOAT row's L10 hours (…STATIC DYN THRUST <L10> P/C).
+    ("Bearing Size", r"\bSIZE\s+([\d /]+?)\s+BEARINGS"),
+    ("Bearing Series", r"BEARINGS,\s*(.+?SERIES\s+\d+)"),
+    ("Bearing L10 Hr", r"DRIVE-FLOAT\s+\d+\s+\d+\s+\d+\s+(\d+)"),
+    # Outline dimensions (AXIAL/SIDE VIEW): "<code>  <desc>  <inches>  <mm>".
+    # Anchored on the code+description so a single-letter code can't false-match;
+    # capture the inches (whole + optional fraction) before the trailing mm col.
+    ("Housing Width (N)", r"^\s*N\s+HSG WIDTH OS\s+(\d+(?:\s+\d+/\d+)?)\s{2,}\d+\s*$"),
+    ("Base to CL (F)", r"^\s*F/2\s+BASE TO CL\s+(\d+(?:\s+\d+/\d+)?)\s{2,}\d+\s*$"),
     # Wheel-construction rows: <component> <gauge> <MATERIAL> <WR2> <weight>.
     # Component can carry a descriptor ("BLADES/2 RIB", "SIDEPL,SPUN").
     ("Blade Material", r"\bBLADES(?:/\d+\s*RIB)?\s+" + _GA + r"\s+([A-Z][A-Z0-9 .\-]+?)\s+\d+\s+\d"),
@@ -301,8 +319,10 @@ _CB_SUMMARY_ORDER = [
     "Blade Material", "Blade Gauge", "Sideplate Material", "Sideplate Gauge",
     "Backplate Material", "Backplate Gauge", "Liner Material", "Liner Gauge",
     "Wheel Material", "Hub", "Coupling",
-    # Shaft / bearing section.
-    "Shaft Dia", "Brg Centers", "Critical Speed RPM", "Drive",
+    # Shaft / bearing section (shaft geometry + bearing spec + key outline dims).
+    "Shaft Dia", "Brg Centers", "Critical Speed RPM",
+    "BX", "STB", "OH", "STH", "Bearing Size", "Bearing Series",
+    "Housing Width (N)", "Base to CL (F)", "Drive",
 ]
 
 
