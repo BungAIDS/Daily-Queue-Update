@@ -22,6 +22,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -153,9 +154,15 @@ def _tuned(app):
             app.Calculate()
         except Exception:  # noqa: BLE001
             pass
-        for attr, val in saved.items():
+        # Restore to known-GOOD values, not the values seen on entry: if a prior
+        # render was force-killed mid-tune, ScreenUpdating/Calculation were left
+        # OFF (the classic "the whole Excel window went blank, but the data is
+        # there") — restoring the stuck value would keep it broken. Resetting to
+        # the normal live state self-heals it on the next successful render.
+        for attr, good in (("ScreenUpdating", True), ("EnableEvents", True),
+                           ("DisplayAlerts", True), ("Calculation", _XL_CALC_AUTOMATIC)):
             try:
-                setattr(app, attr, val)
+                setattr(app, attr, good)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -973,7 +980,97 @@ def apply_order_history(app, wb, name: str, spec: Dict[str, Any], ops: List,
     return len(updates) + len(appends)
 
 
+# --------------------------------------------------------------------------- #
+# Watchdog: never let a busy/modal Excel hang the watcher                       #
+# --------------------------------------------------------------------------- #
+_EXCEL_WRITE_GUARD = threading.Lock()   # protects _excel_write_active
+_excel_write_active = [0.0]             # monotonic start of the in-flight write (0 = none)
+
+
+def _excel_write_timeout() -> float:
+    """Seconds to wait for an Excel write before abandoning it. Generous, so a
+    normal (even slow) render never trips it — only a genuine hang does."""
+    try:
+        return float(os.environ.get("LIVE_WRITE_TIMEOUT", "180"))
+    except ValueError:
+        return 180.0
+
+
+def _run_excel_guarded(label: str, func, default, *args, **kwargs):
+    """Run a COM/Excel call on a worker thread, bounded by a timeout, so a busy
+    or modal Excel (a dialog up, a co-authoring sync in flight, someone typing in
+    a cell) can NEVER hang the watcher's main loop.
+
+    All COM work happens inside the worker (its own CoInitialize), so nothing is
+    marshaled across threads. A new write is skipped only while a previous one is
+    *still within its timeout*; once a write exceeds the timeout it is treated as
+    abandoned and the next poll is allowed to try again — so a permanently stuck
+    write (Excel left showing a dialog) can't block every future write forever.
+    On timeout/skip/error it returns `default` — the same "nothing rendered,
+    retry next poll" outcome the callers already expect from a failed write."""
+    timeout = _excel_write_timeout()
+    now = time.monotonic()
+    with _EXCEL_WRITE_GUARD:
+        active = _excel_write_active[0]
+        if active and (now - active) < timeout:
+            log.warning("%s skipped: a previous Excel write is still in progress (Excel is "
+                        "likely busy / showing a dialog). Will retry next poll.", label)
+            return default
+        my_start = now
+        _excel_write_active[0] = my_start   # claim the slot (also reclaims a stale one)
+
+    box: dict = {}
+
+    def _runner():
+        try:
+            try:
+                import pythoncom  # type: ignore
+                pythoncom.CoInitialize()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                box["value"] = func(*args, **kwargs)
+            except Exception as e:  # noqa: BLE001 - mirror existing best-effort handling
+                box["error"] = e
+            finally:
+                try:
+                    import pythoncom  # type: ignore
+                    pythoncom.CoUninitialize()
+                except Exception:  # noqa: BLE001
+                    pass
+        finally:
+            with _EXCEL_WRITE_GUARD:
+                if _excel_write_active[0] == my_start:   # only if a newer write hasn't taken over
+                    _excel_write_active[0] = 0.0
+
+    worker = threading.Thread(target=_runner, name="excel-write", daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        log.warning("%s exceeded %.0fs and was abandoned — Excel is busy or showing a "
+                    "dialog (co-authoring conflict, 'file in use', a save prompt). The "
+                    "watcher keeps running; the write retries next poll once Excel is free.",
+                    label, timeout)
+        return default
+    if "error" in box:
+        log.warning("%s failed (%s)", label, box["error"])
+        return default
+    return box.get("value", default)
+
+
 def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any],
+                           oh_payload: Dict[str, Any],
+                           changes_sheet: Sheet | None = None) -> set:
+    """Watchdog wrapper: render the master workbook on a bounded worker thread so
+    a busy/modal Excel can never hang the watcher. On timeout it returns an empty
+    set, so those tabs simply re-render next poll (see _update_master_workbook_impl)."""
+    return _run_excel_guarded(
+        "Live workbook update", _update_master_workbook_impl, set(),
+        workbook_path, lq_payload, oh_payload, changes_sheet,
+    )
+
+
+def _update_master_workbook_impl(workbook_path: str | Path, lq_payload: Dict[str, Any],
                            oh_payload: Dict[str, Any],
                            changes_sheet: Sheet | None = None) -> set:
     """Render the master workbook: an incremental upsert for Live Queue, the

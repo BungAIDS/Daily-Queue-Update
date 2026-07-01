@@ -119,13 +119,24 @@ It opens `launcher.py`, a standard-library Windows desktop app that:
   automatically so the GUI can open without leaving a command window behind,
 - groups the scripts into Daily Run, Live Watch, Scans / Backfill, Search /
   Inspect, Transmittals, Tools, and Developer tabs,
-- requires confirmation before every run,
-- keeps email/send actions locked until you check **Allow email / send actions**,
+- requires confirmation before every run, with an extra "this can send email"
+  prompt for the actions that email recipients (the full daily run and Send),
 - shows a green running indicator for long-running tools such as `watch.py`,
+  including copies left running outside the launcher (detected via `wmic`,
+  falling back to PowerShell on newer Windows where `wmic` is removed),
+- **Refresh Status** re-scans and shows a diagnostic of what it found; details
+  are written to `launcher_logs/launcher_debug.log` if the dot looks wrong,
 - blocks starting a second copy of an already-running long-running script,
-- lets you stop a launcher-started process,
+- lets you stop a launcher-started process — and can **force-stop a copy running
+  outside the launcher** (by PID) from the Stop button,
 - shows live console output and writes per-run logs under `launcher_logs/`,
 - remembers last-used options in `.launcher_state.json`,
+- has a **Git Update…** button that opens a small window where you pick a
+  branch from a drop-down and pull the latest code from GitHub (it fetches,
+  optionally checks the branch out, then pulls, streaming git's output); if
+  programs are running it offers to stop them, and when the update changes the
+  launcher itself it automatically relaunches onto the new code and resumes the
+  programs it stopped,
 - provides a Developer tab for the direct-script test files.
 
 To create a desktop shortcut, double-click:
@@ -365,6 +376,7 @@ toasts):
 Daily-Queue-Update/
 ├── login.py            # Run once — log in by hand, save session (no password stored)
 ├── launcher.py         # Desktop GUI launcher for running/stopping the scripts
+├── git_update.py       # Branch/pull helpers behind the launcher's Git Update button
 ├── RunLauncher.vbs     # Quiet double-click launcher startup
 ├── RunLauncher.bat     # Console fallback startup (uses venv/pyw when present)
 ├── CreateLauncherShortcut.bat # Creates a desktop shortcut to the launcher

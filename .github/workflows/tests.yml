@@ -36,3 +36,6 @@ jobs:
       - run: python test_transmittal_doc.py
       - run: python test_watch_baseline.py
       - run: python test_watch_render_commit.py
+      - run: python test_git_update.py
+      - run: python test_procscan.py
+      - run: python test_stop_signal.py

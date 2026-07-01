@@ -20,14 +20,14 @@ CBC_SEARCH_SELECTOR = os.environ.get("CBC_SEARCH_SELECTOR", "").strip()
 CBC_SEARCH_BUTTON = os.environ.get("CBC_SEARCH_BUTTON", "").strip()
 
 # --------------------------------------------------------------------------- #
-# Drawing-transmittal send (email_drawings.py) — DISABLED by design            #
+# Drawing-transmittal send (fill_transmittal_insider.py) — DISABLED by design  #
 # --------------------------------------------------------------------------- #
 # The transmittal tooling fills the Word doc and can pre-fill the CBC Insider
 # "Email Drawings" form, but the actual SEND is hard-disabled in code (the submit
 # click is commented out) so a transmittal can never be mailed to a customer by
 # accident. TRANSMITTAL_MODE only ever reaches "preview"/"review"; "send" is
 # intentionally inert. Leave this alone unless you are deliberately enabling
-# sends and have re-instated the submit code in email_drawings.py.
+# sends and have re-instated the submit code in fill_transmittal_insider.py.
 TRANSMITTAL_MODE = (os.environ.get("TRANSMITTAL_MODE", "preview").strip().lower() or "preview")
 # The CBC Insider "Email Drawings" page URL (Engineering -> Email Drawings).
 # Defaults to the known transmittal page so the tooling navigates straight there
@@ -36,7 +36,7 @@ TRANSMITTAL_MODE = (os.environ.get("TRANSMITTAL_MODE", "preview").strip().lower(
 EMAIL_DRAWINGS_URL = (os.environ.get("EMAIL_DRAWINGS_URL")
                       or "https://www.cbcinsider.com/intranet/engineering/transmittal.aspx").strip()
 # Optional CSS-selector overrides for the Email Drawings flow, filled in after
-# running `python email_drawings.py --probe`. Blank => unknown / not set.
+# running `python fill_transmittal_insider.py --probe`. Blank => unknown / not set.
 # The flow is TWO pages:
 #   Page 1 (order lookup): type the order # and submit to advance.
 #     EMAIL_DRAWINGS_ORDER_SELECTOR        the order # input on page 1

@@ -5,7 +5,7 @@ document" — reduced to its data: who it goes to, which box to check, and which
 drawing rows the table gets. It reads the **order face** (the archived Sales
 Order PDF) plus the job's **AutoCAD folder**, and returns a `TransmittalData`
 the doc-filler (`transmittal_doc.py`) and the Email-Drawings submitter
-(`email_drawings.py`) consume.
+(`fill_transmittal_insider.py`) consume.
 
 Where each field comes from (all confirmed against a real filled transmittal,
 job 421693, and the SO regression dumps in test_line_items.py):
