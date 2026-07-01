@@ -554,6 +554,7 @@ class LauncherApp(tk.Tk):
         self._stop_requested: set[str] = set()   # ids we asked to stop (don't flag as FAIL)
         self.stopped_actions: set[str] = set()    # ids that exited because we stopped them
         self._scan_in_progress = False            # a background process scan is running
+        self._close_publish_thread: threading.Thread | None = None
         self.logs: dict[str, list[str]] = {a.id: [] for a in self.actions}
         self.output_queue: queue.Queue[tuple[str, str, Any]] = queue.Queue()
         self.option_vars: dict[str, dict[str, tk.Variable]] = {}
@@ -1755,14 +1756,18 @@ class LauncherApp(tk.Tk):
     def _publish_on_close(self) -> None:
         """Publish a final debug report as the launcher shuts down.
 
-        Runs on a NON-daemon thread so the window can close immediately while
-        the push still finishes — the interpreter waits for this thread before
-        exiting, and publish_report has its own timeouts so it cannot hang
-        shutdown indefinitely. Building the report is done in the worker too so
-        the close feels instant. Best effort: failures only go to the debug log.
+        Runs on a DAEMON thread so the process can always exit — __main__ waits
+        for it with a bounded timeout after mainloop(), then lets it go. (It used
+        to be non-daemon, which could leave a windowless launcher lingering
+        forever if the publish hung, blocking the next launch.) Building the
+        report is done in the worker too, so the close feels instant. Best
+        effort: failures only go to the debug log.
         """
         self._debug(f"close: publishing debug report to {DEBUG_BRANCH}")
-        threading.Thread(target=self._publish_on_close_worker, daemon=False).start()
+        self._close_publish_thread = threading.Thread(
+            target=self._publish_on_close_worker, daemon=True
+        )
+        self._close_publish_thread.start()
 
     def _publish_on_close_worker(self) -> None:
         try:
@@ -2103,3 +2108,8 @@ class GitUpdateDialog(tk.Toplevel):
 if __name__ == "__main__":
     app = LauncherApp()
     app.mainloop()
+    # Let an on-close debug publish finish, but never linger (and never leave a
+    # windowless launcher alive to block the next launch).
+    _pub = getattr(app, "_close_publish_thread", None)
+    if _pub is not None and _pub.is_alive():
+        _pub.join(timeout=10)
