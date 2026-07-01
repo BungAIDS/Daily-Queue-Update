@@ -3,6 +3,29 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-07-01 — Extract wheel-construction gauges + surface construction detail
+
+Per DG, the report needs the wheel construction detail, not the aero fields
+(CFM/SP/BHP/RPM already come from the Sales Order). The CB "Qt Run" wheel table
+`WHEEL  THICK.(GA)  MATERIAL  WR2  WEIGHT` already had its material pulled but
+the **gauge/thickness column was discarded**.
+
+- New CB fields **Blade/Sideplate/Backplate/Liner Gauge** — capture the
+  `THICK.(GA)` value ("1/4", "3/8", "0.048 (18)") using the same row anchors as
+  the material patterns (`templates.py` `_CB_PATTERNS`). Verified on all three
+  real samples (421579, 421237, 421572).
+- `_CB_SUMMARY_ORDER` reordered to lead with construction: each material paired
+  with its gauge, then Hub / Coupling, then Shaft Dia / Brg Centers / Critical
+  Speed. This is what now shows in the **Quote Run Details** report column (Hub
+  part number + bearing section were already parsed, just not surfaced).
+- `quote_run_scan.CORE_FIELDS` gains the four gauge columns next to their
+  materials so the inventory promotes them out of "Other".
+- Tests: gauge assertions added to the three CB field tests (incl. the GUSSETS
+  case that has no sideplate/backplate gauge).
+- STILL NEEDED FROM DG: a real Qt Run showing the **BX / STB** bearing
+  designations and the **"N F" section** — no current sample contains them, so
+  those patterns can't be written without guessing.
+
 ## 2026-07-01 — Surface parsed quote-run fields in the report (Quote Run Details)
 
 The daily run already parses every quote run into real engineering fields

@@ -184,6 +184,10 @@ def test_chicago_blower_ribbed_blades_and_descriptor():
     assert f["Blade Material"] == "ASTM A1011-HSLAS"
     assert f["Sideplate Material"] == "ASTM A1011-HSLAS"
     assert f["Backplate Material"] == "ASTM CQ HRS A36"
+    # Decimal/parenthetical gauges carry through verbatim from THICK.(GA).
+    assert f["Blade Gauge"] == "0.048 (18)"
+    assert f["Sideplate Gauge"] == "0.179 ( 7)"
+    assert f["Backplate Gauge"] == "1/4"
     assert f["Hub"] == "19-5-1056"
     assert f["Coupling"] == "FALK T10"
     assert f["Drive"] == "Direct"           # coupling, not belt
@@ -225,6 +229,10 @@ def test_chicago_blower_space_delimited_and_liner():
     assert f["Effective Wheel Dia"] == "33"
     assert f["Blade Material"] == "ASTM A572 X-TEN"
     assert f["Liner Material"] == "PLAIN FIRMEX"          # the notable wear liner
+    assert f["Blade Gauge"] == "3/8"
+    assert f["Liner Gauge"] == "1/4"
+    # This wheel has GUSSETS, not a sideplate/backplate row -> no such gauges.
+    assert "Sideplate Gauge" not in f and "Backplate Gauge" not in f
     assert f["Class"] == "4"
     assert f["Drive"] == "Belt"
 
@@ -269,6 +277,10 @@ def test_chicago_blower_fields():
     assert f["Blade Material"] == "ASTM A572 X-TEN"
     assert f["Sideplate Material"] == "ASTM A572 X-TEN"
     assert f["Backplate Material"] == "ASTM CQ HRS A36"
+    # Wheel-construction gauges (THICK.(GA) column) paired with the materials.
+    assert f["Blade Gauge"] == "1/4"
+    assert f["Sideplate Gauge"] == "1/4"
+    assert f["Backplate Gauge"] == "3/8"
     assert f["Drive"] == "Belt"
     assert f["Engineering Approval"] == "Required"
     assert f["Non-Std Wheel Materials"] == "Yes"

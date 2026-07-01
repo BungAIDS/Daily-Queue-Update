@@ -279,6 +279,13 @@ _CB_PATTERNS = [
     ("Sideplate Material", r"\bSIDEPL\S*\s+" + _GA + r"\s+([A-Z][A-Z0-9 .\-]+?)\s+\d+\s+\d"),
     ("Backplate Material", r"\bBACKPLATE\b\s+" + _GA + r"\s+([A-Z][A-Z0-9 .\-]+?)\s+\d+\s+\d"),
     ("Liner Material", r"\bLINER\S*\s+" + _GA + r"\s+([A-Z][A-Z0-9 .\-]+?)\s+\d+\s+\d"),
+    # The THICK.(GA) column of each wheel-construction row — the gauge/thickness
+    # ("1/4", "3/8", "0.048 (18)") that sits between the component and its
+    # material. Same anchors as the material patterns, capturing _GA instead.
+    ("Blade Gauge", r"\bBLADES(?:/\d+\s*RIB)?\s+(" + _GA + r")\s+[A-Z]"),
+    ("Sideplate Gauge", r"\bSIDEPL\S*\s+(" + _GA + r")\s+[A-Z]"),
+    ("Backplate Gauge", r"\bBACKPLATE\b\s+(" + _GA + r")\s+[A-Z]"),
+    ("Liner Gauge", r"\bLINER\S*\s+(" + _GA + r")\s+[A-Z]"),
     # Some runs have no construction table — just a single wheel-material line.
     ("Wheel Material", r"^\s*WHEEL MATERIAL\s+([A-Z0-9][A-Z0-9 .\-]+?)\s*$"),
     ("Class", r"\bCLASS\s+(\d+)\b"),
@@ -288,7 +295,14 @@ _CB_PATTERNS = [
 # Compact summary, in engineering-useful order (only the present fields show).
 _CB_SUMMARY_ORDER = [
     "Size", "Design", "Fan Type", "Arrangement", "% Width", "Discharge", "Rotation",
-    "CFM", "SP", "BHP", "RPM", "Max Temp F", "Effective Wheel Dia", "Blade Material",
+    "Class", "CFM", "SP", "BHP", "RPM", "Max Temp F", "Effective Wheel Dia",
+    # Wheel construction — material paired with its gauge, the detail the report
+    # cares about most (aero fields above already come from the Sales Order).
+    "Blade Material", "Blade Gauge", "Sideplate Material", "Sideplate Gauge",
+    "Backplate Material", "Backplate Gauge", "Liner Material", "Liner Gauge",
+    "Wheel Material", "Hub", "Coupling",
+    # Shaft / bearing section.
+    "Shaft Dia", "Brg Centers", "Critical Speed RPM", "Drive",
 ]
 
 
