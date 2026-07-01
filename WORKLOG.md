@@ -25,9 +25,32 @@ Run Details column); all new fields added to `quote_run_scan.CORE_FIELDS`.
 Test: `test_chicago_blower_shaft_bearing_and_outline_fields` on the real 421579
 tail fixture.
 
-STILL OPEN: the outline table has ~14 more coded dims (A/W/KK/E/RB/RM/H/TV/…) —
-only N and F pulled so far per DG's "N F etc."; can extend the whole table on
-request (ideally with a 2nd arrangement's run to keep it robust).
+Outline table: now pulled in FULL (all 16 codes) — see the block-parser entry
+below.
+
+## 2026-07-01 — Pull the whole AXIAL/SIDE VIEW outline table (block parser)
+
+Per DG: grab ALL the outline dimension codes (not just N/F). They don't all
+belong in the Live Queue but should live in the master .json — which they do,
+since `master_sync.merge_quote_runs` stores the full `drive_run` fields dict
+unfiltered (only N/F stay in `CORE_FIELDS`/the summary; the rest ride the
+inventory "Other" column + master).
+
+- Replaced the two one-off N/F regexes with `_parse_outline_dims` (templates.py):
+  finds the `AXIAL VIEW` marker, scans to the `PUNCHING DETAIL` / `PART NAME` /
+  page-break boundary, and matches each `<code>  <DESC>  <inches>  <mm>` row with
+  `_OUTLINE_ROW`. Captures all 16 codes (A/W/KK/E/RB/RM/F/H/TV/RH/LH/MA/D/K/N/LR)
+  as "<Description> (<code>)"; a curated `_OUTLINE_DIMS` map gives the common
+  codes clean names, unknown codes fall back to their own description text (so a
+  different arrangement's extra codes are still captured).
+- Verified on the full noisy doc: the flange-punching `A =`/`N =`/`DA =` table
+  and the part-cost tables produce ZERO false matches (bounded + shape-anchored).
+- Test: `test_chicago_blower_shaft_bearing_and_outline_fields` now asserts all 16
+  dims and that exactly 16 are captured.
+- DG says the earlier trimmed samples (421237/421572) are other good run
+  examples; offered to supply more. Only 421579 currently has a full outline
+  section, so a 2nd arrangement's full run would let us confirm the map/fallback
+  across fan types (current parser already handles unknown codes generically).
 
 ## 2026-07-01 — Extract wheel-construction gauges + surface construction detail
 

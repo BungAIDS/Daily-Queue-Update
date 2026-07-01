@@ -286,11 +286,8 @@ _CB_PATTERNS = [
     ("Bearing Size", r"\bSIZE\s+([\d /]+?)\s+BEARINGS"),
     ("Bearing Series", r"BEARINGS,\s*(.+?SERIES\s+\d+)"),
     ("Bearing L10 Hr", r"DRIVE-FLOAT\s+\d+\s+\d+\s+\d+\s+(\d+)"),
-    # Outline dimensions (AXIAL/SIDE VIEW): "<code>  <desc>  <inches>  <mm>".
-    # Anchored on the code+description so a single-letter code can't false-match;
-    # capture the inches (whole + optional fraction) before the trailing mm col.
-    ("Housing Width (N)", r"^\s*N\s+HSG WIDTH OS\s+(\d+(?:\s+\d+/\d+)?)\s{2,}\d+\s*$"),
-    ("Base to CL (F)", r"^\s*F/2\s+BASE TO CL\s+(\d+(?:\s+\d+/\d+)?)\s{2,}\d+\s*$"),
+    # The AXIAL/SIDE VIEW outline-dimension table is pulled as a block by
+    # _parse_outline_dims (below) rather than one pattern per code.
     # Wheel-construction rows: <component> <gauge> <MATERIAL> <WR2> <weight>.
     # Component can carry a descriptor ("BLADES/2 RIB", "SIDEPL,SPUN").
     ("Blade Material", r"\bBLADES(?:/\d+\s*RIB)?\s+" + _GA + r"\s+([A-Z][A-Z0-9 .\-]+?)\s+\d+\s+\d"),
@@ -326,12 +323,57 @@ _CB_SUMMARY_ORDER = [
 ]
 
 
+# Outline (AXIAL/SIDE VIEW) dimension codes -> friendly names. The section lists
+# one dimension per line as "<code>  <DESCRIPTION>  <inches>  <mm>". Codes not in
+# this map are still captured, named from their own description text.
+_OUTLINE_DIMS = {
+    "A": "Discharge Height (A)", "W": "Bottom of Disch to CL (W)",
+    "KK": "Outlet/Inlet Flange (KK)", "E": "Discharge Flange to CL (E)",
+    "RB": "Unitary Base to CL (RB)", "RM": "Motor CL to Fan CL (RM)",
+    "F/2": "Base to CL (F)", "H": "Shaft Height (H)",
+    "TV": "Total Vert Height (TV)", "RH": "Max Right of CL to Hsg (RH)",
+    "LH": "Max Left of CL to Disch (LH)", "MA": "Mounting Channel (MA)",
+    "D": "Base Flange to CL (D)", "K": "Drive End of Shaft to CL (K)",
+    "N": "Housing Width (N)", "LR": "Mtg Flange to CL (LR)",
+}
+# One outline row: a short left code, a text description, the inches value (whole
+# + optional fraction), then the mm column at line end. Anchored top-and-tail so
+# the flange-punching "A = .." table and the part-cost tables can't leak in.
+_OUTLINE_ROW = re.compile(
+    r"^\s*([A-Z]{1,3}(?:/\d)?)\s{2,}([A-Z][A-Z0-9 ./&\-]+?)\s{2,}"
+    r"(\d+(?:\s+\d+/\d+)?)\s{2,}\d+\s*$")
+
+
+def _parse_outline_dims(text: str) -> Dict[str, str]:
+    """Pull the whole AXIAL/SIDE VIEW outline-dimension table (one dim per line),
+    bounded to that section. Returns {friendly name: inches value}."""
+    lines = text.splitlines()
+    try:
+        start = next(i for i, ln in enumerate(lines) if "AXIAL VIEW" in ln.upper())
+    except StopIteration:
+        return {}
+    out: Dict[str, str] = {}
+    for ln in lines[start + 1:]:
+        up = ln.upper()
+        if "PUNCHING DETAIL" in up or "PART NAME" in up or ln.strip().startswith("---"):
+            break
+        m = _OUTLINE_ROW.match(ln)
+        if not m:
+            continue
+        code, desc, inches = m.group(1), m.group(2).strip(), m.group(3)
+        name = _OUTLINE_DIMS.get(code) or f"{desc.title()} ({code})"
+        out.setdefault(name, re.sub(r"\s{2,}", " ", inches.strip()))
+    return out
+
+
 def _parse_chicago_blower(text: str) -> Dict[str, str]:
     fields: Dict[str, str] = {}
     for label, pat in _CB_PATTERNS:
         m = re.search(pat, text, re.I | re.M)
         if m and m.group(1).strip():
             fields[label] = re.sub(r"\s{2,}", " ", m.group(1).strip())
+    for name, val in _parse_outline_dims(text).items():
+        fields.setdefault(name, val)
 
     lines = [ln.rstrip() for ln in text.splitlines()]
     # Serial: prefer "SN#NNNN"; some runs print the order number on a bare line.
