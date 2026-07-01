@@ -167,6 +167,13 @@ git fetch origin order-data
 git show order-data:live_master.json
 ```
 
+To keep it current automatically, set `DATA_PUSH_ON_CHANGE=1` in `.env`. Then the
+data republishes itself after **any** flow that gathers order data updates the
+master — every scan/backfill (through `master_sync`), and the live watch when new
+orders arrive and at session end. It's best-effort (a failed push never disturbs
+a scan or the watch), and idle watch polls don't push. Off by default; the manual
+**Publish Order Data** task always works regardless.
+
 > **Private repo only.** This data includes customers, prices, and job details —
 > the same caveat as the log push. Point `DATA_PUSH_BRANCH` at a private repo, or
 > set it empty to disable.

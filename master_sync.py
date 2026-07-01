@@ -29,9 +29,21 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List
 
 import live_master
-from config import BACKLOG_DIR
+from config import BACKLOG_DIR, DATA_PUSH_BRANCH, DATA_PUSH_ON_CHANGE
 
 log = logging.getLogger("master-sync")
+
+
+def _publish_data_if_enabled() -> None:
+    """Republish the order data after a sync changed the master, when auto-publish
+    is enabled. Best-effort: a failed/absent push must never sink a scan."""
+    if not (DATA_PUSH_ON_CHANGE and DATA_PUSH_BRANCH):
+        return
+    try:
+        import data_push
+        data_push.push_data()
+    except Exception as e:  # noqa: BLE001 - publishing must never break a sync
+        log.debug("auto data-push after sync skipped (%s)", e)
 
 _AUTOCAD = BACKLOG_DIR / "autocad_scan_progress.json"
 _QUOTE_RUNS = BACKLOG_DIR / "quote_run_scan_progress.json"
@@ -136,6 +148,7 @@ def run(*sources: str) -> Dict[str, int]:
             counts[s] = 0
     if any(counts.values()):
         live_master.save_master(master)
+        _publish_data_if_enabled()   # keep the remote snapshot in step with changes
     return counts
 
 

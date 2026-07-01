@@ -28,6 +28,21 @@ tail fixture.
 Outline table: now pulled in FULL (all 16 codes) — see the block-parser entry
 below.
 
+## 2026-07-01 — Auto-publish order data on change (opt-in)
+
+Per DG: keep the published snapshot current automatically so a remote reader
+tracks the data as we gather more about orders. New `DATA_PUSH_ON_CHANGE` flag
+(config, default off). When on:
+- `master_sync.run()` republishes after it saves the master (so every scan/
+  backfill auto-publishes — one chokepoint, all four scans funnel through it).
+  Only fires when a source actually changed (`any(counts.values())`).
+- `watch.py` publishes when a poll brings new orders or field changes, and once
+  at session end (mirrors the existing `_publish_logs`). Idle polls don't push.
+Both are best-effort (a failed/absent push never disturbs a scan or the watch)
+and gated on `DATA_PUSH_ON_CHANGE and DATA_PUSH_BRANCH`, so tests (flag off)
+never hit the network. Verified: master_sync tests still green, and gating
+off/on/no-branch checked directly. The manual launcher task is unaffected.
+
 ## 2026-07-01 — Publish order data to a branch for remote access (data_push.py)
 
 Per DG: make the order data readable remotely the way `log_push.py` already does
