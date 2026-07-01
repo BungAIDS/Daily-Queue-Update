@@ -1,19 +1,18 @@
 # Launcher debug report
-generated: 2026-07-01T07:58:31
-code version: branch claude/gui-git-pull-dropdown-y86ajl @ commit fa9de93b95
+generated: 2026-07-01T08:07:03
+code version: branch claude/gui-git-pull-dropdown-y86ajl @ commit dcf326d06a
 os.name: nt   platform: win32
-python (launcher): C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe
+python (launcher): C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\pythonw.exe
 python (for scripts): C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe
 
 ## Process scan (external-status detection)
 method used: powershell-cim
 error: none
-python process lines seen: 2
+python process lines seen: 1
 detected running outside launcher: none
 
 ### python process command lines (up to 40)
-  pid=55904 "C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\python.exe" launcher.py
-  pid=71068 "C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe"  launcher.py
+  pid=123832 C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\pythonw.exe "C:\CBC INSIDER GL QUEUE CHECKER\launcher.py"
 
 ## Launcher-started processes
   (none)
@@ -22,12 +21,6 @@ detected running outside launcher: none
   (none yet)
 
 ## Tail of launcher_debug.log (last 120 lines)
-  2026-06-30 13:49:09 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 13:49:26 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 13:49:41 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 13:50:30 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 13:51:01 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 13:52:22 status scan: method=powershell-cim error=none python_lines=4 detected=none
   2026-06-30 13:53:42 status scan: method=wmic error=none python_lines=4 detected=none
   2026-06-30 13:53:58 status scan: method=powershell-cim error=none python_lines=4 detected=none
   2026-06-30 13:55:18 status scan: method=wmic error=none python_lines=4 detected=none
@@ -142,4 +135,10 @@ detected running outside launcher: none
   2026-07-01 07:57:55 status scan: method=wmic error=none python_lines=2 detected=none
   2026-07-01 07:58:12 status scan: method=powershell-cim error=none python_lines=2 detected=none
   2026-07-01 07:58:22 close: publishing debug report to debug/launcher
+  2026-07-01 08:06:07 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/gui-git-pull-dropdown-y86ajl@fa9de93b)
+  2026-07-01 08:06:19 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-07-01 08:06:23 relaunching launcher; closing this instance
+  2026-07-01 08:06:33 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/gui-git-pull-dropdown-y86ajl@dcf326d0)
+  2026-07-01 08:06:42 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-01 08:06:54 close: publishing debug report to debug/launcher
 
