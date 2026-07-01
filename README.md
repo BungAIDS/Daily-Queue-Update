@@ -143,6 +143,35 @@ message, open `.env` and set `EMAIL_TO` first. `watch.py` validates that value
 before starting because it can send notifications during the live watch.
 
 
+## Publishing order data for remote access
+
+The order data (`live_master.json`, the quote-run / line-item / backfill /
+autocad JSON stores, and the `quote_runs.xlsx` / `backlog.xlsx` /
+`line_items.xlsx` / `autocad_dwgs.xlsx` sheets) lives under your local
+`Documents\DailyQueue` folder, so it isn't visible to anyone off the machine.
+`data_push.py` publishes it the same way `log_push.py` publishes the watch log:
+a single **orphan commit force-pushed to a throwaway branch** (default
+`order-data`, set by `DATA_PUSH_BRANCH`). Each run replaces the branch, so the
+repo never accumulates history, and nothing in your working tree changes.
+
+Run it from the launcher (**Tools → Publish Order Data**) or directly:
+
+```bat
+python data_push.py
+```
+
+Then the data can be read from that branch by fetching it in any clone:
+
+```bat
+git fetch origin order-data
+git show order-data:live_master.json
+```
+
+> **Private repo only.** This data includes customers, prices, and job details —
+> the same caveat as the log push. Point `DATA_PUSH_BRANCH` at a private repo, or
+> set it empty to disable.
+
+
 ## Scheduling at 5 AM daily
 
 ### Windows — Task Scheduler

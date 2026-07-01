@@ -28,6 +28,29 @@ tail fixture.
 Outline table: now pulled in FULL (all 16 codes) — see the block-parser entry
 below.
 
+## 2026-07-01 — Publish order data to a branch for remote access (data_push.py)
+
+Per DG: make the order data readable remotely the way `log_push.py` already does
+for the watch log, so it can be inspected without copying files off the Windows
+box. New `data_push.py` mirrors that plumbing exactly — hash-object -> mktree ->
+commit-tree -> force-push a single ORPHAN commit onto `DATA_PUSH_BRANCH` (default
+`order-data`). Never touches the working tree/index; each push replaces the
+branch (no history bloat).
+
+- Publishes whichever exist: `live_master.json`, the quote-run / line-item /
+  backfill / autocad JSON stores, and the `quote_runs`/`backlog`/`line_items`/
+  `autocad_dwgs` xlsx sheets. `build_snapshot_commit()` is factored out so the
+  tree/commit build is exercisable without a network push.
+- Config `DATA_PUSH_BRANCH` (config.py, next to `LOG_PUSH_BRANCH`); empty
+  disables. **Private repo only** — carries customers/prices.
+- Launcher: **Tools → Publish Order Data** (`data_push.py`, optional branch arg).
+- Read side: `git fetch origin order-data && git show order-data:live_master.json`
+  (or check the files out) from any clone — binary xlsx round-trips intact.
+- Validated end-to-end against the real remote on a throwaway `data-selftest`
+  branch (orphan commit confirmed, binary bytes intact). NOTE: a sandbox token
+  couldn't delete that test branch (GitHub 403 on delete); it's harmless dummy
+  content and can be removed from the GitHub UI.
+
 ## 2026-07-01 — Pull the whole AXIAL/SIDE VIEW outline table (block parser)
 
 Per DG: grab ALL the outline dimension codes (not just N/F). They don't all

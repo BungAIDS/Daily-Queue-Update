@@ -433,6 +433,17 @@ def base_actions() -> list[LauncherAction]:
             "seed_yesterday.py",
         ),
         LauncherAction(
+            "data_push",
+            "Tools",
+            "Publish Order Data",
+            "Force-push the order data (live_master.json + the quote-run / line-item / "
+            "backfill / autocad stores and their xlsx sheets) to the 'order-data' branch "
+            "so it can be read remotely. Overwrites that branch each run; no local files change. "
+            "Private repo only — the data includes customers/prices.",
+            "data_push.py",
+            options=(option("branch", "Branch", "Branch to publish to (blank = DATA_PUSH_BRANCH, default 'order-data').", positional=True),),
+        ),
+        LauncherAction(
             "scrub_baseline",
             "Tools",
             "Scrub Baseline Change Log",
