@@ -594,22 +594,41 @@ class LauncherApp(tk.Tk):
         return commit or branch or "unknown"
 
     # ----- single instance ------------------------------------------------ #
-    def _another_launcher_pid(self) -> int | None:
-        """PID of *another* running launcher.py, or None.
+    def _another_launcher_pid(self) -> tuple[int, str] | None:
+        """(PID, command line) of *another* running launcher.py, or None.
 
         Detection is by process scan only — we verify the command line really is
         launcher.py — so we never block on a stale PID. (An earlier lock-file
         approach falsely fired when a killed launcher's PID got reused by an
         unrelated process.) If the scan can't run, we fail open and let the
-        launcher start."""
+        launcher start.
+
+        We skip our own PID *and our parent's* — the shell, py-launcher, or
+        Microsoft Store alias stub that spawned us often carries "launcher.py"
+        on its own command line but is never an independent launcher. The
+        matched command line is returned and logged so a false positive can be
+        identified straight from the debug report instead of guessing."""
         me = os.getpid()
         try:
-            pairs, _method, _error = self._scan_processes()
+            parent = os.getppid()
+        except (AttributeError, OSError):  # pragma: no cover - defensive
+            parent = -1
+        try:
+            pairs, method, error = self._scan_processes()
         except Exception:  # pragma: no cover - defensive
             return None
-        for other_pid, cmd in pairs:
-            if other_pid and other_pid != me and procscan.process_line_matches_script(cmd, "launcher.py"):
-                return other_pid
+        matches = [
+            (pid, cmd)
+            for pid, cmd in pairs
+            if pid and pid != me and pid != parent
+            and procscan.process_line_matches_script(cmd, "launcher.py")
+        ]
+        if matches:
+            self._debug(
+                f"single-instance: me={me} parent={parent} method={method} "
+                f"error={error} matched={matches!r}"
+            )
+            return matches[0]
         return None
 
     def _acquire_single_instance(self) -> bool:
@@ -617,8 +636,9 @@ class LauncherApp(tk.Tk):
 
         Tolerates a relaunch handoff: if another launcher is alive it waits briefly
         for it to exit (a relaunching launcher dies within ~1s) before deciding."""
-        other = self._another_launcher_pid()
-        if other:
+        match = self._another_launcher_pid()
+        if match:
+            other, other_cmd = match
             # A launcher closed via the window's X doesn't exit instantly: it
             # publishes a final debug report on a daemon thread (a git push,
             # ~8s) that __main__ joins for up to 10s, so a just-closed launcher
@@ -631,9 +651,12 @@ class LauncherApp(tk.Tk):
                 if not pid_alive(other):
                     break
             else:
+                self._debug(f"single-instance: warning shown for pid={other} cmd={other_cmd!r}")
+                detail = other_cmd if len(other_cmd) <= 200 else other_cmd[:200] + "…"
                 if not messagebox.askyesno(
                     "Launcher already running",
                     "Another Daily Queue Launcher appears to be running.\n\n"
+                    f"Detected process id {other}:\n{detail}\n\n"
                     "If you just closed one, it may still be finishing up (publishing its "
                     "debug report) — in that case it's safe to open this one.\n\n"
                     "Running two REAL copies at once causes duplicate watchers and Excel "
