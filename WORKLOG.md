@@ -3,6 +3,33 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-07-01 — Surface parsed quote-run fields in the report (Quote Run Details)
+
+The daily run already parses every quote run into real engineering fields
+(`sales_orders.enrich_with_sales_orders` sets `j["drive_run"]` +
+`drive_run_summary` + `drive_run_template` via `templates.parse_quote_run`), but
+every user-facing output showed only a `YES` / `YES (X)` presence flag — the
+parsed fields were computed each morning and dropped (they reached only the
+offline `quote_runs.xlsx` / `backlog.xlsx`). This was the intended-but-unbuilt
+extension point called out in `drive_run.py:19-22`.
+
+- New **`Quote Run Details`** column in `excel_writer.COLUMNS`, keyed on the
+  already-computed `drive_run_summary` (Size/CFM/SP/BHP/RPM/materials/…). Because
+  `QUEUE_HEADERS` derives from `COLUMNS`, it surfaces in the **Full Queue report**
+  and the **Live Queue / Order History** (live_sheets) in one change; both writers
+  render it through their generic `j.get(key, "")` fallback. Abbreviated to
+  `Run Details` on the compact Live Queue via `_HEADER_ABBR`.
+- Appended at the end of `COLUMNS` so the established front-block layout is
+  undisturbed; `_COL_IDX`/`TOTAL_PRICE_COL`/`LIVE_QUEUE_*` are all derived, so
+  nothing shifts. No new parsing.
+- Tests: `test_quote_run_details_column_surfaces_summary` (report row renders the
+  summary, YES flag untouched, no-run row stays blank). Full suite green except a
+  pre-existing sandbox-only pdfminer/cryptography import panic in
+  `test_line_items.py` (environment, not this change).
+- NEXT: promote specific high-value fields (CFM/SP/BHP/RPM, materials, the
+  Engineering Approval / FEA / Shrink-Fit flags) into their own sortable columns
+  once DG picks which matter; the summary column is the interim surface.
+
 ## 2026-06-25 — Ctrl+C finishes the current poll (hardened + clearer)
 
 The first Ctrl+C already only sets a stop flag (no raise), so the poll in progress

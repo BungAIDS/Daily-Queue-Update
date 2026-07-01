@@ -160,6 +160,32 @@ def test_drive_run_label():
     assert _drive_run_label({"has_drive_run": True, "drive_run_count": 4}) == "YES (4)"
 
 
+def test_quote_run_details_column_surfaces_summary():
+    """The 'Quote Run Details' report column renders the parsed drive_run_summary
+    (the real engineering fields), while the 'Quote Run' flag stays YES."""
+    from openpyxl import Workbook
+    import excel_writer as ew
+
+    assert "Quote Run Details" in ew.QUEUE_HEADERS
+    det_col = ew.QUEUE_HEADERS.index("Quote Run Details") + 1
+    flag_col = ew.QUEUE_HEADERS.index("Quote Run") + 1
+
+    job = {
+        "job": "421579", "has_drive_run": True, "drive_run_count": 1,
+        "drive_run_pdf": r"Z:\jobs\421579 QT RUN.txt",
+        "drive_run_summary": "Size=3300; CFM=22500; SP=18.00; BHP=78.3",
+    }
+    wb = Workbook(); ws = wb.active
+    ew._write_job_row(ws, 2, job)
+    assert ws.cell(row=2, column=det_col).value == job["drive_run_summary"]
+    assert ws.cell(row=2, column=flag_col).value == "YES"   # flag untouched
+
+    # A job with no run leaves the details cell blank, never errors.
+    ws2 = wb.create_sheet("no_run")
+    ew._write_job_row(ws2, 2, {"job": "400111"})
+    assert (ws2.cell(row=2, column=det_col).value or "") == ""
+
+
 def main() -> int:
     passed = 0
     with tempfile.TemporaryDirectory() as d:

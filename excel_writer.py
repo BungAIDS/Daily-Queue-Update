@@ -104,6 +104,11 @@ COLUMNS = [
     ("Ship With", "ship_with"),
     ("Flags", "flags"),
     ("Status", "status"),
+    # Parsed quote-run fields (Size/CFM/SP/BHP/RPM/materials/…) — a compact
+    # one-liner of what templates.py pulled from the run, already computed on
+    # every job in sales_orders.enrich_with_sales_orders (drive_run_summary).
+    # Surfaces the real engineering data that was previously a YES flag only.
+    ("Quote Run Details", "drive_run_summary"),
 ]
 QUEUE_HEADERS = [h for h, _ in COLUMNS]
 _COL_IDX = {key: i for i, (_, key) in enumerate(COLUMNS, start=1)}
