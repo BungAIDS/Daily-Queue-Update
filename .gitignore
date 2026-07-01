@@ -18,3 +18,9 @@ launcher_logs/
 venv/
 __pycache__/
 *.pyc
+
+# Launcher<->script stop-flag files (runtime only)
+.launcher_stops/
+
+# Single-instance launcher lock (runtime only)
+.launcher.lock

@@ -1,0 +1,9 @@
+# Launcher debug report
+
+Published reports do NOT live here on this branch — they are pushed to the
+dedicated `debug/launcher` branch by the launcher's "Publish Debug Report"
+button. Read the latest with:
+
+    git show origin/debug/launcher:diagnostics/launcher_report.txt
+
+See diagnostics/README.md for details.

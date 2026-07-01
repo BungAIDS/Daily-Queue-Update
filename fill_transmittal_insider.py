@@ -23,9 +23,9 @@ by `_SEND_HARD_DISABLED = True`, so there is NO code path that can mail a
 transmittal to a customer. Re-enabling it is a deliberate edit (uncomment the
 submit block AND flip the guard) — not something a stray call can trigger.
 
-    python email_drawings.py --probe                 # discover the form fields
-    python email_drawings.py --probe --order 421693  # also type the order # in
-    python email_drawings.py 421693                  # gather + pre-fill (no send)
+    python fill_transmittal_insider.py --probe                 # discover the form fields
+    python fill_transmittal_insider.py --probe --order 421693  # also type the order # in
+    python fill_transmittal_insider.py 421693                  # gather + pre-fill (no send)
 """
 from __future__ import annotations
 

@@ -40,11 +40,13 @@ from logging.handlers import TimedRotatingFileHandler
 
 import change_log
 import engineers
+import git_update
 import line_items
 import live_master
 import live_sheets
 import live_state
 import notify
+import stop_signal
 from compare import load_latest_snapshot, load_snapshot, save_snapshot
 from config import (EXCEL_RECYCLE_EVERY_POLLS, LIVE_MORNING_SNAPSHOT,
                     LIVE_WORKBOOK_PATH, LOG_DIR, LOG_PUSH_BRANCH, OUTPUT_DIR,
@@ -548,8 +550,36 @@ def _install_stop_handler(stop: "threading.Event") -> None:
             pass
 
 
+def _install_stopfile_watcher(stop: "threading.Event") -> None:
+    """Stop on a flag file from the desktop launcher.
+
+    The launcher runs windowless (pythonw) and can't send Ctrl+Break, so it drops
+    a per-PID flag file instead (see stop_signal.py). A daemon thread polls for it
+    and sets the same stop event Ctrl+C uses — so the launcher's Stop button runs
+    this same clean exit (finish the poll, save state, publish logs) rather than a
+    hard kill. Harmless when run outside the launcher: the flag never appears."""
+    pid = os.getpid()
+    stop_signal.clear_stop(pid)                 # drop any stale flag for a reused PID
+
+    def _watch() -> None:
+        while not stop.wait(1.0):               # returns True the instant stop is set
+            if stop_signal.stop_requested(pid):
+                log.info("Stop requested by the launcher — finishing the current poll, "
+                         "then saving state and publishing logs before exiting.")
+                stop.set()
+                return
+
+    threading.Thread(target=_watch, name="stopfile-watch", daemon=True).start()
+
+
 def run_watch(ignore_window: bool = False) -> int:
     setup_logging()
+    try:   # record the running code version so the published log confirms it
+        log.info("watch.py version: branch %s @ commit %s  (pid %d)",
+                 git_update.current_branch() or "?", git_update.head_rev()[:10] or "?",
+                 os.getpid())
+    except Exception:  # noqa: BLE001
+        pass
     validate_runtime_config()
     if not LIVE_WORKBOOK_PATH:
         log.warning("LIVE_WORKBOOK_PATH is not set in .env — the watcher will run "
@@ -585,6 +615,7 @@ def run_watch(ignore_window: bool = False) -> int:
 
     stop = threading.Event()
     _install_stop_handler(stop)
+    _install_stopfile_watcher(stop)             # launcher Stop button -> clean exit
     if _CONSOLE_CTRL_REF:
         log.info("Ctrl+C: the poll in progress finishes first, then state is saved and the "
                  "watch exits (press Ctrl+C again to force-quit).")
@@ -632,6 +663,7 @@ def run_watch(ignore_window: bool = False) -> int:
                 break
     except KeyboardInterrupt:           # belt and suspenders if the handler is bypassed
         pass
+    stop_signal.clear_stop(os.getpid())         # consume the launcher's stop flag
     log.info("Stopping — saving state.")
     live_state.save_state(state, today)
     live_master.save_master(master)
