@@ -48,11 +48,11 @@ import live_state
 import notify
 import stop_signal
 from compare import load_latest_snapshot, load_snapshot, save_snapshot
-from config import (EXCEL_RECYCLE_EVERY_POLLS, LIVE_MORNING_SNAPSHOT,
-                    LIVE_WORKBOOK_PATH, LOG_DIR, LOG_PUSH_BRANCH, OUTPUT_DIR,
-                    POLL_INTERVAL_SECONDS, SO_REVERIFY_MIN_AGE_MIN,
-                    SO_REVERIFY_PER_POLL, WATCH_END, WATCH_START,
-                    validate_runtime_config)
+from config import (DATA_PUSH_BRANCH, DATA_PUSH_ON_CHANGE, EXCEL_RECYCLE_EVERY_POLLS,
+                    LIVE_MORNING_SNAPSHOT, LIVE_WORKBOOK_PATH, LOG_DIR,
+                    LOG_PUSH_BRANCH, OUTPUT_DIR, POLL_INTERVAL_SECONDS,
+                    SO_REVERIFY_MIN_AGE_MIN, SO_REVERIFY_PER_POLL, WATCH_END,
+                    WATCH_START, validate_runtime_config)
 from live_excel import (recycle_workbook, save_morning_copy,
                         update_master_workbook)
 from live_sheets import added_label
@@ -97,6 +97,19 @@ def _publish_logs() -> None:
             pass
     if push_logs():
         log.info("Published logs to the debug branch.")
+
+
+def _publish_data() -> None:
+    """Publish the order data to its branch (best-effort) so a remote reader
+    tracks new orders as the watch gathers them. Only when auto-publish is on."""
+    if not (DATA_PUSH_ON_CHANGE and DATA_PUSH_BRANCH):
+        return
+    try:
+        from data_push import push_data
+        if push_data():
+            log.info("Published order data to the '%s' branch.", DATA_PUSH_BRANCH)
+    except Exception as e:  # noqa: BLE001 - publishing must never disturb the watch
+        log.debug("data publish skipped (%s)", e)
 
 
 def _window_today(today: date) -> "tuple[datetime, datetime]":
@@ -484,6 +497,10 @@ def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce
 
     live_state.save_state(state, now.date())
     live_master.save_master(master)
+    # New orders (or field changes) this poll -> refresh the published snapshot so
+    # a remote reader tracks them. No-ops unless auto-publish is enabled.
+    if deltas["new"] or events:
+        _publish_data()
     return deltas
 
 
@@ -670,6 +687,7 @@ def run_watch(ignore_window: bool = False) -> int:
     log.info("=== Live watch done (%d cycles) ===", cycle)
     if LOG_PUSH_BRANCH:
         _publish_logs()               # publish on Ctrl+C / window end — captures the full session
+    _publish_data()                   # final snapshot of the day's gathered order data
     return 0
 
 

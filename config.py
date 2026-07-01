@@ -233,6 +233,24 @@ except ValueError:
 # push to. NOTE: the log (job #s, customers, file paths) goes to that repo.
 LOG_PUSH_BRANCH = (os.environ.get("LOG_PUSH_BRANCH", "debug-logs") or "").strip()
 
+# Publish the order-data files (live_master.json + the backlog/quote-run/
+# line-item stores and their xlsx sheets) to a throwaway branch the same way as
+# the log, so they can be read remotely without copying them off the machine.
+# Each push force-replaces the branch with a single orphan commit (no history/
+# bloat). Set DATA_PUSH_BRANCH empty to disable. Needs an 'origin' you can push
+# to. NOTE: this data (job #s, customers, prices, file paths) goes to that repo
+# — only point it at a PRIVATE repo.
+DATA_PUSH_BRANCH = (os.environ.get("DATA_PUSH_BRANCH", "order-data") or "").strip()
+
+# When true, the data is republished automatically after any flow that gathers
+# order data updates the master (each scan/backfill via master_sync, and the
+# live watch on new orders / at session end) — so a remote reader always tracks
+# the latest. Off by default; set DATA_PUSH_ON_CHANGE=1 in .env to enable. Needs
+# DATA_PUSH_BRANCH set. The manual "Publish Order Data" launcher task works
+# regardless of this flag.
+DATA_PUSH_ON_CHANGE = (os.environ.get("DATA_PUSH_ON_CHANGE", "") or "").strip().lower() in (
+    "1", "true", "yes", "on")
+
 
 def _parse_hhmm(raw: str, default: str) -> "tuple[int, int]":
     """Parse a 'HH:MM' watch-window bound into (hour, minute)."""

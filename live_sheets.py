@@ -162,7 +162,7 @@ def _is_windows() -> bool:
 # Display-only header abbreviations (the full label stays the internal key, so
 # change-log field matching and column lookups are unaffected). Keeps wide columns
 # from being held open by a long header when the data itself is short.
-_HEADER_ABBR = {"Arrangement": "Arr."}
+_HEADER_ABBR = {"Arrangement": "Arr.", "Quote Run Details": "Run Details"}
 
 
 def _abbrev_header(h: str) -> str:

@@ -184,6 +184,10 @@ def test_chicago_blower_ribbed_blades_and_descriptor():
     assert f["Blade Material"] == "ASTM A1011-HSLAS"
     assert f["Sideplate Material"] == "ASTM A1011-HSLAS"
     assert f["Backplate Material"] == "ASTM CQ HRS A36"
+    # Decimal/parenthetical gauges carry through verbatim from THICK.(GA).
+    assert f["Blade Gauge"] == "0.048 (18)"
+    assert f["Sideplate Gauge"] == "0.179 ( 7)"
+    assert f["Backplate Gauge"] == "1/4"
     assert f["Hub"] == "19-5-1056"
     assert f["Coupling"] == "FALK T10"
     assert f["Drive"] == "Direct"           # coupling, not belt
@@ -225,6 +229,10 @@ def test_chicago_blower_space_delimited_and_liner():
     assert f["Effective Wheel Dia"] == "33"
     assert f["Blade Material"] == "ASTM A572 X-TEN"
     assert f["Liner Material"] == "PLAIN FIRMEX"          # the notable wear liner
+    assert f["Blade Gauge"] == "3/8"
+    assert f["Liner Gauge"] == "1/4"
+    # This wheel has GUSSETS, not a sideplate/backplate row -> no such gauges.
+    assert "Sideplate Gauge" not in f and "Backplate Gauge" not in f
     assert f["Class"] == "4"
     assert f["Drive"] == "Belt"
 
@@ -269,12 +277,96 @@ def test_chicago_blower_fields():
     assert f["Blade Material"] == "ASTM A572 X-TEN"
     assert f["Sideplate Material"] == "ASTM A572 X-TEN"
     assert f["Backplate Material"] == "ASTM CQ HRS A36"
+    # Wheel-construction gauges (THICK.(GA) column) paired with the materials.
+    assert f["Blade Gauge"] == "1/4"
+    assert f["Sideplate Gauge"] == "1/4"
+    assert f["Backplate Gauge"] == "3/8"
     assert f["Drive"] == "Belt"
     assert f["Engineering Approval"] == "Required"
     assert f["Non-Std Wheel Materials"] == "Yes"
     assert f["Shrink Fit"] == "Yes"
     # The dimension-table noise the generic sweep produced must NOT appear.
     assert "DA" not in f and "DK" not in f and "A" not in f
+
+
+# The shaft/bearing + outline section from the full job-421579 run (the part
+# below BRG CENTERS the earlier trimmed sample dropped): the comma-delimited
+# shaft-geometry line (LENGTH/OH/BX/STB/TG&P), STH, the bearing spec block, and
+# the AXIAL/SIDE VIEW outline dimensions (N = housing width, F/2 = base to CL).
+REAL_CBC_QT_RUN_421579_TAIL = """\
+ SHAFT DIA  2 15/16, BRG CENTERS 12, CRITICAL SPEED  5119 RPM
+  ROTOR WR2   267 LB-FT2, ROTOR MAX RPM 3000, MTL. 1045 STEEL
+  STRESS RATIO AT HUB 0.17, AT BEARING 0.47
+  LENGTH 35  3/8 ,OH  8.64,BX 15  3/8 , STB  12     , TG&P  68     880
+  STH  2.12
+  CHECK MOTOR WR2 >   516 LB-FT2
+
+ SIZE  2 15/16 BEARINGS, LINK BELT SERIES 6800
+    SIDE    STATIC  DYN. THRUST  L10 HR   P/C
+ DRIVE-FLOAT  1534    33      0  400000 0.0320
+ OTHER-FIXED   457    80    183  400000 0.0224              84    3158
+
+      AXIAL VIEW                               IN.          MM
+  A   DISCHARGE HEIGHT OS                     37  9/16      953
+  W   BOTTOM OF DISCH TO CL                    0              0
+ KK   OUTLET AND INLET FLANGE                  2             51
+  E   DISCHARGE FLANGE TO CL                  26  1/8       664
+ RB   UNITARY BASE TO CL                      69 13/16     1773
+ RM   MOTOR CL TO FAN CL                      49  3/16     1249
+     CENTER DISTANCE, IN.: 47.94- 54.65
+F/2   BASE TO CL                              23  7/8       606
+  H   SHAFT HEIGHT                            35  9/16      903
+ TV   TOTAL VERT HEIGHT TO DISCH FL           75  1/8      1908
+ RH   MAX DIM RIGHT OF CL TO HSG              32  9/16      827
+ LH   MAX DIM LEFT OF CL TO DISCH FL          26  1/8       664
+
+      SIDE VIEW                                IN.          MM
+ MA   MOUNTING CHANNEL                         2  1/4        57
+  D   BASE FLANGE TO CL                       31  7/8       810
+  K   DRIVE END OF SHAFT TO CL                39  3/8      1000
+  N   HSG WIDTH OS                            22  3/4       578
+ LR   MTG FLANGE TO CL                        13  5/8       346
+      BEARINGS, TYPE 6800                      2 15/16
+
+ FAN OUTLET AREA   5.934 FT2,   0.551 M2
+"""
+
+
+def test_chicago_blower_shaft_bearing_and_outline_fields():
+    f = _parse_chicago_blower(REAL_CBC_QT_RUN_421579_TAIL)
+    # Shaft/rotor geometry line (the "BX STB ... and everything near there").
+    assert f["Shaft Length"] == "35 3/8"
+    assert f["OH"] == "8.64"
+    assert f["BX"] == "15 3/8"
+    assert f["STB"] == "12"
+    assert f["TG&P"] == "68"          # the price column after it is not captured
+    assert f["STH"] == "2.12"
+    # Bearing spec block.
+    assert f["Bearing Size"] == "2 15/16"
+    assert f["Bearing Series"] == "LINK BELT SERIES 6800"
+    assert f["Bearing L10 Hr"] == "400000"
+    # The whole AXIAL/SIDE VIEW outline table — every coded dim, inches value.
+    assert f["Discharge Height (A)"] == "37 9/16"
+    assert f["Bottom of Disch to CL (W)"] == "0"
+    assert f["Outlet/Inlet Flange (KK)"] == "2"
+    assert f["Discharge Flange to CL (E)"] == "26 1/8"
+    assert f["Unitary Base to CL (RB)"] == "69 13/16"
+    assert f["Motor CL to Fan CL (RM)"] == "49 3/16"
+    assert f["Base to CL (F)"] == "23 7/8"
+    assert f["Shaft Height (H)"] == "35 9/16"
+    assert f["Total Vert Height (TV)"] == "75 1/8"
+    assert f["Max Right of CL to Hsg (RH)"] == "32 9/16"
+    assert f["Max Left of CL to Disch (LH)"] == "26 1/8"
+    assert f["Mounting Channel (MA)"] == "2 1/4"
+    assert f["Base Flange to CL (D)"] == "31 7/8"
+    assert f["Drive End of Shaft to CL (K)"] == "39 3/8"
+    assert f["Housing Width (N)"] == "22 3/4"
+    assert f["Mtg Flange to CL (LR)"] == "13 5/8"
+    # Exactly the 16 outline codes are captured — the "CENTER DISTANCE" note and
+    # the "BEARINGS, TYPE 6800" line (no valid code+inches+mm shape) are skipped.
+    outline = [k for k in f if k.endswith(")")]
+    assert len(outline) == 16
+    assert not any("Center Distance" in k for k in f)
 
 
 def test_chicago_blower_matches_and_parses_end_to_end(tmp: Path):

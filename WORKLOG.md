@@ -3,6 +3,143 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-07-01 — Shaft/bearing geometry + outline dims (BX/STB/N/F etc.)
+
+DG pointed at the full job-421579 run (the earlier samples were trimmed above
+BRG CENTERS). Added the shaft/bearing + outline fields DG asked for, all
+grounded and tested against the real text — including a run against the FULL
+noisy document to prove no false matches from the part-cost tables, the
+factory-use number block, or the decoy `OUTLET N X A:` / flange-punching `N =`
+lines.
+
+New CB fields (`templates.py` `_CB_PATTERNS`):
+- Shaft/rotor geometry line `LENGTH .. ,OH .. ,BX .. , STB .. , TG&P ..` + `STH`
+  → **Shaft Length, OH, BX, STB, TG&P, STH**.
+- Bearing spec block → **Bearing Size, Bearing Series, Bearing L10 Hr**
+  (from the DRIVE-FLOAT row).
+- Outline dims (AXIAL/SIDE VIEW), anchored on code+description so a bare letter
+  can't false-match → **Housing Width (N)**, **Base to CL (F)** (=F/2).
+
+Surfaced BX/STB/OH/STH/Bearing Size/Series/N/F in `_CB_SUMMARY_ORDER` (the Quote
+Run Details column); all new fields added to `quote_run_scan.CORE_FIELDS`.
+Test: `test_chicago_blower_shaft_bearing_and_outline_fields` on the real 421579
+tail fixture.
+
+Outline table: now pulled in FULL (all 16 codes) — see the block-parser entry
+below.
+
+## 2026-07-01 — Auto-publish order data on change (opt-in)
+
+Per DG: keep the published snapshot current automatically so a remote reader
+tracks the data as we gather more about orders. New `DATA_PUSH_ON_CHANGE` flag
+(config, default off). When on:
+- `master_sync.run()` republishes after it saves the master (so every scan/
+  backfill auto-publishes — one chokepoint, all four scans funnel through it).
+  Only fires when a source actually changed (`any(counts.values())`).
+- `watch.py` publishes when a poll brings new orders or field changes, and once
+  at session end (mirrors the existing `_publish_logs`). Idle polls don't push.
+Both are best-effort (a failed/absent push never disturbs a scan or the watch)
+and gated on `DATA_PUSH_ON_CHANGE and DATA_PUSH_BRANCH`, so tests (flag off)
+never hit the network. Verified: master_sync tests still green, and gating
+off/on/no-branch checked directly. The manual launcher task is unaffected.
+
+## 2026-07-01 — Publish order data to a branch for remote access (data_push.py)
+
+Per DG: make the order data readable remotely the way `log_push.py` already does
+for the watch log, so it can be inspected without copying files off the Windows
+box. New `data_push.py` mirrors that plumbing exactly — hash-object -> mktree ->
+commit-tree -> force-push a single ORPHAN commit onto `DATA_PUSH_BRANCH` (default
+`order-data`). Never touches the working tree/index; each push replaces the
+branch (no history bloat).
+
+- Publishes whichever exist: `live_master.json`, the quote-run / line-item /
+  backfill / autocad JSON stores, and the `quote_runs`/`backlog`/`line_items`/
+  `autocad_dwgs` xlsx sheets. `build_snapshot_commit()` is factored out so the
+  tree/commit build is exercisable without a network push.
+- Config `DATA_PUSH_BRANCH` (config.py, next to `LOG_PUSH_BRANCH`); empty
+  disables. **Private repo only** — carries customers/prices.
+- Launcher: **Tools → Publish Order Data** (`data_push.py`, optional branch arg).
+- Read side: `git fetch origin order-data && git show order-data:live_master.json`
+  (or check the files out) from any clone — binary xlsx round-trips intact.
+- Validated end-to-end against the real remote on a throwaway `data-selftest`
+  branch (orphan commit confirmed, binary bytes intact). NOTE: a sandbox token
+  couldn't delete that test branch (GitHub 403 on delete); it's harmless dummy
+  content and can be removed from the GitHub UI.
+
+## 2026-07-01 — Pull the whole AXIAL/SIDE VIEW outline table (block parser)
+
+Per DG: grab ALL the outline dimension codes (not just N/F). They don't all
+belong in the Live Queue but should live in the master .json — which they do,
+since `master_sync.merge_quote_runs` stores the full `drive_run` fields dict
+unfiltered (only N/F stay in `CORE_FIELDS`/the summary; the rest ride the
+inventory "Other" column + master).
+
+- Replaced the two one-off N/F regexes with `_parse_outline_dims` (templates.py):
+  finds the `AXIAL VIEW` marker, scans to the `PUNCHING DETAIL` / `PART NAME` /
+  page-break boundary, and matches each `<code>  <DESC>  <inches>  <mm>` row with
+  `_OUTLINE_ROW`. Captures all 16 codes (A/W/KK/E/RB/RM/F/H/TV/RH/LH/MA/D/K/N/LR)
+  as "<Description> (<code>)"; a curated `_OUTLINE_DIMS` map gives the common
+  codes clean names, unknown codes fall back to their own description text (so a
+  different arrangement's extra codes are still captured).
+- Verified on the full noisy doc: the flange-punching `A =`/`N =`/`DA =` table
+  and the part-cost tables produce ZERO false matches (bounded + shape-anchored).
+- Test: `test_chicago_blower_shaft_bearing_and_outline_fields` now asserts all 16
+  dims and that exactly 16 are captured.
+- DG says the earlier trimmed samples (421237/421572) are other good run
+  examples; offered to supply more. Only 421579 currently has a full outline
+  section, so a 2nd arrangement's full run would let us confirm the map/fallback
+  across fan types (current parser already handles unknown codes generically).
+
+## 2026-07-01 — Extract wheel-construction gauges + surface construction detail
+
+Per DG, the report needs the wheel construction detail, not the aero fields
+(CFM/SP/BHP/RPM already come from the Sales Order). The CB "Qt Run" wheel table
+`WHEEL  THICK.(GA)  MATERIAL  WR2  WEIGHT` already had its material pulled but
+the **gauge/thickness column was discarded**.
+
+- New CB fields **Blade/Sideplate/Backplate/Liner Gauge** — capture the
+  `THICK.(GA)` value ("1/4", "3/8", "0.048 (18)") using the same row anchors as
+  the material patterns (`templates.py` `_CB_PATTERNS`). Verified on all three
+  real samples (421579, 421237, 421572).
+- `_CB_SUMMARY_ORDER` reordered to lead with construction: each material paired
+  with its gauge, then Hub / Coupling, then Shaft Dia / Brg Centers / Critical
+  Speed. This is what now shows in the **Quote Run Details** report column (Hub
+  part number + bearing section were already parsed, just not surfaced).
+- `quote_run_scan.CORE_FIELDS` gains the four gauge columns next to their
+  materials so the inventory promotes them out of "Other".
+- Tests: gauge assertions added to the three CB field tests (incl. the GUSSETS
+  case that has no sideplate/backplate gauge).
+- STILL NEEDED FROM DG: a real Qt Run showing the **BX / STB** bearing
+  designations and the **"N F" section** — no current sample contains them, so
+  those patterns can't be written without guessing.
+
+## 2026-07-01 — Surface parsed quote-run fields in the report (Quote Run Details)
+
+The daily run already parses every quote run into real engineering fields
+(`sales_orders.enrich_with_sales_orders` sets `j["drive_run"]` +
+`drive_run_summary` + `drive_run_template` via `templates.parse_quote_run`), but
+every user-facing output showed only a `YES` / `YES (X)` presence flag — the
+parsed fields were computed each morning and dropped (they reached only the
+offline `quote_runs.xlsx` / `backlog.xlsx`). This was the intended-but-unbuilt
+extension point called out in `drive_run.py:19-22`.
+
+- New **`Quote Run Details`** column in `excel_writer.COLUMNS`, keyed on the
+  already-computed `drive_run_summary` (Size/CFM/SP/BHP/RPM/materials/…). Because
+  `QUEUE_HEADERS` derives from `COLUMNS`, it surfaces in the **Full Queue report**
+  and the **Live Queue / Order History** (live_sheets) in one change; both writers
+  render it through their generic `j.get(key, "")` fallback. Abbreviated to
+  `Run Details` on the compact Live Queue via `_HEADER_ABBR`.
+- Appended at the end of `COLUMNS` so the established front-block layout is
+  undisturbed; `_COL_IDX`/`TOTAL_PRICE_COL`/`LIVE_QUEUE_*` are all derived, so
+  nothing shifts. No new parsing.
+- Tests: `test_quote_run_details_column_surfaces_summary` (report row renders the
+  summary, YES flag untouched, no-run row stays blank). Full suite green except a
+  pre-existing sandbox-only pdfminer/cryptography import panic in
+  `test_line_items.py` (environment, not this change).
+- NEXT: promote specific high-value fields (CFM/SP/BHP/RPM, materials, the
+  Engineering Approval / FEA / Shrink-Fit flags) into their own sortable columns
+  once DG picks which matter; the summary column is the interim surface.
+
 ## 2026-06-25 — Ctrl+C finishes the current poll (hardened + clearer)
 
 The first Ctrl+C already only sets a stop flag (no raise), so the poll in progress
