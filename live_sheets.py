@@ -199,7 +199,7 @@ def _job_value_cells(j: Dict[str, Any], columns: Optional[List] = None,
                 # Links straight to the latest Sales Order PDF. The watcher keeps
                 # so_pdf pointed at the newest revision (sales_orders
                 # .refresh_sales_orders / a re-fetch on a change order), so a CO
-                # renaming the file (… (original).pdf -> … CO#1.pdf) follows here.
+                # renaming the file (… (original).pdf -> … CO1.pdf) follows here.
                 c.link, c.font = so, F_LINK
                 linked_idx.add(idx)
         elif key == "folder":

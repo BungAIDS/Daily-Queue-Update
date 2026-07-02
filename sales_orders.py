@@ -286,12 +286,14 @@ def refresh_autocad_folders(jobs: List[Dict[str, Any]]) -> int:
     return n
 
 
-_CO_IN_SO_NAME = re.compile(r"CO#(\d+)", re.I)
+# Matches both the current '… CO2.pdf' naming and the legacy '… CO#2.pdf' one
+# (the '#' had to go — Excel hyperlinks can't hold a '#' in a file path).
+_CO_IN_SO_NAME = re.compile(r"CO#?(\d+)", re.I)
 
 
 def _latest_so_in_folder(folder: Path):
     """The newest Sales Order revision on disk in a job's folder: the highest CO#
-    in the file name ('… CO#2.pdf' beats '… (original).pdf'), mtime as a
+    in the file name ('… CO2.pdf' beats '… (original).pdf'), mtime as a
     tiebreak. Returns (path, co_number) or None."""
     best = None
     try:
@@ -309,7 +311,7 @@ def _latest_so_in_folder(folder: Path):
 def refresh_sales_orders(jobs: List[Dict[str, Any]]) -> int:
     """Repoint an order's so_pdf at the latest Sales Order PDF actually on disk
     whenever the stored one has gone — a change order renames the file
-    ('… (original).pdf' -> '… CO#1.pdf'), which dead-links a path captured before
+    ('… (original).pdf' -> '… CO1.pdf'), which dead-links a path captured before
     the CO. Syncs co_number to the file found, so the change order also shows up
     (red text, change log). Cheap: a single stat per order, and a folder listing
     only for the ones whose link is broken. Mutates the job dicts in place;
@@ -526,8 +528,12 @@ def _run_docs(docs: List) -> List:
 
 
 def _so_filename(job: str, rev: int | None) -> str:
+    # No '#' in the change-order suffix: Excel treats everything after a '#' in a
+    # hyperlink address as an in-document anchor, so a Job # linked to a path like
+    # "... CO#1.pdf" fails with "Cannot open the specified file". Legacy '#'
+    # archives are still recognized (_CO_IN_SO_NAME), but new downloads use CO<n>.
     if rev and rev > 1:
-        return f"{job} - Sales Order CO#{rev - 1}.pdf"
+        return f"{job} - Sales Order CO{rev - 1}.pdf"
     return f"{job} - Sales Order (original).pdf"
 
 
@@ -540,8 +546,9 @@ def _run_filename(job: str, doc: Dict[str, Any]) -> str:
     """Archive name for a quote-run document. Keeps the site's own file name —
     it carries the identifying naming and the real extension (.txt qt runs,
     .xlsx D64 wheel constructions, .pdf HDX runs) — prefixed with the job
-    number when it isn't already in it."""
-    fn = re.sub(r'[<>:"/\\|?*]', "_", (doc.get("fn") or "").strip())
+    number when it isn't already in it. '#' is sanitized alongside the
+    Windows-invalid characters: Excel hyperlinks can't hold a '#' in a path."""
+    fn = re.sub(r'[<>:"/\\|?*#]', "_", (doc.get("fn") or "").strip())
     if not fn:
         return _doc_filename(job, "Quote Run", doc.get("rev"))
     return fn if job in fn else f"{job} - {fn}"
