@@ -20,11 +20,15 @@ from quote_run_scan import carry_vision_forward
 
 def test_parse_clean_json():
     p = parse_vision_response(
-        '{"doc_type": "quote_run", "fields": {"Size": 3300, "BX": "15  3/8"}, "note": "Qt Run"}')
+        '{"doc_type": "quote_run", "fields": {"Size": 3300, "BX": "15  3/8"}, '
+        '"note": "Qt Run", "transcript": "CHICAGO BLOWER CORP.\\nSIZE 3300"}')
     assert p["doc_type"] == "quote_run"
     assert p["fields"]["Size"] == "3300"          # numbers normalized to strings
     assert p["fields"]["BX"] == "15 3/8"          # runs of spaces collapsed
     assert p["note"] == "Qt Run"
+    assert p["transcript"] == "CHICAGO BLOWER CORP.\nSIZE 3300"
+    # A reply without a transcript still parses (older/partial replies).
+    assert parse_vision_response('{"doc_type": "other", "fields": {}}')["transcript"] == ""
 
 
 def test_parse_fenced_and_padded_json():
@@ -46,12 +50,15 @@ def test_apply_quote_run_result():
     run = {"path": "Z:\\j\\406244 qt run.pdf", "status": NO_TEXT_STATUS,
            "template": "pdf", "fields": {}, "summary": ""}
     parsed = {"doc_type": "quote_run",
-              "fields": {"Size": "3300", "CFM": "22500"}, "note": "scanned Qt Run"}
+              "fields": {"Size": "3300", "CFM": "22500"}, "note": "scanned Qt Run",
+              "transcript": "SIZE 3300, ARR 9H\n22500 CFM"}
     assert apply_vision_result(run, parsed, "claude-haiku-4-5") is True
     assert run["status"] == "OK" and run["template"] == "pdf_vision"
     assert run["fields"]["CFM"] == "22500"
     assert "Size=3300" in run["summary"]
     assert run["vision"]["model"] == "claude-haiku-4-5"
+    # The full transcription is stored, so re-parsing later is free.
+    assert run["vision"]["transcript"] == "SIZE 3300, ARR 9H\n22500 CFM"
 
 
 def test_apply_drawing_and_error_results():

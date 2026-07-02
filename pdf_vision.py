@@ -12,6 +12,10 @@ one call:
     stops showing up as "needs attention" forever
   - unreadable / something else                      -> stays flagged
 
+Every read also stores a FULL TRANSCRIPTION of the document (run["vision"]
+["transcript"] in the progress store), so future field additions can re-parse
+the stored text for free instead of re-paying the API.
+
 Results are written back into the quote-run progress store (and from there the
 workbook + live_master.json via master_sync), and each PDF is only ever paid
 for once — a run that has a vision result is skipped unless --redo is passed.
@@ -90,10 +94,15 @@ def build_prompt() -> str:
         "Copy values verbatim (keep fractions like '2 15/16' and gauges like "
         "'0.048 (18)'). Do not guess unreadable values — omit them.\n"
         "\n"
+        "Also transcribe the document: every piece of readable text, top to "
+        "bottom, preserving line breaks with \\n (for a drawing, transcribe the "
+        "title block and any labels/notes). Do not invent unreadable text.\n"
+        "\n"
         "Reply with ONLY a JSON object, no other text:\n"
         '{"doc_type": "quote_run" | "drawing" | "other",\n'
         ' "fields": {"<Field Name>": "<value>", ...},\n'
-        ' "note": "<one short line: what the document is>"}\n'
+        ' "note": "<one short line: what the document is>",\n'
+        ' "transcript": "<full transcription>"}\n'
         'For a drawing or other, "fields" must be {}.'
     )
 
@@ -125,7 +134,8 @@ def parse_vision_response(text: str) -> Dict[str, Any]:
             if key and val:
                 fields[key] = val
     return {"doc_type": doc_type, "fields": fields,
-            "note": str(data.get("note", "")).strip()[:300]}
+            "note": str(data.get("note", "")).strip()[:300],
+            "transcript": str(data.get("transcript", "")).strip()[:20000]}
 
 
 def apply_vision_result(run: Dict[str, Any], parsed: Dict[str, Any], model: str) -> bool:
@@ -136,7 +146,10 @@ def apply_vision_result(run: Dict[str, Any], parsed: Dict[str, Any], model: str)
         return False                       # leave the run flagged; retried next time
     run["vision"] = {"model": model,
                      "at": datetime.now().isoformat(timespec="seconds"),
-                     "doc_type": doc_type, "note": parsed.get("note", "")}
+                     "doc_type": doc_type, "note": parsed.get("note", ""),
+                     # Full transcription — kept so new fields can be re-parsed
+                     # from the stored text later without re-paying the API.
+                     "transcript": parsed.get("transcript", "")}
     run["template"] = "pdf_vision"
     if doc_type == "drawing":
         run["fields"] = {}
@@ -221,7 +234,7 @@ def read_scanned_pdf(path: Path, model: str = PDF_VISION_MODEL,
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     try:
         response = client.messages.create(
-            model=model, max_tokens=2000,
+            model=model, max_tokens=6000,   # fields + the full transcription
             messages=[{"role": "user", "content": content}],
         )
     except anthropic.APIError as e:

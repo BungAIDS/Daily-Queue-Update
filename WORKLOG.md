@@ -48,6 +48,12 @@ backlog is on the order of a dollar, one time (not $1/doc).
   and `quote_run_scan.carry_vision_forward` preserves vision results across a
   full `--rescan` (which starts from an empty store — it now loads the prior
   store just for this).
+- **Full transcript stored** (per DG): every read also returns a complete
+  transcription of the document, kept at `run["vision"]["transcript"]` in the
+  progress store (capped 20k chars; survives rescans with the vision result).
+  So when new fields are wanted later, we re-parse the stored text for free —
+  no `--redo`, no second API charge. Roughly doubles output tokens per doc
+  (`max_tokens` 6000); backlog total still ~a dollar or two.
 - Config: `PDF_VISION_MODEL` (default = CLAUDE_MODEL, i.e. Haiku),
   `PDF_VISION_MAX_PAGES` (default 2). Needs the existing ANTHROPIC_API_KEY.
 - Launcher: **Scans / Backfill -> Read Scanned PDFs (AI)** with Jobs/Limit/
