@@ -154,6 +154,9 @@ def scan_one(job: str, jtype: str, folder: Path) -> Dict[str, Any]:
             "summary": r["summary"],
             "status": classify_status(r["template"], r["fields"], r["raw_lines"], f.suffix.lower()),
             "damper": is_damper(f.name),
+            # The document's own lines — persisted so the store doubles as a
+            # re-parsable corpus (new patterns re-extract without re-reading Z:).
+            "raw_lines": r["raw_lines"],
         })
     return {
         "job": job,

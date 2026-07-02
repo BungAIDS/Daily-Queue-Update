@@ -425,6 +425,11 @@ def _cb_summary(fields: Dict[str, str]) -> str:
 # matched the file name, like a vendor quote or a markup.)
 SELECTION_PROGRAM_MARKERS = ("CHICAGO BLOWER", "SN#")
 
+# How many document lines a template returns as raw_lines. Generous on purpose:
+# the sweep persists them to its store, making the store a re-parsable corpus
+# (design new per-arrangement patterns, re-extract without re-reading Z:).
+RAW_LINES_CAP = 250
+
 
 def is_selection_program(text: str) -> bool:
     up = (text or "").upper()
@@ -446,7 +451,11 @@ class ChicagoBlowerQtRun(_TextLineMixin, QuoteRunTemplate):
         text = ctx.text()
         fields = _parse_chicago_blower(text)
         lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
-        return {"fields": fields, "raw_lines": lines[:40], "summary": _cb_summary(fields)}
+        # Keep the whole document (not just a peek): the sweep persists these
+        # lines so new per-arrangement patterns can be designed/re-parsed from
+        # the store without re-reading Z:.
+        return {"fields": fields, "raw_lines": lines[:RAW_LINES_CAP],
+                "summary": _cb_summary(fields)}
 
 
 class QtRunText(_TextLineMixin, QuoteRunTemplate):
@@ -517,12 +526,14 @@ class PdfQuoteRun(QuoteRunTemplate):
         from drive_run import parse_drive_run_pdf
         r = parse_drive_run_pdf(ctx.path)
         text = r.get("text", "")
+        lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
         if is_selection_program(text):
             fields = _parse_chicago_blower(text)
             if fields:
-                return {"fields": fields, "raw_lines": r.get("raw_lines", []),
+                return {"fields": fields, "raw_lines": lines[:RAW_LINES_CAP],
                         "summary": _cb_summary(fields)}
-        return {"fields": r.get("fields", {}), "raw_lines": r.get("raw_lines", [])}
+        return {"fields": r.get("fields", {}),
+                "raw_lines": lines[:RAW_LINES_CAP] or r.get("raw_lines", [])}
 
 
 class GenericTextRun(_TextLineMixin, QuoteRunTemplate):
