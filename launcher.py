@@ -312,6 +312,23 @@ def base_actions() -> list[LauncherAction]:
             long_running=True,
         ),
         LauncherAction(
+            "pdf_vision_scan",
+            "Scans / Backfill",
+            "Read Scanned PDFs (AI)",
+            "Sends quote-run PDFs that have no text layer to Claude vision: extracts the run "
+            "fields from scanned forms and marks drawings as DRAWING. Uses the API "
+            "(fractions of a cent per document; results cached, never re-paid). "
+            "Run with Limit=5 first as a trial and eyeball the fields.",
+            "pdf_vision.py",
+            options=(
+                option("jobs", "Job(s)", "Space-separated job numbers. Blank reads every flagged PDF.", kind="args", positional=True, split=True),
+                option("limit", "Limit", "Read at most N PDFs this run (blank/0 = all). Use 5 as a trial.", arg="--limit"),
+                option("model", "Model", "Claude model override (blank = PDF_VISION_MODEL).", arg="--model"),
+                option("redo", "Re-read done PDFs", "Also re-read PDFs that already have a vision result (re-pays the API call).", kind="check", arg="--redo"),
+            ),
+            long_running=True,
+        ),
+        LauncherAction(
             "line_items_scan",
             "Scans / Backfill",
             "Scan Sales Order Line Items",

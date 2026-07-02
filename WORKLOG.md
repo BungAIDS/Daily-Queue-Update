@@ -28,6 +28,36 @@ tail fixture.
 Outline table: now pulled in FULL (all 16 codes) — see the block-parser entry
 below.
 
+## 2026-07-02 — Read scanned (no-text-layer) PDFs with Claude vision
+
+Per DG: the ~128 runs flagged "PDF (no text layer)" are unreadable by
+pdfplumber (image-only scans/drawings). New `pdf_vision.py` sends exactly those
+to Claude vision — classify + extract in one call. Cost reality-check for DG:
+~1-2k input tokens/page on Haiku ≈ well under a cent per document; the whole
+backlog is on the order of a dollar, one time (not $1/doc).
+
+- Renders page 1-2 via pypdfium2 (already installed with pdfplumber; no new
+  deps), downscaled to 1568px; asks for JSON {doc_type, fields, note} using the
+  SAME field names as the text parser, so scanned runs land in the same
+  workbook columns and master.json shape.
+- Outcomes: quote_run -> fields, status OK, template `pdf_vision`; drawing ->
+  new status **DRAWING** (grey in the xlsx, excluded from "needs attention" and
+  `--reparse-attention` forever); error/refusal -> left flagged, retried next
+  run for free. Progress saved after EVERY answer (they cost money).
+- **Never re-pays**: runs with a vision result are skipped (`--redo` to force),
+  and `quote_run_scan.carry_vision_forward` preserves vision results across a
+  full `--rescan` (which starts from an empty store — it now loads the prior
+  store just for this).
+- Config: `PDF_VISION_MODEL` (default = CLAUDE_MODEL, i.e. Haiku),
+  `PDF_VISION_MAX_PAGES` (default 2). Needs the existing ANTHROPIC_API_KEY.
+- Launcher: **Scans / Backfill -> Read Scanned PDFs (AI)** with Jobs/Limit/
+  Model/Redo. TRIAL FIRST: run with Limit=5 (~3 cents), eyeball the fields in
+  quote_runs.xlsx, then run with Limit blank for the rest.
+- Tests: `test_pdf_vision.py` (parsing incl. fenced/garbage replies, run
+  updating for all three outcomes, candidate selection, rescan carry-forward);
+  plus an end-to-end dry run (real pypdfium2 render + mocked API) verified the
+  CLI flow and the no-re-pay path.
+
 ## 2026-07-01 — Auto-publish order data on change (opt-in)
 
 Per DG: keep the published snapshot current automatically so a remote reader

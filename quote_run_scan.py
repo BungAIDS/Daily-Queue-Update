@@ -97,6 +97,23 @@ def classify_status(template: str, fields: Dict[str, Any], raw_lines: List[str],
     return "NO FIELDS"                 # readable, but no fields pulled — needs tuning
 
 
+def carry_vision_forward(old_rec: Optional[Dict[str, Any]],
+                         new_rec: Dict[str, Any]) -> Dict[str, Any]:
+    """A --rescan re-parses every file from disk, but pdfplumber still gets
+    nothing out of a scanned PDF — so a fresh parse would wipe the (paid-for)
+    Claude-vision result. Carry each vision result forward onto the matching
+    re-scanned run (same path) whenever the fresh parse pulled no fields."""
+    if not old_rec:
+        return new_rec
+    old_by_path = {r.get("path"): r for r in old_rec.get("runs", []) if r.get("vision")}
+    for run in new_rec.get("runs", []):
+        old = old_by_path.get(run.get("path"))
+        if old and not run.get("fields"):
+            for k in ("template", "fields", "summary", "status", "vision"):
+                run[k] = old.get(k)
+    return new_rec
+
+
 def run_rows(records: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Flatten the per-job store into one row per run (a job can have several:
     e.g. the quote and the production run; `history\\` copies are not swept)."""
@@ -196,8 +213,10 @@ def write_workbook(records: Dict[str, Dict[str, Any]], path: Path) -> Path:
         cell.font = header_font
         cell.fill = header_fill
 
+    drawing_fill = PatternFill("solid", fgColor="D9D9D9")  # grey: a drawing, nothing to parse
     status_fill = {"OK": ok_fill, "NO FIELDS": warn_fill,
-                   "UNRECOGNIZED FORMAT": bad_fill, "PDF (no text layer)": bad_fill}
+                   "UNRECOGNIZED FORMAT": bad_fill, "PDF (no text layer)": bad_fill,
+                   "DRAWING": drawing_fill}
     for i, row in enumerate(rows, start=2):
         ws.cell(i, 1, row["job"])
         ws.cell(i, 2, row["type"])
@@ -282,7 +301,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         log.error("AutoCAD jobs root not reachable: %s (is Z: mapped?)", root)
         return 1
 
-    records = {} if args.rescan else load_progress()
+    prior = load_progress()
+    # --rescan redoes every parse, but vision results are carried forward from
+    # the prior store (see carry_vision_forward) — they cost API money.
+    records = {} if args.rescan else prior
 
     jobs = list(args.jobs)
     if args.list:
@@ -292,9 +314,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             log.error("Could not read --list file %s (%s)", args.list, e)
             return 1
     if args.reparse_attention:
+        # DRAWING is a settled classification (a drawing has no fields to pull),
+        # not something a parser fix will ever change — don't re-flag it forever.
         attention = sorted({
             rec.get("job", "") for rec in records.values()
-            if any(run.get("status") != "OK" for run in rec.get("runs", []))
+            if any(run.get("status") not in ("OK", "DRAWING")
+                   for run in rec.get("runs", []))
         } - {""})
         if attention:
             log.info("Re-parsing %d job(s) flagged as needing attention.", len(attention))
@@ -322,7 +347,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         if job in records and not args.rescan and not explicit:
             continue  # already scanned on an earlier run
         try:
-            records[job] = scan_one(job, jtype, folder)
+            records[job] = carry_vision_forward(prior.get(job),
+                                                scan_one(job, jtype, folder))
             scanned += 1
         except OSError as e:
             log.warning("  %s: scan failed (%s)", job, e)
@@ -346,7 +372,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     log.info("Done in %.1fs: %d jobs in store (%d scanned this run), %d with a run, %d runs total.",
              time.monotonic() - t0, len(records), scanned, jobs_with_runs, len(rows))
     log.info("  by template: %s", dict(by_template) or "(none)")
-    needs = {k: v for k, v in by_status.items() if k != "OK"}
+    needs = {k: v for k, v in by_status.items() if k not in ("OK", "DRAWING")}
     if needs:
         log.info("  runs that need attention (no fields): %s", needs)
     log.info("  Wrote %s", out)

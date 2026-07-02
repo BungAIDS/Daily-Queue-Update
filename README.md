@@ -154,6 +154,24 @@ message, open `.env` and set `EMAIL_TO` first. `watch.py` validates that value
 before starting because it can send notifications during the live watch.
 
 
+## Reading scanned PDFs with AI (pdf_vision.py)
+
+Some quote runs are image-only PDFs (scans/drawings) with no text layer — the
+sweep flags them `PDF (no text layer)`. `pdf_vision.py` sends exactly those to
+Claude vision: a scanned Qt Run form comes back with the same field names the
+text parser uses (status `OK`, template `pdf_vision`); an engineering drawing
+is marked `DRAWING` and stops showing as needs-attention. Each PDF is paid for
+**once** (results are cached; a full `--rescan` preserves them).
+
+```bat
+python pdf_vision.py --limit 5    # trial: ~3 cents, check the fields in quote_runs.xlsx
+python pdf_vision.py              # then the rest (~a dollar for a 100+ backlog)
+```
+
+Or from the launcher: **Scans / Backfill → Read Scanned PDFs (AI)**. Uses the
+existing `ANTHROPIC_API_KEY`; model set by `PDF_VISION_MODEL` (defaults to the
+daily-brief Haiku model — bump it only if the worst scans come back sloppy).
+
 ## Publishing order data for remote access
 
 The order data (`live_master.json`, the quote-run / line-item / backfill /
