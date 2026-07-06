@@ -711,6 +711,26 @@ def test_lube_accessories_map_to_bearing_or_motor():
     both = li.extract_items(["Motor Bearing Grease Fittings L 100.00"])[0]
     assert {"BEARINGS", "MOTOR"} <= set(both["tags"])
 
+    items = {it["norm"]: it for it in li.extract_items([
+        "Motor C 1,000.00",
+        "Extended Grease Leads",
+        "Extended Grease Leads L 100.00",
+    ])}
+    assert "MOTOR" in items["MOTOR"]["tags"]
+    assert "BEARINGS" not in items["MOTOR"]["tags"]
+    assert {"BEARINGS", "MOTOR"} <= set(items["EXTENDED GREASE LEADS"]["tags"])
+
+
+def test_assembly_note_is_misc_note_not_component():
+    assembly = li.extract_items([
+        "Assembly, Assemble Panel, Wheel, Shaft, and L INC",
+        "Bearings",
+    ])[0]
+    assert "MISC NOTE" in assembly["tags"]
+    assert "WHEEL" not in assembly["tags"]
+    assert "BEARINGS" not in assembly["tags"]
+    assert assembly["attributes"]["note_type"] == "ASSEMBLY"
+
 
 def test_paint_line_does_not_become_component_tags():
     paint = li.extract_items([

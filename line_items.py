@@ -241,6 +241,8 @@ _rules_cache: Dict[str, Any] | None = None
 _MATERIAL_TAGS = {"MATERIALS", "STAINLESS STEEL", "ALUMINUM"}
 _GUARD_TAG = "SHAFT/BEARING/COUPLING GUARD"
 _PAINT_SURFACE_TAGS = {"MOTOR", "UNITARY BASE", "WHEEL"}
+_MISC_NOTE_TAG = "MISC NOTE"
+_MISC_NOTE_COMPONENT_TAGS = {"WHEEL"}
 _LUBE_ACCESSORY = re.compile(
     r"\b(EXTENDED\s+LUBE|LUBE\s+LINES?|GREASE\s+(LINES?|FITTINGS?|LEADS?)|ZERK\s+FITTINGS?)\b",
     re.I,
@@ -647,6 +649,10 @@ def _is_paint_line(primary: str) -> bool:
     return bool(re.match(r"^PAINT\b", primary, re.I))
 
 
+def _is_assembly_note(primary: str) -> bool:
+    return bool(re.match(r"^ASSEMBLY\b", primary, re.I))
+
+
 def _lube_component_tags(primary: str, norm_blob: str) -> List[str]:
     if not (_LUBE_ACCESSORY.search(primary) or _LUBE_ACCESSORY.search(norm_blob)):
         return []
@@ -669,6 +675,9 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t != _GUARD_TAG]
     if "COATING" in tags and _is_paint_line(primary):
         tags = [t for t in tags if t not in _PAINT_SURFACE_TAGS]
+    if _is_assembly_note(primary):
+        tags = [t for t in tags if t not in _MISC_NOTE_COMPONENT_TAGS]
+        _add_unique(tags, _MISC_NOTE_TAG)
     for tag in _lube_component_tags(primary, norm_blob):
         _add_unique(tags, tag)
     if _component_material_owner(item, _material_attributes(norm_blob), rules):
@@ -694,6 +703,8 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
         attrs["vendor"] = vendor
     if product:
         attrs["product"] = product
+    if _is_assembly_note(_primary_norm(item, rules)):
+        attrs["note_type"] = "ASSEMBLY"
 
     material_attrs = _material_attributes(norm_blob)
     material_owner = _component_material_owner(item, material_attrs, rules)

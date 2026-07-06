@@ -74,7 +74,7 @@ def _attrs_label(item: Dict[str, Any]) -> str:
     if not isinstance(attrs, dict):
         return ""
     keys = [
-        "inquiry_num", "component", "used_on", "used_on_review", "vendor", "product",
+        "inquiry_num", "note_type", "component", "used_on", "used_on_review", "vendor", "product",
         "material", "material_grade", "material_scope",
         "component_material", "component_material_grade", "component_material_scope",
         "balance_type", "balance_grade",
