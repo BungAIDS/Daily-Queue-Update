@@ -599,6 +599,8 @@ def test_used_on_requires_damper_context():
     assert "used_on" not in flange["attributes"]
     damper = li.extract_items(["Outlet Damper, Opposed L 100.00"])[0]
     assert damper["attributes"]["used_on"] == "OUTLET DAMPER"
+    discharge = li.extract_items(["Actuator for Discharge Damper, Bettis #RPED200 C 5,192.00"])[0]
+    assert discharge["attributes"]["used_on"] == "OUTLET DAMPER"
 
 
 def test_tag_counts():

@@ -448,7 +448,7 @@ def _used_on(norm_blob: str) -> str:
     if "OUTLET" in norm_blob and ("DAMPER" in norm_blob or "VOLUME CONTROL" in norm_blob):
         return "OUTLET DAMPER"
     if "DISCHARGE" in norm_blob and ("DAMPER" in norm_blob or "ACTUATOR" in norm_blob):
-        return "DISCHARGE DAMPER"
+        return "OUTLET DAMPER"
     if "IVC" in norm_blob or "INLET VOLUME CONTROL" in norm_blob:
         return "IVC"
     if "INLET" in norm_blob and "DAMPER" in norm_blob:
