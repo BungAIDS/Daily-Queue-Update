@@ -112,6 +112,65 @@ def test_approval_released_from_flags():
     assert box == "record" and released is True
 
 
+def test_approval_negated_release_is_not_released():
+    # Unapproved orders carry conditional boilerplate that MENTIONS release —
+    # it must never tick the 'record / released for fabrication' box.
+    for negated in [
+        "Drawings will not be released for production until approved",
+        "HOLD - NOT RELEASED FOR PRODUCTION",
+        "Fan is not to be RELEASED FOR FABRICATION before customer approval",
+        "Order held pending release: not released for production",
+    ]:
+        box, released = td.parse_approval(SO_473 + [negated])
+        assert box == "approval" and released is False, negated
+
+
+def test_approval_positive_status_beats_boilerplate():
+    # A real APPROVED/RELEASED stamp wins even when conditional boilerplate
+    # elsewhere on the SO mentions (negated) release.
+    lines = SO_473 + [
+        "Drawings will not be released for production until approved",
+        "STATUS: APPROVED - RELEASED FOR PRODUCTION",
+    ]
+    box, released = td.parse_approval(lines)
+    assert box == "record" and released is True
+
+
+def test_approval_status_does_not_pair_across_lines():
+    # 'STATUS' ending one line must not pair with 'APPROVED' opening the next.
+    lines = ["Fan Drawings: STATUS", "APPROVED VENDOR LIST ATTACHED"]
+    box, released = td.parse_approval(lines)
+    assert box == "approval" and released is False
+
+
+def test_approval_evidence_records_the_line():
+    box, released, why = td.parse_approval_evidence(
+        SO_473 + ["STATUS: APPROVED - RELEASED FOR PRODUCTION"])
+    assert released is True
+    assert why == "STATUS: APPROVED - RELEASED FOR PRODUCTION"
+    box, released, why = td.parse_approval_evidence(SO_473)
+    assert released is False and "no APPROVED" in why
+
+
+def test_board_unapproved_overrides_released_so():
+    d = td.build_transmittal_data(
+        SO_473 + ["STATUS: APPROVED - RELEASED FOR PRODUCTION"], order="421473")
+    assert d.box == "record"
+    td.apply_board_approval(d, True)   # board says UNAPPROVED today
+    assert d.box == "approval" and d.released is False
+    assert any("UNAPPROVED" in w for w in d.warnings)
+    assert "board flag" in d.box_evidence
+
+
+def test_board_flag_none_or_false_leaves_so_result():
+    d = td.build_transmittal_data(
+        SO_473 + ["STATUS: APPROVED - RELEASED FOR PRODUCTION"], order="421473")
+    td.apply_board_approval(d, None)    # order not in today's live state
+    td.apply_board_approval(d, False)   # board explicitly not-unapproved
+    assert d.box == "record" and d.released is True
+    assert not any("UNAPPROVED" in w for w in d.warnings)
+
+
 def test_fan_drawings_checklist():
     cl = td.parse_fan_drawings(SO_473)
     assert cl["fan_drawings"].lower() == "both"
@@ -125,6 +184,23 @@ def test_fan_drawings_checklist():
 def test_has_step():
     assert td.has_step(SO_473) is True
     assert td.has_step(["Base Fan", "Motor"]) is False
+
+
+def test_has_step_tolerates_variant_spellings():
+    assert td.has_step(["Include 3-D STEP Drawings L 991.00"]) is True
+    assert td.has_step(["Include 3D-STEP Drawings"]) is True
+    assert td.has_step(["INCLUDE 3DSTEP DRAWINGS"]) is True
+    # The PDF reconstruction can split the phrase across two lines.
+    assert td.has_step(["Include 3D", "STEP Drawings L 991.00"]) is True
+    # No false positives from ordinary words.
+    assert td.has_step(["Stepped inlet cone", "3 D-rings"]) is False
+
+
+def test_force_step_adds_row_without_so_mention():
+    lines = [ln for ln in SO_473 if "STEP" not in ln.upper()]
+    d = td.build_transmittal_data(lines, order="421473", force_step=True)
+    assert d.include_step is True
+    assert any("3D STEP" in r.description for r in d.drawing_rows)
 
 
 def test_build_drawing_rows_matches_421693_recipe():
@@ -169,6 +245,46 @@ def test_build_transmittal_data_end_to_end():
 def test_warns_when_om_but_no_imi():
     d = td.build_transmittal_data(SO_473, order="421473", imi_number="")
     assert any("IMI" in w for w in d.warnings)
+
+
+def test_find_attachments_matches_loose_step_names():
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = Path(tmp)
+        for name in ["421395-01.dwg", "421395-01.pdf", "421395 3D STEP.stp",
+                     "OTHER 421999.stp", "readme.txt"]:
+            (folder / name).write_bytes(b"")
+        sub = folder / "STEP"
+        sub.mkdir()
+        (sub / "421395.step").write_bytes(b"")
+        got = [p.name for p in td.find_attachments(folder, "421395")]
+        assert "421395-01.dwg" in got and "421395-01.pdf" in got
+        assert "421395 3D STEP.stp" in got          # loose top-level STEP name
+        assert "421395.step" in got                 # STEP subfolder, one level down
+        assert "OTHER 421999.stp" not in got        # different order
+        assert "readme.txt" not in got
+
+
+def test_board_unapproved_reads_live_state():
+    from datetime import date
+    old_snapshot_dir = td.SNAPSHOT_DIR
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            tmp_path = Path(d)
+            td.SNAPSHOT_DIR = tmp_path
+            ref = date(2026, 7, 6)
+            # No state file -> unknown.
+            assert td.board_unapproved("421395", ref) is None
+            (tmp_path / "live_state_2026-07-06.json").write_text(json.dumps({
+                "421395": {"job": {"job": "421395", "unapproved": True}},
+                "421507": {"job": {"job": "421507", "unapproved": False}},
+                "421999": {"first_seen": "x"},   # no job dict -> unknown
+            }))
+            assert td.board_unapproved("421395", ref) is True
+            assert td.board_unapproved("421507", ref) is False
+            assert td.board_unapproved("421999", ref) is None
+            assert td.board_unapproved("400000", ref) is None
+    finally:
+        td.SNAPSHOT_DIR = old_snapshot_dir
 
 
 def test_so_read_today_uses_watcher_state():

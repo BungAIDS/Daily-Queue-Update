@@ -69,6 +69,16 @@ ANTHROPIC_API_KEY = _raw_anthropic
 #  - "claude-opus-4-7"    ~$0.13/run, the heaviest; analyzer auto-enables
 #                          adaptive thinking only for opus-4.x
 CLAUDE_MODEL = "claude-haiku-4-5"
+# Model used by pdf_vision.py to read scanned (image-only) quote-run PDFs.
+# Haiku reads a form page for a fraction of a cent; bump to a bigger model
+# only if the worst scans come back sloppy (it's a one-string change here).
+PDF_VISION_MODEL = (os.environ.get("PDF_VISION_MODEL") or "").strip() or CLAUDE_MODEL
+# Pages sent per PDF (the run data is on the first page or two; later pages
+# are usually part tables). Each page costs roughly 1-2k input tokens.
+try:
+    PDF_VISION_MAX_PAGES = max(1, int(os.environ.get("PDF_VISION_MAX_PAGES", "2")))
+except ValueError:
+    PDF_VISION_MAX_PAGES = 2
 
 
 def _expand_path(raw: str) -> Path:

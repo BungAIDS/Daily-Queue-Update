@@ -115,6 +115,46 @@ def test_scan_one_flags_damper(tmp: Path):
     assert flags["420848 damper quote run.txt"] is True
 
 
+def test_reparse_stored_applies_new_patterns_offline():
+    from quote_run_scan import reparse_stored
+    cb_text = ("CHICAGO BLOWER CORP.\n SN#401221\n"
+               " SIZE  4014,DESIGN 6195 ,ARR 4S ,100.0 PCT,DISCH UB ,ROT CW\n"
+               " WHEEL WEIGHT  267 LB, THRUST  190 LB, WR2  387 LB-FT2\n"
+               " BASE , 405T  FR MOTOR    579   4722\n")
+    records = {
+        # A text run parsed by an OLD parser (fields sparse) — raw_lines stored.
+        "401221": {"job": "401221", "runs": [{
+            "path": "Z:\\j\\401221 qt run.txt", "template": "cbc_qt_run_text",
+            "fields": {"Size": "4014"}, "summary": "", "status": "OK",
+            "raw_lines": cb_text.splitlines(),
+        }]},
+        # A vision run: model fields kept, pattern hits merged over them.
+        "406244": {"job": "406244", "runs": [{
+            "path": "Z:\\j\\406244 qt run.pdf", "template": "pdf_vision",
+            "fields": {"Size": "22", "Oddball": "kept"}, "summary": "", "status": "OK",
+            "vision": {"model": "m", "transcript": cb_text},
+        }]},
+        # A non-CB document: untouched.
+        "400111": {"job": "400111", "runs": [{
+            "path": "Z:\\j\\notes.txt", "template": "generic_text",
+            "fields": {"Coating": "epoxy"}, "summary": "", "status": "OK",
+            "raw_lines": ["Coating: epoxy"],
+        }]},
+    }
+    changed = reparse_stored(records)
+    assert changed == 2
+    txt = records["401221"]["runs"][0]
+    assert txt["fields"]["Wheel Weight Lb"] == "267"      # new pattern applied
+    assert txt["fields"]["Motor Frame"] == "405T"
+    assert txt["fields"]["Serial"] == "401221"
+    vis = records["406244"]["runs"][0]
+    assert vis["fields"]["Oddball"] == "kept"             # model's extras survive
+    assert vis["fields"]["Motor Frame"] == "405T"         # pattern fills the gap
+    assert vis["fields"]["Size"] == "22"                  # model wins overlaps (it saw the image)
+    assert vis["template"] == "pdf_vision"                # provenance kept
+    assert records["400111"]["runs"][0]["fields"] == {"Coating": "epoxy"}
+
+
 def main() -> int:
     passed = 0
     with tempfile.TemporaryDirectory() as d:

@@ -28,6 +28,91 @@ tail fixture.
 Outline table: now pulled in FULL (all 16 codes) — see the block-parser entry
 below.
 
+## 2026-07-06 — Rank multiple quote runs by currency (71 orders have >1)
+
+Per DG. 71/381 orders carry multiple run files; master.json and the daily
+report used to take `runs[0]` — ALPHABETICAL — so 400567's 2021 base run beat
+its `Qt Run CO#1.txt`. New import-light `run_rank.py`: most-current first by
+(1) highest CO# in the name, (2) highest REV letter/number, (3) newest file
+mtime (now captured by the sweep), (4) most fields; stable on full ties.
+
+Applied everywhere one run represents the order:
+- `master_sync.merge_quote_runs`: ranked head leads `drive_run`, and ALL runs
+  (revisions included) are kept under a new **`drive_runs`** list — history is
+  queryable instead of discarded.
+- daily enrich (`sales_orders`): the archived-run fallback picks the ranked
+  head for `drive_run_pdf` / Quote Run Details.
+- `quote_runs.xlsx`: still one row per run, now ordered most-current first.
+
+Dry-run on the real store: 31 multi-run orders change primary (400567→CO#1,
+416869→CO#2, 408682→Rev1, 417821→REV 2, ...). Tests: `test_run_rank.py` +
+a ranked-history case in `test_master_sync.py`.
+
+## 2026-07-06 — Section templates for every arrangement (designed from the corpus)
+
+Per DG: different arrangements carry different parts of the run (bearing
+section, wheel info, base/motor variables) and we tracked almost none of the
+arr-4 family's. Analyzed the FULL corpus from the order-data branch (447 docs:
+324 stored raw texts + 123 vision transcripts) — built a per-arrangement
+frequency matrix of every candidate line, then wrote SECTION-based patterns
+(they fire when their section exists; no arrangement gating):
+
+- **Arr-4 family block** (94+ runs, was 0% tracked): Wheel Weight/Thrust/WR2
+  line, Housing to Wheel CG / Hub Inlet Face, motor base — now 92-99%.
+- **Rotor/bearing block** (arr 1/3/7/8/9): Rotor WR2/Max RPM/Material, Stress
+  Ratio at Hub/Bearing, bearing-loads rows (DRIVE-FIXED **and** -FLOAT,
+  negative statics, wide layouts — the old L10 pattern only matched
+  DRIVE-FLOAT; now anchored on the number before the P/C decimal) — 93-100%.
+- **Universal**: Blades / Max RPM Wheel Only / RES CPM, Housing Construction
+  (incl. arr-7 "SPLIT HOUSING AND BOX"), Stiffeners, Fan Outlet Area, Motor
+  Frame/Position/Enclosure/Weight, Sheave PD + Min PD (belt), Inlet Box Size,
+  Shaft Seal / Flanged Inlet flags, Total Weight + Total Price (GOOD FOR line),
+  Drive="Motor mounted" for FR-MOTOR runs.
+- Serial now defaults to the job number when the header omits SN# (93% vs
+  27-60%). ~30 new CORE_FIELDS columns; summary adds Blades + motor block.
+
+**`--reparse-stored`** (also in the launcher via Scan Quote Runs options):
+re-runs the parser over the stored raw_lines/transcripts — new patterns apply
+in seconds, no Z:, no API. Vision fields kept, pattern hits merged over them.
+Dry-run on the real store: 416/450 runs updated, avg 54 fields/run.
+Tests: real 401221 arr-4S fixture + bearing-row variants + reparse merge rules.
+
+## 2026-07-02 — Read scanned (no-text-layer) PDFs with Claude vision
+
+Per DG: the ~128 runs flagged "PDF (no text layer)" are unreadable by
+pdfplumber (image-only scans/drawings). New `pdf_vision.py` sends exactly those
+to Claude vision — classify + extract in one call. Cost reality-check for DG:
+~1-2k input tokens/page on Haiku ≈ well under a cent per document; the whole
+backlog is on the order of a dollar, one time (not $1/doc).
+
+- Renders page 1-2 via pypdfium2 (already installed with pdfplumber; no new
+  deps), downscaled to 1568px; asks for JSON {doc_type, fields, note} using the
+  SAME field names as the text parser, so scanned runs land in the same
+  workbook columns and master.json shape.
+- Outcomes: quote_run -> fields, status OK, template `pdf_vision`; drawing ->
+  new status **DRAWING** (grey in the xlsx, excluded from "needs attention" and
+  `--reparse-attention` forever); error/refusal -> left flagged, retried next
+  run for free. Progress saved after EVERY answer (they cost money).
+- **Never re-pays**: runs with a vision result are skipped (`--redo` to force),
+  and `quote_run_scan.carry_vision_forward` preserves vision results across a
+  full `--rescan` (which starts from an empty store — it now loads the prior
+  store just for this).
+- **Full transcript stored** (per DG): every read also returns a complete
+  transcription of the document, kept at `run["vision"]["transcript"]` in the
+  progress store (capped 20k chars; survives rescans with the vision result).
+  So when new fields are wanted later, we re-parse the stored text for free —
+  no `--redo`, no second API charge. Roughly doubles output tokens per doc
+  (`max_tokens` 6000); backlog total still ~a dollar or two.
+- Config: `PDF_VISION_MODEL` (default = CLAUDE_MODEL, i.e. Haiku),
+  `PDF_VISION_MAX_PAGES` (default 2). Needs the existing ANTHROPIC_API_KEY.
+- Launcher: **Scans / Backfill -> Read Scanned PDFs (AI)** with Jobs/Limit/
+  Model/Redo. TRIAL FIRST: run with Limit=5 (~3 cents), eyeball the fields in
+  quote_runs.xlsx, then run with Limit blank for the rest.
+- Tests: `test_pdf_vision.py` (parsing incl. fenced/garbage replies, run
+  updating for all three outcomes, candidate selection, rescan carry-forward);
+  plus an end-to-end dry run (real pypdfium2 render + mocked API) verified the
+  CLI flow and the no-re-pay path.
+
 ## 2026-07-01 — Auto-publish order data on change (opt-in)
 
 Per DG: keep the published snapshot current automatically so a remote reader

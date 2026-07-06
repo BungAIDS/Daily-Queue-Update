@@ -31,7 +31,10 @@ automatically **every time the launcher is closed**, and on demand via the
 checkout). So the tip of `debug/launcher` normally reflects the end of the
 user's last session. The report contains: OS/Python info, the external-status
 process scan (method used / error / what it saw / what it detected),
-launcher-started processes, last exit codes, and the tail of
+launcher-started processes, last exit codes, the tail of the last **Email
+Drawings** (`fill_transmittal_insider.py`) per-run log — with the transmittal
+decision summary: which approval box was picked and the SO line it came from,
+3D STEP yes/no, the drawing table, attachments, warnings — and the tail of
 `launcher_debug.log`. If you need a snapshot of a *current* problem, ask the user
 to click **Publish Debug Report** (or just close/reopen the launcher). Each
 publish is a new commit, so `git log origin/debug/launcher` shows the history.

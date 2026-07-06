@@ -168,7 +168,7 @@ DEFAULT_RULES: Dict[str, Any] = {
         "BALANCE": [r"balanc"],
         "TESTING": [r"witness", r"\btest"],
         "SPARE PARTS": [r"spare"],
-        "3D STEP DRAWINGS": [r"3d\s+step"],
+        "3D STEP DRAWINGS": [r"3\s*-?\s*d[\s\-_]*step"],  # tolerates "3-D STEP" / "3D-STEP"
     },
 }
 

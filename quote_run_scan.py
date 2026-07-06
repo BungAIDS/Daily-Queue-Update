@@ -62,10 +62,21 @@ CORE_FIELDS = [
     "Shaft Dia", "Brg Centers", "Critical Speed RPM",
     "Shaft Length", "OH", "BX", "STB", "TG&P", "STH",
     "Bearing Size", "Bearing Series", "Bearing L10 Hr",
+    "Drive Brg Mount", "Drive Brg Static Lb", "Other Brg Mount",
+    "Other Brg Static Lb", "Brg Thrust Lb",
+    "Rotor WR2", "Rotor Max RPM", "Rotor Material",
+    "Stress Ratio at Hub", "Stress Ratio at Bearing",
     "Housing Width (N)", "Base to CL (F)",
     "Blade Material", "Blade Gauge", "Sideplate Material", "Sideplate Gauge",
     "Backplate Material", "Backplate Gauge", "Liner Material", "Liner Gauge",
-    "Wheel Material",
+    "Wheel Material", "Blades", "Max RPM Wheel Only", "Wheel Resonance CPM",
+    "Wheel Weight Lb", "Wheel Thrust Lb", "Wheel WR2",
+    "Housing to Wheel CG", "Housing to Hub Inlet Face",
+    "Sheave PD", "Min Sheave PD",
+    "Motor Frame", "Motor Position", "Motor Enclosure", "Motor Weight Lb",
+    "Housing Construction", "Stiffeners", "Fan Outlet Area FT2",
+    "Inlet Box Size", "Shaft Seal", "Shaft Seal Height", "Flanged Inlet",
+    "Total Weight Lb", "Total Price",
     "Hub", "Coupling", "Drive", "Engineering Approval", "FEA Analysis",
     "Non-Std Wheel Materials", "Shrink Fit", "Factory Run Test",
 ]
@@ -97,12 +108,65 @@ def classify_status(template: str, fields: Dict[str, Any], raw_lines: List[str],
     return "NO FIELDS"                 # readable, but no fields pulled — needs tuning
 
 
+def reparse_stored(records: Dict[str, Dict[str, Any]]) -> int:
+    """Re-run the (current, improved) Chicago Blower parser over the text each
+    run already carries — raw_lines from the sweep, or the vision transcript —
+    so new extraction patterns apply instantly: no Z: access, no API cost.
+    Vision-extracted fields are kept and pattern hits merged over them. Returns
+    how many runs changed."""
+    from templates import _parse_chicago_blower, _cb_summary, SELECTION_PROGRAM_MARKERS
+    changed = 0
+    for rec in records.values():
+        job = rec.get("job", "")
+        for run in rec.get("runs", []):
+            vision = run.get("vision") or {}
+            text = "\n".join(run.get("raw_lines") or []) or vision.get("transcript", "")
+            up = text.upper()
+            if not text or not any(m in up for m in SELECTION_PROGRAM_MARKERS):
+                continue                      # not a selection-program run
+            parsed = _parse_chicago_blower(text)
+            # Vision runs: the model read the actual IMAGE; the transcript the
+            # patterns run on is derivative (OCR noise like "4/100 CFM" happens).
+            # So patterns only FILL GAPS on vision runs — the model wins overlaps.
+            fields = {**parsed, **(run.get("fields") or {})} if vision else parsed
+            if fields and job:
+                fields.setdefault("Serial", job)
+            if fields == run.get("fields"):
+                continue
+            run["fields"] = fields
+            run["summary"] = _cb_summary(fields)
+            if fields:
+                run["status"] = "OK"
+                if not vision:
+                    run["template"] = "cbc_qt_run_text"
+            changed += 1
+    return changed
+
+
+def carry_vision_forward(old_rec: Optional[Dict[str, Any]],
+                         new_rec: Dict[str, Any]) -> Dict[str, Any]:
+    """A --rescan re-parses every file from disk, but pdfplumber still gets
+    nothing out of a scanned PDF — so a fresh parse would wipe the (paid-for)
+    Claude-vision result. Carry each vision result forward onto the matching
+    re-scanned run (same path) whenever the fresh parse pulled no fields."""
+    if not old_rec:
+        return new_rec
+    old_by_path = {r.get("path"): r for r in old_rec.get("runs", []) if r.get("vision")}
+    for run in new_rec.get("runs", []):
+        old = old_by_path.get(run.get("path"))
+        if old and not run.get("fields"):
+            for k in ("template", "fields", "summary", "status", "vision"):
+                run[k] = old.get(k)
+    return new_rec
+
+
 def run_rows(records: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Flatten the per-job store into one row per run (a job can have several:
     e.g. the quote and the production run; `history\\` copies are not swept)."""
+    from run_rank import rank_runs
     rows: List[Dict[str, Any]] = []
     for rec in sorted(records.values(), key=lambda r: r.get("job", "")):
-        for run in rec.get("runs", []):
+        for run in rank_runs(rec.get("runs", [])):   # most-current run first
             f = run.get("fields", {}) or {}
             other = "; ".join(f"{k}={v}" for k, v in f.items() if k not in CORE_FIELDS)
             rows.append({
@@ -124,11 +188,20 @@ def run_rows(records: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
 # --------------------------------------------------------------------------- #
 # Filesystem scan                                                             #
 # --------------------------------------------------------------------------- #
+def _mtime(f: Path) -> float:
+    try:
+        return f.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 def scan_one(job: str, jtype: str, folder: Path) -> Dict[str, Any]:
     """Find and parse every quote run in one job folder."""
     runs: List[Dict[str, Any]] = []
     for f in _run_files_in_folder(folder):
         r = parse_quote_run(f)
+        if r["fields"] and "Serial" not in r["fields"]:
+            r["fields"]["Serial"] = job   # runs often omit the SN# header
         runs.append({
             "file": f.name,
             "path": str(f),
@@ -137,6 +210,10 @@ def scan_one(job: str, jtype: str, folder: Path) -> Dict[str, Any]:
             "summary": r["summary"],
             "status": classify_status(r["template"], r["fields"], r["raw_lines"], f.suffix.lower()),
             "damper": is_damper(f.name),
+            # The document's own lines — persisted so the store doubles as a
+            # re-parsable corpus (new patterns re-extract without re-reading Z:).
+            "raw_lines": r["raw_lines"],
+            "mtime": _mtime(f),   # recency signal for ranking multiple runs
         })
     return {
         "job": job,
@@ -196,8 +273,10 @@ def write_workbook(records: Dict[str, Dict[str, Any]], path: Path) -> Path:
         cell.font = header_font
         cell.fill = header_fill
 
+    drawing_fill = PatternFill("solid", fgColor="D9D9D9")  # grey: a drawing, nothing to parse
     status_fill = {"OK": ok_fill, "NO FIELDS": warn_fill,
-                   "UNRECOGNIZED FORMAT": bad_fill, "PDF (no text layer)": bad_fill}
+                   "UNRECOGNIZED FORMAT": bad_fill, "PDF (no text layer)": bad_fill,
+                   "DRAWING": drawing_fill}
     for i, row in enumerate(rows, start=2):
         ws.cell(i, 1, row["job"])
         ws.cell(i, 2, row["type"])
@@ -266,6 +345,9 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ap.add_argument("--reparse-attention", action="store_true",
                     help="Re-parse only the jobs whose saved results currently need attention "
                          "(any run not flagged OK). Fast way to re-check failures after a parser fix.")
+    ap.add_argument("--reparse-stored", action="store_true",
+                    help="Re-run the parser over the text already saved in the store (raw lines "
+                         "+ vision transcripts) — applies new patterns in seconds, no Z:, no API.")
     ap.add_argument("--limit", type=int, default=0,
                     help="Stop after scanning N folders this run (0 = no limit).")
     ap.add_argument("--min-job", type=int, default=DEFAULT_MIN_JOB,
@@ -282,7 +364,22 @@ def main(argv: Optional[List[str]] = None) -> int:
         log.error("AutoCAD jobs root not reachable: %s (is Z: mapped?)", root)
         return 1
 
-    records = {} if args.rescan else load_progress()
+    prior = load_progress()
+    # --rescan redoes every parse, but vision results are carried forward from
+    # the prior store (see carry_vision_forward) — they cost API money.
+    records = {} if args.rescan else prior
+
+    if args.reparse_stored:
+        changed = reparse_stored(records)
+        save_progress(records)
+        try:
+            import master_sync
+            master_sync.run("quote_runs")
+        except Exception as e:  # noqa: BLE001
+            log.warning("Could not sync quote runs to the live master (%s)", e)
+        out = write_workbook(records, Path(args.out))
+        log.info("Re-parsed stored text: %d run(s) updated. Wrote %s", changed, out)
+        return 0
 
     jobs = list(args.jobs)
     if args.list:
@@ -292,9 +389,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             log.error("Could not read --list file %s (%s)", args.list, e)
             return 1
     if args.reparse_attention:
+        # DRAWING is a settled classification (a drawing has no fields to pull),
+        # not something a parser fix will ever change — don't re-flag it forever.
         attention = sorted({
             rec.get("job", "") for rec in records.values()
-            if any(run.get("status") != "OK" for run in rec.get("runs", []))
+            if any(run.get("status") not in ("OK", "DRAWING")
+                   for run in rec.get("runs", []))
         } - {""})
         if attention:
             log.info("Re-parsing %d job(s) flagged as needing attention.", len(attention))
@@ -322,7 +422,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         if job in records and not args.rescan and not explicit:
             continue  # already scanned on an earlier run
         try:
-            records[job] = scan_one(job, jtype, folder)
+            records[job] = carry_vision_forward(prior.get(job),
+                                                scan_one(job, jtype, folder))
             scanned += 1
         except OSError as e:
             log.warning("  %s: scan failed (%s)", job, e)
@@ -346,7 +447,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     log.info("Done in %.1fs: %d jobs in store (%d scanned this run), %d with a run, %d runs total.",
              time.monotonic() - t0, len(records), scanned, jobs_with_runs, len(rows))
     log.info("  by template: %s", dict(by_template) or "(none)")
-    needs = {k: v for k, v in by_status.items() if k != "OK"}
+    needs = {k: v for k, v in by_status.items() if k not in ("OK", "DRAWING")}
     if needs:
         log.info("  runs that need attention (no fields): %s", needs)
     log.info("  Wrote %s", out)

@@ -308,7 +308,24 @@ def base_actions() -> list[LauncherAction]:
             "Scan Quote Runs",
             "Filesystem sweep for quote/construction runs in job folders. Parses them through templates and writes an inventory.",
             "quote_run_scan.py",
-            options=(JOB_LIST, LIST_FILE, RANGE, ROOT_FOLDER, OUT_FILE, RESCAN, option("reparse_attention", "Reparse attention rows", "Retry rows that were previously flagged for attention.", kind="check", arg="--reparse-attention"), LIMIT, MIN_JOB, MAX_JOB),
+            options=(JOB_LIST, LIST_FILE, RANGE, ROOT_FOLDER, OUT_FILE, RESCAN, option("reparse_attention", "Reparse attention rows", "Retry rows that were previously flagged for attention.", kind="check", arg="--reparse-attention"), option("reparse_stored", "Reparse stored text (fast)", "Re-run the parser over text already saved in the store — applies new patterns in seconds; no Z: drive, no API cost.", kind="check", arg="--reparse-stored"), LIMIT, MIN_JOB, MAX_JOB),
+            long_running=True,
+        ),
+        LauncherAction(
+            "pdf_vision_scan",
+            "Scans / Backfill",
+            "Read Scanned PDFs (AI)",
+            "Sends quote-run PDFs that have no text layer to Claude vision: extracts the run "
+            "fields from scanned forms and marks drawings as DRAWING. Uses the API "
+            "(fractions of a cent per document; results cached, never re-paid). "
+            "Run with Limit=5 first as a trial and eyeball the fields.",
+            "pdf_vision.py",
+            options=(
+                option("jobs", "Job(s)", "Space-separated job numbers. Blank reads every flagged PDF.", kind="args", positional=True, split=True),
+                option("limit", "Limit", "Read at most N PDFs this run (blank/0 = all). Use 5 as a trial.", arg="--limit"),
+                option("model", "Model", "Claude model override (blank = PDF_VISION_MODEL).", arg="--model"),
+                option("redo", "Re-read done PDFs", "Also re-read PDFs that already have a vision result (re-pays the API call).", kind="check", arg="--redo"),
+            ),
             long_running=True,
         ),
         LauncherAction(
@@ -1653,6 +1670,25 @@ class LauncherApp(tk.Tk):
             return ["  (no debug log yet)"]
         return [f"  {line.rstrip()}" for line in tail] or ["  (debug log empty)"]
 
+    def _tail_last_run_log(self, action_id: str, count: int) -> list[str]:
+        """Tail of the newest launcher_logs/<stamp>_<action_id>.log — the
+        per-run logs are git-ignored and never leave this PC, so the debug
+        report carries the last run's output for the tools that matter
+        (the timestamp prefix makes the newest file sort last)."""
+        try:
+            runs = sorted(LOG_DIR.glob(f"*_{action_id}.log"))
+        except OSError:
+            runs = []
+        if not runs:
+            return [f"  (no {action_id} run logged yet)"]
+        path = runs[-1]
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as fh:
+                tail = fh.readlines()[-count:]
+        except OSError as exc:
+            return [f"  (could not read {path.name}: {exc})"]
+        return [f"  [{path.name}]"] + [f"  {line.rstrip()}" for line in tail]
+
     def _build_debug_report_text(self) -> str:
         """Build the shareable debug snapshot string (no I/O)."""
         pairs, method, error = self._scan_processes()
@@ -1699,6 +1735,9 @@ class LauncherApp(tk.Tk):
             out.extend(f"  {action_id}: {code}" for action_id, code in sorted(self.last_exit.items()))
         else:
             out.append("  (none yet)")
+        out.append("")
+        out.append("## Last Email Drawings run (tail of its per-run log)")
+        out.extend(self._tail_last_run_log("email_drawings", 100))
         out.append("")
         out.append("## Tail of launcher_debug.log (last 120 lines)")
         out.extend(self._tail_debug_log(120))

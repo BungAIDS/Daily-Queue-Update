@@ -76,12 +76,16 @@ def merge_autocad(master: Dict[str, Any]) -> int:
 
 
 def merge_quote_runs(master: Dict[str, Any]) -> int:
+    from run_rank import rank_runs
     recs = _read_json(_QUOTE_RUNS) or {}
     n = 0
     for job, rec in recs.items():
-        runs = rec.get("runs") or []
+        runs = rank_runs(rec.get("runs") or [])
         if not runs:
             continue
+        # The MOST CURRENT run (CO#/REV in the name, then file mtime) leads the
+        # order's drive_run fields; every run — revisions included — is kept
+        # under drive_runs so history is queryable instead of discarded.
         r0 = runs[0]
         if live_master.merge_order(master, job, {
             "has_drive_run": True,
@@ -90,6 +94,11 @@ def merge_quote_runs(master: Dict[str, Any]) -> int:
             "drive_run_template": r0.get("template", ""),
             "drive_run_pdf": r0.get("path", ""),
             "drive_run_count": len(runs),
+            "drive_runs": [{
+                "file": r.get("file", ""), "path": r.get("path", ""),
+                "template": r.get("template", ""), "status": r.get("status", ""),
+                "summary": r.get("summary", ""), "fields": r.get("fields") or {},
+            } for r in runs],
             "job_type": rec.get("type", ""),
             "job_folder": rec.get("folder", ""),
         }):

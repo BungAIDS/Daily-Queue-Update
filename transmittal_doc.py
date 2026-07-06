@@ -47,6 +47,15 @@ TEMPLATE_PATH = Path(__file__).resolve().parent / "DWG TRANSMITTAL MASTER.doc"
 # The three FORMCHECKBOX fields in document order map to these boxes.
 BOX_ORDER = ["sales", "approval", "record"]
 
+# Each box's identifying wording in its template paragraph ("For sales purposes
+# only…", "For approval only…", "For record only…"). Used to tick the right
+# FORMCHECKBOX by its label rather than trusting position alone.
+BOX_LABEL_RES = {
+    "sales": re.compile(r"sales\s+purposes", re.IGNORECASE),
+    "approval": re.compile(r"approval\s+only", re.IGNORECASE),
+    "record": re.compile(r"record\s+only", re.IGNORECASE),
+}
+
 # Word COM constant: a checkbox form field (wdFieldFormCheckBox).
 _WD_FORM_CHECKBOX = 71
 
@@ -151,15 +160,48 @@ def _fill_to_block(doc, emails: List[str]) -> None:
             p.Range.Delete()
 
 
+def pick_checkbox_index(paragraph_texts: List[str], box: str, fallback: int) -> int:
+    """The index of the checkbox whose paragraph text names `box` (see
+    BOX_LABEL_RES). Falls back to the positional index when the label matches
+    no (or more than one) paragraph — pure, so the mapping is unit-testable."""
+    rx = BOX_LABEL_RES.get(box)
+    if rx is not None:
+        hits = [i for i, t in enumerate(paragraph_texts) if rx.search(t or "")]
+        if len(hits) == 1:
+            return hits[0]
+    return fallback
+
+
 def _check_box(doc, box_index: int) -> None:
-    """Tick the FORMCHECKBOX at `box_index` (sales/approval/record) and clear the
-    others."""
+    """Tick the FORMCHECKBOX for BOX_ORDER[box_index] and clear the others.
+
+    The box is located by the wording of its own paragraph ('sales purposes' /
+    'approval only' / 'record only'), with the document-order index only as the
+    fallback — so a template whose form fields enumerate unexpectedly can't
+    tick the wrong box silently. What was ticked is logged for the run log."""
+    box = BOX_ORDER[box_index] if 0 <= box_index < len(BOX_ORDER) else "approval"
     checkboxes = [ff for ff in doc.FormFields if ff.Type == _WD_FORM_CHECKBOX]
+    if len(checkboxes) != len(BOX_ORDER):
+        log.warning("Template has %d checkbox form fields (expected %d) — "
+                    "relying on the paragraph labels to find the %r box.",
+                    len(checkboxes), len(BOX_ORDER), box)
+    texts: List[str] = []
+    for ff in checkboxes:
+        try:
+            texts.append(ff.Range.Paragraphs(1).Range.Text or "")
+        except Exception:  # noqa: BLE001 - label read is best-effort
+            texts.append("")
+    target = pick_checkbox_index(texts, box, box_index)
     for i, ff in enumerate(checkboxes):
         try:
-            ff.CheckBox.Value = (i == box_index)
+            ff.CheckBox.Value = (i == target)
         except Exception as e:  # noqa: BLE001
             log.warning("Could not set checkbox %d: %s", i, e)
+    if 0 <= target < len(texts):
+        log.info("Ticked the %r box: %s", box, texts[target].strip()[:90] or "(no label read)")
+    else:
+        log.warning("No checkbox ticked — index %d out of range of %d found.",
+                    target, len(checkboxes))
 
 
 def _fill_table(doc, rows: List[Tuple[str, str, str, str, str, str]]) -> None:
@@ -403,6 +445,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"  Subject : {plan.subject}")
     print(f"  P.O. #  : {plan.po}")
     print(f"  Box     : {BOX_ORDER[plan.box_index]}")
+    print(f"  Because : {data.box_evidence or '(no status evidence recorded)'}")
     print(f"  BY      : {plan.initials or '(none)'}")
     print(f"  TO:")
     for e in plan.to_emails:
