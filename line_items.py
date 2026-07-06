@@ -157,6 +157,8 @@ DEFAULT_RULES: Dict[str, Any] = {
                        r"ceramic\s*felt"],
         "SHAFT SLEEVE": [r"shaft\s*sleeve"],
         "SHAFT COOLER": [r"shaft\s*cooler", r"heat\s*slinger"],
+        "MATERIALS": [r"stainless", r"\b304L?\b", r"\b316L?\b",
+                      r"aluminum", r"aluminium"],
         "STAINLESS STEEL": [r"stainless", r"\b304L?\b", r"\b316L?\b"],
         "ALUMINUM": [r"aluminum", r"aluminium"],
         "HIGH TEMPERATURE": [r"high\s*temp", r"heat\s*fan"],
@@ -293,7 +295,7 @@ _TYPE_TAIL = re.compile(r"\s+(?P<ptype>[LCN])\s*$")
 # Leading enumeration: "1.", "(1)", "1)", "ITEM 2:", "2 -". Qty guess only.
 _LEAD = re.compile(r"^\s*(?:ITEM\s*)?\(?(?P<num>\d{1,3})\)?\s*(?:[.):]|-(?=\s))?\s+", re.I)
 _NONDECIMAL_DOT = re.compile(r"(?<!\d)\.|\.(?!\d)")
-_DIGITS_SS = re.compile(r"^(\d+)(SS)$", re.I)
+_DIGITS_SS = re.compile(r"^T?(\d{3}L?)(SST?|SS)$", re.I)
 
 
 def split_price_tail(text: str) -> Tuple[str, str]:
@@ -351,7 +353,7 @@ def normalize_text(raw: str, rules: Dict[str, Any] | None = None) -> str:
         if t in abbrev:
             out.append(abbrev[t])
             continue
-        m = _DIGITS_SS.match(t)  # "316SS" -> "316 STAINLESS STEEL"
+        m = _DIGITS_SS.match(t)  # "316SS"/"304SST" -> "316 STAINLESS STEEL"
         if m:
             out.append(f"{m.group(1)} STAINLESS STEEL")
             continue
@@ -468,6 +470,85 @@ def _needs_used_on_review(norm_blob: str, attrs: Dict[str, str]) -> bool:
     return False
 
 
+_MATERIAL_GRADE = re.compile(r"\bT?(304L?|316L?)\s+STAINLESS\s+STEEL\b", re.I)
+
+
+def _material_attributes(norm_blob: str) -> Dict[str, str]:
+    """Material roll-up with grade and where the material applies."""
+    attrs: Dict[str, str] = {}
+    materials: List[str] = []
+    if re.search(r"\bALUMINUM\b", norm_blob):
+        materials.append("ALUMINUM")
+    if re.search(r"\bSTAINLESS\s+STEEL\b", norm_blob):
+        materials.append("STAINLESS STEEL")
+    if materials:
+        attrs["material"] = ", ".join(materials)
+
+    grades: List[str] = []
+    for m in _MATERIAL_GRADE.finditer(norm_blob):
+        grade = f"{m.group(1).upper()} SS"
+        if grade not in grades:
+            grades.append(grade)
+    if grades:
+        attrs["material_grade"] = ", ".join(grades)
+
+    scopes: List[str] = []
+
+    def add_scope(scope: str) -> None:
+        if scope not in scopes:
+            scopes.append(scope)
+
+    if (re.search(r"\bHOUSING\s+(AND|&)\s+BASE\b", norm_blob)
+            or re.search(r"\bBASE\s+(AND|&)\s+HOUSING\b", norm_blob)
+            or ("HOUSING" in norm_blob and "BASE" in norm_blob and "BASE FAN" not in norm_blob)):
+        add_scope("HOUSING AND BASE")
+    if "BASE FAN" in norm_blob:
+        add_scope("BASE FAN")
+    if "AIRSTREAM" in norm_blob:
+        add_scope("AIRSTREAM")
+    if "EXTERIOR" in norm_blob:
+        add_scope("EXTERIOR")
+    if re.search(r"\bWHEEL\s+AND\s+HUB\b", norm_blob):
+        add_scope("WHEEL AND HUB")
+    elif "WHEEL" in norm_blob:
+        add_scope("WHEEL")
+    if re.search(r"\bINLET\s+CONE\b", norm_blob):
+        add_scope("INLET CONE")
+    elif "INLET" in norm_blob:
+        add_scope("INLET")
+    if "OUTLET" in norm_blob or "DISCHARGE" in norm_blob:
+        add_scope("OUTLET")
+    if "ACCESS DOOR" in norm_blob:
+        add_scope("ACCESS DOOR")
+    if re.search(r"\bHOUSING\s+DRAIN\b", norm_blob):
+        add_scope("HOUSING DRAIN")
+    if "HOUSING" in norm_blob and not any(s.startswith("HOUSING") for s in scopes):
+        add_scope("HOUSING")
+    for scope, pattern in (
+        ("DRAIN", r"\bDRAIN\b"),
+        ("SHAFT COOLER", r"\bSHAFT\s+COOLER\b"),
+        ("SHAFT SEAL", r"\bSHAFT\s+SEAL\b"),
+        ("SCREEN", r"\bSCREEN\b"),
+        ("FLEX CONNECTOR", r"\b(FLEX(IBLE)?\s+CONNECTOR|EXPANSION\s+JOINT|EJ)\b"),
+        ("SILENCER", r"\bSILENCER\b"),
+        ("NAMEPLATE", r"\bNAMEPLATE\b"),
+        ("HARDWARE", r"\bHARDWARE\b"),
+        ("TUBING", r"\bTUBING\b"),
+        ("BACKING RINGS", r"\bBACKING\s+RINGS?\b"),
+        ("BACKING BARS", r"\bBACKING\s+BARS?\b"),
+        ("MOTOR", r"^MOTOR\b"),
+    ):
+        if scope == "DRAIN" and "HOUSING DRAIN" in scopes:
+            continue
+        if re.search(pattern, norm_blob):
+            add_scope(scope)
+    if "SHAFT" in norm_blob and not {"SHAFT COOLER", "SHAFT SEAL"} & set(scopes):
+        add_scope("SHAFT")
+    if scopes:
+        attrs["material_scope"] = ", ".join(scopes)
+    return attrs
+
+
 def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Dict[str, str]:
     """Structured fan-component details pulled from raw text + detail lines."""
     rules = rules or load_rules()
@@ -486,6 +567,8 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
         attrs["vendor"] = vendor
     if product:
         attrs["product"] = product
+
+    attrs.update(_material_attributes(norm_blob))
 
     used_on = _used_on(norm_blob)
     if used_on:

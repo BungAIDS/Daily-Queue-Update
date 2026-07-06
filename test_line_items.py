@@ -293,6 +293,8 @@ def test_normalization_converges_variants():
     c = li.normalize_text("S/S SHAFT SLEEVE - N/C")
     assert a == b == c == "STAINLESS STEEL SHAFT SLEEVE", (a, b, c)
     assert li.normalize_text("316SS sleeve") == "316 STAINLESS STEEL SLEEVE"
+    assert li.normalize_text("304SST Airstream") == "304 STAINLESS STEEL AIRSTREAM"
+    assert li.normalize_text("316LSS housing") == "316L STAINLESS STEEL HOUSING"
     assert li.normalize_text("SST exterior") == "STAINLESS STEEL EXTERIOR"
     assert li.normalize_text("Wheel Aluminium AMCA B") == "WHEEL ALUMINUM AMCA B"
     # "EXT" stays unexpanded (ambiguous with EXTERIOR) — the tag converges both.
@@ -306,6 +308,7 @@ def test_tagging():
     assert "SHAFT SEAL" in li.tag_item(li.normalize_text("Teflon shaft seal"))
     assert "SPARK RESISTANT" in li.tag_item("SPARK RESISTANT CONSTRUCTION TYPE B")
     assert "STAINLESS STEEL" in li.tag_item(li.normalize_text("316SS wheel"))
+    assert "MATERIALS" in li.tag_item(li.normalize_text("304SST Airstream"))
     assert "COATING" in li.tag_item("EPOXY COATED INTERIOR AND EXTERIOR")
     assert "VIBRATION ISOLATION" in li.tag_item("VIBRATION ISOLATORS RUBBER IN SHEAR")
     assert "V-BELT DRIVE" in li.tag_item(li.normalize_text("Drive"))
@@ -316,6 +319,7 @@ def test_tagging():
     assert "EXTENDED LUBE" in li.tag_item(li.normalize_text("Extended Grease Leads"))
     assert "FLEXIBLE COUPLING" in li.tag_item(li.normalize_text("Flexible Coupling Falk Type T Steelflex"))
     assert "ALUMINUM" in li.tag_item(li.normalize_text("Wheel Aluminium AMCA B"))
+    assert "MATERIALS" in li.tag_item(li.normalize_text("Wheel Aluminium AMCA B"))
     assert "WHEEL" in li.tag_item(li.normalize_text("Percent Width 78.7%"))
     assert "LIFTING LUGS" in li.tag_item(li.normalize_text("Lifting Lugs"))
     assert "NAMEPLATE" in li.tag_item(li.normalize_text("Fan Nameplate without Chicago Blower Name"))
@@ -572,6 +576,41 @@ def test_inquiry_counts():
     ]))
     counts = {num: (jobs, items, job_list) for num, jobs, items, job_list in li.inquiry_counts(store)}
     assert counts["333-25-1622"] == (2, 3, ["421464", "421463"])
+
+
+def test_material_attributes():
+    wheel = li.extract_items([
+        "Wheel and Hub, 316 SS Construction, Inquiry Num: L 15,589.00",
+    ])[0]
+    attrs = wheel["attributes"]
+    assert {"MATERIALS", "STAINLESS STEEL", "WHEEL"} <= set(wheel["tags"])
+    assert attrs["material"] == "STAINLESS STEEL"
+    assert attrs["material_grade"] == "316 SS"
+    assert attrs["material_scope"] == "WHEEL AND HUB"
+
+    base = li.extract_items([
+        "Base Fan (Base Fan, Design 53 Size F1, 304SST L 9,212.00",
+        "Airstream, Arrangement 4 (Less Motor), Inquiry",
+        "Num: 333-26-1680)",
+    ])[0]
+    attrs = base["attributes"]
+    assert {"BASE FAN", "MATERIALS", "STAINLESS STEEL"} <= set(base["tags"])
+    assert attrs["material"] == "STAINLESS STEEL"
+    assert attrs["material_grade"] == "304 SS"
+    assert attrs["material_scope"] == "BASE FAN, AIRSTREAM"
+
+    alum = li.extract_items(["Wheel, Aluminum (AMCA B) L INC"])[0]
+    attrs = alum["attributes"]
+    assert {"ALUMINUM", "MATERIALS", "WHEEL"} <= set(alum["tags"])
+    assert attrs["material"] == "ALUMINUM"
+    assert attrs["material_scope"] == "WHEEL"
+
+    grades = li.extract_items([
+        "Housing and Base, 304L SS / 316L SS Construction L 1,200.00",
+    ])[0]
+    attrs = grades["attributes"]
+    assert attrs["material_grade"] == "304L SS, 316L SS"
+    assert attrs["material_scope"] == "HOUSING AND BASE"
 
 
 def test_data_branch_noise_skipped():
