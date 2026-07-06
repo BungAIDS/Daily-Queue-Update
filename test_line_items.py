@@ -335,6 +335,11 @@ def test_tagging():
     assert "INSPECTION" in li.tag_item(li.normalize_text("Customer Final Inspection"))
     assert "INSPECTION" in li.tag_item(li.normalize_text("General Mill Certifications"))
     assert "LABEL" in li.tag_item(li.normalize_text("FEI Label Inquiry Num"))
+    assert "BALANCE" in li.tag_item(li.normalize_text("G2.5 Balance"))
+    assert "BALANCE" in li.tag_item(li.normalize_text("Welded Balance Weights"))
+    assert "BALANCE" not in li.tag_item(li.normalize_text("Balance Report"))
+    assert "BALANCE" not in li.tag_item(li.normalize_text(
+        "All Chicago Blower wheels are precision balanced"))
     assert li.tag_item("SOMETHING NOBODY EVER ORDERED") == []
 
 
@@ -615,8 +620,31 @@ def test_material_attributes():
 
 def test_material_scope_requires_material():
     report = li.extract_items(["CBC Runtest Results and Wheel Balance Report, L"])[0]
-    assert "BALANCE" in report["tags"]
+    assert "BALANCE" not in report["tags"]
     assert "material_scope" not in report["attributes"]
+
+
+def test_balance_attributes():
+    g25 = li.extract_items(["G2.5 Balance L 341.00"])[0]
+    assert "BALANCE" in g25["tags"]
+    assert g25["attributes"]["balance_type"] == "GRADED BALANCE"
+    assert g25["attributes"]["balance_grade"] == "G2.5"
+
+    g10 = li.extract_items([
+        "Special Product Design (EMD Wheel PN 40214482 N 4,393.00",
+        "(CBC PN 08-5-4281) Includes G1.0 Balance on",
+        "clearance fit arbor, Inquiry Num: 410-13-237)",
+    ])[0]
+    assert {"BALANCE", "WHEEL"} <= set(g10["tags"])
+    assert g10["attributes"]["balance_type"] == "GRADED BALANCE"
+    assert g10["attributes"]["balance_grade"] == "G1.0"
+
+    welded = li.extract_items([
+        "Welded Balance Weights, Inquiry Num: 339-26-2098 L 126.00",
+    ])[0]
+    assert "BALANCE" in welded["tags"]
+    assert welded["attributes"]["balance_type"] == "WELDED BALANCE WEIGHTS"
+    assert "balance_grade" not in welded["attributes"]
 
 
 def test_component_materials_do_not_count_as_fan_materials():

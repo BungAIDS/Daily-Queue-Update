@@ -225,7 +225,8 @@ DEFAULT_RULES: Dict[str, Any] = {
                              r"^\d{3,4}\s+\d{3,4}\s+[A-Z]{1,2}\d+\s+\d+\s+"],
         "V-BELT DRIVE": [r"^drive\b", r"v[\s-]*belt", r"sheave",
                          r"bushing", r"drive\s*set"],
-        "BALANCE": [r"balanc"],
+        "BALANCE": [r"\bG\s*\d+(?:\.\d+)?\s+balance\b",
+                    r"welded\s+balance\s+weights?"],
         "TESTING": [r"witness", r"\btest"],
         "SPARE PARTS": [r"spare"],
         "3D STEP DRAWINGS": [r"3d\s+(step\s+)?drawings?"],
@@ -476,6 +477,28 @@ def _needs_used_on_review(norm_blob: str, attrs: Dict[str, str]) -> bool:
 
 
 _MATERIAL_GRADE = re.compile(r"\bT?(304L?|316L?)\s+STAINLESS\s+STEEL\b", re.I)
+_BALANCE_GRADE = re.compile(r"\bG\s*(\d+(?:\.\d+)?)\s+BALANCE\b", re.I)
+
+
+def _add_unique(values: List[str], value: str) -> None:
+    if value and value not in values:
+        values.append(value)
+
+
+def _balance_attributes(norm_blob: str) -> Dict[str, str]:
+    attrs: Dict[str, str] = {}
+    types: List[str] = []
+    grades: List[str] = []
+    for m in _BALANCE_GRADE.finditer(norm_blob):
+        _add_unique(grades, f"G{m.group(1).upper()}")
+    if grades:
+        _add_unique(types, "GRADED BALANCE")
+        attrs["balance_grade"] = ", ".join(grades)
+    if re.search(r"\bWELDED\s+BALANCE\s+WEIGHTS?\b", norm_blob):
+        _add_unique(types, "WELDED BALANCE WEIGHTS")
+    if types:
+        attrs["balance_type"] = ", ".join(types)
+    return attrs
 
 
 def _material_attributes(norm_blob: str) -> Dict[str, str]:
@@ -616,6 +639,8 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
             attrs[f"component_{key}"] = val
     else:
         attrs.update(material_attrs)
+
+    attrs.update(_balance_attributes(norm_blob))
 
     used_on = _used_on(norm_blob)
     if used_on:

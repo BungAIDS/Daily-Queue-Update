@@ -77,6 +77,7 @@ def _attrs_label(item: Dict[str, Any]) -> str:
         "inquiry_num", "component", "used_on", "used_on_review", "vendor", "product",
         "material", "material_grade", "material_scope",
         "component_material", "component_material_grade", "component_material_scope",
+        "balance_type", "balance_grade",
         "manufacturer", "model", "size", "operation", "supplied_by", "mounting", "fail_power", "fail_signal",
         "belt_qty", "belt", "drive_sheave_bushing", "driven_sheave_bushing",
         "actual_sf", "actual_cd", "service_factor", "center_distance_range",
