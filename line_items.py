@@ -405,6 +405,37 @@ def _label_value(item: Dict[str, Any], label: str) -> str:
     return m.group(1).strip(" ,;") if m else ""
 
 
+_INQUIRY_NUM = r"[A-Z0-9]{1,6}-\d{1,2}-[A-Z0-9]{2,10}"
+
+
+def inquiry_numbers(item: Dict[str, Any]) -> List[str]:
+    """Inquiry numbers printed on or under this line item.
+
+    CBC orders split these several ways: "Inquiry Num: 333-25-1622",
+    "InquiryNum:333-25-1622", or "Inquiry L 645.00" followed by
+    "Num: 352-23-2696" on the detail line.
+    """
+    parts = [re.sub(r"\s+", " ", str(item.get("raw", ""))).strip()]
+    parts += [re.sub(r"\s+", " ", str(d)).strip() for d in item.get("details") or []]
+    patterns = [
+        re.compile(rf"\bInquiry\s*(?:Num(?:ber)?|#)\s*:?\s*({_INQUIRY_NUM})", re.I),
+        re.compile(rf"\bInquiry\b.{{0,80}}?\bNum\s*:?\s*({_INQUIRY_NUM})", re.I),
+    ]
+    seen, nums = set(), []
+    for i, part in enumerate(parts):
+        candidates = [part]
+        if "inquiry" in part.lower() and i + 1 < len(parts):
+            candidates.append(f"{part} {parts[i + 1]}")
+        for text in candidates:
+            for pat in patterns:
+                for m in pat.finditer(text):
+                    num = m.group(1).strip(" .;,()").upper()
+                    if num not in seen:
+                        seen.add(num)
+                        nums.append(num)
+    return nums
+
+
 def _used_on(norm_blob: str) -> str:
     component_context = ("DAMPER" in norm_blob or "ACTUATOR" in norm_blob
                          or "VOLUME CONTROL" in norm_blob)
@@ -432,6 +463,10 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     norm_blob = normalize_text(blob, rules)
     tags = set(tag_item(_taggable_text(item, rules), rules))
     attrs: Dict[str, str] = {}
+
+    inquiries = inquiry_numbers(item)
+    if inquiries:
+        attrs["inquiry_num"] = ", ".join(inquiries)
 
     vendor = _label_value(item, "Vendor")
     product = _label_value(item, "Product")
@@ -790,6 +825,11 @@ def _term_matches(term: str, item: Dict[str, Any], fuzzy: float = 0.0) -> bool:
     t = term.upper().strip()
     hay = [item.get("norm", ""), item.get("raw", "").upper()]
     hay += [x.upper() for x in item.get("tags") or []]
+    attrs = item.get("attributes") or {}
+    if isinstance(attrs, dict):
+        for k, v in attrs.items():
+            val = " ".join(str(x) for x in v) if isinstance(v, list) else str(v)
+            hay.extend([str(k).upper(), val.upper(), normalize_text(val)])
     for d in item.get("details") or []:
         hay.append(d.upper())
         hay.append(normalize_text(d))
@@ -857,6 +897,23 @@ def tag_counts(store: Dict[str, Any]) -> List[Tuple[str, int, int]]:
                 jobs.setdefault(t, set()).add(job)
                 items[t] = items.get(t, 0) + 1
     return sorted(((t, len(jobs[t]), items[t]) for t in jobs),
+                  key=lambda r: (-r[1], -r[2], r[0]))
+
+
+def inquiry_counts(store: Dict[str, Any]) -> List[Tuple[str, int, int, List[str]]]:
+    """Inquiry number rollup: (inquiry_num, #jobs, #items, job list)."""
+    rules = load_rules()
+    jobs: Dict[str, set] = {}
+    items: Dict[str, int] = {}
+    for job, rec in (store.get("jobs") or {}).items():
+        for it in rec.get("items") or []:
+            attrs = it.get("attributes") if isinstance(it.get("attributes"), dict) else {}
+            inquiry = (attrs or component_attributes(it, rules)).get("inquiry_num", "")
+            for num in [n.strip().upper() for n in str(inquiry).split(",") if n.strip()]:
+                jobs.setdefault(num, set()).add(str(job))
+                items[num] = items.get(num, 0) + 1
+    return sorted(((n, len(jobs[n]), items[n], sorted(jobs[n], key=_job_sort_key))
+                   for n in jobs),
                   key=lambda r: (-r[1], -r[2], r[0]))
 
 

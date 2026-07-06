@@ -74,7 +74,7 @@ def _attrs_label(item: Dict[str, Any]) -> str:
     if not isinstance(attrs, dict):
         return ""
     keys = [
-        "component", "used_on", "vendor", "product", "manufacturer", "model", "size",
+        "inquiry_num", "component", "used_on", "vendor", "product", "manufacturer", "model", "size",
         "operation", "supplied_by", "mounting", "fail_power", "fail_signal",
         "belt_qty", "belt", "drive_sheave_bushing", "driven_sheave_bushing",
         "actual_sf", "actual_cd", "service_factor", "center_distance_range",
@@ -228,6 +228,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="Also accept close (typo) matches; optional ratio 0-1, default 0.84.")
     ap.add_argument("--job", default="", help="Show the stored items for one job number.")
     ap.add_argument("--list-tags", action="store_true", help="List the tag vocabulary with counts.")
+    ap.add_argument("--list-inquiries", action="store_true",
+                    help="List parsed inquiry numbers with order/item counts.")
     ap.add_argument("--audit-untagged", action="store_true",
                     help="List the most common normalized item names current rules still do not tag.")
     ap.add_argument("--audit-limit", type=int, default=50,
@@ -254,6 +256,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"{'TAG'.ljust(w)}  ORDERS  ITEMS")
         for t, n_jobs, n_items in counts:
             print(f"{t.ljust(w)}  {n_jobs:6d}  {n_items:5d}")
+        print(f"\n({_store_stats(store)})")
+        return 0
+
+    if args.list_inquiries:
+        counts = li.inquiry_counts(store)
+        if not counts:
+            print("No inquiry numbers parsed yet.")
+            return 0
+        w = max(len(n) for n, _, _, _ in counts)
+        print(f"{'INQUIRY #'.ljust(w)}  ORDERS  ITEMS  JOBS")
+        for num, n_jobs, n_items, jobs in counts:
+            print(f"{num.ljust(w)}  {n_jobs:6d}  {n_items:5d}  {', '.join(jobs[:12])}")
         print(f"\n({_store_stats(store)})")
         return 0
 

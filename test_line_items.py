@@ -539,6 +539,41 @@ def test_selected_drive_table_attributes():
     assert bare["attributes"]["driven_sheave_bushing"] == "3B5V94 B"
 
 
+def test_inquiry_number_attributes():
+    items = {it["norm"]: it for it in li.extract_items([
+        "3D Drawings, InquiryNum:333-25-1622 L",
+        "Access Door, Quick Clamp @ 10:30 position, Inquiry L 645.00",
+        "Num: 352-23-2696",
+        "Base Fan (Base fan, Suitable for 3600rpm Motor, L 5,761.00",
+        "Inquiry Num: 317-26-1510)",
+    ])}
+    assert items["3D DRAWINGS INQUIRYNUM 333 25 1622"]["attributes"]["inquiry_num"] == "333-25-1622"
+    assert items["ACCESS DOOR QUICK CLAMP 10 30 POSITION INQUIRY"]["attributes"]["inquiry_num"] == "352-23-2696"
+    assert items["BASE FAN BASE FAN SUITABLE FOR 3600RPM MOTOR"]["attributes"]["inquiry_num"] == "317-26-1510"
+
+
+def test_search_reaches_inquiry_attributes():
+    store = li.load_store(Path("/nonexistent/line_items.json"))
+    li.record_job(store, "421463", li.extract_items([
+        "3D Drawings, InquiryNum:333-25-1622 L",
+    ]))
+    assert [h["job"] for h in li.search(store, ["333-25-1622"])] == ["421463"]
+
+
+def test_inquiry_counts():
+    store = li.load_store(Path("/nonexistent/line_items.json"))
+    li.record_job(store, "421463", li.extract_items([
+        "3D Drawings, InquiryNum:333-25-1622 L",
+        "Add COG and Weights to the fan drawing, Inquiry L",
+        "Num: 333-25-1622",
+    ]))
+    li.record_job(store, "421464", li.extract_items([
+        "Plan View on Customer Drawing, Inquiry Num: 333-25-1622 L",
+    ]))
+    counts = {num: (jobs, items, job_list) for num, jobs, items, job_list in li.inquiry_counts(store)}
+    assert counts["333-25-1622"] == (2, 3, ["421464", "421463"])
+
+
 def test_data_branch_noise_skipped():
     lines = [
         "ADDITIONAL FEATURES",
