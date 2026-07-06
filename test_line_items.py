@@ -609,9 +609,21 @@ def test_material_attributes():
     ])[0]
     attrs = base["attributes"]
     assert {"BASE FAN", "MATERIALS", "STAINLESS STEEL"} <= set(base["tags"])
+    assert "MOTOR" not in base["tags"]
     assert attrs["material"] == "STAINLESS STEEL"
     assert attrs["material_grade"] == "304 SS"
     assert attrs["material_scope"] == "BASE FAN, AIRSTREAM"
+
+    base_with_motor_detail = li.extract_items([
+        "Base Fan L 3,684.00",
+        "Motor (Customer Provided) N NA",
+        "Vendor: CBC Option",
+        "5 HP, 1800 RPM, Enclosure: TEFC",
+        "184T, Cast Iron, 3/60/230/460, F1, 1.15 SF",
+        "Mounted by Others",
+    ])[0]
+    assert base_with_motor_detail["tags"] == ["BASE FAN"]
+    assert "vendor" not in base_with_motor_detail["attributes"]
 
     alum = li.extract_items(["Wheel, Aluminum (AMCA B) L INC"])[0]
     attrs = alum["attributes"]

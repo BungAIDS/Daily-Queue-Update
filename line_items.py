@@ -243,6 +243,7 @@ _GUARD_TAG = "SHAFT/BEARING/COUPLING GUARD"
 _PAINT_SURFACE_TAGS = {"MOTOR", "UNITARY BASE", "WHEEL"}
 _MISC_NOTE_TAG = "MISC NOTE"
 _MISC_NOTE_COMPONENT_TAGS = {"WHEEL"}
+_BASE_FAN_DETAIL_TAGS = {"MOTOR", "MOUNTING"}
 _BELT_GUARD_DETAIL_TAGS = {"COATING", "MOUNTING", "MOTOR"}
 _ACCESSORY_COATING_TAGS = {
     "BELT GUARD", _GUARD_TAG, "MOTOR", "SILENCER", "FLEX CONNECTOR",
@@ -665,6 +666,10 @@ def _is_belt_guard_line(primary: str) -> bool:
     return bool(re.search(r"\bBELT\s+GUARD\b", primary, re.I))
 
 
+def _is_base_fan_line(primary: str) -> bool:
+    return bool(re.match(r"^BASE\s+FAN\b", primary, re.I))
+
+
 def _is_paint_line(primary: str) -> bool:
     return bool(re.match(r"^PAINT\b", primary, re.I))
 
@@ -871,6 +876,8 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t != "WARRANTY"]
     if _GUARD_TAG in tags and not _is_shaft_bearing_guard_line(primary):
         tags = [t for t in tags if t != _GUARD_TAG]
+    if _is_base_fan_line(primary):
+        tags = [t for t in tags if t not in _BASE_FAN_DETAIL_TAGS]
     if _is_belt_guard_line(primary):
         tags = [t for t in tags if t not in _BELT_GUARD_DETAIL_TAGS]
     elif _is_accessory_coating(primary, tag_set, norm_blob):
@@ -903,9 +910,10 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
 
     vendor = _label_value(item, "Vendor")
     product = _label_value(item, "Product")
-    if vendor:
+    base_fan = _is_base_fan_line(primary)
+    if vendor and not base_fan:
         attrs["vendor"] = vendor
-    if product:
+    if product and not base_fan:
         attrs["product"] = product
     admin_note = _is_admin_note(primary)
     if admin_note:
