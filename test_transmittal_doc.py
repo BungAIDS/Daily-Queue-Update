@@ -64,6 +64,39 @@ def test_plan_warns_without_initials():
     assert any("signature" in w.lower() or "initials" in w.lower() for w in plan.warnings)
 
 
+# The three checkbox paragraphs as they read in DWG TRANSMITTAL MASTER.doc.
+_BOX_PARAS = [
+    "For sales purposes only – and is not specialized.",
+    "For approval only, certified – and not released for fabrication.",
+    "For record only, certified – and released for fabrication.",
+]
+
+
+def test_pick_checkbox_by_label():
+    assert doc.pick_checkbox_index(_BOX_PARAS, "sales", 0) == 0
+    assert doc.pick_checkbox_index(_BOX_PARAS, "approval", 1) == 1
+    assert doc.pick_checkbox_index(_BOX_PARAS, "record", 2) == 2
+
+
+def test_pick_checkbox_label_beats_position():
+    # If Word enumerates the fields in an unexpected order (or one is missing),
+    # the label still finds the right box — position is only the fallback.
+    shuffled = [_BOX_PARAS[2], _BOX_PARAS[0], _BOX_PARAS[1]]
+    assert doc.pick_checkbox_index(shuffled, "record", 2) == 0
+    assert doc.pick_checkbox_index(shuffled, "approval", 1) == 2
+    two_only = [_BOX_PARAS[1], _BOX_PARAS[2]]   # first field dropped
+    assert doc.pick_checkbox_index(two_only, "approval", 1) == 0
+    assert doc.pick_checkbox_index(two_only, "record", 2) == 1
+
+
+def test_pick_checkbox_falls_back_when_labels_unreadable():
+    assert doc.pick_checkbox_index(["", "", ""], "record", 2) == 2
+    assert doc.pick_checkbox_index([], "approval", 1) == 1
+    # Ambiguous (two 'record only' paragraphs) -> positional fallback.
+    dup = [_BOX_PARAS[2], _BOX_PARAS[2], _BOX_PARAS[0]]
+    assert doc.pick_checkbox_index(dup, "record", 2) == 2
+
+
 def test_default_out_path_naming():
     p = doc.default_out_path("421693")
     assert p.name == "421693 DWG TRANSMITTAL-01.doc"

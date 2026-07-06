@@ -1670,6 +1670,25 @@ class LauncherApp(tk.Tk):
             return ["  (no debug log yet)"]
         return [f"  {line.rstrip()}" for line in tail] or ["  (debug log empty)"]
 
+    def _tail_last_run_log(self, action_id: str, count: int) -> list[str]:
+        """Tail of the newest launcher_logs/<stamp>_<action_id>.log — the
+        per-run logs are git-ignored and never leave this PC, so the debug
+        report carries the last run's output for the tools that matter
+        (the timestamp prefix makes the newest file sort last)."""
+        try:
+            runs = sorted(LOG_DIR.glob(f"*_{action_id}.log"))
+        except OSError:
+            runs = []
+        if not runs:
+            return [f"  (no {action_id} run logged yet)"]
+        path = runs[-1]
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as fh:
+                tail = fh.readlines()[-count:]
+        except OSError as exc:
+            return [f"  (could not read {path.name}: {exc})"]
+        return [f"  [{path.name}]"] + [f"  {line.rstrip()}" for line in tail]
+
     def _build_debug_report_text(self) -> str:
         """Build the shareable debug snapshot string (no I/O)."""
         pairs, method, error = self._scan_processes()
@@ -1716,6 +1735,9 @@ class LauncherApp(tk.Tk):
             out.extend(f"  {action_id}: {code}" for action_id, code in sorted(self.last_exit.items()))
         else:
             out.append("  (none yet)")
+        out.append("")
+        out.append("## Last Email Drawings run (tail of its per-run log)")
+        out.extend(self._tail_last_run_log("email_drawings", 100))
         out.append("")
         out.append("## Tail of launcher_debug.log (last 120 lines)")
         out.extend(self._tail_debug_log(120))
