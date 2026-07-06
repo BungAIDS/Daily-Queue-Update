@@ -613,6 +613,35 @@ def test_material_attributes():
     assert attrs["material_scope"] == "HOUSING AND BASE"
 
 
+def test_component_materials_do_not_count_as_fan_materials():
+    actuator = li.extract_items([
+        "Bettis #RPED150 Double Acting Pneumatic Actuator C 6,537.14 1,046.00",
+        "Fisher #67CFR Filter/ Regulator, SS Tubing.",
+        "Vendor: Novaspect",
+        "Product: Actuator",
+    ])[0]
+    attrs = actuator["attributes"]
+    assert "ACTUATOR" in actuator["tags"]
+    assert not {"MATERIALS", "STAINLESS STEEL"} & set(actuator["tags"])
+    assert attrs["component"] == "ACTUATOR"
+    assert attrs["component_material"] == "STAINLESS STEEL"
+    assert attrs["component_material_scope"] == "TUBING"
+    assert "material" not in attrs
+
+    motor = li.extract_items([
+        "Motor (Multimounting IE3 5.5 HP 2P 112M 3Ph C 620.49",
+        "112M, Cast Aluminum, Foot Mounted",
+        "Vendor: Weg",
+    ])[0]
+    attrs = motor["attributes"]
+    assert "MOTOR" in motor["tags"]
+    assert not {"MATERIALS", "ALUMINUM"} & set(motor["tags"])
+    assert attrs["component"] == "MOTOR"
+    assert attrs["component_material"] == "ALUMINUM"
+    assert attrs["component_material_scope"] == "MOTOR"
+    assert "material" not in attrs
+
+
 def test_data_branch_noise_skipped():
     lines = [
         "ADDITIONAL FEATURES",

@@ -233,6 +233,7 @@ DEFAULT_RULES: Dict[str, Any] = {
 }
 
 _rules_cache: Dict[str, Any] | None = None
+_MATERIAL_TAGS = {"MATERIALS", "STAINLESS STEEL", "ALUMINUM"}
 
 
 def load_rules(path: str | Path | None = None, refresh: bool = False) -> Dict[str, Any]:
@@ -372,6 +373,10 @@ def tag_item(norm: str, rules: Dict[str, Any] | None = None) -> List[str]:
     norm + normalized details to let an item's detail block contribute)."""
     rules = rules or load_rules()
     return sorted(t for t, pats in rules["tags"].items() if any(p.search(norm) for p in pats))
+
+
+def _primary_norm(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> str:
+    return str(item.get("norm") or normalize_text(str(item.get("raw", "")), rules)).upper()
 
 
 def _item_blob(item: Dict[str, Any]) -> str:
@@ -549,6 +554,39 @@ def _material_attributes(norm_blob: str) -> Dict[str, str]:
     return attrs
 
 
+def _component_material_owner(item: Dict[str, Any], material_attrs: Dict[str, str],
+                              rules: Dict[str, Any] | None = None) -> str:
+    if not material_attrs:
+        return ""
+    primary = _primary_norm(item, rules)
+    product = _label_value(item, "Product").upper()
+    if "ACTUATOR" in primary or product == "ACTUATOR":
+        return "ACTUATOR"
+    if re.match(r"^MOTOR\b", primary) and not re.match(r"^MOTOR\s+MOUNTING\b", primary):
+        return "MOTOR"
+    return ""
+
+
+def _component_material_attributes(owner: str, material_attrs: Dict[str, str]) -> Dict[str, str]:
+    attrs = dict(material_attrs)
+    scopes = [s.strip() for s in attrs.get("material_scope", "").split(",") if s.strip()]
+    if owner == "ACTUATOR":
+        component_scopes = [s for s in scopes if s in {"TUBING", "HARDWARE"}]
+        attrs["material_scope"] = ", ".join(component_scopes or ["ACTUATOR"])
+    elif owner == "MOTOR":
+        attrs["material_scope"] = "MOTOR"
+    return attrs
+
+
+def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> List[str]:
+    rules = rules or load_rules()
+    tags = tag_item(_taggable_text(item, rules), rules)
+    norm_blob = normalize_text(_item_blob(item), rules)
+    if _component_material_owner(item, _material_attributes(norm_blob), rules):
+        tags = [t for t in tags if t not in _MATERIAL_TAGS]
+    return sorted(tags)
+
+
 def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Dict[str, str]:
     """Structured fan-component details pulled from raw text + detail lines."""
     rules = rules or load_rules()
@@ -568,7 +606,14 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     if product:
         attrs["product"] = product
 
-    attrs.update(_material_attributes(norm_blob))
+    material_attrs = _material_attributes(norm_blob)
+    material_owner = _component_material_owner(item, material_attrs, rules)
+    if material_owner:
+        attrs.setdefault("component", material_owner)
+        for key, val in _component_material_attributes(material_owner, material_attrs).items():
+            attrs[f"component_{key}"] = val
+    else:
+        attrs.update(material_attrs)
 
     used_on = _used_on(norm_blob)
     if used_on:
@@ -661,7 +706,7 @@ def derive_item_fields(item: Dict[str, Any], rules: Dict[str, Any] | None = None
     norm = normalize_text(body, rules)
     probe = dict(item)
     probe["norm"] = norm
-    tags = tag_item(_taggable_text(probe, rules), rules)
+    tags = _final_tags(probe, rules)
     return {"norm": norm, "qty": qty, "price": price or mark, "ptype": ptype,
             "tags": tags, "attributes": component_attributes(probe, rules)}
 
@@ -809,7 +854,7 @@ def extract_items(lines: Iterable[str], rules: Dict[str, Any] | None = None) -> 
     # what identifies it.
     items = list(by_norm.values())
     for it in items:
-        it["tags"] = tag_item(_taggable_text(it, rules), rules)
+        it["tags"] = _final_tags(it, rules)
         it["attributes"] = component_attributes(it, rules)
     return items
 
