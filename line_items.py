@@ -496,6 +496,8 @@ def _material_attributes(norm_blob: str) -> Dict[str, str]:
             grades.append(grade)
     if grades:
         attrs["material_grade"] = ", ".join(grades)
+    if not attrs:
+        return {}
 
     scopes: List[str] = []
 

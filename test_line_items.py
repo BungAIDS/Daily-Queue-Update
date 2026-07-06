@@ -613,6 +613,12 @@ def test_material_attributes():
     assert attrs["material_scope"] == "HOUSING AND BASE"
 
 
+def test_material_scope_requires_material():
+    report = li.extract_items(["CBC Runtest Results and Wheel Balance Report, L"])[0]
+    assert "BALANCE" in report["tags"]
+    assert "material_scope" not in report["attributes"]
+
+
 def test_component_materials_do_not_count_as_fan_materials():
     actuator = li.extract_items([
         "Bettis #RPED150 Double Acting Pneumatic Actuator C 6,537.14 1,046.00",
