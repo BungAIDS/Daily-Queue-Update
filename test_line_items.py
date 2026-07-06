@@ -340,6 +340,15 @@ def test_tagging():
     assert "BALANCE" not in li.tag_item(li.normalize_text("Balance Report"))
     assert "BALANCE" not in li.tag_item(li.normalize_text(
         "All Chicago Blower wheels are precision balanced"))
+    assert "BEARINGS" in li.tag_item(li.normalize_text("Bearings, Standard"))
+    assert "BEARINGS" in li.tag_item(li.normalize_text("Bearings, Split Pillow Block"))
+    assert "BEARINGS" in li.tag_item(li.normalize_text("Repair Bearings (Pair), 2-3/16 Bore"))
+    guard_tags = li.tag_item(li.normalize_text("Shaft, Bearing, and Coupling Guard, Painted Safety Yellow"))
+    assert "SHAFT/BEARING/COUPLING GUARD" in guard_tags
+    assert "BEARINGS" not in guard_tags
+    assert "BEARINGS" not in li.tag_item(li.normalize_text("Motor with insulated bearings"))
+    assert "BEARINGS" not in li.tag_item(li.normalize_text(
+        "Paint Interior Wheel Exterior Motor Base Channel Base and Bearing Base"))
     assert li.tag_item("SOMETHING NOBODY EVER ORDERED") == []
 
 
@@ -645,6 +654,51 @@ def test_balance_attributes():
     assert "BALANCE" in welded["tags"]
     assert welded["attributes"]["balance_type"] == "WELDED BALANCE WEIGHTS"
     assert "balance_grade" not in welded["attributes"]
+
+
+def test_bearing_attributes():
+    repair = li.extract_items([
+        'Repair Bearings (Pair), 2-3/16" Bore (Qty: 1), N 552.00 110.00',
+        "Inquiry Num: 340-25-943RP",
+    ])[0]
+    assert "BEARINGS" in repair["tags"]
+    assert repair["attributes"]["bearing_type"] == "REPAIR BEARINGS"
+    assert repair["attributes"]["bearing_bore"] == '2-3/16"'
+    assert repair["attributes"]["inquiry_num"] == "340-25-943RP"
+
+    split = li.extract_items(["Bearings, Split Pillow Block L 2,387.00"])[0]
+    assert "BEARINGS" in split["tags"]
+    assert split["attributes"]["bearing_type"] == "SPLIT PILLOW BLOCK"
+
+    spare = li.extract_items(["Spare Bearings, Inquiry Num: 340-26-1112 L 3,583.00"])[0]
+    assert "BEARINGS" in spare["tags"]
+    assert spare["attributes"]["bearing_type"] == "SPARE BEARINGS"
+    assert spare["attributes"]["inquiry_num"] == "340-26-1112"
+
+    adder = li.extract_items(["Bearing ADDER for 200,00 hours, Inquiry Num: L"])[0]
+    assert "BEARINGS" in adder["tags"]
+    assert adder["attributes"]["bearing_type"] == "BEARING ADDER"
+
+
+def test_shaft_bearing_guard_tag_uses_primary_line():
+    guard = li.extract_items(["Shaft and Bearing Guard, Painted Safety Yellow L 949.00"])[0]
+    assert "SHAFT/BEARING/COUPLING GUARD" in guard["tags"]
+
+    grease = li.extract_items([
+        "Extended Grease Fittings - Shipped Loose, Inquiry L 349.00",
+        "Num: 6-5-1551",
+        "Size 16-1/2 Shaft and Bearing Guard, Inquiry Num: L -940.00",
+    ])[0]
+    assert "EXTENDED LUBE" in grease["tags"]
+    assert "SHAFT/BEARING/COUPLING GUARD" not in grease["tags"]
+
+
+def test_paint_line_does_not_become_component_tags():
+    paint = li.extract_items([
+        "Paint: Interior, Wheel, Exterior, Motor Base, L 983.00",
+        "Channel Base and Bearing Base",
+    ])[0]
+    assert paint["tags"] == ["COATING"]
 
 
 def test_component_materials_do_not_count_as_fan_materials():

@@ -186,6 +186,10 @@ DEFAULT_RULES: Dict[str, Any] = {
                         r"quick\s*open"],
         "DRAIN": [r"\bdrain"],
         "BELT GUARD": [r"belt\s*guard"],
+        "SHAFT/BEARING/COUPLING GUARD": [
+            r"\bshaft\b.*\bbearing\b.*\bguard\b",
+            r"\bguard\b.*\bshaft\b.*\bbearing\b",
+        ],
         "WEATHER COVER": [r"weather\s*(cover|hood|proof)"],
         "SCREEN": [r"\bscreen"],
         "FLANGE": [r"flange"],
@@ -194,7 +198,9 @@ DEFAULT_RULES: Dict[str, Any] = {
                               r"thomas\s+series"],
         "UNITARY BASE": [r"unitary\s*base", r"structural\s*(steel\s*)?base",
                          r"channel\s*base"],
-        "BEARINGS": [r"bearing"],
+        "BEARINGS": [r"^bearings?\s+(standard|split\s+pillow\s+block)\b",
+                     r"^repair\s+bearings?\b", r"^spare\s+bearings?\b",
+                     r"^bearing\s+adder\b"],
         "LIFTING LUGS": [r"lifting\s*lugs?"],
         "LABEL": [r"\blabel\b"],
         "NAMEPLATE": [r"nameplate"],
@@ -235,6 +241,8 @@ DEFAULT_RULES: Dict[str, Any] = {
 
 _rules_cache: Dict[str, Any] | None = None
 _MATERIAL_TAGS = {"MATERIALS", "STAINLESS STEEL", "ALUMINUM"}
+_GUARD_TAG = "SHAFT/BEARING/COUPLING GUARD"
+_PAINT_SURFACE_TAGS = {"MOTOR", "UNITARY BASE", "WHEEL"}
 
 
 def load_rules(path: str | Path | None = None, refresh: bool = False) -> Dict[str, Any]:
@@ -501,6 +509,29 @@ def _balance_attributes(norm_blob: str) -> Dict[str, str]:
     return attrs
 
 
+def _bearing_attributes(blob: str, norm_blob: str) -> Dict[str, str]:
+    attrs: Dict[str, str] = {}
+    for label, pattern in (
+        ("SPLIT PILLOW BLOCK", r"\bBEARINGS?\s+SPLIT\s+PILLOW\s+BLOCK\b"),
+        ("STANDARD", r"\bBEARINGS?\s+STANDARD\b"),
+        ("REPAIR BEARINGS", r"\bREPAIR\s+BEARINGS?\b"),
+        ("SPARE BEARINGS", r"\bSPARE\s+BEARINGS?\b"),
+        ("BEARING ADDER", r"\bBEARING\s+ADDER\b"),
+    ):
+        if re.search(pattern, norm_blob):
+            attrs["bearing_type"] = label
+            break
+
+    m = re.search(
+        r"\b(\d+(?:[-\s]\d+/\d+)?|\d+/\d+)\s*(?:\"|in(?:ch(?:es)?)?\.?)?\s*bore\b",
+        blob,
+        re.I,
+    )
+    if m:
+        attrs["bearing_bore"] = re.sub(r"\s+", "-", m.group(1).strip()) + '"'
+    return attrs
+
+
 def _material_attributes(norm_blob: str) -> Dict[str, str]:
     """Material roll-up with grade and where the material applies."""
     attrs: Dict[str, str] = {}
@@ -603,9 +634,25 @@ def _component_material_attributes(owner: str, material_attrs: Dict[str, str]) -
     return attrs
 
 
+def _is_shaft_bearing_guard_line(primary: str) -> bool:
+    return bool(
+        re.search(r"\bshaft\b.*\bbearing\b.*\bguard\b", primary, re.I)
+        or re.search(r"\bguard\b.*\bshaft\b.*\bbearing\b", primary, re.I)
+    )
+
+
+def _is_paint_line(primary: str) -> bool:
+    return bool(re.match(r"^PAINT\b", primary, re.I))
+
+
 def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> List[str]:
     rules = rules or load_rules()
     tags = tag_item(_taggable_text(item, rules), rules)
+    primary = _primary_norm(item, rules)
+    if _GUARD_TAG in tags and not _is_shaft_bearing_guard_line(primary):
+        tags = [t for t in tags if t != _GUARD_TAG]
+    if "COATING" in tags and _is_paint_line(primary):
+        tags = [t for t in tags if t not in _PAINT_SURFACE_TAGS]
     norm_blob = normalize_text(_item_blob(item), rules)
     if _component_material_owner(item, _material_attributes(norm_blob), rules):
         tags = [t for t in tags if t not in _MATERIAL_TAGS]
@@ -641,6 +688,7 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
         attrs.update(material_attrs)
 
     attrs.update(_balance_attributes(norm_blob))
+    attrs.update(_bearing_attributes(blob, norm_blob))
 
     used_on = _used_on(norm_blob)
     if used_on:
