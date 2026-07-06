@@ -740,6 +740,7 @@ def test_paint_line_does_not_become_component_tags():
     ])[0]
     assert paint["tags"] == ["COATING"]
     assert paint["attributes"]["coating_context"] == "FAN"
+    assert paint["attributes"]["coating_category"] == "PAINT"
     assert "WHEEL" not in paint["tags"]
 
     paint_with_warranty_detail = li.extract_items([
@@ -747,6 +748,37 @@ def test_paint_line_does_not_become_component_tags():
         "Extended Warranty: Chicago Blower standard warranty extended to 24 months.",
     ])[0]
     assert paint_with_warranty_detail["tags"] == ["COATING"]
+
+    pre_coating = li.extract_items(["Pre-Coating Assembly/Disassembly L 1,185.00"])[0]
+    assert pre_coating["tags"] == ["COATING"]
+    assert pre_coating["attributes"]["coating_category"] == "PRE-COATING PROCESS"
+    assert pre_coating["attributes"]["coating_process"] == "PRE-COATING ASSEMBLY/DISASSEMBLY"
+
+    special = li.extract_items([
+        "Special Paint, exterior and airstream: SSPC-SP10, N 5,310.00 220.00",
+        "Zinc Rich Epoxy primer, 3 mils, mid coat epoxy 7 mil, top coat poly, 3-mil",
+        "(RAL 6019 if not available use RAL 7035), Inquiry Num: 253-24-1651",
+    ])[0]
+    assert special["attributes"]["coating_category"] == "SPECIAL COATING"
+    assert special["attributes"]["coating_type"] == "EPOXY"
+    assert special["attributes"]["coating_color"] == "RAL 6019"
+    assert special["attributes"]["alternate_coating_color"] == "RAL 7035"
+
+    veg_oil = li.extract_items([
+        "Airstream to be unpainted and Coated with L 714.00",
+        "vegetable oil, Inquiry Num: 317-26-1059",
+    ])[0]
+    assert veg_oil["attributes"]["coating_category"] == "SPECIAL COATING"
+    assert veg_oil["attributes"]["coating_type"] == "VEGETABLE OIL"
+    assert veg_oil["attributes"]["coating_state"] == "UNPAINTED"
+
+    unpainted = li.extract_items(["Wheel, Cast Aluminum CCW (Unpainted) (Bore: L 739.00"])[0]
+    assert unpainted["attributes"]["coating_category"] == "UNPAINTED"
+
+    note = li.extract_items([
+        "Specification and updated coating Note # B to show wheel is un-coated L 100.00",
+    ])[0]
+    assert note["attributes"]["coating_category"] == "COATING NOTE"
 
 
 def test_accessory_coating_is_attribute_not_fan_coating():

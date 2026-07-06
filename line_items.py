@@ -257,6 +257,7 @@ _COATING_WORD = re.compile(
     r"ZINC|ENAMEL|UNPAINTED|GALVANIZ(?:ED|ING)?|VEGETABLE\s+OIL)\b",
     re.I,
 )
+_RAL_STOP_WORDS = {"COAT", "COATS", "IF", "NOT", "AVAILABLE", "USE", "INQUIRY", "NUM"}
 
 
 def load_rules(path: str | Path | None = None, refresh: bool = False) -> Dict[str, Any]:
@@ -764,6 +765,34 @@ def _coating_scope(primary: str, tags: set[str], norm_blob: str) -> str:
     return ", ".join(scopes)
 
 
+def _ral_color(match: re.Match[str]) -> str:
+    words = [
+        w for w in (match.group(2), match.group(3))
+        if w and w not in _RAL_STOP_WORDS
+    ]
+    return " ".join(["RAL", match.group(1), *words])
+
+
+def _coating_category(primary: str, norm_blob: str, coating_type: str | None) -> str:
+    if re.search(r"\b(UPDATED\s+)?COATING\s+NOTE\b", norm_blob):
+        return "COATING NOTE"
+    if re.match(r"^PRE\s+COATING\b", primary, re.I):
+        return "PRE-COATING PROCESS"
+    if "VEGETABLE OIL" in norm_blob:
+        return "SPECIAL COATING"
+    if re.match(r"^SPECIAL\s+PAINT\b", primary, re.I):
+        return "SPECIAL COATING"
+    if any(term in norm_blob for term in ("PLASITE", "HERESITE")):
+        return "SPECIAL COATING"
+    if "UNPAINTED" in norm_blob:
+        return "UNPAINTED"
+    if coating_type in {"EPOXY", "PRIMER"}:
+        return "EPOXY/PRIMER"
+    if coating_type in {"PAINT", "ENAMEL"}:
+        return "PAINT"
+    return coating_type or "COATING"
+
+
 def _coating_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
     if not _COATING_WORD.search(norm_blob):
         return {}
@@ -781,37 +810,44 @@ def _coating_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[st
 
     if "UNPAINTED" in norm_blob:
         attrs["coating_state"] = "UNPAINTED"
+    coating_type = None
     if "GALVANIZED" in norm_blob or "GALVANIZING" in norm_blob:
-        attrs["coating_type"] = "GALVANIZED"
+        coating_type = "GALVANIZED"
     elif "VEGETABLE OIL" in norm_blob:
-        attrs["coating_type"] = "VEGETABLE OIL"
+        coating_type = "VEGETABLE OIL"
     elif "PLASITE" in norm_blob:
-        attrs["coating_type"] = "PLASITE"
+        coating_type = "PLASITE"
     elif "HERESITE" in norm_blob:
-        attrs["coating_type"] = "HERESITE"
+        coating_type = "HERESITE"
     elif "EPOXY" in norm_blob:
-        attrs["coating_type"] = "EPOXY"
+        coating_type = "EPOXY"
     elif "PRIMER" in norm_blob or "ZINC" in norm_blob:
-        attrs["coating_type"] = "PRIMER"
+        coating_type = "PRIMER"
     elif "ENAMEL" in norm_blob:
-        attrs["coating_type"] = "ENAMEL"
+        coating_type = "ENAMEL"
     elif re.search(r"\bPAINT", norm_blob):
-        attrs["coating_type"] = "PAINT"
+        coating_type = "PAINT"
     elif re.search(r"\bCOAT", norm_blob):
-        attrs["coating_type"] = "COATING"
+        coating_type = "COATING"
+    if coating_type:
+        attrs["coating_type"] = coating_type
+    attrs["coating_category"] = _coating_category(primary, norm_blob, coating_type)
+    if attrs["coating_category"] == "PRE-COATING PROCESS":
+        attrs["coating_process"] = "PRE-COATING ASSEMBLY/DISASSEMBLY"
 
     if "SAFETY YELLOW" in norm_blob:
         attrs["coating_color"] = "SAFETY YELLOW"
     elif "STANDARD CBC BLACK" in norm_blob:
         attrs["coating_color"] = "STANDARD CBC BLACK"
     else:
-        m = re.search(r"\bRAL\s+(\d{4})(?:\s+([A-Z]+)(?:\s+([A-Z]+))?)?", norm_blob)
-        if m:
-            words = [
-                w for w in (m.group(2), m.group(3))
-                if w and w not in {"COAT", "COATS", "IF", "NOT", "AVAILABLE", "USE"}
-            ]
-            attrs["coating_color"] = " ".join(["RAL", m.group(1), *words])
+        ral_colors = [
+            _ral_color(match)
+            for match in re.finditer(r"\bRAL\s+(\d{4})(?:\s+([A-Z]+)(?:\s+([A-Z]+))?)?", norm_blob)
+        ]
+        if ral_colors:
+            attrs["coating_color"] = ral_colors[0]
+            if len(ral_colors) > 1:
+                attrs["alternate_coating_color"] = ", ".join(ral_colors[1:])
         elif "IMPERIAL GRAY" in norm_blob:
             attrs["coating_color"] = "IMPERIAL GRAY"
         elif "BLACK" in norm_blob:
