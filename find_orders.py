@@ -75,8 +75,10 @@ def _attrs_label(item: Dict[str, Any]) -> str:
         return ""
     keys = [
         "inquiry_num", "note_type", "component", "used_on", "used_on_review", "vendor", "product",
-        "material", "material_grade", "material_scope",
+        "material", "material_grade", "material_scope", "material_treatment",
         "component_material", "component_material_grade", "component_material_scope",
+        "coating_context", "coating_scope", "coating_state", "coating_type", "coating_color", "coats",
+        "guard_type", "guard_material", "tach_hole", "tach_hole_location",
         "balance_type", "balance_grade",
         "bearing_type", "bearing_bore",
         "manufacturer", "model", "size", "operation", "supplied_by", "mounting", "fail_power", "fail_signal",

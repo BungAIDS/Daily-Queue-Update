@@ -110,7 +110,7 @@ DEFAULT_RULES: Dict[str, Any] = {
         r"list\s+price", r"multiplier", r"^unit\s+price", r"^price\s+each",
         r"^discount\b", r"^see\s+(additional|special)\b",
         r"^warranty\b", r"^commission\s+override\b",
-        r"\b(charge|fee)\b", r"slow\s+pay\s+addition", r"paymode[-\s]+x",
+        r"\b(charge|fee)\b",
         r"^prints?\s*$", r"^product\s*:?\s*$", r"^product\s+\$?\d",
         # Shipping/admin notes can appear inside Additional Features / Notes;
         # keep them out of the item inventory while preserving real ship-loose
@@ -124,7 +124,7 @@ DEFAULT_RULES: Dict[str, Any] = {
         r"^above\s+email\s+after\b", r"^as\s+well\b",
         r"^appointment\s+required\b", r"^for\s+(orders|packages)\b",
         r"^with\s+a\s+ship\s+date\b", r"^contact\s*$",
-        r"^must\s+(appear|be)\b", r"^paymode[-\s]+x\b", r"^includes\s+paymode[-\s]+x\b",
+        r"^must\s+(appear|be)\b",
         r"^reference\s+sn\b", r"\bppap\b", r"^kindly\s+note\b",
         r"^please\s+confirm\b",
         r"^be\s+necessary\b.*\bfor\s+more\s+information\b",
@@ -157,14 +157,14 @@ DEFAULT_RULES: Dict[str, Any] = {
                        r"ceramic\s*felt"],
         "SHAFT SLEEVE": [r"shaft\s*sleeve"],
         "SHAFT COOLER": [r"shaft\s*cooler", r"heat\s*slinger"],
-        "MATERIALS": [r"stainless", r"\b304L?\b", r"\b316L?\b",
+        "MATERIALS": [r"stainless", r"\b304L?\b", r"\b316L?\b", r"passivat",
                       r"aluminum", r"aluminium"],
-        "STAINLESS STEEL": [r"stainless", r"\b304L?\b", r"\b316L?\b"],
+        "STAINLESS STEEL": [r"stainless", r"\b304L?\b", r"\b316L?\b", r"passivat"],
         "ALUMINUM": [r"aluminum", r"aluminium"],
         "HIGH TEMPERATURE": [r"high\s*temp", r"heat\s*fan"],
         "HEAVY DUTY": [r"heavy\s*duty"],
-        "COATING": [r"epoxy", r"\bcoat", r"galvaniz", r"paint", r"primer",
-                    r"plasite", r"heresite", r"\bzinc\b", r"passivat"],
+        "COATING": [r"epoxy", r"\bcoat(?:ed|ing|s)?\b", r"paint", r"primer",
+                    r"plasite", r"heresite", r"\bzinc\b"],
         "LINING": [r"rubber\s*lin", r"\blined\b", r"\blining\b", r"abrasion",
                    r"firmex"],
         "INSULATION": [r"insulat"],
@@ -243,8 +243,18 @@ _GUARD_TAG = "SHAFT/BEARING/COUPLING GUARD"
 _PAINT_SURFACE_TAGS = {"MOTOR", "UNITARY BASE", "WHEEL"}
 _MISC_NOTE_TAG = "MISC NOTE"
 _MISC_NOTE_COMPONENT_TAGS = {"WHEEL"}
+_BELT_GUARD_DETAIL_TAGS = {"COATING", "MOUNTING", "MOTOR"}
+_ACCESSORY_COATING_TAGS = {
+    "BELT GUARD", _GUARD_TAG, "MOTOR", "SILENCER", "FLEX CONNECTOR",
+    "WEATHER COVER", "SCREEN",
+}
 _LUBE_ACCESSORY = re.compile(
     r"\b(EXTENDED\s+LUBE|LUBE\s+LINES?|GREASE\s+(LINES?|FITTINGS?|LEADS?)|ZERK\s+FITTINGS?)\b",
+    re.I,
+)
+_COATING_WORD = re.compile(
+    r"\b(PAINT(?:ED|ING)?|COAT(?:ED|ING|S)?|EPOXY|PRIMER|PLASITE|HERESITE|"
+    r"ZINC|ENAMEL|UNPAINTED|GALVANIZ(?:ED|ING)?|VEGETABLE\s+OIL)\b",
     re.I,
 )
 
@@ -540,12 +550,15 @@ def _material_attributes(norm_blob: str) -> Dict[str, str]:
     """Material roll-up with grade and where the material applies."""
     attrs: Dict[str, str] = {}
     materials: List[str] = []
+    passivation = bool(re.search(r"\bPASSIVAT", norm_blob))
     if re.search(r"\bALUMINUM\b", norm_blob):
-        materials.append("ALUMINUM")
-    if re.search(r"\bSTAINLESS\s+STEEL\b", norm_blob):
-        materials.append("STAINLESS STEEL")
+        _add_unique(materials, "ALUMINUM")
+    if re.search(r"\bSTAINLESS\s+STEEL\b", norm_blob) or passivation:
+        _add_unique(materials, "STAINLESS STEEL")
     if materials:
         attrs["material"] = ", ".join(materials)
+    if passivation:
+        attrs["material_treatment"] = "PASSIVATION OF WELDS" if "WELDS" in norm_blob else "PASSIVATION"
 
     grades: List[str] = []
     for m in _MATERIAL_GRADE.finditer(norm_blob):
@@ -583,6 +596,8 @@ def _material_attributes(norm_blob: str) -> Dict[str, str]:
         add_scope("INLET")
     if "OUTLET" in norm_blob or "DISCHARGE" in norm_blob:
         add_scope("OUTLET")
+    if passivation and "WELDS" in norm_blob:
+        add_scope("WELDS")
     if "ACCESS DOOR" in norm_blob:
         add_scope("ACCESS DOOR")
     if re.search(r"\bHOUSING\s+DRAIN\b", norm_blob):
@@ -645,12 +660,42 @@ def _is_shaft_bearing_guard_line(primary: str) -> bool:
     )
 
 
+def _is_belt_guard_line(primary: str) -> bool:
+    return bool(re.search(r"\bBELT\s+GUARD\b", primary, re.I))
+
+
 def _is_paint_line(primary: str) -> bool:
     return bool(re.match(r"^PAINT\b", primary, re.I))
 
 
 def _is_assembly_note(primary: str) -> bool:
     return bool(re.match(r"^ASSEMBLY\b", primary, re.I))
+
+
+def _is_admin_note(primary: str) -> bool:
+    return bool(re.search(r"\b(SLOW\s+PAY\s+ADDITION|PAYMODE[-\s]*X|FEE|CHARGE)\b", primary, re.I))
+
+
+def _is_fan_coating_line(primary: str, tags: set[str]) -> bool:
+    if _is_paint_line(primary) or re.match(r"^(SPECIAL\s+PAINT|PRE\s+COATING)\b", primary, re.I):
+        return True
+    if re.search(r"\b(AIRSTREAM|EXTERIOR)\b", primary, re.I) and _COATING_WORD.search(primary):
+        return True
+    if {"BASE FAN", "WHEEL", "INLET", "OUTLET", "HOUSING"} & tags and _COATING_WORD.search(primary):
+        return True
+    return False
+
+
+def _is_accessory_coating(primary: str, tags: set[str], norm_blob: str) -> bool:
+    if "COATING" not in tags:
+        return False
+    if _is_fan_coating_line(primary, tags):
+        return False
+    if _is_belt_guard_line(primary) or _is_shaft_bearing_guard_line(primary):
+        return True
+    if primary.startswith("MOTOR"):
+        return True
+    return bool((_ACCESSORY_COATING_TAGS & tags) and _COATING_WORD.search(norm_blob))
 
 
 def _lube_component_tags(primary: str, norm_blob: str) -> List[str]:
@@ -666,13 +711,134 @@ def _lube_component_tags(primary: str, norm_blob: str) -> List[str]:
     return tags
 
 
+def _guard_attributes(primary: str, norm_blob: str) -> Dict[str, str]:
+    attrs: Dict[str, str] = {}
+    if _is_belt_guard_line(primary):
+        attrs["component"] = "BELT GUARD"
+        if "PROVIDED BY OTHERS" in norm_blob:
+            attrs["supplied_by"] = "OTHERS"
+        if "CBC MOUNT" in norm_blob:
+            attrs["mounting"] = "CBC MOUNT"
+        if "HINGED" in norm_blob:
+            attrs["guard_type"] = "HINGED"
+        if "STANDARD STEEL" in norm_blob:
+            attrs["guard_material"] = "STANDARD STEEL"
+        if "TACH HOLE IN GUARD WITH PLUG" in norm_blob:
+            attrs["tach_hole"] = "WITH PLUG"
+        elif "TACH HOLE IN GUARD NONE" in norm_blob:
+            attrs["tach_hole"] = "NONE"
+        locs: List[str] = []
+        if "FAN END" in norm_blob:
+            locs.append("FAN END")
+        if "MOTOR END" in norm_blob:
+            locs.append("MOTOR END")
+        if locs:
+            attrs["tach_hole_location"] = ", ".join(locs)
+    elif _is_shaft_bearing_guard_line(primary):
+        attrs["component"] = "SHAFT/BEARING/COUPLING GUARD"
+        if "PROVIDED BY OTHERS" in norm_blob:
+            attrs["supplied_by"] = "OTHERS"
+        if "STANDARD STEEL" in norm_blob:
+            attrs["guard_material"] = "STANDARD STEEL"
+    return attrs
+
+
+def _coating_scope(primary: str, tags: set[str], norm_blob: str) -> str:
+    scopes: List[str] = []
+    for tag in ("BELT GUARD", _GUARD_TAG, "MOTOR", "SILENCER", "FLEX CONNECTOR",
+                "WEATHER COVER", "SCREEN", "WHEEL", "INLET", "OUTLET", "HOUSING"):
+        if tag == "MOTOR" and "MOTOR BASE" in norm_blob and not primary.startswith("MOTOR"):
+            continue
+        if tag in tags:
+            _add_unique(scopes, tag)
+    for scope, pattern in (
+        ("AIRSTREAM", r"\bAIRSTREAM\b"),
+        ("EXTERIOR", r"\bEXTERIOR\b"),
+        ("INTERIOR", r"\bINTERIOR\b"),
+        ("MOTOR BASE", r"\bMOTOR\s+BASE\b"),
+        ("CHANNEL BASE", r"\bCHANNEL\s+BASE\b"),
+        ("BEARING BASE", r"\bBEARING\s+BASE\b"),
+    ):
+        if re.search(pattern, norm_blob):
+            _add_unique(scopes, scope)
+    return ", ".join(scopes)
+
+
+def _coating_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if not _COATING_WORD.search(norm_blob):
+        return {}
+    attrs: Dict[str, str] = {}
+    accessory = _is_accessory_coating(primary, tags, norm_blob) or _is_belt_guard_line(primary)
+    attrs["coating_context"] = "ACCESSORY" if accessory else "FAN"
+    if _is_belt_guard_line(primary):
+        scope = "BELT GUARD"
+    elif _is_shaft_bearing_guard_line(primary):
+        scope = "SHAFT/BEARING/COUPLING GUARD"
+    else:
+        scope = _coating_scope(primary, tags, norm_blob)
+    if scope:
+        attrs["coating_scope"] = scope
+
+    if "UNPAINTED" in norm_blob:
+        attrs["coating_state"] = "UNPAINTED"
+    if "GALVANIZED" in norm_blob or "GALVANIZING" in norm_blob:
+        attrs["coating_type"] = "GALVANIZED"
+    elif "VEGETABLE OIL" in norm_blob:
+        attrs["coating_type"] = "VEGETABLE OIL"
+    elif "PLASITE" in norm_blob:
+        attrs["coating_type"] = "PLASITE"
+    elif "HERESITE" in norm_blob:
+        attrs["coating_type"] = "HERESITE"
+    elif "EPOXY" in norm_blob:
+        attrs["coating_type"] = "EPOXY"
+    elif "PRIMER" in norm_blob or "ZINC" in norm_blob:
+        attrs["coating_type"] = "PRIMER"
+    elif "ENAMEL" in norm_blob:
+        attrs["coating_type"] = "ENAMEL"
+    elif re.search(r"\bPAINT", norm_blob):
+        attrs["coating_type"] = "PAINT"
+    elif re.search(r"\bCOAT", norm_blob):
+        attrs["coating_type"] = "COATING"
+
+    if "SAFETY YELLOW" in norm_blob:
+        attrs["coating_color"] = "SAFETY YELLOW"
+    elif "STANDARD CBC BLACK" in norm_blob:
+        attrs["coating_color"] = "STANDARD CBC BLACK"
+    else:
+        m = re.search(r"\bRAL\s+(\d{4})(?:\s+([A-Z]+)(?:\s+([A-Z]+))?)?", norm_blob)
+        if m:
+            words = [
+                w for w in (m.group(2), m.group(3))
+                if w and w not in {"COAT", "COATS", "IF", "NOT", "AVAILABLE", "USE"}
+            ]
+            attrs["coating_color"] = " ".join(["RAL", m.group(1), *words])
+        elif "IMPERIAL GRAY" in norm_blob:
+            attrs["coating_color"] = "IMPERIAL GRAY"
+        elif "BLACK" in norm_blob:
+            attrs["coating_color"] = "BLACK"
+
+    m = re.search(r"\bCOATS?\s*:?\s*(\d+)\b", norm_blob)
+    if m:
+        attrs["coats"] = m.group(1)
+    return attrs
+
+
 def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> List[str]:
     rules = rules or load_rules()
     tags = tag_item(_taggable_text(item, rules), rules)
+    tag_set = set(tags)
     primary = _primary_norm(item, rules)
     norm_blob = normalize_text(_item_blob(item), rules)
+    if _is_admin_note(primary):
+        return [_MISC_NOTE_TAG]
+    if "WARRANTY" in tags and not re.search(r"\bWARRANTY\b", primary, re.I):
+        tags = [t for t in tags if t != "WARRANTY"]
     if _GUARD_TAG in tags and not _is_shaft_bearing_guard_line(primary):
         tags = [t for t in tags if t != _GUARD_TAG]
+    if _is_belt_guard_line(primary):
+        tags = [t for t in tags if t not in _BELT_GUARD_DETAIL_TAGS]
+    elif _is_accessory_coating(primary, tag_set, norm_blob):
+        tags = [t for t in tags if t != "COATING"]
     if "COATING" in tags and _is_paint_line(primary):
         tags = [t for t in tags if t not in _PAINT_SURFACE_TAGS]
     if _is_assembly_note(primary):
@@ -690,7 +856,9 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     rules = rules or load_rules()
     blob = _item_blob(item)
     norm_blob = normalize_text(blob, rules)
-    tags = set(tag_item(_taggable_text(item, rules), rules))
+    raw_tags = set(tag_item(_taggable_text(item, rules), rules))
+    tags = set(_final_tags(item, rules))
+    primary = _primary_norm(item, rules)
     attrs: Dict[str, str] = {}
 
     inquiries = inquiry_numbers(item)
@@ -703,8 +871,14 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
         attrs["vendor"] = vendor
     if product:
         attrs["product"] = product
-    if _is_assembly_note(_primary_norm(item, rules)):
+    admin_note = _is_admin_note(primary)
+    if admin_note:
+        attrs["note_type"] = "ADMIN"
+        return attrs
+    elif _is_assembly_note(primary):
         attrs["note_type"] = "ASSEMBLY"
+    attrs.update(_guard_attributes(primary, norm_blob))
+    attrs.update(_coating_attributes(primary, norm_blob, raw_tags))
 
     material_attrs = _material_attributes(norm_blob)
     material_owner = _component_material_owner(item, material_attrs, rules)

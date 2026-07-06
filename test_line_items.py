@@ -314,7 +314,8 @@ def test_tagging():
     assert "V-BELT DRIVE" in li.tag_item(li.normalize_text("Drive"))
     assert "VIBRATION ISOLATION" in li.tag_item(li.normalize_text("Vibration Base"))
     assert "INLET VANES" in li.tag_item(li.normalize_text("Inlet Volume Control Automatic"))
-    assert "COATING" in li.tag_item(li.normalize_text("Passivation of Welds"))
+    assert "COATING" not in li.tag_item(li.normalize_text("Passivation of Welds"))
+    assert "STAINLESS STEEL" in li.tag_item(li.normalize_text("Passivation of Welds"))
     assert "LINING" in li.tag_item(li.normalize_text("Firmex liners on blades and housing scroll"))
     assert "FLEXIBLE COUPLING" in li.tag_item(li.normalize_text("Flexible Coupling Falk Type T Steelflex"))
     assert "ALUMINUM" in li.tag_item(li.normalize_text("Wheel Aluminium AMCA B"))
@@ -738,6 +739,73 @@ def test_paint_line_does_not_become_component_tags():
         "Channel Base and Bearing Base",
     ])[0]
     assert paint["tags"] == ["COATING"]
+    assert paint["attributes"]["coating_context"] == "FAN"
+    assert "WHEEL" not in paint["tags"]
+
+    paint_with_warranty_detail = li.extract_items([
+        "Paint: Exterior, Motor Base L 714.00",
+        "Extended Warranty: Chicago Blower standard warranty extended to 24 months.",
+    ])[0]
+    assert paint_with_warranty_detail["tags"] == ["COATING"]
+
+
+def test_accessory_coating_is_attribute_not_fan_coating():
+    belt = li.extract_items([
+        "Belt Guard, Painted Safety Yellow L 1,581.00",
+        "CBC Mount",
+        "Tach Hole in Guard: with Plug",
+        "Fan End",
+        "Motor End",
+    ])[0]
+    assert belt["tags"] == ["BELT GUARD"]
+    attrs = belt["attributes"]
+    assert attrs["component"] == "BELT GUARD"
+    assert attrs["coating_context"] == "ACCESSORY"
+    assert attrs["coating_scope"] == "BELT GUARD"
+    assert attrs["coating_color"] == "SAFETY YELLOW"
+    assert attrs["mounting"] == "CBC MOUNT"
+    assert attrs["tach_hole"] == "WITH PLUG"
+    assert attrs["tach_hole_location"] == "FAN END, MOTOR END"
+
+    shaft_guard = li.extract_items(["Shaft and Bearing Guard, Painted Safety Yellow L 949.00"])[0]
+    assert "SHAFT/BEARING/COUPLING GUARD" in shaft_guard["tags"]
+    assert "COATING" not in shaft_guard["tags"]
+    assert shaft_guard["attributes"]["coating_context"] == "ACCESSORY"
+
+
+def test_passivation_is_stainless_treatment_not_coating():
+    passivation = li.extract_items([
+        "Passivation of Welds (Passivation of Welds L 1,412.00",
+        "(Airstream and Exterior), Inquiry Num: 333-26-1234",
+    ])[0]
+    assert "COATING" not in passivation["tags"]
+    assert {"MATERIALS", "STAINLESS STEEL"} <= set(passivation["tags"])
+    attrs = passivation["attributes"]
+    assert attrs["material"] == "STAINLESS STEEL"
+    assert attrs["material_treatment"] == "PASSIVATION OF WELDS"
+    assert attrs["material_scope"] == "AIRSTREAM, EXTERIOR, WELDS"
+
+
+def test_accessory_coating_does_not_make_silencer_fan_coating():
+    silencer = li.extract_items([
+        "Inlet Silencer for 85 dBA @ 3' Outdoors, Model C 2,267.00 363.00",
+        "includes Leg, 2 coats of paint",
+        "Vendor: VAW Systems",
+        "Product: Inlet Silencer",
+    ])[0]
+    assert "SILENCER" in silencer["tags"]
+    assert "COATING" not in silencer["tags"]
+    assert silencer["attributes"]["coating_context"] == "ACCESSORY"
+    assert silencer["attributes"]["coating_scope"] == "SILENCER"
+
+
+def test_admin_notes_are_misc_notes():
+    note = li.extract_items([
+        "Slow Pay Addition N 339.00",
+        "3-coat paint system to match fan.",
+    ])[0]
+    assert note["tags"] == ["MISC NOTE"]
+    assert note["attributes"] == {"note_type": "ADMIN"}
 
 
 def test_component_materials_do_not_count_as_fan_materials():
@@ -785,6 +853,9 @@ def test_data_branch_noise_skipped():
     ]
     items = {it["norm"]: it for it in li.extract_items(lines)}
     assert "DRIVE" in items
+    paymode = next(v for n, v in items.items() if "PAYMODE" in n)
+    assert paymode["tags"] == ["MISC NOTE"]
+    assert paymode["attributes"]["note_type"] == "ADMIN"
     for bad in ("PRODUCT", "PRINTS", "WARRANTY", "SHIPPING NOTES", "DO NOT STACK"):
         assert not any(bad in n for n in items), items
 
