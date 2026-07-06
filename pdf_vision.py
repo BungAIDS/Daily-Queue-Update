@@ -73,6 +73,12 @@ _FIELD_NAMES = [
     "Blade Material", "Blade Gauge", "Sideplate Material", "Sideplate Gauge",
     "Backplate Material", "Backplate Gauge", "Liner Material", "Liner Gauge",
     "Wheel Material", "Hub", "Coupling", "Drive",
+    "Blades", "Max RPM Wheel Only", "Wheel Resonance CPM",
+    "Wheel Weight Lb", "Wheel Thrust Lb", "Wheel WR2",
+    "Rotor WR2", "Rotor Max RPM", "Rotor Material",
+    "Motor Frame", "Motor Position", "Motor Enclosure", "Motor Weight Lb",
+    "Housing Construction", "Fan Outlet Area FT2",
+    "Total Weight Lb", "Total Price",
 ]
 
 

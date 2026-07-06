@@ -369,6 +369,103 @@ def test_chicago_blower_shaft_bearing_and_outline_fields():
     assert not any("Center Distance" in k for k in f)
 
 
+# A real Arr-4S run (job 401221): the motor-mounted family (94+ runs — the
+# largest) whose back half has NO shaft/bearing section. Instead: the wheel
+# weight/thrust/WR2 line, housing-to-CG dims, motor base/frame, housing
+# construction, and quote totals — the sections the parser used to miss 100%.
+REAL_CBC_QT_RUN_401221 = """\
+---------------------------------------
+CONFIDENTIAL
+               MON JAN 10 10:13:52 CST 2022
+               CHICAGO BLOWER CORP.
+ 401221
+ SIZE  4014,DESIGN 6195 ,ARR 4S ,100.0 PCT,DISCH UB ,ROT CW
+ EFFECTIVE WHEEL DIA.  38  1/4
+   30240 CFM, 14.00 SP,  82.8 BHP, 1770 RPM,  70 DEG F, DENSITY 0.0750
+ MAX HP  100.0, MAX RPM 1770, MAX TEMP   70 F, AMBIENT TEMP  70 F
+ TIP SPEED 19491 FPM, EQ. TS  20516 RE SK-9-105         WEIGHT   PRICE
+ WHEEL         THICK.(GA)    MATERIAL        WR2 WEIGHT
+  BLADES          3/16    ASTM A6  XF-100    134    60
+  SIDEPL,SPUN  0.135 (10) ASTM A1011-HSLAS    88    41
+  BACKPLATE       1/4     ASTM A572 X-TEN    159   104
+  HUB 19-5-16   BORE 2  7/8  CAST IRON         7    62     267    9916
+    MAX RPM, WHEEL ONLY  2346.  10 BLADES.       RES  3110 CPM
+    ***NON STD WHEEL MATERIALS, CHECK FOR CORRECT WELD WIRE***
+  HOUSING TO WHEEL CG   5.33, HOUSING TO HUB INLET FACE  6.38 IN.
+  STH  2.50
+  WHEEL WEIGHT  267 LB, THRUST  190 LB, WR2  387 LB-FT2
+ RUN TEST AT FACTORY
+ OUTLET N X A:   27  3/4  IN. X   45 13/16 IN.
+ BASE , 405T  FR MOTOR                                     579    4722
+ MOTOR MOUNTING INCLUDED
+ MOTOR WEIGHT, PRICE NOT INCL.                            1575
+ STIFFENERS SK-9-236 HI  PRESSURE, 22 IN. CENTERS
+ FLANGED INLET  INCLUDED
+ HOUSING  1/4  C.Q. HRS                                   1352   17437
+                                  GOOD FOR 60 DAYS        3773   32851
+ NOTES
+     ONLY ITEMIZED OR STANDARD ACCESSORIES INCLUDED IN PRICE
+     FAN OUTLET AREA   8.828 FT2
+     SHAFT SEAL NOT INCLUDED
+ 401221
+    2 '6195'   63 'UB  '   64 'CW  '  112 '405T'  113 'TEFC'
+"""
+
+
+def test_chicago_blower_arr4_motor_mounted_sections():
+    f = _parse_chicago_blower(REAL_CBC_QT_RUN_401221)
+    assert f["Arrangement"] == "4S"
+    # The arr-4 wheel dynamics / weight block.
+    assert f["Wheel Weight Lb"] == "267"
+    assert f["Wheel Thrust Lb"] == "190"
+    assert f["Wheel WR2"] == "387"
+    assert f["Max RPM Wheel Only"] == "2346"     # no trailing dot
+    assert f["Blades"] == "10"
+    assert f["Wheel Resonance CPM"] == "3110"
+    assert f["Housing to Wheel CG"] == "5.33"
+    assert f["Housing to Hub Inlet Face"] == "6.38"
+    # Motor / base block.
+    assert f["Motor Frame"] == "405T"
+    assert f["Motor Enclosure"] == "TEFC"
+    assert f["Motor Weight Lb"] == "1575"
+    assert f["Drive"] == "Motor mounted"
+    # Housing / accessories / totals.
+    assert f["Housing Construction"] == "1/4 C.Q. HRS"
+    assert f["Stiffeners"] == "SK-9-236 HI PRESSURE, 22 IN. CENTERS"
+    assert f["Fan Outlet Area FT2"] == "8.828"
+    assert f["Flanged Inlet"] == "Included"
+    assert f["Shaft Seal"] == "Not included"
+    assert f["Total Weight Lb"] == "3773"
+    assert f["Total Price"] == "32851"
+    # And no shaft/bearing section on this arrangement.
+    assert "Shaft Dia" not in f and "Bearing L10 Hr" not in f
+
+
+def test_chicago_blower_rotor_and_bearing_loads_variants():
+    # DRIVE-FIXED (not -FLOAT), negative static load, and the wider row layout.
+    txt = ("CHICAGO BLOWER CORP.\n SN#400567\n"
+           " SIZE  1908,DESIGN 1904 ,ARR 8S , 90.0 PCT,DISCH UB ,ROT CW\n"
+           " ROTOR WR2  28 LB-FT2, ROTOR MAX RPM 3600, MTL. A240 304 SS\n"
+           " STRESS RATIO AT HUB 0.08, AT BEARING 0.21\n"
+           "    SIDE    STATIC  DYN. THRUST  L10 HR   P/C\n"
+           " DRIVE-FIXED    -51     15      0  400000 0.0037\n"
+           " OTHER-FLOAT   301      3     71   47882 0.0494\n"
+           " SPLIT HOUSING AND BOX  3/8  C.Q. HRS  6591  75987\n")
+    f = _parse_chicago_blower(txt)
+    assert f["Rotor WR2"] == "28"
+    assert f["Rotor Max RPM"] == "3600"
+    assert f["Rotor Material"] == "A240 304 SS"
+    assert f["Stress Ratio at Hub"] == "0.08"
+    assert f["Stress Ratio at Bearing"] == "0.21"
+    assert f["Drive Brg Mount"] == "FIXED"
+    assert f["Drive Brg Static Lb"] == "-51"     # negative loads happen
+    assert f["Other Brg Mount"] == "FLOAT"
+    assert f["Other Brg Static Lb"] == "301"
+    assert f["Brg Thrust Lb"] == "71"
+    assert f["Bearing L10 Hr"] == "400000"       # anchored before the P/C decimal
+    assert f["Housing Construction"] == "3/8 C.Q. HRS"   # arr-7 SPLIT... variant
+
+
 def test_chicago_blower_matches_and_parses_end_to_end(tmp: Path):
     # Even named just "QT RUN.txt" (the AutoCAD-folder copy), the CB content
     # marker routes it to the CB template over the generic qt_run_text.

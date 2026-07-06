@@ -28,6 +28,35 @@ tail fixture.
 Outline table: now pulled in FULL (all 16 codes) — see the block-parser entry
 below.
 
+## 2026-07-06 — Section templates for every arrangement (designed from the corpus)
+
+Per DG: different arrangements carry different parts of the run (bearing
+section, wheel info, base/motor variables) and we tracked almost none of the
+arr-4 family's. Analyzed the FULL corpus from the order-data branch (447 docs:
+324 stored raw texts + 123 vision transcripts) — built a per-arrangement
+frequency matrix of every candidate line, then wrote SECTION-based patterns
+(they fire when their section exists; no arrangement gating):
+
+- **Arr-4 family block** (94+ runs, was 0% tracked): Wheel Weight/Thrust/WR2
+  line, Housing to Wheel CG / Hub Inlet Face, motor base — now 92-99%.
+- **Rotor/bearing block** (arr 1/3/7/8/9): Rotor WR2/Max RPM/Material, Stress
+  Ratio at Hub/Bearing, bearing-loads rows (DRIVE-FIXED **and** -FLOAT,
+  negative statics, wide layouts — the old L10 pattern only matched
+  DRIVE-FLOAT; now anchored on the number before the P/C decimal) — 93-100%.
+- **Universal**: Blades / Max RPM Wheel Only / RES CPM, Housing Construction
+  (incl. arr-7 "SPLIT HOUSING AND BOX"), Stiffeners, Fan Outlet Area, Motor
+  Frame/Position/Enclosure/Weight, Sheave PD + Min PD (belt), Inlet Box Size,
+  Shaft Seal / Flanged Inlet flags, Total Weight + Total Price (GOOD FOR line),
+  Drive="Motor mounted" for FR-MOTOR runs.
+- Serial now defaults to the job number when the header omits SN# (93% vs
+  27-60%). ~30 new CORE_FIELDS columns; summary adds Blades + motor block.
+
+**`--reparse-stored`** (also in the launcher via Scan Quote Runs options):
+re-runs the parser over the stored raw_lines/transcripts — new patterns apply
+in seconds, no Z:, no API. Vision fields kept, pattern hits merged over them.
+Dry-run on the real store: 416/450 runs updated, avg 54 fields/run.
+Tests: real 401221 arr-4S fixture + bearing-row variants + reparse merge rules.
+
 ## 2026-07-02 — Read scanned (no-text-layer) PDFs with Claude vision
 
 Per DG: the ~128 runs flagged "PDF (no text layer)" are unreadable by

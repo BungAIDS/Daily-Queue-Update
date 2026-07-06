@@ -308,7 +308,7 @@ def base_actions() -> list[LauncherAction]:
             "Scan Quote Runs",
             "Filesystem sweep for quote/construction runs in job folders. Parses them through templates and writes an inventory.",
             "quote_run_scan.py",
-            options=(JOB_LIST, LIST_FILE, RANGE, ROOT_FOLDER, OUT_FILE, RESCAN, option("reparse_attention", "Reparse attention rows", "Retry rows that were previously flagged for attention.", kind="check", arg="--reparse-attention"), LIMIT, MIN_JOB, MAX_JOB),
+            options=(JOB_LIST, LIST_FILE, RANGE, ROOT_FOLDER, OUT_FILE, RESCAN, option("reparse_attention", "Reparse attention rows", "Retry rows that were previously flagged for attention.", kind="check", arg="--reparse-attention"), option("reparse_stored", "Reparse stored text (fast)", "Re-run the parser over text already saved in the store — applies new patterns in seconds; no Z: drive, no API cost.", kind="check", arg="--reparse-stored"), LIMIT, MIN_JOB, MAX_JOB),
             long_running=True,
         ),
         LauncherAction(

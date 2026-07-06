@@ -285,7 +285,55 @@ _CB_PATTERNS = [
     # DRIVE-FLOAT row's L10 hours (…STATIC DYN THRUST <L10> P/C).
     ("Bearing Size", r"\bSIZE\s+([\d /]+?)\s+BEARINGS"),
     ("Bearing Series", r"BEARINGS,\s*(.+?SERIES\s+\d+)"),
-    ("Bearing L10 Hr", r"DRIVE-FLOAT\s+\d+\s+\d+\s+\d+\s+(\d+)"),
+    # Bearing-loads rows: "DRIVE-FIXED   301   3   0   47882 0.0494" (or -FLOAT;
+    # static can be negative; some layouts add extra columns). L10 is the big
+    # integer right before the P/C decimal, so anchor on that, not on position.
+    ("Bearing L10 Hr", r"DRIVE-(?:FIXED|FLOAT)[^\n]*?(\d{4,})\s+0?\.\d+"),
+    ("Drive Brg Mount", r"DRIVE-(FIXED|FLOAT)"),
+    ("Drive Brg Static Lb", r"DRIVE-(?:FIXED|FLOAT)\s+(-?\d+)"),
+    ("Other Brg Mount", r"OTHER-(FIXED|FLOAT)"),
+    ("Other Brg Static Lb", r"OTHER-(?:FIXED|FLOAT)\s+(-?\d+)"),
+    ("Brg Thrust Lb", r"OTHER-(?:FIXED|FLOAT)\s+-?\d+\s+-?\d+\s+(-?\d+)"),
+    # Rotor line (arr 1/3/7/8/9): "ROTOR WR2  267 LB-FT2, ROTOR MAX RPM 2860, MTL. 1045 STEEL"
+    ("Rotor WR2", r"ROTOR WR2\s+([\d.]+)"),
+    ("Rotor Max RPM", r"ROTOR MAX RPM\s+([\d.]+)"),
+    ("Rotor Material", r"ROTOR MAX RPM[^\n]*MTL\.\s*(.+?)\s*$"),
+    ("Stress Ratio at Hub", r"STRESS RATIO AT HUB\s+([\d.]+)"),
+    ("Stress Ratio at Bearing", r"STRESS RATIO AT HUB[^\n]*AT BEARING\s+([\d.]+)"),
+    # Wheel dynamics line (all arrangements): "MAX RPM, WHEEL ONLY 2346.  10 BLADES.  RES 3110 CPM"
+    ("Max RPM Wheel Only", r"MAX RPM,?\s*WHEEL ONLY\s+(\d+(?:\.\d+)?)"),
+    ("Blades", r"(\d+)\s+BLADES\."),
+    ("Wheel Resonance CPM", r"\bRES\s+([\d.]+)\s*CPM"),
+    # Arr-4-family wheel/housing block (wheel on the motor shaft — these runs
+    # have no shaft/bearing section; this block is what they carry instead):
+    #   WHEEL WEIGHT  267 LB, THRUST  190 LB, WR2  387 LB-FT2
+    #   HOUSING TO WHEEL CG   5.33, HOUSING TO HUB INLET FACE  6.38 IN.
+    ("Wheel Weight Lb", r"WHEEL WEIGHT\s+([\d.]+)\s*LB"),
+    ("Wheel Thrust Lb", r"WHEEL WEIGHT[^\n]*THRUST\s+([\d.]+)\s*LB"),
+    ("Wheel WR2", r"WHEEL WEIGHT[^\n]*\bWR2\s+([\d.]+)"),
+    ("Housing to Wheel CG", r"HOUSING TO WHEEL CG\s+([\d.]+)"),
+    ("Housing to Hub Inlet Face", r"HOUSING TO HUB INLET FACE\s+([\d.]+)"),
+    # Belt-drive sheave data (arr 9/1): "FAN SHEAVE  ASSUMED PD  6.2 IN, 4000 FPM"
+    # and "AT 2585 RPM, MIN PD  3.0 IN, 2030 FPM".
+    ("Sheave PD", r"ASSUMED PD\s+([\d.]+)\s*IN"),
+    ("Min Sheave PD", r"MIN PD\s+([\d.]+)"),
+    # Motor / base (motor-mounted arrangements): "BASE , 405T FR MOTOR",
+    # "ADJUSTABLE BASE, 365TS FR MOTOR, MOTOR POSITION Z".
+    ("Motor Frame", r"\b(\d{2,3}T?S?)\s+FR\.?\s+MOTOR"),
+    ("Motor Position", r"MOTOR POSITION\s+([A-Z])\b"),
+    ("Motor Weight Lb", r"MOTOR WEIGHT(?: AND MOUNTING)?[^0-9\n]*(\d+)"),
+    # Housing construction: "HOUSING  7 GA C.Q. HRS ..." / "HOUSING 3/16 A240
+    # 304L SS ..." / arr-7 "SPLIT HOUSING AND BOX  3/8 C.Q. HRS ...". The
+    # capture must end on a letter so trailing weight/price columns fall off.
+    ("Housing Construction",
+     r"^\s*(?:SPLIT\s+)?HOUSING(?:\s+AND\s+BOX)?\s+((?:\d+\s*GA|[\d/]+)\s+[A-Z][A-Za-z0-9 .]*?[A-Za-z])(?:\s+\d+)*\s*$"),
+    ("Stiffeners", r"STIFFENERS\s+(SK-[0-9-]+\s+\w+\s*PRESSURE(?:,\s*\d+\s*IN\.?\s*CENTERS)?)"),
+    ("Fan Outlet Area FT2", r"FAN OUTLET AREA\s+([\d.]+)\s*FT2"),
+    ("Inlet Box Size", r"INLET BOX SIZE\s+([\d.]+)"),
+    ("Shaft Seal Height", r"SPECIAL SHAFT SEAL(?: OR SPACER)? HEIGHT\s+([\d.]+)"),
+    # Quote totals: "GOOD FOR 60 DAYS   3773   32851" (weight, price).
+    ("Total Weight Lb", r"GOOD FOR\s+\d+\s*DAYS\s+(\d+)\s+\d+"),
+    ("Total Price", r"GOOD FOR\s+\d+\s*DAYS\s+\d+\s+(\d+)"),
     # The AXIAL/SIDE VIEW outline-dimension table is pulled as a block by
     # _parse_outline_dims (below) rather than one pattern per code.
     # Wheel-construction rows: <component> <gauge> <MATERIAL> <WR2> <weight>.
@@ -315,11 +363,13 @@ _CB_SUMMARY_ORDER = [
     # cares about most (aero fields above already come from the Sales Order).
     "Blade Material", "Blade Gauge", "Sideplate Material", "Sideplate Gauge",
     "Backplate Material", "Backplate Gauge", "Liner Material", "Liner Gauge",
-    "Wheel Material", "Hub", "Coupling",
+    "Wheel Material", "Hub", "Coupling", "Blades",
     # Shaft / bearing section (shaft geometry + bearing spec + key outline dims).
     "Shaft Dia", "Brg Centers", "Critical Speed RPM",
     "BX", "STB", "OH", "STH", "Bearing Size", "Bearing Series",
-    "Housing Width (N)", "Base to CL (F)", "Drive",
+    "Housing Width (N)", "Base to CL (F)",
+    # Motor/base block (the arr-4 family's back half) + drive.
+    "Motor Frame", "Motor Position", "Motor Enclosure", "Drive",
 ]
 
 
@@ -399,6 +449,20 @@ def _parse_chicago_blower(text: str) -> Dict[str, str]:
         fields["Drive"] = "Belt"
     elif "COUPLING" in up or ("DIRECT" in up and "DRIV" in up):
         fields["Drive"] = "Direct"
+    elif re.search(r"\bFR\.?\s+MOTOR", up):
+        fields["Drive"] = "Motor mounted"   # arr 4 family: wheel on the motor shaft
+    # Motor enclosure: printed in the machine-readable tail as 113 'TEFC', and
+    # sometimes in prose. Restricted to known enclosure codes to avoid noise.
+    m = re.search(r"'(TEFC|ODP|WPII|XPFC)'|\b(TEFC|ODP|WPII|XPFC)\b", up)
+    if m:
+        fields["Motor Enclosure"] = m.group(1) or m.group(2)
+    if "FLANGED INLET" in up:
+        fields["Flanged Inlet"] = ("Included" if "FLANGED INLET  INCLUDED" in up
+                                   or "FLANGED INLET INCLUDED" in up else "Yes")
+    if "SHAFT SEAL NOT INCLUDED" in up:
+        fields["Shaft Seal"] = "Not included"
+    elif "SHAFT SEAL" in up:
+        fields.setdefault("Shaft Seal", "Included")
     if "ENGINEERING APPROVAL" in up:
         fields["Engineering Approval"] = "Required"
     if "FEA ANALYSIS REQUIRED" in up:

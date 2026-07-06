@@ -62,10 +62,21 @@ CORE_FIELDS = [
     "Shaft Dia", "Brg Centers", "Critical Speed RPM",
     "Shaft Length", "OH", "BX", "STB", "TG&P", "STH",
     "Bearing Size", "Bearing Series", "Bearing L10 Hr",
+    "Drive Brg Mount", "Drive Brg Static Lb", "Other Brg Mount",
+    "Other Brg Static Lb", "Brg Thrust Lb",
+    "Rotor WR2", "Rotor Max RPM", "Rotor Material",
+    "Stress Ratio at Hub", "Stress Ratio at Bearing",
     "Housing Width (N)", "Base to CL (F)",
     "Blade Material", "Blade Gauge", "Sideplate Material", "Sideplate Gauge",
     "Backplate Material", "Backplate Gauge", "Liner Material", "Liner Gauge",
-    "Wheel Material",
+    "Wheel Material", "Blades", "Max RPM Wheel Only", "Wheel Resonance CPM",
+    "Wheel Weight Lb", "Wheel Thrust Lb", "Wheel WR2",
+    "Housing to Wheel CG", "Housing to Hub Inlet Face",
+    "Sheave PD", "Min Sheave PD",
+    "Motor Frame", "Motor Position", "Motor Enclosure", "Motor Weight Lb",
+    "Housing Construction", "Stiffeners", "Fan Outlet Area FT2",
+    "Inlet Box Size", "Shaft Seal", "Shaft Seal Height", "Flanged Inlet",
+    "Total Weight Lb", "Total Price",
     "Hub", "Coupling", "Drive", "Engineering Approval", "FEA Analysis",
     "Non-Std Wheel Materials", "Shrink Fit", "Factory Run Test",
 ]
@@ -95,6 +106,40 @@ def classify_status(template: str, fields: Dict[str, Any], raw_lines: List[str],
     if ext == ".pdf" and not raw_lines:
         return "PDF (no text layer)"   # a drawing/scanned run, not a parsing gap
     return "NO FIELDS"                 # readable, but no fields pulled — needs tuning
+
+
+def reparse_stored(records: Dict[str, Dict[str, Any]]) -> int:
+    """Re-run the (current, improved) Chicago Blower parser over the text each
+    run already carries — raw_lines from the sweep, or the vision transcript —
+    so new extraction patterns apply instantly: no Z: access, no API cost.
+    Vision-extracted fields are kept and pattern hits merged over them. Returns
+    how many runs changed."""
+    from templates import _parse_chicago_blower, _cb_summary, SELECTION_PROGRAM_MARKERS
+    changed = 0
+    for rec in records.values():
+        job = rec.get("job", "")
+        for run in rec.get("runs", []):
+            vision = run.get("vision") or {}
+            text = "\n".join(run.get("raw_lines") or []) or vision.get("transcript", "")
+            up = text.upper()
+            if not text or not any(m in up for m in SELECTION_PROGRAM_MARKERS):
+                continue                      # not a selection-program run
+            parsed = _parse_chicago_blower(text)
+            # Vision runs: the model's reading stays as the base; targeted
+            # patterns are more precise where they hit, so they win overlaps.
+            fields = {**(run.get("fields") or {}), **parsed} if vision else parsed
+            if fields and job:
+                fields.setdefault("Serial", job)
+            if fields == run.get("fields"):
+                continue
+            run["fields"] = fields
+            run["summary"] = _cb_summary(fields)
+            if fields:
+                run["status"] = "OK"
+                if not vision:
+                    run["template"] = "cbc_qt_run_text"
+            changed += 1
+    return changed
 
 
 def carry_vision_forward(old_rec: Optional[Dict[str, Any]],
@@ -146,6 +191,8 @@ def scan_one(job: str, jtype: str, folder: Path) -> Dict[str, Any]:
     runs: List[Dict[str, Any]] = []
     for f in _run_files_in_folder(folder):
         r = parse_quote_run(f)
+        if r["fields"] and "Serial" not in r["fields"]:
+            r["fields"]["Serial"] = job   # runs often omit the SN# header
         runs.append({
             "file": f.name,
             "path": str(f),
@@ -288,6 +335,9 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ap.add_argument("--reparse-attention", action="store_true",
                     help="Re-parse only the jobs whose saved results currently need attention "
                          "(any run not flagged OK). Fast way to re-check failures after a parser fix.")
+    ap.add_argument("--reparse-stored", action="store_true",
+                    help="Re-run the parser over the text already saved in the store (raw lines "
+                         "+ vision transcripts) — applies new patterns in seconds, no Z:, no API.")
     ap.add_argument("--limit", type=int, default=0,
                     help="Stop after scanning N folders this run (0 = no limit).")
     ap.add_argument("--min-job", type=int, default=DEFAULT_MIN_JOB,
@@ -308,6 +358,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     # --rescan redoes every parse, but vision results are carried forward from
     # the prior store (see carry_vision_forward) — they cost API money.
     records = {} if args.rescan else prior
+
+    if args.reparse_stored:
+        changed = reparse_stored(records)
+        save_progress(records)
+        try:
+            import master_sync
+            master_sync.run("quote_runs")
+        except Exception as e:  # noqa: BLE001
+            log.warning("Could not sync quote runs to the live master (%s)", e)
+        out = write_workbook(records, Path(args.out))
+        log.info("Re-parsed stored text: %d run(s) updated. Wrote %s", changed, out)
+        return 0
 
     jobs = list(args.jobs)
     if args.list:
