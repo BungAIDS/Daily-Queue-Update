@@ -163,9 +163,10 @@ def carry_vision_forward(old_rec: Optional[Dict[str, Any]],
 def run_rows(records: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Flatten the per-job store into one row per run (a job can have several:
     e.g. the quote and the production run; `history\\` copies are not swept)."""
+    from run_rank import rank_runs
     rows: List[Dict[str, Any]] = []
     for rec in sorted(records.values(), key=lambda r: r.get("job", "")):
-        for run in rec.get("runs", []):
+        for run in rank_runs(rec.get("runs", [])):   # most-current run first
             f = run.get("fields", {}) or {}
             other = "; ".join(f"{k}={v}" for k, v in f.items() if k not in CORE_FIELDS)
             rows.append({
@@ -187,6 +188,13 @@ def run_rows(records: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
 # --------------------------------------------------------------------------- #
 # Filesystem scan                                                             #
 # --------------------------------------------------------------------------- #
+def _mtime(f: Path) -> float:
+    try:
+        return f.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 def scan_one(job: str, jtype: str, folder: Path) -> Dict[str, Any]:
     """Find and parse every quote run in one job folder."""
     runs: List[Dict[str, Any]] = []
@@ -205,6 +213,7 @@ def scan_one(job: str, jtype: str, folder: Path) -> Dict[str, Any]:
             # The document's own lines — persisted so the store doubles as a
             # re-parsable corpus (new patterns re-extract without re-reading Z:).
             "raw_lines": r["raw_lines"],
+            "mtime": _mtime(f),   # recency signal for ranking multiple runs
         })
     return {
         "job": job,

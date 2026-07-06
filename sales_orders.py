@@ -872,7 +872,8 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2,
             n_dr_folder += 1
         j["has_drive_run"] = had_doc_run or bool(archived)
         if not dr_pdf and archived:
-            dr_pdf = str(archived[0])
+            from run_rank import rank_paths
+            dr_pdf = str(rank_paths(archived)[0])   # most-current run represents the order
         j["drive_run_pdf"] = dr_pdf or ""
         # X = the distinct run files actually in the archive folder the link opens.
         j["drive_run_count"] = len(archived) if j["has_drive_run"] else 0

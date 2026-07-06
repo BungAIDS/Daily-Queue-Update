@@ -28,6 +28,26 @@ tail fixture.
 Outline table: now pulled in FULL (all 16 codes) — see the block-parser entry
 below.
 
+## 2026-07-06 — Rank multiple quote runs by currency (71 orders have >1)
+
+Per DG. 71/381 orders carry multiple run files; master.json and the daily
+report used to take `runs[0]` — ALPHABETICAL — so 400567's 2021 base run beat
+its `Qt Run CO#1.txt`. New import-light `run_rank.py`: most-current first by
+(1) highest CO# in the name, (2) highest REV letter/number, (3) newest file
+mtime (now captured by the sweep), (4) most fields; stable on full ties.
+
+Applied everywhere one run represents the order:
+- `master_sync.merge_quote_runs`: ranked head leads `drive_run`, and ALL runs
+  (revisions included) are kept under a new **`drive_runs`** list — history is
+  queryable instead of discarded.
+- daily enrich (`sales_orders`): the archived-run fallback picks the ranked
+  head for `drive_run_pdf` / Quote Run Details.
+- `quote_runs.xlsx`: still one row per run, now ordered most-current first.
+
+Dry-run on the real store: 31 multi-run orders change primary (400567→CO#1,
+416869→CO#2, 408682→Rev1, 417821→REV 2, ...). Tests: `test_run_rank.py` +
+a ranked-history case in `test_master_sync.py`.
+
 ## 2026-07-06 — Section templates for every arrangement (designed from the corpus)
 
 Per DG: different arrangements carry different parts of the run (bearing
