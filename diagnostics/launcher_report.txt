@@ -1,6 +1,6 @@
 # Launcher debug report
-generated: 2026-07-02T07:06:51
-code version: branch claude/job-so-linking-issue-ivl7hw @ commit 9770f496cc
+generated: 2026-07-06T15:32:29
+code version: branch claude/quirky-hypatia-7pwmqp @ commit cd77390132
 os.name: nt   platform: win32
 python (launcher): C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\pythonw.exe
 python (for scripts): C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe
@@ -8,45 +8,26 @@ python (for scripts): C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe
 ## Process scan (external-status detection)
 method used: powershell-cim
 error: none
-python process lines seen: 2
-detected running outside launcher: none
+python process lines seen: 5
+detected running outside launcher: ['watch']
 
 ### python process command lines (up to 40)
-  pid=111016 "C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\pythonw.exe" launcher.py
-  pid=12224 "C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\pythonw.exe"  launcher.py
+  pid=16232 C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\pythonw.exe "C:\CBC INSIDER GL QUEUE CHECKER\launcher.py"
+  pid=101064 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
+  pid=146896 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
+  pid=148296 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" fill_transmittal_insider.py 421395 --initials LDL
+  pid=155980 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" fill_transmittal_insider.py 421395 --initials LDL
 
 ## Launcher-started processes
-  (none)
+  email_drawings: pid=148296 alive=True started=2026-07-06 15:24:12
+      cmd: "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" fill_transmittal_insider.py 421395 --initials LDL
 
 ## Last exit codes
-  (none yet)
+  data_push: 0
+  quote_run_scan: 0
+  watch: 0
 
 ## Tail of launcher_debug.log (last 120 lines)
-  2026-06-30 14:06:07 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:06:23 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:06:39 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:07:27 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:08:47 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:11:11 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:12:48 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:15:27 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:15:44 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:19:43 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:20:32 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:22:08 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:22:24 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:25:04 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:25:37 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:27:28 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:29:13 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:29:44 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:33:13 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:34:32 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:35:13 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:36:01 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:37:06 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:38:25 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:38:42 status scan: method=powershell-cim error=none python_lines=4 detected=none
   2026-06-30 14:40:17 status scan: method=wmic error=none python_lines=4 detected=none
   2026-06-30 14:42:18 status scan: method=powershell-cim error=none python_lines=4 detected=none
   2026-06-30 14:42:33 status scan: method=wmic error=none python_lines=4 detected=none
@@ -142,4 +123,29 @@ detected running outside launcher: none
   2026-07-02 07:04:12 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@63ad3757)
   2026-07-02 07:04:21 status scan: method=powershell-cim error=none python_lines=2 detected=none
   2026-07-02 07:06:41 close: publishing debug report to debug/launcher
+  2026-07-02 07:07:03 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/job-so-linking-issue-ivl7hw@9770f496)
+  2026-07-02 07:07:12 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-07-02 07:30:11 relaunching launcher; closing this instance
+  2026-07-02 07:30:20 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/job-so-linking-issue-ivl7hw@941ae2b8)
+  2026-07-02 07:30:30 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-02 07:30:30 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-02 10:16:30 relaunching launcher; closing this instance
+  2026-07-02 10:16:40 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/quirky-hypatia-7pwmqp@465c6b85)
+  2026-07-02 10:16:50 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-02 10:16:50 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-02 15:05:30 relaunching launcher; closing this instance
+  2026-07-02 15:05:40 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/quirky-hypatia-7pwmqp@4484fabe)
+  2026-07-02 15:05:50 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-02 15:05:50 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-02 16:27:51 relaunching launcher; closing this instance
+  2026-07-02 16:28:01 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/quirky-hypatia-7pwmqp@cd773901)
+  2026-07-02 16:28:11 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-02 16:28:11 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-03 05:00:05 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-03 17:00:19 status scan: method=wmic error=none python_lines=3 detected=['watch']
+  2026-07-03 17:01:15 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-04 19:24:25 status scan: method=none error=powershell-cim: TimeoutExpired: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' timed out after 8 seconds python_lines=0 detected=none
+  2026-07-04 19:24:39 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-06 05:00:05 status scan: method=wmic error=none python_lines=3 detected=['watch']
+  2026-07-06 07:53:08 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
 
