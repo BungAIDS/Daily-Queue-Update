@@ -79,6 +79,7 @@ DEFAULT_RULES: Dict[str, Any] = {
         "CONST": "CONSTRUCTION", "CONSTR": "CONSTRUCTION",
         "ARR": "ARRANGEMENT", "ARRG": "ARRANGEMENT", "ARRGT": "ARRANGEMENT",
         "ASSY": "ASSEMBLY", "MTR": "MOTOR", "TEMP": "TEMPERATURE",
+        "FA": "FRESH AIR",
         "BRG": "BEARING", "BRGS": "BEARINGS", "SLV": "SLEEVE",
         "HSG": "HOUSING", "WHL": "WHEEL", "CONN": "CONNECTOR",
         "HVY": "HEAVY", "DTY": "DUTY", "HD": "HEAVY DUTY",
@@ -473,7 +474,7 @@ def _used_on(norm_blob: str) -> str:
                          or "VOLUME CONTROL" in norm_blob)
     if not component_context and "IVC" not in norm_blob:
         return ""
-    if "FRESH AIR" in norm_blob:
+    if "FRESH AIR" in norm_blob or re.search(r"\bFA\s+DAMPER\b", norm_blob):
         return "FRESH AIR DAMPER"
     if "PRESPIN" in norm_blob or "PRE SPIN" in norm_blob:
         return "PRESPIN DAMPER"
@@ -522,6 +523,49 @@ def _balance_attributes(norm_blob: str) -> Dict[str, str]:
         _add_unique(types, "WELDED BALANCE WEIGHTS")
     if types:
         attrs["balance_type"] = ", ".join(types)
+    return attrs
+
+
+def _is_housing_drain(norm_blob: str) -> bool:
+    return bool(re.search(r"\bHOUSING\s+DRAINS?\b", norm_blob))
+
+
+def _is_inlet_box_drain(norm_blob: str) -> bool:
+    return bool(re.search(r"\bINLET\s+BOX\b", norm_blob) and "DRAIN" in norm_blob)
+
+
+def _is_motor_drain(primary: str, norm_blob: str) -> bool:
+    if "DRAIN" not in norm_blob:
+        return False
+    return bool(
+        re.match(r"^MOTOR\b", primary, re.I)
+        or re.search(r"\b(CONDENSATION\s+DRAIN|CONDUIT\s+BOX\s+DRAIN|DRAIN\s+HOLES?)\b", norm_blob)
+    )
+
+
+def _drain_type(primary: str, norm_blob: str) -> str:
+    if "DRAIN" not in norm_blob:
+        return ""
+    if _is_housing_drain(norm_blob):
+        return "HOUSING DRAIN"
+    if _is_inlet_box_drain(norm_blob):
+        return "INLET BOX DRAIN"
+    if _is_motor_drain(primary, norm_blob):
+        return "MOTOR CONDUIT BOX DRAIN"
+    return "DRAIN"
+
+
+def _drain_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "DRAIN" not in tags and "DRAIN" not in norm_blob:
+        return {}
+    drain_type = _drain_type(primary, norm_blob)
+    if not drain_type:
+        return {}
+    attrs = {"drain_type": drain_type}
+    if "PLUG" in norm_blob:
+        attrs["drain_closure"] = "PLUG"
+    if "CONDENSATION DRAIN" in norm_blob or re.search(r"\bDRAIN\s+HOLES?\b", norm_blob):
+        attrs["drain_detail"] = "CONDENSATION DRAIN HOLES"
     return attrs
 
 
@@ -594,7 +638,7 @@ def _material_attributes(norm_blob: str) -> Dict[str, str]:
         add_scope("WHEEL")
     if re.search(r"\bINLET\s+CONE\b", norm_blob):
         add_scope("INLET CONE")
-    elif "INLET" in norm_blob:
+    elif "INLET" in norm_blob and not _is_inlet_box_drain(norm_blob):
         add_scope("INLET")
     if "OUTLET" in norm_blob or "DISCHARGE" in norm_blob:
         add_scope("OUTLET")
@@ -602,8 +646,13 @@ def _material_attributes(norm_blob: str) -> Dict[str, str]:
         add_scope("WELDS")
     if "ACCESS DOOR" in norm_blob:
         add_scope("ACCESS DOOR")
-    if re.search(r"\bHOUSING\s+DRAIN\b", norm_blob):
+    primary = norm_blob.split(";", 1)[0].strip()
+    if _is_housing_drain(norm_blob):
         add_scope("HOUSING DRAIN")
+    if _is_inlet_box_drain(norm_blob):
+        add_scope("INLET BOX DRAIN")
+    if _is_motor_drain(primary, norm_blob):
+        add_scope("MOTOR CONDUIT BOX DRAIN")
     if "HOUSING" in norm_blob and not any(s.startswith("HOUSING") for s in scopes):
         add_scope("HOUSING")
     for scope, pattern in (
@@ -620,7 +669,7 @@ def _material_attributes(norm_blob: str) -> Dict[str, str]:
         ("BACKING BARS", r"\bBACKING\s+BARS?\b"),
         ("MOTOR", r"^MOTOR\b"),
     ):
-        if scope == "DRAIN" and "HOUSING DRAIN" in scopes:
+        if scope == "DRAIN" and any(s.endswith("DRAIN") for s in scopes):
             continue
         if re.search(pattern, norm_blob):
             add_scope(scope)
@@ -651,7 +700,8 @@ def _component_material_attributes(owner: str, material_attrs: Dict[str, str]) -
         component_scopes = [s for s in scopes if s in {"TUBING", "HARDWARE"}]
         attrs["material_scope"] = ", ".join(component_scopes or ["ACTUATOR"])
     elif owner == "MOTOR":
-        attrs["material_scope"] = "MOTOR"
+        component_scopes = [s for s in scopes if s == "MOTOR CONDUIT BOX DRAIN"]
+        attrs["material_scope"] = ", ".join(component_scopes or ["MOTOR"])
     return attrs
 
 
@@ -878,6 +928,11 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t != _GUARD_TAG]
     if _is_base_fan_line(primary):
         tags = [t for t in tags if t not in _BASE_FAN_DETAIL_TAGS]
+    drain_type = _drain_type(primary, norm_blob)
+    if drain_type == "HOUSING DRAIN":
+        tags = [t for t in tags if t != "HOUSING"]
+    elif drain_type == "INLET BOX DRAIN":
+        tags = [t for t in tags if t != "INLET"]
     if _is_belt_guard_line(primary):
         tags = [t for t in tags if t not in _BELT_GUARD_DETAIL_TAGS]
     elif _is_accessory_coating(primary, tag_set, norm_blob):
@@ -923,6 +978,7 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
         attrs["note_type"] = "ASSEMBLY"
     attrs.update(_guard_attributes(primary, norm_blob))
     attrs.update(_coating_attributes(primary, norm_blob, raw_tags))
+    attrs.update(_drain_attributes(primary, norm_blob, tags))
 
     material_attrs = _material_attributes(norm_blob)
     material_owner = _component_material_owner(item, material_attrs, rules)

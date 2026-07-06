@@ -77,6 +77,7 @@ def _attrs_label(item: Dict[str, Any]) -> str:
         "inquiry_num", "note_type", "component", "used_on", "used_on_review", "vendor", "product",
         "material", "material_grade", "material_scope", "material_treatment",
         "component_material", "component_material_grade", "component_material_scope",
+        "drain_type", "drain_closure", "drain_detail",
         "coating_context", "coating_category", "coating_scope", "coating_process",
         "coating_state", "coating_type", "coating_color", "alternate_coating_color", "coats",
         "guard_type", "guard_material", "tach_hole", "tach_hole_location",

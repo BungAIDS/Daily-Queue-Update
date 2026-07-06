@@ -911,6 +911,46 @@ def test_used_on_requires_damper_context():
     assert damper["attributes"]["used_on"] == "OUTLET DAMPER"
     discharge = li.extract_items(["Actuator for Discharge Damper, Bettis #RPED200 C 5,192.00"])[0]
     assert discharge["attributes"]["used_on"] == "OUTLET DAMPER"
+    fresh_air = li.extract_items(["Change Actuator Location for the FA damper to be on motor side of fan L 100.00"])[0]
+    assert fresh_air["attributes"]["used_on"] == "FRESH AIR DAMPER"
+    assert "used_on_review" not in fresh_air["attributes"]
+    prespin = li.extract_items(["Actuator for Pre-spin Damper, Bettis #RPED200 C 5,192.00"])[0]
+    assert prespin["attributes"]["used_on"] == "PRESPIN DAMPER"
+
+
+def test_drain_attributes():
+    housing = li.extract_items(["Housing Drain with Plug, 304 SS Construction L 328.00"])[0]
+    attrs = housing["attributes"]
+    assert "HOUSING" not in housing["tags"]
+    assert attrs["drain_type"] == "HOUSING DRAIN"
+    assert attrs["drain_closure"] == "PLUG"
+    assert attrs["material"] == "STAINLESS STEEL"
+    assert attrs["material_grade"] == "304 SS"
+    assert attrs["material_scope"] == "HOUSING DRAIN"
+
+    housing_plural = li.extract_items(["Housing Drains with Plugs, Inquiry Num: 333-26-1234 L 252.00"])[0]
+    assert housing_plural["tags"] == ["DRAIN"]
+    assert housing_plural["attributes"]["drain_type"] == "HOUSING DRAIN"
+
+    inlet = li.extract_items(['Inlet Box, Drain Plug 3/4" Diameter L 51.00'])[0]
+    assert "INLET" not in inlet["tags"]
+    assert inlet["attributes"]["drain_type"] == "INLET BOX DRAIN"
+    assert inlet["attributes"]["drain_closure"] == "PLUG"
+
+    motor = li.extract_items([
+        "Motor (CEM3711T-10hp motor C 618.96 25.00",
+        "M7A Add Condensation Drain Holes - Vertical Shaft",
+        "Down)",
+    ])[0]
+    assert motor["attributes"]["drain_type"] == "MOTOR CONDUIT BOX DRAIN"
+    assert motor["attributes"]["drain_detail"] == "CONDENSATION DRAIN HOLES"
+
+    motor_ss = li.extract_items(["Motor (Conduit Box Drain, 304 SS Construction C 100.00"])[0]
+    attrs = motor_ss["attributes"]
+    assert attrs["drain_type"] == "MOTOR CONDUIT BOX DRAIN"
+    assert attrs["component_material"] == "STAINLESS STEEL"
+    assert attrs["component_material_grade"] == "304 SS"
+    assert attrs["component_material_scope"] == "MOTOR CONDUIT BOX DRAIN"
 
 
 def test_standalone_actuator_used_on_review():
