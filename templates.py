@@ -326,7 +326,7 @@ _CB_PATTERNS = [
     # 304L SS ..." / arr-7 "SPLIT HOUSING AND BOX  3/8 C.Q. HRS ...". The
     # capture must end on a letter so trailing weight/price columns fall off.
     ("Housing Construction",
-     r"^\s*(?:SPLIT\s+)?HOUSING(?:\s+AND\s+BOX)?\s+((?:\d+\s*GA|[\d/]+)\s+[A-Z][A-Za-z0-9 .]*?[A-Za-z])(?:\s+\d+)*\s*$"),
+     r"^\s*(?:SPLIT\s+)?HOUSING(?:\s+AND\s+BOX)?\s+((?:\d+\s*GA|[\d/]+)\s+[A-Z][A-Za-z0-9 .\-]*?[A-Za-z])(?:\s+\d+)*\s*$"),
     ("Stiffeners", r"STIFFENERS\s+(SK-[0-9-]+\s+\w+\s*PRESSURE(?:,\s*\d+\s*IN\.?\s*CENTERS)?)"),
     ("Fan Outlet Area FT2", r"FAN OUTLET AREA\s+([\d.]+)\s*FT2"),
     ("Inlet Box Size", r"INLET BOX SIZE\s+([\d.]+)"),

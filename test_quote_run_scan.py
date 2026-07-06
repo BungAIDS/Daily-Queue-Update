@@ -149,7 +149,8 @@ def test_reparse_stored_applies_new_patterns_offline():
     assert txt["fields"]["Serial"] == "401221"
     vis = records["406244"]["runs"][0]
     assert vis["fields"]["Oddball"] == "kept"             # model's extras survive
-    assert vis["fields"]["Motor Frame"] == "405T"         # pattern merged in
+    assert vis["fields"]["Motor Frame"] == "405T"         # pattern fills the gap
+    assert vis["fields"]["Size"] == "22"                  # model wins overlaps (it saw the image)
     assert vis["template"] == "pdf_vision"                # provenance kept
     assert records["400111"]["runs"][0]["fields"] == {"Coating": "epoxy"}
 

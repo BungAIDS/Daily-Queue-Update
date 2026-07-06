@@ -125,9 +125,10 @@ def reparse_stored(records: Dict[str, Dict[str, Any]]) -> int:
             if not text or not any(m in up for m in SELECTION_PROGRAM_MARKERS):
                 continue                      # not a selection-program run
             parsed = _parse_chicago_blower(text)
-            # Vision runs: the model's reading stays as the base; targeted
-            # patterns are more precise where they hit, so they win overlaps.
-            fields = {**(run.get("fields") or {}), **parsed} if vision else parsed
+            # Vision runs: the model read the actual IMAGE; the transcript the
+            # patterns run on is derivative (OCR noise like "4/100 CFM" happens).
+            # So patterns only FILL GAPS on vision runs — the model wins overlaps.
+            fields = {**parsed, **(run.get("fields") or {})} if vision else parsed
             if fields and job:
                 fields.setdefault("Serial", job)
             if fields == run.get("fields"):
