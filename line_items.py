@@ -110,6 +110,7 @@ DEFAULT_RULES: Dict[str, Any] = {
         r"list\s+price", r"multiplier", r"^unit\s+price", r"^price\s+each",
         r"^discount\b", r"^see\s+(additional|special)\b",
         r"^warranty\b", r"^commission\s+override\b",
+        r"\b(charge|fee)\b", r"slow\s+pay\s+addition", r"paymode[-\s]+x",
         r"^prints?\s*$", r"^product\s*:?\s*$", r"^product\s+\$?\d",
         # Shipping/admin notes can appear inside Additional Features / Notes;
         # keep them out of the item inventory while preserving real ship-loose
@@ -123,9 +124,10 @@ DEFAULT_RULES: Dict[str, Any] = {
         r"^above\s+email\s+after\b", r"^as\s+well\b",
         r"^appointment\s+required\b", r"^for\s+(orders|packages)\b",
         r"^with\s+a\s+ship\s+date\b", r"^contact\s*$",
-        r"^must\s+(appear|be)\b", r"^paymode\s+x\b", r"^includes\s+paymode\s+x\b",
+        r"^must\s+(appear|be)\b", r"^paymode[-\s]+x\b", r"^includes\s+paymode[-\s]+x\b",
         r"^reference\s+sn\b", r"\bppap\b", r"^kindly\s+note\b",
         r"^please\s+confirm\b",
+        r"^be\s+necessary\b.*\bfor\s+more\s+information\b",
         # Drawings-distribution checklist (trails the Notes section).
         r"^fan\s+drawings?\b", r"^motor\s+prints?\b", r"^motor\s+data\s+sheets?\b",
         r"^buyout\s+prints?\b", r"^emailed\b", r"^mailed\b", r"^o\s*&\s*m\b",
@@ -149,6 +151,7 @@ DEFAULT_RULES: Dict[str, Any] = {
     # text + details of an item. An item can carry several.
     "tags": {
         "BASE FAN": [r"^base\s+fan\b"],
+        "ACTUATOR": [r"\bactuator\b"],
         "SPARK RESISTANT": [r"spark"],
         "SHAFT SEAL": [r"shaft\s*seal", r"stuffing\s*box", r"lip\s*seal",
                        r"ceramic\s*felt"],
@@ -191,21 +194,22 @@ DEFAULT_RULES: Dict[str, Any] = {
                          r"channel\s*base"],
         "BEARINGS": [r"bearing"],
         "LIFTING LUGS": [r"lifting\s*lugs?"],
+        "LABEL": [r"\blabel\b"],
         "NAMEPLATE": [r"nameplate"],
         "PACKAGING": [r"\bcrate\b", r"\bcrating\b", r"shrink\s*wrap",
                       r"\bskid\b", r"ispm\s*wood", r"do\s*not\s*stack",
                       r"metal\s*banding"],
         "SHIPPING": [r"ship\s*loose", r"freight\s*included", r"\bshipping\b"],
         "WARRANTY": [r"warranty"],
-        "CHARGE": [r"\bcharge\b", r"\bfee\b", r"slow\s*pay\s*addition"],
         "MOUNTING": [r"\bmounting\b", r"\bmounted\b", r"\bcbc\s*mount\b"],
         "SPECIAL CONSTRUCTION": [r"set\s*screws?", r"loc\s*tite", r"caulking",
-                                 r"\bwelding\b", r"tie\s*rod\s*support",
+                                 r"\bweld(?:ing)?\b", r"tie\s*rod\s*support",
                                  r"buffer\s*tube", r"cast\s*hub",
                                  r"plug\s*panel", r"pressure\s*tap",
                                  r"\bconduit\b", r"\boverhang\b",
                                  r"effective\s*diameter", r"threaded\s*plug",
-                                 r"hole\s*diameters?"],
+                                 r"hole\s*diameters?", r"earthing\s*boss"],
+        "INSPECTION": [r"\binspection\b", r"mill\s*certifications?"],
         "DRAWINGS": [r"\bcertified\s*drawings?\b", r"\bprints?\b",
                      r"\bdrawings?\b"],
         "EXTENDED LUBE": [r"ext(ended)?\s*lube", r"lube\s*line", r"grease\s*line",
@@ -213,7 +217,11 @@ DEFAULT_RULES: Dict[str, Any] = {
         "MOTOR": [r"\bmotor\b"],
         "VFD": [r"\bVFD\b", r"variable\s*freq", r"inverter"],
         "EXPLOSION PROOF": [r"explosion\s*proof", r"class\s*i+\b.*div"],
-        "V-BELT DRIVE": [r"^drive(?:\s*;|$)", r"v[\s-]*belt", r"sheave",
+        "DRIVE COMPONENTS": [r"sheave\s*/?\s*bushing", r"\bbushing\b",
+                             r"\bactual\s+sf\b", r"\bactual\s+cd\b",
+                             r"selected\s+drive", r"center\s+distance",
+                             r"^\d{3,4}\s+\d{3,4}\s+[A-Z]{1,2}\d+\s+\d+\s+"],
+        "V-BELT DRIVE": [r"^drive\b", r"v[\s-]*belt", r"sheave",
                          r"bushing", r"drive\s*set"],
         "BALANCE": [r"balanc"],
         "TESTING": [r"witness", r"\btest"],
@@ -364,6 +372,154 @@ def tag_item(norm: str, rules: Dict[str, Any] | None = None) -> List[str]:
     return sorted(t for t, pats in rules["tags"].items() if any(p.search(norm) for p in pats))
 
 
+def _item_blob(item: Dict[str, Any]) -> str:
+    parts = [str(item.get("raw", ""))]
+    parts += [str(d) for d in item.get("details") or []]
+    return " ".join(re.sub(r"\s+", " ", p).strip() for p in parts if str(p).strip())
+
+
+_DETAIL_LABELS = (
+    "Vendor", "Product", "Operation", "Actuator Manufacturer",
+    "Actuator Supplied By", "Actuator Mounting",
+    "Actuator Size",
+    "Fail Position Upon Loss of Supply/Air/Power",
+    "Fail Position Upon Loss of Signal",
+)
+
+
+def _label_value(item: Dict[str, Any], label: str) -> str:
+    parts = [str(item.get("raw", ""))]
+    parts += [str(d) for d in item.get("details") or []]
+    for i, part in enumerate(parts):
+        m = re.match(rf"\s*{re.escape(label)}\s*:\s*(.+?)\s*$", part, re.I)
+        if m:
+            val = m.group(1).strip(" ,;")
+            if (label.startswith("Fail Position") and val.upper() == "IN"
+                    and i + 1 < len(parts) and parts[i + 1].strip().upper() == "PLACE"):
+                val = "In Place"
+            return val
+    blob = _item_blob(item)
+    labels = "|".join(re.escape(x) for x in _DETAIL_LABELS)
+    m = re.search(rf"\b{re.escape(label)}\s*:\s*(.*?)(?=\s+(?:{labels})\s*:|$)",
+                  blob, re.I)
+    return m.group(1).strip(" ,;") if m else ""
+
+
+def _used_on(norm_blob: str) -> str:
+    component_context = ("DAMPER" in norm_blob or "ACTUATOR" in norm_blob
+                         or "VOLUME CONTROL" in norm_blob)
+    if not component_context and "IVC" not in norm_blob:
+        return ""
+    if "FRESH AIR" in norm_blob:
+        return "FRESH AIR DAMPER"
+    if "PRESPIN" in norm_blob or "PRE SPIN" in norm_blob:
+        return "PRESPIN DAMPER"
+    if "OUTLET" in norm_blob and ("DAMPER" in norm_blob or "VOLUME CONTROL" in norm_blob):
+        return "OUTLET DAMPER"
+    if "DISCHARGE" in norm_blob and ("DAMPER" in norm_blob or "ACTUATOR" in norm_blob):
+        return "DISCHARGE DAMPER"
+    if "IVC" in norm_blob or "INLET VOLUME CONTROL" in norm_blob:
+        return "IVC"
+    if "INLET" in norm_blob and "DAMPER" in norm_blob:
+        return "INLET DAMPER"
+    return ""
+
+
+def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Dict[str, str]:
+    """Structured fan-component details pulled from raw text + detail lines."""
+    rules = rules or load_rules()
+    blob = _item_blob(item)
+    norm_blob = normalize_text(blob, rules)
+    tags = set(tag_item(_taggable_text(item, rules), rules))
+    attrs: Dict[str, str] = {}
+
+    vendor = _label_value(item, "Vendor")
+    product = _label_value(item, "Product")
+    if vendor:
+        attrs["vendor"] = vendor
+    if product:
+        attrs["product"] = product
+
+    used_on = _used_on(norm_blob)
+    if used_on:
+        attrs["used_on"] = used_on
+
+    if "ACTUATOR" in tags or "ACTUATOR" in norm_blob:
+        attrs["component"] = "ACTUATOR"
+        for label, key in (
+            ("Actuator Manufacturer", "manufacturer"),
+            ("Actuator Supplied By", "supplied_by"),
+            ("Actuator Mounting", "mounting"),
+            ("Fail Position Upon Loss of Supply/Air/Power", "fail_power"),
+            ("Fail Position Upon Loss of Signal", "fail_signal"),
+            ("Operation", "operation"),
+        ):
+            val = _label_value(item, label)
+            if val:
+                attrs[key] = val
+        m = re.search(
+            r"\b(UNIC\s*(?P<unic_size>\d+(?:/\d+)?)|"
+            r"BETTIS\s*#?\s*(?P<bettis_size>[A-Z0-9-]+)|"
+            r"EMERSON\s+FIELD\s+Q)\b",
+            blob, re.I,
+        )
+        if m:
+            attrs["model"] = re.sub(r"\s+", " ", m.group(1)).strip()
+            size = (_label_value(item, "Actuator Size")
+                    or m.groupdict().get("unic_size")
+                    or m.groupdict().get("bettis_size")
+                    or "")
+            if size:
+                attrs["size"] = size.upper()
+
+    is_drive = bool({"V-BELT DRIVE", "DRIVE COMPONENTS"} & tags)
+    if is_drive:
+        attrs.setdefault("component", "V-BELT DRIVE")
+        m = re.search(r"Max/Min RPM:\s*(\d+)\s*/\s*(\d+)", blob, re.I)
+        if m:
+            attrs["max_rpm"], attrs["min_rpm"] = m.group(1), m.group(2)
+        m = re.search(r"\b(\d+)\s+belts?\s*:\s*([A-Z0-9-]+)", blob, re.I)
+        if m:
+            attrs["belt_qty"], attrs["belt"] = m.group(1), m.group(2).upper()
+        m = re.search(r"Motor\s+Sheave/Bushing:\s*(.*?)\s*,?\s*Fan\s+Sheave/Bushing:\s*(.*?)\s*,?\s*Actual\s+SF",
+                      blob, re.I)
+        if m:
+            attrs["drive_sheave_bushing"] = m.group(1).strip(" ,;")
+            attrs["driven_sheave_bushing"] = m.group(2).strip(" ,;")
+        for label, key in (("Actual SF", "actual_sf"), ("Actual CD", "actual_cd")):
+            m = re.search(rf"\b{re.escape(label)}\s*:\s*([0-9.]+)", blob, re.I)
+            if m:
+                attrs[key] = m.group(1)
+        m = re.search(r"Constant Speed,\s*SF:\s*([0-9.]+)", blob, re.I)
+        if m:
+            attrs["service_factor"] = m.group(1)
+        m = re.search(r"Specified minimum belt service factor:\s*([0-9.]+)", blob, re.I)
+        if m:
+            attrs["service_factor"] = m.group(1)
+        m = re.search(r"Center Distance with allowance for install and take-up:\s*([0-9.]+\s*-\s*[0-9.]+)",
+                      blob, re.I)
+        if m:
+            attrs["center_distance_range"] = m.group(1)
+
+        tokens = blob.split()
+        if (len(tokens) >= 9 and re.fullmatch(r"\d{3,4}/\d{3,4}", tokens[0])
+                and re.fullmatch(r"[A-Z]{1,2}\d+", tokens[1], re.I)
+                and tokens[2].isdigit()):
+            rpms = tokens[0].split("/")
+            attrs.setdefault("drive_rpm", rpms[0])
+            attrs.setdefault("driven_rpm", rpms[1])
+            attrs.setdefault("belt", tokens[1].upper())
+            attrs.setdefault("belt_qty", tokens[2])
+            attrs.setdefault("drive_sheave_bushing", f"{tokens[3]} {tokens[4]}")
+            attrs.setdefault("driven_sheave_bushing", f"{tokens[5]} {tokens[6]}")
+            if re.fullmatch(r"\d+(?:\.\d+)?", tokens[7]):
+                attrs.setdefault("actual_sf", tokens[7])
+            if re.fullmatch(r"\d+(?:\.\d+)?", tokens[8]):
+                attrs.setdefault("actual_cd", tokens[8])
+
+    return attrs
+
+
 def derive_item_fields(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Dict[str, Any]:
     """Re-derive normalized fields for a stored item without mutating it."""
     rules = rules or load_rules()
@@ -374,7 +530,8 @@ def derive_item_fields(item: Dict[str, Any], rules: Dict[str, Any] | None = None
     probe = dict(item)
     probe["norm"] = norm
     tags = tag_item(_taggable_text(probe, rules), rules)
-    return {"norm": norm, "qty": qty, "price": price or mark, "ptype": ptype, "tags": tags}
+    return {"norm": norm, "qty": qty, "price": price or mark, "ptype": ptype,
+            "tags": tags, "attributes": component_attributes(probe, rules)}
 
 
 # --------------------------------------------------------------------------- #
@@ -514,12 +671,14 @@ def extract_items(lines: Iterable[str], rules: Dict[str, Any] | None = None) -> 
             "section": section,
             "details": [],
             "tags": [],
+            "attributes": {},
         }
     # Tags consider the details too — "Product: Damper" under an "IVD" row is
     # what identifies it.
     items = list(by_norm.values())
     for it in items:
         it["tags"] = tag_item(_taggable_text(it, rules), rules)
+        it["attributes"] = component_attributes(it, rules)
     return items
 
 
@@ -791,6 +950,7 @@ def renormalize_store(store: Dict[str, Any]) -> int:
             derived = derive_item_fields(it, rules)
             it["norm"] = derived["norm"]
             it["tags"] = derived["tags"]
+            it["attributes"] = derived["attributes"]
             qty = derived["qty"]
             price = derived["price"]
             ptype = derived["ptype"]

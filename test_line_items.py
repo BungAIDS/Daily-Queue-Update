@@ -165,7 +165,9 @@ def test_real_so_std_inc_and_bare_type_letter():
     # STD / INC in the price column (after the L/C/N type letter) are items...
     assert items["MECHANICAL RUN TEST NOT AVAILABLE"]["price"] == "STD"
     assert "OUTLET FLANGED PUNCHED" in items
-    assert items["MOUNTING CHARGE"]["ptype"] == "L"
+    inc = {it["norm"]: it for it in li.extract_items(["Temporary Fan Feature L INC"])}
+    assert inc["TEMPORARY FAN FEATURE"]["price"] == "INC"
+    assert "MOUNTING CHARGE" not in items
     # ...and so is a row whose price column is simply empty (trailing bare L).
     assert any(n.startswith("WEIGHTS ON DRAWING") for n in items), items.keys()
     # But "INC." at the end of a company name never makes an address an item.
@@ -319,9 +321,16 @@ def test_tagging():
     assert "NAMEPLATE" in li.tag_item(li.normalize_text("Fan Nameplate without Chicago Blower Name"))
     assert "PACKAGING" in li.tag_item(li.normalize_text("ISPM Wood Inspection Stamp"))
     assert "SHIPPING" in li.tag_item(li.normalize_text("Ship Loose Freight Included"))
-    assert "CHARGE" in li.tag_item(li.normalize_text("Change Order Charge Inquiry Num"))
+    assert "ACTUATOR" in li.tag_item(li.normalize_text("Actuator for IVC Bettis #RPED100"))
+    assert "DRIVE COMPONENTS" in li.tag_item(li.normalize_text("Motor Sheave/Bushing 3B5V74/B"))
+    assert "V-BELT DRIVE" in li.tag_item(li.normalize_text("Drive (Max/Min RPM: 1531/1531, 3 belts: B112"))
     assert "SPECIAL CONSTRUCTION" in li.tag_item(li.normalize_text("Tie Rod Support"))
     assert "SPECIAL CONSTRUCTION" in li.tag_item(li.normalize_text("Loc Tite on the set screw threads"))
+    assert "SPECIAL CONSTRUCTION" in li.tag_item(li.normalize_text("Continuous Weld Airstream"))
+    assert "SPECIAL CONSTRUCTION" in li.tag_item(li.normalize_text("Earthing Boss"))
+    assert "INSPECTION" in li.tag_item(li.normalize_text("Customer Final Inspection"))
+    assert "INSPECTION" in li.tag_item(li.normalize_text("General Mill Certifications"))
+    assert "LABEL" in li.tag_item(li.normalize_text("FEI Label Inquiry Num"))
     assert li.tag_item("SOMETHING NOBODY EVER ORDERED") == []
 
 
@@ -448,6 +457,88 @@ def test_audit_untagged_uses_current_rules():
     assert [r["norm"] for r in rows] == ["MYSTERY OPTION"], rows
 
 
+def test_actuator_attributes():
+    items = {it["norm"]: it for it in li.extract_items([
+        "Actuator for IVC, Bettis #RPED100 Double Acting C 5,054.00 809.00",
+        "Pneumatic Actuator. Complete with a VAC",
+        "Vendor: Novaspect",
+        "Product: Actuator",
+        "Operation: Automatic",
+        "Actuator Manufacturer: Bettis RPD",
+        "Actuator Supplied By: CBC (Mounted)",
+        "Fail Position Upon Loss of Supply/Air/Power: In",
+        "Place",
+        "Fail Position Upon Loss of Signal: Closed",
+        "Actuator Mounting: Bracket and actuator",
+    ])}
+    actuator = items["ACTUATOR FOR IVC BETTIS #RPED100 DOUBLE ACTING"]
+    attrs = actuator["attributes"]
+    assert {"ACTUATOR", "INLET VANES"} <= set(actuator["tags"])
+    assert attrs["component"] == "ACTUATOR"
+    assert attrs["used_on"] == "IVC"
+    assert attrs["vendor"] == "Novaspect"
+    assert attrs["product"] == "Actuator"
+    assert attrs["manufacturer"] == "Bettis RPD"
+    assert attrs["model"].upper().replace(" ", "") == "BETTIS#RPED100"
+    assert attrs["size"] == "RPED100"
+    assert attrs["operation"] == "Automatic"
+    assert attrs["supplied_by"] == "CBC (Mounted)"
+    assert attrs["mounting"] == "Bracket and actuator"
+    assert attrs["fail_power"] == "In Place"
+    assert attrs["fail_signal"] == "Closed"
+
+
+def test_drive_attributes():
+    items = {it["norm"]: it for it in li.extract_items([
+        "Drive (Max/Min RPM: 1531/1531, 3 belts: B112, C 409.00 125.00",
+        "Motor Sheave/Bushing: 3B5V74/B (1 7/8\"), Fan",
+        "Sheave/Bushing: 3B5V86/B (2 3/16\"), Actual SF:",
+        "1.31, Actual CD: 44.34)",
+        "Constant Speed, SF: 1.3",
+    ])}
+    drive = items["DRIVE MAX MIN RPM 1531 1531 3 BELTS B112"]
+    attrs = drive["attributes"]
+    assert {"V-BELT DRIVE", "DRIVE COMPONENTS"} <= set(drive["tags"])
+    assert attrs["component"] == "V-BELT DRIVE"
+    assert attrs["belt_qty"] == "3"
+    assert attrs["belt"] == "B112"
+    assert attrs["max_rpm"] == "1531"
+    assert attrs["min_rpm"] == "1531"
+    assert attrs["drive_sheave_bushing"] == '3B5V74/B (1 7/8")'
+    assert attrs["driven_sheave_bushing"] == '3B5V86/B (2 3/16")'
+    assert attrs["actual_sf"] == "1.31"
+    assert attrs["actual_cd"] == "44.34"
+    assert attrs["service_factor"] == "1.3"
+
+
+def test_selected_drive_table_attributes():
+    items = li.extract_items([
+        "1515/1515 B116 3 3TB80 Q1 3B5V94 B 1.49 45.24 436.00",
+        "Notes:",
+        "* Selected Drive",
+        "Specified minimum belt service factor: 1.3",
+        "Center Distance with allowance for install and take-up: 43.5 - 46.5",
+    ])
+    drive = items[0]
+    attrs = drive["attributes"]
+    assert "DRIVE COMPONENTS" in drive["tags"]
+    assert attrs["belt"] == "B116"
+    assert attrs["belt_qty"] == "3"
+    assert attrs["drive_sheave_bushing"] == "3TB80 Q1"
+    assert attrs["driven_sheave_bushing"] == "3B5V94 B"
+    assert attrs["actual_sf"] == "1.49"
+    assert attrs["actual_cd"] == "45.24"
+    assert attrs["service_factor"] == "1.3"
+    assert attrs["center_distance_range"] == "43.5 - 46.5"
+    bare = li.extract_items([
+        "1515/1515 B116 3 3B5V80 B 3B5V94 B 1.49 45.24 428.00",
+    ])[0]
+    assert "DRIVE COMPONENTS" in bare["tags"]
+    assert bare["attributes"]["belt"] == "B116"
+    assert bare["attributes"]["drive_sheave_bushing"] == "3B5V80 B"
+    assert bare["attributes"]["driven_sheave_bushing"] == "3B5V94 B"
+
+
 def test_data_branch_noise_skipped():
     lines = [
         "ADDITIONAL FEATURES",
@@ -455,6 +546,9 @@ def test_data_branch_noise_skipped():
         "Product 7,623.00",
         "Prints",
         "Warranty Exclusive 3 Year",
+        "Paymode-X invoice processing system N 52.00",
+        "Includes Paymode-X invoice processing system",
+        "be necessary. For more information on this process, contact Chicago Blower.",
         "Additional Shipping Notes must use BOL provided by CH Robinson",
         "Do Not Stack sticker on all 4 sides of skid",
         "Drive L 100.00",
@@ -463,6 +557,13 @@ def test_data_branch_noise_skipped():
     assert "DRIVE" in items
     for bad in ("PRODUCT", "PRINTS", "WARRANTY", "SHIPPING NOTES", "DO NOT STACK"):
         assert not any(bad in n for n in items), items
+
+
+def test_used_on_requires_damper_context():
+    flange = li.extract_items(["Outlet, Flanged, Punched L STD"])[0]
+    assert "used_on" not in flange["attributes"]
+    damper = li.extract_items(["Outlet Damper, Opposed L 100.00"])[0]
+    assert damper["attributes"]["used_on"] == "OUTLET DAMPER"
 
 
 def test_tag_counts():

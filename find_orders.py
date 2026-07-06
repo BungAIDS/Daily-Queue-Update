@@ -61,9 +61,25 @@ def _print_hits(hits: List[Dict[str, Any]], terms: List[str] | None = None,
         for it in h["matches"]:
             tags = ", ".join(it.get("tags") or []) or "-"
             print(f"    [{tags}]  {it['raw']}")
+            attrs = _attrs_label(it)
+            if attrs:
+                print(f"        attrs: {attrs}")
             for d in it.get("details") or []:
                 if all_details or any(t in d.upper() for t in terms_u):
                     print(f"        · {d}")
+
+
+def _attrs_label(item: Dict[str, Any]) -> str:
+    attrs = item.get("attributes") or {}
+    if not isinstance(attrs, dict):
+        return ""
+    keys = [
+        "component", "used_on", "vendor", "product", "manufacturer", "model", "size",
+        "operation", "supplied_by", "mounting", "fail_power", "fail_signal",
+        "belt_qty", "belt", "drive_sheave_bushing", "driven_sheave_bushing",
+        "actual_sf", "actual_cd", "service_factor", "center_distance_range",
+    ]
+    return "; ".join(f"{k}={attrs[k]}" for k in keys if attrs.get(k))
 
 
 def _print_untagged_audit(store: Dict[str, Any], limit: int) -> None:
@@ -99,7 +115,7 @@ def write_xlsx(hits: List[Dict[str, Any]], path: Path,
     header_font = Font(color="FFFFFF", bold=True)
     link_font = Font(color="0563C1", underline="single")
 
-    headers = ["Job #", "Customer", "CO#", "Tags", "Item (as printed)",
+    headers = ["Job #", "Customer", "CO#", "Tags", "Attributes", "Item (as printed)",
                "Normalized", "Details", "Qty", "Price", "Section", "SO PDF"]
     wb = Workbook()
     ws = wb.active
@@ -117,14 +133,15 @@ def write_xlsx(hits: List[Dict[str, Any]], path: Path,
             ws.cell(row, 2, h.get("customer", ""))
             ws.cell(row, 3, co)
             ws.cell(row, 4, ", ".join(it.get("tags") or []))
-            ws.cell(row, 5, it.get("raw", ""))
-            ws.cell(row, 6, it.get("norm", ""))
-            ws.cell(row, 7, " ; ".join(it.get("details") or []))
-            ws.cell(row, 8, it.get("qty", ""))
-            ws.cell(row, 9, it.get("price", ""))
-            ws.cell(row, 10, it.get("section", ""))
+            ws.cell(row, 5, _attrs_label(it))
+            ws.cell(row, 6, it.get("raw", ""))
+            ws.cell(row, 7, it.get("norm", ""))
+            ws.cell(row, 8, " ; ".join(it.get("details") or []))
+            ws.cell(row, 9, it.get("qty", ""))
+            ws.cell(row, 10, it.get("price", ""))
+            ws.cell(row, 11, it.get("section", ""))
             if h.get("so_pdf"):
-                cell = ws.cell(row, 11, "Open")
+                cell = ws.cell(row, 12, "Open")
                 cell.hyperlink = h["so_pdf"]
                 cell.font = link_font
             row += 1
