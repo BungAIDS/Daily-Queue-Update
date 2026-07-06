@@ -14,6 +14,7 @@ says "SS SHAFT SLEEVE".
                                                # or as --fuzzy=0.8)
     python find_orders.py --job 421314         # one job's stored items
     python find_orders.py --list-tags          # live tag vocabulary + counts
+    python find_orders.py --audit-untagged     # names current rules still miss
     python find_orders.py shaft seal --xlsx    # ...write matches to Excel too
     python find_orders.py --xlsx               # full inventory workbook:
                                                # "Line Items" (row per item,
@@ -63,6 +64,23 @@ def _print_hits(hits: List[Dict[str, Any]], terms: List[str] | None = None,
             for d in it.get("details") or []:
                 if all_details or any(t in d.upper() for t in terms_u):
                     print(f"        · {d}")
+
+
+def _print_untagged_audit(store: Dict[str, Any], limit: int) -> None:
+    rows = li.audit_untagged(store, limit=limit)
+    if not rows:
+        print(f"Current rules tag every stored normalized item. ({_store_stats(store)})")
+        return
+    w = max(len(r["norm"]) for r in rows)
+    print(f"Top {len(rows)} normalized item name(s) current rules still do not tag")
+    print(f"({'after re-deriving names/tags from stored raw text'}; {_store_stats(store)})")
+    print(f"{'COUNT':>5}  {'NORMALIZED'.ljust(min(w, 72))}  JOBS  AI")
+    for r in rows:
+        norm = r["norm"]
+        shown = norm if len(norm) <= 72 else norm[:69] + "..."
+        jobs = ",".join(r.get("jobs") or [])
+        ai = ", ".join(r.get("ai_tags") or [])
+        print(f"{r['count']:5d}  {shown.ljust(min(w, 72))}  {jobs}  {ai}")
 
 
 def write_xlsx(hits: List[Dict[str, Any]], path: Path,
@@ -193,6 +211,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="Also accept close (typo) matches; optional ratio 0-1, default 0.84.")
     ap.add_argument("--job", default="", help="Show the stored items for one job number.")
     ap.add_argument("--list-tags", action="store_true", help="List the tag vocabulary with counts.")
+    ap.add_argument("--audit-untagged", action="store_true",
+                    help="List the most common normalized item names current rules still do not tag.")
+    ap.add_argument("--audit-limit", type=int, default=50,
+                    help="How many --audit-untagged rows to print (0 = all; default 50).")
     ap.add_argument("--xlsx", nargs="?", const=str(XLSX_DEFAULT), default="", metavar="PATH",
                     help=f"Write the result (or, with no filters, the full inventory) to Excel: "
                          f"a per-item sheet + a green-✓/red jobs-x-features matrix "
@@ -216,6 +238,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         for t, n_jobs, n_items in counts:
             print(f"{t.ljust(w)}  {n_jobs:6d}  {n_items:5d}")
         print(f"\n({_store_stats(store)})")
+        return 0
+
+    if args.audit_untagged:
+        _print_untagged_audit(store, args.audit_limit)
         return 0
 
     if args.job:

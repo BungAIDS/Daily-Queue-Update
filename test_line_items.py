@@ -291,6 +291,8 @@ def test_normalization_converges_variants():
     c = li.normalize_text("S/S SHAFT SLEEVE - N/C")
     assert a == b == c == "STAINLESS STEEL SHAFT SLEEVE", (a, b, c)
     assert li.normalize_text("316SS sleeve") == "316 STAINLESS STEEL SLEEVE"
+    assert li.normalize_text("SST exterior") == "STAINLESS STEEL EXTERIOR"
+    assert li.normalize_text("Wheel Aluminium AMCA B") == "WHEEL ALUMINUM AMCA B"
     # "EXT" stays unexpanded (ambiguous with EXTERIOR) — the tag converges both.
     assert "EXTENDED LUBE" in li.tag_item(li.normalize_text("EXT LUBE LINES W/ ZERKS"))
     assert "EXTENDED LUBE" in li.tag_item(li.normalize_text("Extended lube lines w/ zerks"))
@@ -304,6 +306,22 @@ def test_tagging():
     assert "STAINLESS STEEL" in li.tag_item(li.normalize_text("316SS wheel"))
     assert "COATING" in li.tag_item("EPOXY COATED INTERIOR AND EXTERIOR")
     assert "VIBRATION ISOLATION" in li.tag_item("VIBRATION ISOLATORS RUBBER IN SHEAR")
+    assert "V-BELT DRIVE" in li.tag_item(li.normalize_text("Drive"))
+    assert "VIBRATION ISOLATION" in li.tag_item(li.normalize_text("Vibration Base"))
+    assert "INLET VANES" in li.tag_item(li.normalize_text("Inlet Volume Control Automatic"))
+    assert "COATING" in li.tag_item(li.normalize_text("Passivation of Welds"))
+    assert "LINING" in li.tag_item(li.normalize_text("Firmex liners on blades and housing scroll"))
+    assert "EXTENDED LUBE" in li.tag_item(li.normalize_text("Extended Grease Leads"))
+    assert "FLEXIBLE COUPLING" in li.tag_item(li.normalize_text("Flexible Coupling Falk Type T Steelflex"))
+    assert "ALUMINUM" in li.tag_item(li.normalize_text("Wheel Aluminium AMCA B"))
+    assert "WHEEL" in li.tag_item(li.normalize_text("Percent Width 78.7%"))
+    assert "LIFTING LUGS" in li.tag_item(li.normalize_text("Lifting Lugs"))
+    assert "NAMEPLATE" in li.tag_item(li.normalize_text("Fan Nameplate without Chicago Blower Name"))
+    assert "PACKAGING" in li.tag_item(li.normalize_text("ISPM Wood Inspection Stamp"))
+    assert "SHIPPING" in li.tag_item(li.normalize_text("Ship Loose Freight Included"))
+    assert "CHARGE" in li.tag_item(li.normalize_text("Change Order Charge Inquiry Num"))
+    assert "SPECIAL CONSTRUCTION" in li.tag_item(li.normalize_text("Tie Rod Support"))
+    assert "SPECIAL CONSTRUCTION" in li.tag_item(li.normalize_text("Loc Tite on the set screw threads"))
     assert li.tag_item("SOMETHING NOBODY EVER ORDERED") == []
 
 
@@ -387,16 +405,26 @@ def test_search_fuzzy():
 
 
 def test_ai_cache_applied():
-    store = _seeded_store()
+    store = li.load_store(Path("/nonexistent/line_items.json"))
+    items = li.extract_items(["Mystery Option L 12.00"])
+    li.record_job(store, "421314", items)
     rec = store["jobs"]["421314"]
-    # The BASE FAN line carries no rule tag -> it's offered to the AI pass.
-    it = next(i for i in rec["items"] if not i["tags"])
+    it = rec["items"][0]
     assert it["norm"] in li.unknown_norms(store)
     store["ai_tags"][it["norm"]] = ["BASE FAN"]
     li.apply_ai_cache(rec["items"], store)
     assert "BASE FAN" in it["tags"]
     # Once cached it's never sent to the API again.
     assert it["norm"] not in li.unknown_norms(store)
+
+
+def test_ai_cache_does_not_override_current_rules():
+    store = li.load_store(Path("/nonexistent/line_items.json"))
+    items = li.extract_items(["Base Fan L 900.00"])
+    assert items[0]["tags"] == ["BASE FAN"]
+    store["ai_tags"][items[0]["norm"]] = ["UNITARY BASE"]
+    li.apply_ai_cache(items, store)
+    assert items[0]["tags"] == ["BASE FAN"]
 
 
 def test_renormalize_uses_current_rules():
@@ -408,6 +436,33 @@ def test_renormalize_uses_current_rules():
     assert n >= len(store["jobs"]["421314"]["items"])
     norms = [it["norm"] for it in store["jobs"]["421314"]["items"]]
     assert "STAINLESS STEEL SHAFT SLEEVE" in norms, norms
+
+
+def test_audit_untagged_uses_current_rules():
+    store = li.load_store(Path("/nonexistent/line_items.json"))
+    items = li.extract_items(["Drive L 100.00", "Mystery Option L 12.00"])
+    items.append({"raw": "Product:", "norm": "PRODUCT", "qty": "", "price": "",
+                  "ptype": "", "section": "", "details": [], "tags": []})
+    li.record_job(store, "421000", items)
+    rows = li.audit_untagged(store)
+    assert [r["norm"] for r in rows] == ["MYSTERY OPTION"], rows
+
+
+def test_data_branch_noise_skipped():
+    lines = [
+        "ADDITIONAL FEATURES",
+        "Product:",
+        "Product 7,623.00",
+        "Prints",
+        "Warranty Exclusive 3 Year",
+        "Additional Shipping Notes must use BOL provided by CH Robinson",
+        "Do Not Stack sticker on all 4 sides of skid",
+        "Drive L 100.00",
+    ]
+    items = {it["norm"]: it for it in li.extract_items(lines)}
+    assert "DRIVE" in items
+    for bad in ("PRODUCT", "PRINTS", "WARRANTY", "SHIPPING NOTES", "DO NOT STACK"):
+        assert not any(bad in n for n in items), items
 
 
 def test_tag_counts():

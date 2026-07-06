@@ -73,7 +73,9 @@ DEFAULT_RULES: Dict[str, Any] = {
     "abbreviations": {
         "W/": "WITH", "W/O": "WITHOUT", "C/W": "COMPLETE WITH",
         "SS": "STAINLESS STEEL", "S/S": "STAINLESS STEEL",
-        "STL": "STEEL", "GALV": "GALVANIZED", "ALUM": "ALUMINUM",
+        "SST": "STAINLESS STEEL", "STL": "STEEL",
+        "GALV": "GALVANIZED", "ALUM": "ALUMINUM",
+        "ALUMINIUM": "ALUMINUM",
         "CONST": "CONSTRUCTION", "CONSTR": "CONSTRUCTION",
         "ARR": "ARRANGEMENT", "ARRG": "ARRANGEMENT", "ARRGT": "ARRANGEMENT",
         "ASSY": "ASSEMBLY", "MTR": "MOTOR", "TEMP": "TEMPERATURE",
@@ -107,6 +109,23 @@ DEFAULT_RULES: Dict[str, Any] = {
         r"^sales\s+office\b", r"^splits?\b",
         r"list\s+price", r"multiplier", r"^unit\s+price", r"^price\s+each",
         r"^discount\b", r"^see\s+(additional|special)\b",
+        r"^warranty\b", r"^commission\s+override\b",
+        r"^prints?\s*$", r"^product\s*:?\s*$", r"^product\s+\$?\d",
+        # Shipping/admin notes can appear inside Additional Features / Notes;
+        # keep them out of the item inventory while preserving real ship-loose
+        # priced rows.
+        r"^additional\s+shipping\s+notes?\b", r"^traffic\s+note\b",
+        r"shipping\s+barcode", r"do\s+not\s+stack", r"no\s+metal\s+banding",
+        r"^order\s+is\s+shipping\s+overseas\b", r"^customer\s+broker\b",
+        r"^standard\s+address\b", r"^https?\b", r"^ispm\s+wood\b",
+        r"^(last\s+choice\s+)?(fedex|ups)\b", r"^please\s+send\b",
+        r"^if\s+the\s+shipment\b", r"^lbs\.?\s+contact\b",
+        r"^above\s+email\s+after\b", r"^as\s+well\b",
+        r"^appointment\s+required\b", r"^for\s+(orders|packages)\b",
+        r"^with\s+a\s+ship\s+date\b", r"^contact\s*$",
+        r"^must\s+(appear|be)\b", r"^paymode\s+x\b", r"^includes\s+paymode\s+x\b",
+        r"^reference\s+sn\b", r"\bppap\b", r"^kindly\s+note\b",
+        r"^please\s+confirm\b",
         # Drawings-distribution checklist (trails the Notes section).
         r"^fan\s+drawings?\b", r"^motor\s+prints?\b", r"^motor\s+data\s+sheets?\b",
         r"^buyout\s+prints?\b", r"^emailed\b", r"^mailed\b", r"^o\s*&\s*m\b",
@@ -129,24 +148,34 @@ DEFAULT_RULES: Dict[str, Any] = {
     # Canonical feature tags: tag -> regexes matched against the NORMALIZED
     # text + details of an item. An item can carry several.
     "tags": {
+        "BASE FAN": [r"^base\s+fan\b"],
         "SPARK RESISTANT": [r"spark"],
         "SHAFT SEAL": [r"shaft\s*seal", r"stuffing\s*box", r"lip\s*seal",
                        r"ceramic\s*felt"],
         "SHAFT SLEEVE": [r"shaft\s*sleeve"],
         "SHAFT COOLER": [r"shaft\s*cooler", r"heat\s*slinger"],
         "STAINLESS STEEL": [r"stainless", r"\b304L?\b", r"\b316L?\b"],
+        "ALUMINUM": [r"aluminum", r"aluminium"],
         "HIGH TEMPERATURE": [r"high\s*temp", r"heat\s*fan"],
         "HEAVY DUTY": [r"heavy\s*duty"],
         "COATING": [r"epoxy", r"\bcoat", r"galvaniz", r"paint", r"primer",
-                    r"plasite", r"heresite", r"\bzinc\b"],
-        "LINING": [r"rubber\s*lin", r"\blined\b", r"\blining\b", r"abrasion"],
+                    r"plasite", r"heresite", r"\bzinc\b", r"passivat"],
+        "LINING": [r"rubber\s*lin", r"\blined\b", r"\blining\b", r"abrasion",
+                   r"firmex"],
         "INSULATION": [r"insulat"],
         "VIBRATION ISOLATION": [r"isolat", r"rubber[\s-]*in[\s-]*shear",
-                                r"\bRIS\b", r"spring\s*mount", r"seismic"],
+                                r"\bRIS\b", r"spring\s*mount", r"seismic",
+                                r"vibration\s*base"],
         "VIBRATION SWITCH": [r"vibration\s*(switch|detector|monitor|sensor)"],
-        "DAMPER": [r"damper", r"backdraft"],
+        "DAMPER": [r"damper", r"backdraft", r"volume\s*control"],
         "INLET VANES": [r"inlet\s*vane", r"\bVIV\b", r"\bIVC\b",
-                        r"variable\s*inlet"],
+                        r"variable\s*inlet", r"inlet\s*volume\s*control"],
+        "INLET": [r"\binlet\s+(open|slip|bell|cone|box|tube|flanged|punched)",
+                  r"\binlet\s+direction"],
+        "OUTLET": [r"\boutlet\s+(open|slip|flanged|punched|pressure\s*tap|volume\s*control)",
+                   r"\bdischarge\s+elbow"],
+        "WHEEL": [r"\bwheel\b", r"\bpercent\s+width\b", r"%\s*width\b"],
+        "HOUSING": [r"\bhousing\b"],
         "SILENCER": [r"silencer", r"muffler", r"sound\s*atten"],
         "ACCESS DOOR": [r"access\s*door", r"inspection\s*door", r"clean\s*out",
                         r"quick\s*open"],
@@ -156,19 +185,40 @@ DEFAULT_RULES: Dict[str, Any] = {
         "SCREEN": [r"\bscreen"],
         "FLANGE": [r"flange"],
         "FLEX CONNECTOR": [r"flex(ible)?\s*conn", r"expansion\s*joint"],
+        "FLEXIBLE COUPLING": [r"flexible\s*coupling", r"steelflex",
+                              r"thomas\s+series"],
         "UNITARY BASE": [r"unitary\s*base", r"structural\s*(steel\s*)?base",
                          r"channel\s*base"],
         "BEARINGS": [r"bearing"],
+        "LIFTING LUGS": [r"lifting\s*lugs?"],
+        "NAMEPLATE": [r"nameplate"],
+        "PACKAGING": [r"\bcrate\b", r"\bcrating\b", r"shrink\s*wrap",
+                      r"\bskid\b", r"ispm\s*wood", r"do\s*not\s*stack",
+                      r"metal\s*banding"],
+        "SHIPPING": [r"ship\s*loose", r"freight\s*included", r"\bshipping\b"],
+        "WARRANTY": [r"warranty"],
+        "CHARGE": [r"\bcharge\b", r"\bfee\b", r"slow\s*pay\s*addition"],
+        "MOUNTING": [r"\bmounting\b", r"\bmounted\b", r"\bcbc\s*mount\b"],
+        "SPECIAL CONSTRUCTION": [r"set\s*screws?", r"loc\s*tite", r"caulking",
+                                 r"\bwelding\b", r"tie\s*rod\s*support",
+                                 r"buffer\s*tube", r"cast\s*hub",
+                                 r"plug\s*panel", r"pressure\s*tap",
+                                 r"\bconduit\b", r"\boverhang\b",
+                                 r"effective\s*diameter", r"threaded\s*plug",
+                                 r"hole\s*diameters?"],
+        "DRAWINGS": [r"\bcertified\s*drawings?\b", r"\bprints?\b",
+                     r"\bdrawings?\b"],
         "EXTENDED LUBE": [r"ext(ended)?\s*lube", r"lube\s*line", r"grease\s*line",
-                          r"grease\s*fitting"],
+                          r"grease\s*fitting", r"grease\s*leads?"],
         "MOTOR": [r"\bmotor\b"],
         "VFD": [r"\bVFD\b", r"variable\s*freq", r"inverter"],
         "EXPLOSION PROOF": [r"explosion\s*proof", r"class\s*i+\b.*div"],
-        "V-BELT DRIVE": [r"v[\s-]*belt", r"sheave", r"bushing", r"drive\s*set"],
+        "V-BELT DRIVE": [r"^drive(?:\s*;|$)", r"v[\s-]*belt", r"sheave",
+                         r"bushing", r"drive\s*set"],
         "BALANCE": [r"balanc"],
         "TESTING": [r"witness", r"\btest"],
         "SPARE PARTS": [r"spare"],
-        "3D STEP DRAWINGS": [r"3d\s+step"],
+        "3D STEP DRAWINGS": [r"3d\s+(step\s+)?drawings?"],
     },
 }
 
@@ -312,6 +362,19 @@ def tag_item(norm: str, rules: Dict[str, Any] | None = None) -> List[str]:
     norm + normalized details to let an item's detail block contribute)."""
     rules = rules or load_rules()
     return sorted(t for t, pats in rules["tags"].items() if any(p.search(norm) for p in pats))
+
+
+def derive_item_fields(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """Re-derive normalized fields for a stored item without mutating it."""
+    rules = rules or load_rules()
+    body, qty = split_lead(item.get("raw", ""))
+    body, price = split_price_tail(body)
+    body, ptype, mark = split_type_tail(body)
+    norm = normalize_text(body, rules)
+    probe = dict(item)
+    probe["norm"] = norm
+    tags = tag_item(_taggable_text(probe, rules), rules)
+    return {"norm": norm, "qty": qty, "price": price or mark, "ptype": ptype, "tags": tags}
 
 
 # --------------------------------------------------------------------------- #
@@ -506,12 +569,37 @@ def save_store(store: Dict[str, Any], path: Path | None = None) -> None:
 
 
 def apply_ai_cache(items: List[Dict[str, Any]], store: Dict[str, Any]) -> None:
-    """Merge cached Claude classifications into each item's tags (in place)."""
+    """Fill still-untagged items from cached Claude classifications in place."""
     ai = store.get("ai_tags") or {}
     for it in items:
         extra = ai.get(it.get("norm", ""))
-        if extra:
-            it["tags"] = sorted(set(it.get("tags") or []) | set(extra))
+        if extra and not it.get("tags"):
+            it["tags"] = sorted(set(extra))
+
+
+def audit_untagged(store: Dict[str, Any], limit: int = 50) -> List[Dict[str, Any]]:
+    """Most common normalized items that current rules still keep but do not tag."""
+    rules = load_rules(refresh=True)
+    ai = store.get("ai_tags") or {}
+    rows: Dict[str, Dict[str, Any]] = {}
+    for job, rec in (store.get("jobs") or {}).items():
+        for item in rec.get("items") or []:
+            raw = str(item.get("raw", "")).strip()
+            if any(p.search(raw) for p in rules["skip"]):
+                continue
+            derived = derive_item_fields(item, rules)
+            norm = derived["norm"]
+            if not norm or derived["tags"]:
+                continue
+            row = rows.setdefault(norm, {"norm": norm, "count": 0, "jobs": [], "ai_tags": []})
+            row["count"] += 1
+            if len(row["jobs"]) < 5:
+                row["jobs"].append(str(job))
+            for tag in ai.get(norm) or []:
+                if tag not in row["ai_tags"]:
+                    row["ai_tags"].append(tag)
+    out = sorted(rows.values(), key=lambda r: (-r["count"], r["norm"]))
+    return out[:limit] if limit else out
 
 
 def record_job(store: Dict[str, Any], job: str, items: List[Dict[str, Any]],
@@ -700,15 +788,16 @@ def renormalize_store(store: Dict[str, Any]) -> int:
     n = 0
     for rec in (store.get("jobs") or {}).values():
         for it in rec.get("items") or []:
-            body, qty = split_lead(it.get("raw", ""))
-            body, price = split_price_tail(body)
-            body, ptype, mark = split_type_tail(body)
-            it["norm"] = normalize_text(body, rules)
-            it["tags"] = tag_item(_taggable_text(it, rules), rules)
+            derived = derive_item_fields(it, rules)
+            it["norm"] = derived["norm"]
+            it["tags"] = derived["tags"]
+            qty = derived["qty"]
+            price = derived["price"]
+            ptype = derived["ptype"]
             if qty and not it.get("qty"):
                 it["qty"] = qty
-            if (price or mark) and not it.get("price"):
-                it["price"] = price or mark
+            if price and not it.get("price"):
+                it["price"] = price
             if ptype and not it.get("ptype"):
                 it["ptype"] = ptype
             n += 1
