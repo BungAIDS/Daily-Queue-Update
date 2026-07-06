@@ -603,6 +603,18 @@ def test_used_on_requires_damper_context():
     assert discharge["attributes"]["used_on"] == "OUTLET DAMPER"
 
 
+def test_standalone_actuator_used_on_review():
+    actuator = li.extract_items([
+        "Bettis #RPED150 Double Acting Pneumatic Actuator C 6,537.14 1,046.00",
+        "Vendor: Novaspect",
+        "Product: Actuator",
+    ])[0]
+    attrs = actuator["attributes"]
+    assert attrs["component"] == "ACTUATOR"
+    assert "used_on" not in attrs
+    assert attrs["used_on_review"] == "INCONCLUSIVE - INLET/OUTLET/PRESPIN/IVC"
+
+
 def test_tag_counts():
     store = _seeded_store()
     counts = {t: (j, i) for t, j, i in li.tag_counts(store)}

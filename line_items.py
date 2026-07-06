@@ -456,6 +456,18 @@ def _used_on(norm_blob: str) -> str:
     return ""
 
 
+def _needs_used_on_review(norm_blob: str, attrs: Dict[str, str]) -> bool:
+    if attrs.get("used_on"):
+        return False
+    if attrs.get("product", "").upper() == "ACTUATOR":
+        return True
+    if attrs.get("model") or attrs.get("manufacturer"):
+        return True
+    if re.search(r"\b(BETTIS|UNIC|EMERSON|ACTUATOR\s*:?)\b", norm_blob, re.I):
+        return True
+    return False
+
+
 def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Dict[str, str]:
     """Structured fan-component details pulled from raw text + detail lines."""
     rules = rules or load_rules()
@@ -506,6 +518,8 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
                     or "")
             if size:
                 attrs["size"] = size.upper()
+        if _needs_used_on_review(norm_blob, attrs):
+            attrs["used_on_review"] = "INCONCLUSIVE - INLET/OUTLET/PRESPIN/IVC"
 
     is_drive = bool({"V-BELT DRIVE", "DRIVE COMPONENTS"} & tags)
     if is_drive:
