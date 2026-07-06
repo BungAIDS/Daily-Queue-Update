@@ -216,7 +216,8 @@ def test_real_so_ivd_and_buyout_tagging():
     # The flanged expansion-joint buyouts tag FLEX CONNECTOR via "Product:".
     items473 = {it["norm"]: it for it in li.extract_items(REAL_LINES_473)}
     assert "FLEX CONNECTOR" in items473["INLET FLANGED"]["tags"]
-    assert "EXTENDED LUBE" in items473["EXTENDED GREASE FITTINGS"]["tags"]
+    assert {"BEARINGS", "MOTOR"} <= set(items473["EXTENDED GREASE FITTINGS"]["tags"])
+    assert "EXTENDED LUBE" not in items473["EXTENDED GREASE FITTINGS"]["tags"]
     assert "HEAVY DUTY" in items473["HOUSING HEAVY DUTY"]["tags"]
     assert "3D STEP DRAWINGS" in items473["INCLUDE 3D STEP DRAWINGS"]["tags"]
 
@@ -242,7 +243,7 @@ def test_priced_lines_captured():
 
 def test_section_lines_captured_unpriced():
     items = {it["norm"]: it for it in li.extract_items(SO_LINES)}
-    assert any("EXTENDED LUBE" in n for n in items), items.keys()
+    assert any("ZERK FITTINGS" in n for n in items), items.keys()
     assert any("VIBRATION ISOLATORS" in n for n in items), items.keys()
     it = next(v for n, v in items.items() if "ACCESS DOOR" in n)
     assert it["section"] == "ADDITIONAL FEATURES"
@@ -297,9 +298,8 @@ def test_normalization_converges_variants():
     assert li.normalize_text("316LSS housing") == "316L STAINLESS STEEL HOUSING"
     assert li.normalize_text("SST exterior") == "STAINLESS STEEL EXTERIOR"
     assert li.normalize_text("Wheel Aluminium AMCA B") == "WHEEL ALUMINUM AMCA B"
-    # "EXT" stays unexpanded (ambiguous with EXTERIOR) — the tag converges both.
-    assert "EXTENDED LUBE" in li.tag_item(li.normalize_text("EXT LUBE LINES W/ ZERKS"))
-    assert "EXTENDED LUBE" in li.tag_item(li.normalize_text("Extended lube lines w/ zerks"))
+    # "EXT" stays unexpanded (ambiguous with EXTERIOR).
+    assert li.normalize_text("EXT LUBE LINES W/ ZERKS") == "EXT LUBE LINES WITH ZERKS"
     assert li.normalize_text("W/DRAIN") == "WITH DRAIN"
 
 
@@ -316,7 +316,6 @@ def test_tagging():
     assert "INLET VANES" in li.tag_item(li.normalize_text("Inlet Volume Control Automatic"))
     assert "COATING" in li.tag_item(li.normalize_text("Passivation of Welds"))
     assert "LINING" in li.tag_item(li.normalize_text("Firmex liners on blades and housing scroll"))
-    assert "EXTENDED LUBE" in li.tag_item(li.normalize_text("Extended Grease Leads"))
     assert "FLEXIBLE COUPLING" in li.tag_item(li.normalize_text("Flexible Coupling Falk Type T Steelflex"))
     assert "ALUMINUM" in li.tag_item(li.normalize_text("Wheel Aluminium AMCA B"))
     assert "MATERIALS" in li.tag_item(li.normalize_text("Wheel Aluminium AMCA B"))
@@ -689,8 +688,28 @@ def test_shaft_bearing_guard_tag_uses_primary_line():
         "Num: 6-5-1551",
         "Size 16-1/2 Shaft and Bearing Guard, Inquiry Num: L -940.00",
     ])[0]
-    assert "EXTENDED LUBE" in grease["tags"]
+    assert "BEARINGS" in grease["tags"]
+    assert "MOTOR" not in grease["tags"]
+    assert "EXTENDED LUBE" not in grease["tags"]
     assert "SHAFT/BEARING/COUPLING GUARD" not in grease["tags"]
+
+
+def test_lube_accessories_map_to_bearing_or_motor():
+    assert "EXTENDED LUBE" not in li.load_rules(refresh=True)["tags"]
+
+    unknown = li.extract_items(["Extended Lube Lines with Zerk Fittings L 100.00"])[0]
+    assert {"BEARINGS", "MOTOR"} <= set(unknown["tags"])
+
+    motor = li.extract_items(["Motor Grease Lines L 100.00"])[0]
+    assert "MOTOR" in motor["tags"]
+    assert "BEARINGS" not in motor["tags"]
+
+    bearing = li.extract_items(["Extended Grease Leads to Fan Bearings L 100.00"])[0]
+    assert "BEARINGS" in bearing["tags"]
+    assert "MOTOR" not in bearing["tags"]
+
+    both = li.extract_items(["Motor Bearing Grease Fittings L 100.00"])[0]
+    assert {"BEARINGS", "MOTOR"} <= set(both["tags"])
 
 
 def test_paint_line_does_not_become_component_tags():
@@ -870,7 +889,7 @@ def test_pdf_roundtrip(tmp: Path):
     res = parse_sales_order_pdf(pdf)
     norms = [it["norm"] for it in res["line_items"]]
     assert any("SPARK RESISTANT" in n for n in norms), norms
-    assert any("EXTENDED LUBE" in n for n in norms), norms     # section capture
+    assert any("ZERK FITTINGS" in n for n in norms), norms     # section capture
     assert not any("TOTAL" in n for n in norms), norms
     assert res["co_history"] and "CO#1" in res["co_history"][0].replace(" ", "")
 

@@ -220,8 +220,6 @@ DEFAULT_RULES: Dict[str, Any] = {
         "INSPECTION": [r"\binspection\b", r"mill\s*certifications?"],
         "DRAWINGS": [r"\bcertified\s*drawings?\b", r"\bprints?\b",
                      r"\bdrawings?\b"],
-        "EXTENDED LUBE": [r"ext(ended)?\s*lube", r"lube\s*line", r"grease\s*line",
-                          r"grease\s*fitting", r"grease\s*leads?"],
         "MOTOR": [r"\bmotor\b"],
         "VFD": [r"\bVFD\b", r"variable\s*freq", r"inverter"],
         "EXPLOSION PROOF": [r"explosion\s*proof", r"class\s*i+\b.*div"],
@@ -243,6 +241,10 @@ _rules_cache: Dict[str, Any] | None = None
 _MATERIAL_TAGS = {"MATERIALS", "STAINLESS STEEL", "ALUMINUM"}
 _GUARD_TAG = "SHAFT/BEARING/COUPLING GUARD"
 _PAINT_SURFACE_TAGS = {"MOTOR", "UNITARY BASE", "WHEEL"}
+_LUBE_ACCESSORY = re.compile(
+    r"\b(EXTENDED\s+LUBE|LUBE\s+LINES?|GREASE\s+(LINES?|FITTINGS?|LEADS?)|ZERK\s+FITTINGS?)\b",
+    re.I,
+)
 
 
 def load_rules(path: str | Path | None = None, refresh: bool = False) -> Dict[str, Any]:
@@ -645,15 +647,30 @@ def _is_paint_line(primary: str) -> bool:
     return bool(re.match(r"^PAINT\b", primary, re.I))
 
 
+def _lube_component_tags(primary: str, norm_blob: str) -> List[str]:
+    if not (_LUBE_ACCESSORY.search(primary) or _LUBE_ACCESSORY.search(norm_blob)):
+        return []
+    tags: List[str] = []
+    if re.search(r"\bMOTOR\b", norm_blob, re.I):
+        _add_unique(tags, "MOTOR")
+    if re.search(r"\bBEARINGS?\b", norm_blob, re.I):
+        _add_unique(tags, "BEARINGS")
+    if not tags:
+        tags = ["BEARINGS", "MOTOR"]
+    return tags
+
+
 def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> List[str]:
     rules = rules or load_rules()
     tags = tag_item(_taggable_text(item, rules), rules)
     primary = _primary_norm(item, rules)
+    norm_blob = normalize_text(_item_blob(item), rules)
     if _GUARD_TAG in tags and not _is_shaft_bearing_guard_line(primary):
         tags = [t for t in tags if t != _GUARD_TAG]
     if "COATING" in tags and _is_paint_line(primary):
         tags = [t for t in tags if t not in _PAINT_SURFACE_TAGS]
-    norm_blob = normalize_text(_item_blob(item), rules)
+    for tag in _lube_component_tags(primary, norm_blob):
+        _add_unique(tags, tag)
     if _component_material_owner(item, _material_attributes(norm_blob), rules):
         tags = [t for t in tags if t not in _MATERIAL_TAGS]
     return sorted(tags)
