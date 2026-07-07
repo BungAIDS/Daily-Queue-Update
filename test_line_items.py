@@ -326,6 +326,7 @@ def test_tagging():
     assert "PACKAGING" in li.tag_item(li.normalize_text("ISPM Wood Inspection Stamp"))
     assert "SHIPPING" in li.tag_item(li.normalize_text("Ship Loose Freight Included"))
     assert "ACTUATOR" in li.tag_item(li.normalize_text("Actuator for IVC Bettis #RPED100"))
+    assert "3D STEP DRAWINGS" in li.tag_item(li.normalize_text("3D STEP File Drawings"))
     assert "DRIVE COMPONENTS" in li.tag_item(li.normalize_text("Motor Sheave/Bushing 3B5V74/B"))
     assert "V-BELT DRIVE" in li.tag_item(li.normalize_text("Drive (Max/Min RPM: 1531/1531, 3 belts: B112"))
     assert "SPECIAL CONSTRUCTION" in li.tag_item(li.normalize_text("Tie Rod Support"))
@@ -524,6 +525,10 @@ def test_drive_attributes():
     assert attrs["min_rpm"] == "1531"
     assert attrs["drive_sheave_bushing"] == '3B5V74/B (1 7/8")'
     assert attrs["driven_sheave_bushing"] == '3B5V86/B (2 3/16")'
+    assert attrs["drive_sheave"] == "3B5V74"
+    assert attrs["drive_bushing"] == 'B (1 7/8")'
+    assert attrs["driven_sheave"] == "3B5V86"
+    assert attrs["driven_bushing"] == 'B (2 3/16")'
     assert attrs["actual_sf"] == "1.31"
     assert attrs["actual_cd"] == "44.34"
     assert attrs["service_factor"] == "1.3"
@@ -544,8 +549,13 @@ def test_selected_drive_table_attributes():
     assert attrs["belt_qty"] == "3"
     assert attrs["drive_sheave_bushing"] == "3TB80 Q1"
     assert attrs["driven_sheave_bushing"] == "3B5V94 B"
+    assert attrs["drive_sheave"] == "3TB80"
+    assert attrs["drive_bushing"] == "Q1"
+    assert attrs["driven_sheave"] == "3B5V94"
+    assert attrs["driven_bushing"] == "B"
     assert attrs["actual_sf"] == "1.49"
     assert attrs["actual_cd"] == "45.24"
+    assert attrs["selected_drive"] == "YES"
     assert attrs["service_factor"] == "1.3"
     assert attrs["center_distance_range"] == "43.5 - 46.5"
     bare = li.extract_items([
@@ -556,6 +566,27 @@ def test_selected_drive_table_attributes():
     assert bare["attributes"]["drive_sheave_bushing"] == "3B5V80 B"
     assert bare["attributes"]["driven_sheave_bushing"] == "3B5V94 B"
 
+    compact = li.extract_items([
+        "*2567/2567 A52 1 AK46 AK30H H 1.25 21.14 99.00",
+        "Notes:",
+        "* Selected Drive",
+        "Motor conduit box in F1 position.",
+        "Specified minimum belt service factor: 1.2",
+        "Center Distance range assumes adjustable base per drawing 7-2-94.",
+    ])[0]
+    compact_attrs = compact["attributes"]
+    assert "DRIVE COMPONENTS" in compact["tags"]
+    assert "DRAWINGS" not in compact["tags"]
+    assert "MOTOR" not in compact["tags"]
+    assert "SPECIAL CONSTRUCTION" not in compact["tags"]
+    assert compact_attrs["selected_drive"] == "YES"
+    assert compact_attrs["drive_sheave"] == "AK46"
+    assert "drive_bushing" not in compact_attrs
+    assert compact_attrs["driven_sheave"] == "AK30H"
+    assert compact_attrs["driven_bushing"] == "H"
+    assert compact_attrs["actual_sf"] == "1.25"
+    assert compact_attrs["actual_cd"] == "21.14"
+
 
 def test_inquiry_number_attributes():
     items = {it["norm"]: it for it in li.extract_items([
@@ -565,9 +596,29 @@ def test_inquiry_number_attributes():
         "Base Fan (Base fan, Suitable for 3600rpm Motor, L 5,761.00",
         "Inquiry Num: 317-26-1510)",
     ])}
-    assert items["3D DRAWINGS INQUIRYNUM 333 25 1622"]["attributes"]["inquiry_num"] == "333-25-1622"
+    drawing_attrs = items["3D DRAWINGS INQUIRYNUM 333 25 1622"]["attributes"]
+    assert "3D STEP DRAWINGS" in items["3D DRAWINGS INQUIRYNUM 333 25 1622"]["tags"]
+    assert drawing_attrs["inquiry_num"] == "333-25-1622"
+    assert drawing_attrs["drawing_type"] == "3D STEP DRAWINGS"
+    assert drawing_attrs["drawing_scope"] == "3D FILE"
     assert items["ACCESS DOOR QUICK CLAMP 10 30 POSITION INQUIRY"]["attributes"]["inquiry_num"] == "352-23-2696"
     assert items["BASE FAN BASE FAN SUITABLE FOR 3600RPM MOTOR"]["attributes"]["inquiry_num"] == "317-26-1510"
+
+
+def test_drawing_note_attributes():
+    items = li.extract_items([
+        "Add COG and Weights to the fan drawing, Inquiry L",
+        "Num: 333-25-1622",
+        "Add BOM to fan drawing, Inquiry Num: 333-25-1622 L",
+        "Plan View on Customer Drawing, Inquiry Num: 333-25-1622 L",
+    ])
+    by_raw = {it["raw"]: it for it in items}
+    weights = by_raw["Add COG and Weights to the fan drawing, Inquiry L"]["attributes"]
+    assert weights["inquiry_num"] == "333-25-1622"
+    assert weights["drawing_type"] == "WEIGHTS/COG/LOADS"
+    assert weights["drawing_scope"] == "FAN"
+    assert by_raw["Add BOM to fan drawing, Inquiry Num: 333-25-1622 L"]["attributes"]["drawing_type"] == "BOM"
+    assert by_raw["Plan View on Customer Drawing, Inquiry Num: 333-25-1622 L"]["attributes"]["drawing_type"] == "PLAN VIEW/CUSTOMER DRAWING"
 
 
 def test_search_reaches_inquiry_attributes():
@@ -887,6 +938,7 @@ def test_data_branch_noise_skipped():
         "Product:",
         "Product 7,623.00",
         "Prints",
+        "Prints:",
         "Warranty Exclusive 3 Year",
         "Paymode-X invoice processing system N 52.00",
         "Includes Paymode-X invoice processing system",

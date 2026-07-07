@@ -112,7 +112,7 @@ DEFAULT_RULES: Dict[str, Any] = {
         r"^discount\b", r"^see\s+(additional|special)\b",
         r"^warranty\b", r"^commission\s+override\b",
         r"\b(charge|fee)\b",
-        r"^prints?\s*$", r"^product\s*:?\s*$", r"^product\s+\$?\d",
+        r"^prints?\s*:?\s*$", r"^product\s*:?\s*$", r"^product\s+\$?\d",
         # Shipping/admin notes can appear inside Additional Features / Notes;
         # keep them out of the item inventory while preserving real ship-loose
         # priced rows.
@@ -234,7 +234,7 @@ DEFAULT_RULES: Dict[str, Any] = {
                     r"welded\s+balance\s+weights?"],
         "TESTING": [r"witness", r"\btest"],
         "SPARE PARTS": [r"spare"],
-        "3D STEP DRAWINGS": [r"3d\s+(step\s+)?drawings?"],
+        "3D STEP DRAWINGS": [r"3d\s+(step\s+)?(file\s+)?drawings?"],
     },
 }
 
@@ -246,6 +246,7 @@ _MISC_NOTE_TAG = "MISC NOTE"
 _MISC_NOTE_COMPONENT_TAGS = {"WHEEL"}
 _BASE_FAN_DETAIL_TAGS = {"MOTOR", "MOUNTING"}
 _BELT_GUARD_DETAIL_TAGS = {"COATING", "MOUNTING", "MOTOR"}
+_DRIVE_TABLE_DETAIL_TAGS = {"DRAWINGS", "MOTOR", "SPECIAL CONSTRUCTION"}
 _ACCESSORY_COATING_TAGS = {
     "BELT GUARD", _GUARD_TAG, "MOTOR", "SILENCER", "FLEX CONNECTOR",
     "WEATHER COVER", "SCREEN",
@@ -508,6 +509,167 @@ _BALANCE_GRADE = re.compile(r"\bG\s*(\d+(?:\.\d+)?)\s+BALANCE\b", re.I)
 def _add_unique(values: List[str], value: str) -> None:
     if value and value not in values:
         values.append(value)
+
+
+def _drawing_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if not ({"DRAWINGS", "3D STEP DRAWINGS"} & tags):
+        return {}
+
+    attrs: Dict[str, str] = {}
+    types: List[str] = []
+    scopes: List[str] = []
+
+    def add_type(value: str) -> None:
+        _add_unique(types, value)
+
+    def add_scope(value: str) -> None:
+        _add_unique(scopes, value)
+
+    if "3D STEP DRAWINGS" in tags or re.search(r"\b3D\s+(STEP\s+)?(FILE\s+)?DRAWINGS?\b", norm_blob):
+        add_type("3D STEP DRAWINGS")
+    if re.search(r"\bCERTIFIED\s+DRAWINGS?\b", norm_blob):
+        add_type("CERTIFIED DRAWINGS")
+    if re.search(r"\b(UNCERTIFIED|PRELIMINARY)\s+DRAWINGS?\b", norm_blob):
+        add_type("PRELIMINARY DRAWINGS")
+    if re.search(r"\b(BILL\s+OF\s+MATERIALS|BOM)\b", norm_blob):
+        add_type("BOM")
+    if re.search(r"\bBUYOUT\b.*\b(PART\s+NUMBERS?|ITEMS?|DRAWINGS?)\b", norm_blob):
+        add_type("BUYOUT ITEMS")
+    if re.search(r"\b(COG|CENTER\s+OF\s+GRAVITY|WEIGHTS?|STATIC\s+AND\s+DYNAMIC\s+LOADS?)\b", norm_blob):
+        add_type("WEIGHTS/COG/LOADS")
+    if re.search(r"\b(WHEEL\s+REMOVAL\s+CLEARANCES?|LIFTING\s+LOCATIONS?|SUGGESTED\s+SCROLL\s+DIMENSIONS)\b",
+                 norm_blob):
+        add_type("CLEARANCES/LOCATIONS")
+    if re.search(r"\b(PLAN\s*VIEW|CUSTOMER\s+DRAWINGS?|MARKED\s+UP\s+CUSTOMER\s+DRAWINGS?)\b", norm_blob):
+        add_type("PLAN VIEW/CUSTOMER DRAWING")
+    if re.search(r"\b(REFERENCE\s+)?(?:CBC\s+)?OEM\s+DRAWINGS?\b", norm_blob):
+        add_type("OEM REFERENCE")
+    if re.search(r"\b(RED\s+MARK|LAST\s+SUBMITTED|REFERENCE\s+(?:CBC\s+)?DRAWINGS?)\b", norm_blob):
+        add_type("REFERENCE/REDMARK")
+    if re.search(r"\b(PROVIDE|INCLUDE)\b.*\b(DRAWING|WIRING\s+DIAGRAM|PERFORMANCE\s+DATA\s+SHEET|OMI)\b",
+                 norm_blob):
+        add_type("VENDOR DOCUMENTATION")
+    if re.search(r"\b(DRAWING\s+NOTES?|ADD\s+NOTES?\s+ON\s+THE\s+DRAWING|ON\s+DRAWINGS?\s+ADD)\b",
+                 norm_blob):
+        add_type("DRAWING NOTES")
+    if not types:
+        add_type("DRAWING NOTE")
+
+    if "3D STEP DRAWINGS" in types:
+        add_scope("3D FILE")
+    if re.search(r"\bFAN\b", norm_blob):
+        add_scope("FAN")
+    if "MOTOR" in tags or re.search(r"\bMOTOR\b", norm_blob):
+        add_scope("MOTOR")
+    if "FLEX CONNECTOR" in tags or re.search(r"\b(FLEX\s+CONNECTOR|EXPANSION\s+JOINT|EJ)\b", norm_blob):
+        add_scope("FLEX CONNECTOR")
+    if "SILENCER" in tags or re.search(r"\bSILENCER\b", norm_blob):
+        add_scope("SILENCER")
+    if "WHEEL" in tags or re.search(r"\bWHEEL\b", norm_blob):
+        add_scope("WHEEL")
+    if "INLET" in tags or re.search(r"\bINLET\b", norm_blob):
+        add_scope("INLET")
+    if "OUTLET" in tags or re.search(r"\bOUTLET\b", norm_blob):
+        add_scope("OUTLET")
+    if re.search(r"\bCUSTOMER\s+DRAWINGS?\b", norm_blob):
+        add_scope("CUSTOMER DRAWING")
+
+    attrs["drawing_type"] = ", ".join(types)
+    if scopes:
+        attrs["drawing_scope"] = ", ".join(scopes)
+    return attrs
+
+
+def _is_number_token(value: str) -> bool:
+    return bool(re.fullmatch(r"\d+(?:\.\d+)?", value))
+
+
+def _set_sheave_attrs(attrs: Dict[str, str], prefix: str, sheave: str, bushing: str = "") -> None:
+    sheave = sheave.strip(" ,;")
+    bushing = bushing.strip(" ,;")
+    if not sheave:
+        return
+    attrs[f"{prefix}_sheave"] = sheave
+    combo = sheave
+    if bushing:
+        attrs[f"{prefix}_bushing"] = bushing
+        combo = f"{sheave} {bushing}"
+    combo_key = "drive_sheave_bushing" if prefix == "drive" else "driven_sheave_bushing"
+    attrs.setdefault(combo_key, combo)
+
+
+def _set_sheave_attrs_from_text(attrs: Dict[str, str], prefix: str, value: str) -> None:
+    value = re.sub(r"\s+", " ", value).strip(" ,;")
+    if not value:
+        return
+    combo_key = "drive_sheave_bushing" if prefix == "drive" else "driven_sheave_bushing"
+    attrs[combo_key] = value
+
+    m = re.match(r"^(?P<sheave>[A-Z0-9]+)\s*/\s*(?P<bushing>.+)$", value, re.I)
+    if m:
+        _set_sheave_attrs(attrs, prefix, m.group("sheave"), m.group("bushing"))
+        return
+    parts = value.split()
+    if len(parts) >= 2:
+        _set_sheave_attrs(attrs, prefix, parts[0], " ".join(parts[1:]))
+    else:
+        _set_sheave_attrs(attrs, prefix, value)
+
+
+def _is_drive_table_line(primary: str) -> bool:
+    return bool(re.match(r"^\*?\s*\d{3,4}\s*/?\s+\d{3,4}\s+[A-Z]{1,3}\d+\s+\d+\b", primary, re.I))
+
+
+def _drive_table_attributes(item: Dict[str, Any]) -> Dict[str, str]:
+    raw = re.sub(r"\s+", " ", str(item.get("raw", ""))).strip()
+    tokens = raw.split()
+    attrs: Dict[str, str] = {}
+    if len(tokens) < 8:
+        return attrs
+
+    selected = False
+    rpm_token = tokens[0]
+    if rpm_token.startswith("*"):
+        selected = True
+        rpm_token = rpm_token.lstrip("*")
+    rpm_match = re.fullmatch(r"(\d{3,4})/(\d{3,4})", rpm_token)
+    if not rpm_match:
+        return attrs
+    if not re.fullmatch(r"[A-Z]{1,3}\d+", tokens[1], re.I) or not tokens[2].isdigit():
+        return attrs
+
+    if all(_is_number_token(tok) for tok in tokens[-3:]):
+        sf_index = len(tokens) - 3
+    elif all(_is_number_token(tok) for tok in tokens[-2:]):
+        sf_index = len(tokens) - 2
+    else:
+        return attrs
+
+    sheave_tokens = tokens[3:sf_index]
+    if len(sheave_tokens) < 2:
+        return attrs
+
+    attrs["drive_rpm"] = rpm_match.group(1)
+    attrs["driven_rpm"] = rpm_match.group(2)
+    attrs["belt"] = tokens[1].upper()
+    attrs["belt_qty"] = tokens[2]
+
+    if len(sheave_tokens) == 2:
+        _set_sheave_attrs(attrs, "drive", sheave_tokens[0])
+        _set_sheave_attrs(attrs, "driven", sheave_tokens[1])
+    elif len(sheave_tokens) == 3:
+        _set_sheave_attrs(attrs, "drive", sheave_tokens[0])
+        _set_sheave_attrs(attrs, "driven", sheave_tokens[1], sheave_tokens[2])
+    else:
+        _set_sheave_attrs(attrs, "drive", sheave_tokens[0], sheave_tokens[1])
+        _set_sheave_attrs(attrs, "driven", sheave_tokens[2], " ".join(sheave_tokens[3:]))
+
+    attrs["actual_sf"] = tokens[sf_index]
+    attrs["actual_cd"] = tokens[sf_index + 1]
+    blob = _item_blob(item)
+    if selected or re.search(r"\*\s*selected\s+drive\b", blob, re.I):
+        attrs["selected_drive"] = "YES"
+    return attrs
 
 
 def _balance_attributes(norm_blob: str) -> Dict[str, str]:
@@ -937,6 +1099,8 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t not in _BELT_GUARD_DETAIL_TAGS]
     elif _is_accessory_coating(primary, tag_set, norm_blob):
         tags = [t for t in tags if t != "COATING"]
+    if _is_drive_table_line(primary):
+        tags = [t for t in tags if t not in _DRIVE_TABLE_DETAIL_TAGS]
     if "COATING" in tags and _is_paint_line(primary):
         tags = [t for t in tags if t not in _PAINT_SURFACE_TAGS]
     if _is_assembly_note(primary):
@@ -962,6 +1126,7 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     inquiries = inquiry_numbers(item)
     if inquiries:
         attrs["inquiry_num"] = ", ".join(inquiries)
+    attrs.update(_drawing_attributes(primary, norm_blob, tags))
 
     vendor = _label_value(item, "Vendor")
     product = _label_value(item, "Product")
@@ -1038,8 +1203,8 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
         m = re.search(r"Motor\s+Sheave/Bushing:\s*(.*?)\s*,?\s*Fan\s+Sheave/Bushing:\s*(.*?)\s*,?\s*Actual\s+SF",
                       blob, re.I)
         if m:
-            attrs["drive_sheave_bushing"] = m.group(1).strip(" ,;")
-            attrs["driven_sheave_bushing"] = m.group(2).strip(" ,;")
+            _set_sheave_attrs_from_text(attrs, "drive", m.group(1))
+            _set_sheave_attrs_from_text(attrs, "driven", m.group(2))
         for label, key in (("Actual SF", "actual_sf"), ("Actual CD", "actual_cd")):
             m = re.search(rf"\b{re.escape(label)}\s*:\s*([0-9.]+)", blob, re.I)
             if m:
@@ -1055,21 +1220,8 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
         if m:
             attrs["center_distance_range"] = m.group(1)
 
-        tokens = blob.split()
-        if (len(tokens) >= 9 and re.fullmatch(r"\d{3,4}/\d{3,4}", tokens[0])
-                and re.fullmatch(r"[A-Z]{1,2}\d+", tokens[1], re.I)
-                and tokens[2].isdigit()):
-            rpms = tokens[0].split("/")
-            attrs.setdefault("drive_rpm", rpms[0])
-            attrs.setdefault("driven_rpm", rpms[1])
-            attrs.setdefault("belt", tokens[1].upper())
-            attrs.setdefault("belt_qty", tokens[2])
-            attrs.setdefault("drive_sheave_bushing", f"{tokens[3]} {tokens[4]}")
-            attrs.setdefault("driven_sheave_bushing", f"{tokens[5]} {tokens[6]}")
-            if re.fullmatch(r"\d+(?:\.\d+)?", tokens[7]):
-                attrs.setdefault("actual_sf", tokens[7])
-            if re.fullmatch(r"\d+(?:\.\d+)?", tokens[8]):
-                attrs.setdefault("actual_cd", tokens[8])
+        for key, value in _drive_table_attributes(item).items():
+            attrs.setdefault(key, value)
 
     return attrs
 

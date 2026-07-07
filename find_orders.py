@@ -75,6 +75,7 @@ def _attrs_label(item: Dict[str, Any]) -> str:
         return ""
     keys = [
         "inquiry_num", "note_type", "component", "used_on", "used_on_review", "vendor", "product",
+        "drawing_type", "drawing_scope",
         "material", "material_grade", "material_scope", "material_treatment",
         "component_material", "component_material_grade", "component_material_scope",
         "drain_type", "drain_closure", "drain_detail",
@@ -84,7 +85,8 @@ def _attrs_label(item: Dict[str, Any]) -> str:
         "balance_type", "balance_grade",
         "bearing_type", "bearing_bore",
         "manufacturer", "model", "size", "operation", "supplied_by", "mounting", "fail_power", "fail_signal",
-        "belt_qty", "belt", "drive_sheave_bushing", "driven_sheave_bushing",
+        "belt_qty", "belt", "selected_drive", "drive_sheave", "drive_bushing",
+        "driven_sheave", "driven_bushing", "drive_sheave_bushing", "driven_sheave_bushing",
         "actual_sf", "actual_cd", "service_factor", "center_distance_range",
     ]
     return "; ".join(f"{k}={attrs[k]}" for k in keys if attrs.get(k))
