@@ -75,6 +75,7 @@ def _attrs_label(item: Dict[str, Any]) -> str:
         return ""
     keys = [
         "inquiry_num", "note_type", "component", "used_on", "used_on_review", "vendor", "product",
+        "split_type",
         "drawing_type", "drawing_scope",
         "material", "material_grade", "material_scope", "material_treatment",
         "component_material", "component_material_grade", "component_material_scope",

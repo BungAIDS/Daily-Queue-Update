@@ -182,7 +182,9 @@ DEFAULT_RULES: Dict[str, Any] = {
                    r"\bdischarge\s+elbow"],
         "WHEEL": [r"\bwheel\b", r"\bpercent\s+width\b", r"%\s*width\b"],
         "HOUSING": [r"\bhousing\b"],
-        "SPLIT HOUSING": [r"\bsplit\s+housings?\b"],
+        "SPLIT HOUSING": [r"\bsplit\s+housings?\b",
+                          r"\bshipping\s+splits?\b",
+                          r"\bhousings?\b.*\bsplit\b.*\b(ship|shipping|shipment)\b"],
         "SILENCER": [r"silencer", r"muffler", r"sound\s*atten"],
         "ACCESS DOOR": [r"access\s*door", r"inspection\s*door", r"clean\s*out",
                         r"quick\s*open"],
@@ -224,7 +226,7 @@ DEFAULT_RULES: Dict[str, Any] = {
                      r"\bdrawings?\b"],
         "MOTOR": [r"\bmotor\b"],
         "VFD": [r"\bVFD\b", r"variable\s*freq", r"inverter"],
-        "EXPLOSION PROOF": [r"explosion\s*proof", r"class\s*i+\b.*div"],
+        "EXPLOSION PROOF": [r"explosion(?:\s|;|-)*proof", r"class\s*i+\b.*div"],
         "DRIVE COMPONENTS": [r"sheave\s*/?\s*bushing", r"\bbushing\b",
                              r"\bactual\s+sf\b", r"\bactual\s+cd\b",
                              r"selected\s+drive", r"center\s+distance",
@@ -598,6 +600,28 @@ def _drawing_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[st
     attrs["drawing_type"] = ", ".join(types)
     if scopes:
         attrs["drawing_scope"] = ", ".join(scopes)
+    return attrs
+
+
+def _split_housing_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "SPLIT HOUSING" not in tags:
+        return {}
+    attrs = {"component": "SPLIT HOUSING"}
+    split_types: List[str] = []
+    if re.search(r"\bHORIZONTAL\s+SPLIT\s+HOUSINGS?\b", norm_blob):
+        _add_unique(split_types, "HORIZONTAL")
+    if re.search(r"\bPIE\s+WEDGE\s+SPLIT\s+HOUSINGS?\b", norm_blob):
+        _add_unique(split_types, "PIE WEDGE")
+    if re.search(
+        r"\b(SHIPPING|SHIPMENT)\s+SPLITS?\b|"
+        r"\bSPLIT\s+(?:HOUSINGS?\s+)?(?:FOR\s+)?(?:SHIPPING|SHIPMENT)\b|"
+        r"\bSPLIT\s+(?:HOUSINGS?\s+)?TO\s+SHIP\b|"
+        r"\bHOUSINGS?\s+SPLIT\s+(?:FOR\s+)?(?:SHIPPING|SHIPMENT)\b",
+        norm_blob,
+    ):
+        _add_unique(split_types, "SHIPPING")
+    if split_types:
+        attrs["split_type"] = ", ".join(split_types)
     return attrs
 
 
@@ -1150,6 +1174,7 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     if inquiries:
         attrs["inquiry_num"] = ", ".join(inquiries)
     attrs.update(_drawing_attributes(primary, norm_blob, tags))
+    attrs.update(_split_housing_attributes(norm_blob, tags))
 
     vendor = _label_value(item, "Vendor")
     product = _label_value(item, "Product")

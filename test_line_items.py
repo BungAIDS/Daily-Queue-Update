@@ -329,6 +329,7 @@ def test_tagging():
     assert "3D STEP DRAWINGS" in li.tag_item(li.normalize_text("3D STEP File Drawings"))
     assert "DRIVE COMPONENTS" in li.tag_item(li.normalize_text("Motor Sheave/Bushing 3B5V74/B"))
     assert "SPLIT HOUSING" in li.tag_item(li.normalize_text("Drawing and split housing released into production"))
+    assert "SPLIT HOUSING" in li.tag_item(li.normalize_text("Shipping Split"))
     assert "V-BELT DRIVE" in li.tag_item(li.normalize_text("Drive (Max/Min RPM: 1531/1531, 3 belts: B112"))
     assert "SPECIAL CONSTRUCTION" in li.tag_item(li.normalize_text("Tie Rod Support"))
     assert "SPECIAL CONSTRUCTION" in li.tag_item(li.normalize_text("Loc Tite on the set screw threads"))
@@ -647,6 +648,32 @@ def test_drawing_note_attributes():
     assert "SPLIT HOUSING" in split["tags"]
     assert "HOUSING" not in split["tags"]
     assert split["attributes"]["drawing_type"] == "SPLIT HOUSING"
+
+
+def test_split_housing_attributes():
+    items = {it["raw"]: it for it in li.extract_items([
+        "Horizontal Split Housing L 3,567.00",
+        "Pie Wedge Split Housing L 2,303.00",
+        "Shipping Split L 1,000.00",
+        "Housing split for shipment L 1,000.00",
+    ])}
+    horizontal = items["Horizontal Split Housing L 3,567.00"]
+    assert horizontal["tags"] == ["SPLIT HOUSING"]
+    assert horizontal["attributes"]["component"] == "SPLIT HOUSING"
+    assert horizontal["attributes"]["split_type"] == "HORIZONTAL"
+    assert items["Pie Wedge Split Housing L 2,303.00"]["attributes"]["split_type"] == "PIE WEDGE"
+    assert items["Shipping Split L 1,000.00"]["attributes"]["split_type"] == "SHIPPING"
+    assert items["Housing split for shipment L 1,000.00"]["attributes"]["split_type"] == "SHIPPING"
+
+
+def test_explosion_proof_split_detail_line():
+    motor = li.extract_items([
+        "Motor C 633.61",
+        "Vendor: WEG",
+        "Enclosure: Premium Explosion",
+        "Proof",
+    ])[0]
+    assert "EXPLOSION PROOF" in motor["tags"]
 
 
 def test_search_reaches_inquiry_attributes():
