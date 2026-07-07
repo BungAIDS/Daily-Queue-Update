@@ -638,6 +638,9 @@ def _split_housing_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
 
 
 def _is_motor_flange_line(primary: str, norm_blob: str) -> bool:
+    if (re.search(r"\b(HOUSING|INLET|OUTLET)\s+FLANGE\b", norm_blob)
+            and re.search(r"\bMOTOR\s+CONDUIT\s+BOX\b", norm_blob)):
+        return False
     return bool(
         re.search(r"\bC\s*[- ]?\s*FLANGE\b", norm_blob)
         or re.search(r"\bMOTOR\b.{0,50}\bFLANGE\b", norm_blob)
@@ -666,6 +669,43 @@ def _is_inlet_cone_width_without_wheel(norm_blob: str) -> bool:
         and re.search(r"\b\d+(?:\.\d+)?\s*%\s*WIDTH\b|\bPERCENT\s+WIDTH\b", norm_blob)
         and not re.search(r"\bWHEEL\b", norm_blob)
     )
+
+
+def _is_motor_conduit_box_location(norm_blob: str) -> bool:
+    return bool(
+        re.search(r"\bCONDUIT\s+BOX\b", norm_blob)
+        and re.search(r"\bHOUSING\b", norm_blob)
+        and re.search(
+            r"\b(HUGGING|CLOSE\s+TO|AS\s+CLOSE\s+TO|TACK\s+AND\s+WELD|"
+            r"WELD\s+CONDUIT\s+BOX|CONDUIT\s+BOX\s+TO\s+HOUSING)\b",
+            norm_blob,
+        )
+    )
+
+
+def _has_housing_engineering_feature(norm_blob: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(HOUSING\s+FLANGE|DRUM\s+HOUSING\s+BOLT\s+PATTERN|"
+            r"HOUSING\s+LENGTH|HOUSING\s+THICK(?:NESS)?|"
+            r"HOUSING\s+STIFF(?:E|NE)R|STIFF(?:E|NE)R\s+PLATES?|"
+            r"HOUSING\s+MOUNTING|MOUNT\s+HOUSING|"
+            r"HOUSING\s+TO\s+DRIVE\s+COVER|TAP\s+DRIVE\s+SIDE\s+HOUSING|"
+            r"CASING\s+EXTENSION|SQUARE\s+HOUSING|UNIVERSAL\s+HOUSING|"
+            r"RIVETED\s+TO\s+HOUSING|NAMEPLATE\s+TO\s+(?:FAN\s+)?HOUSING|"
+            r"LINERS?\b.*\bHOUSING|HOUSING\s+SCROLL)\b",
+            norm_blob,
+        )
+        or _is_non_wheel_end_location(norm_blob)
+    )
+
+
+def _is_housing_packaging_reference(norm_blob: str, tags: set[str]) -> bool:
+    if "HOUSING" not in tags or not ({"PACKAGING", "SHIPPING"} & tags):
+        return False
+    if _has_housing_engineering_feature(norm_blob):
+        return False
+    return bool(re.search(r"\b(SKID|SCRAP\s+WOOD|BLOCKING|BANDING|CRAT(?:E|ING)|CARTON|PACKAG)\b", norm_blob))
 
 
 def _is_explosion_proof_motor_context(primary: str) -> bool:
@@ -736,6 +776,84 @@ def _flange_attributes(primary: str, norm_blob: str, tags: set[str], raw_tags: s
         attrs["flange_type"] = "PUNCHED"
     elif re.search(r"\bFLANGED\b", norm_blob):
         attrs["flange_type"] = "FLANGED"
+    return attrs
+
+
+def _housing_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "HOUSING" not in tags:
+        return {}
+    attrs: Dict[str, str] = {}
+    subcategories: List[str] = []
+    features: List[str] = []
+
+    def add_subcategory(value: str) -> None:
+        _add_unique(subcategories, value)
+
+    def add_feature(value: str) -> None:
+        _add_unique(features, value)
+
+    if re.search(r"\bSQUARE\s+HOUSING\b|\bHOUSING\s+SQUARE\b", norm_blob):
+        add_subcategory("SQUARE")
+    if re.search(r"\bUNIVERSAL\s+HOUSING\b|\bHOUSING\s+UNIVERSAL\b", norm_blob):
+        add_subcategory("UNIVERSAL")
+    if "HEAVY DUTY" in tags:
+        add_subcategory("HEAVY DUTY")
+    if "LINING" in tags or re.search(r"\b(FIRMEX|LINERS?|LINING)\b.*\bHOUSING\b", norm_blob):
+        add_subcategory("LINING")
+
+    if re.search(r"\b(FLANGE\s+THICKNESS|BOLT\s+PATTERN|REINFORCING\s+GUSSETS?)\b", norm_blob):
+        add_subcategory("MODIFIED FLANGE")
+        if "FLANGE THICKNESS" in norm_blob:
+            add_feature("FLANGE THICKNESS")
+        if "BOLT PATTERN" in norm_blob:
+            add_feature("BOLT PATTERN")
+        if re.search(r"\bREINFORCING\s+GUSSETS?\b", norm_blob):
+            add_feature("REINFORCING GUSSETS")
+
+    if re.search(r"\bHOUSING\s+LENGTH\b", norm_blob) and re.search(r"\bFLANGE\s+TO\s+FLANGE\b", norm_blob):
+        add_subcategory("DIMENSION NOTE")
+        attrs["housing_dimension"] = "FLANGE-TO-FLANGE LENGTH"
+
+    if re.search(r"\b(?:\d+\s*GA|[0-9/.\-]+\s*\")\s+HOUSING\s+THICKNESS\b|\bHOUSING\s+THICKNESS\b", norm_blob):
+        add_subcategory("THICKNESS")
+        m = re.search(r"\b(\d+\s*GA)\s+HOUSING\s+THICKNESS\b", norm_blob)
+        if m:
+            attrs["housing_thickness"] = re.sub(r"\s+", " ", m.group(1)).strip()
+
+    if re.search(r"\bHOUSING\s+STIFF(?:E|NE)R\s+PLATES?\b", norm_blob):
+        add_subcategory("STIFFENER PLATES")
+    if "CASING EXTENSION" in norm_blob:
+        add_subcategory("CASING EXTENSION")
+        if "OUTLET" in norm_blob:
+            attrs["used_on"] = "OUTLET"
+    if re.search(r"\b(TAP\s+DRIVE\s+SIDE\s+HOUSING|TAP\s+.*HOUSING\s+HALF)\b", norm_blob):
+        add_subcategory("TAPPED HOUSING")
+    if re.search(r"\b(MOUNT\s+HOUSING|HOUSING\s+MOUNTING|HOUSING\s+TO\s+DRIVE\s+COVER)\b", norm_blob):
+        add_subcategory("MOUNTING/SUPPORT")
+    if re.search(r"\b(NAMEPLATE\b.*\bHOUSING|RIVETED\s+TO\s+HOUSING)\b", norm_blob):
+        add_subcategory("NAMEPLATE LOCATION")
+        attrs["mount_location"] = "HOUSING"
+
+    if subcategories:
+        attrs["housing_subcategory"] = ", ".join(subcategories)
+    if features:
+        attrs["housing_feature"] = ", ".join(features)
+    return attrs
+
+
+def _motor_conduit_box_attributes(norm_blob: str) -> Dict[str, str]:
+    if not _is_motor_conduit_box_location(norm_blob):
+        return {}
+    attrs = {
+        "component": "MOTOR",
+        "motor_feature": "CONDUIT BOX LOCATION",
+    }
+    if "HUGGING" in norm_blob:
+        attrs["motor_conduit_box_location"] = "HUGGING HOUSING"
+    elif re.search(r"\b(CLOSE\s+TO|AS\s+CLOSE\s+TO)\b", norm_blob):
+        attrs["motor_conduit_box_location"] = "CLOSE TO HOUSING"
+    elif re.search(r"\b(TACK\s+AND\s+WELD|WELD\s+CONDUIT\s+BOX|CONDUIT\s+BOX\s+TO\s+HOUSING)\b", norm_blob):
+        attrs["motor_conduit_box_location"] = "MOUNTED TO HOUSING"
     return attrs
 
 
@@ -1165,6 +1283,8 @@ def _material_attributes(norm_blob: str) -> Dict[str, str]:
             add_scope(scope)
     if "SHAFT" in norm_blob and not {"SHAFT COOLER", "SHAFT SEAL"} & set(scopes):
         add_scope("SHAFT")
+    if _is_nameplate_housing_mount(norm_blob):
+        scopes = [s for s in scopes if s != "HOUSING"]
     if scopes:
         attrs["material_scope"] = ", ".join(scopes)
     return attrs
@@ -1193,6 +1313,14 @@ def _component_material_attributes(owner: str, material_attrs: Dict[str, str]) -
         component_scopes = [s for s in scopes if s == "MOTOR CONDUIT BOX DRAIN"]
         attrs["material_scope"] = ", ".join(component_scopes or ["MOTOR"])
     return attrs
+
+
+def _is_nameplate_housing_mount(norm_blob: str) -> bool:
+    return bool(
+        "NAMEPLATE" in norm_blob
+        and "HOUSING" in norm_blob
+        and re.search(r"\b(RIVETED\s+TO\s+HOUSING|NAMEPLATE\b.*\bHOUSING)\b", norm_blob)
+    )
 
 
 def _is_shaft_bearing_guard_line(primary: str) -> bool:
@@ -1430,6 +1558,10 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
     if _is_non_wheel_end_location(norm_blob):
         tags = [t for t in tags if t != "WHEEL"]
         _add_unique(tags, "HOUSING")
+    if _is_motor_conduit_box_location(norm_blob):
+        _add_unique(tags, "MOTOR")
+        if not _has_housing_engineering_feature(norm_blob):
+            tags = [t for t in tags if t != "HOUSING"]
     if _is_without_ivc(norm_blob):
         tags = [t for t in tags if t != "INLET VANES"]
     if _is_inlet_cone_width_without_wheel(norm_blob):
@@ -1457,6 +1589,8 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t not in _DRIVE_TABLE_DETAIL_TAGS]
     if "COATING" in tags and _is_paint_line(primary):
         tags = [t for t in tags if t not in _PAINT_SURFACE_TAGS]
+    if _is_housing_packaging_reference(norm_blob, set(tags)):
+        tags = [t for t in tags if t != "HOUSING"]
     if _is_assembly_note(primary):
         tags = [t for t in tags if t not in _MISC_NOTE_COMPONENT_TAGS]
         _add_unique(tags, _MISC_NOTE_TAG)
@@ -1489,6 +1623,8 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_low_leakage_attributes(norm_blob, tags))
     attrs.update(_temperature_attributes(primary, norm_blob, tags, blob))
     attrs.update(_heavy_duty_attributes(norm_blob, tags))
+    attrs.update(_housing_attributes(norm_blob, tags))
+    attrs.update(_motor_conduit_box_attributes(norm_blob))
 
     vendor = _label_value(item, "Vendor")
     product = _label_value(item, "Product")

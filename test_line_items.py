@@ -705,6 +705,85 @@ def test_flange_scope_motor_and_non_wheel_end():
     assert housing["attributes"]["flange_location"] == "NON-WHEEL END"
 
 
+def test_housing_modified_flange_and_length_attributes():
+    thickness = li.extract_items(['Housing Flange Thickness, 2-7/8", Inquiry Num: L 250.00'])[0]
+    assert {"FLANGE", "HOUSING"} <= set(thickness["tags"])
+    assert thickness["attributes"]["flange_scope"] == "HOUSING"
+    assert thickness["attributes"]["housing_subcategory"] == "MODIFIED FLANGE"
+    assert thickness["attributes"]["housing_feature"] == "FLANGE THICKNESS"
+
+    bolt_pattern = li.extract_items([
+        'Drum Housing Bolt Pattern, QTY (12) 9/16" L',
+        'Diameter Holes, 34" B.C. Diameter, Straddle',
+    ])[0]
+    assert "HOUSING" in bolt_pattern["tags"]
+    assert bolt_pattern["attributes"]["housing_subcategory"] == "MODIFIED FLANGE"
+    assert bolt_pattern["attributes"]["housing_feature"] == "BOLT PATTERN"
+
+    length = li.extract_items(['Housing Length 30-3/4" Flange to Flange, Inquiry L 650.00'])[0]
+    assert {"FLANGE", "HOUSING"} <= set(length["tags"])
+    assert length["attributes"]["housing_subcategory"] == "DIMENSION NOTE"
+    assert length["attributes"]["housing_dimension"] == "FLANGE-TO-FLANGE LENGTH"
+
+    mixing_box = li.extract_items(['Mixing Box Length 30" Flange to Flange L 650.00'])[0]
+    assert "HOUSING" not in mixing_box["tags"]
+    assert "housing_subcategory" not in mixing_box["attributes"]
+
+
+def test_housing_construction_and_nameplate_mount_attributes():
+    square = li.extract_items(["Housing, Square L 284.00"])[0]
+    assert square["attributes"]["housing_subcategory"] == "SQUARE"
+
+    universal = li.extract_items(["Housing, Universal Housing L 75.00"])[0]
+    assert universal["attributes"]["housing_subcategory"] == "UNIVERSAL"
+
+    stiffener = li.extract_items(["Housing Stiffner Plates, Inquiry Num: 311-19-2159 L 114.00"])[0]
+    assert stiffener["attributes"]["housing_subcategory"] == "STIFFENER PLATES"
+
+    casing = li.extract_items(["Housing, Casing Extension for Outlet L 3,213.00"])[0]
+    assert casing["attributes"]["housing_subcategory"] == "CASING EXTENSION"
+    assert casing["attributes"]["used_on"] == "OUTLET"
+
+    nameplate = li.extract_items([
+        "316 SS Nameplate, Riveted to Housing with 316 SS L 1,179.00",
+        "Hardware, Inquiry Num: 253-26-1710",
+    ])[0]
+    assert {"HOUSING", "MATERIALS", "NAMEPLATE", "STAINLESS STEEL"} <= set(nameplate["tags"])
+    assert nameplate["attributes"]["housing_subcategory"] == "NAMEPLATE LOCATION"
+    assert nameplate["attributes"]["mount_location"] == "HOUSING"
+    assert nameplate["attributes"]["material_scope"] == "NAMEPLATE, HARDWARE"
+
+
+def test_conduit_box_location_is_motor_not_housing():
+    conduit = li.extract_items([
+        "mount conduit box as close to the housing as L",
+        "possible., Inquiry Num: 311-24-1312",
+    ])[0]
+    assert "MOTOR" in conduit["tags"]
+    assert "HOUSING" not in conduit["tags"]
+    assert conduit["attributes"]["component"] == "MOTOR"
+    assert conduit["attributes"]["motor_feature"] == "CONDUIT BOX LOCATION"
+    assert conduit["attributes"]["motor_conduit_box_location"] == "CLOSE TO HOUSING"
+
+    mixed = li.extract_items([
+        "HOUSING FLANGE THICKNESS, DRUM HOUSING BOLT PATTERN AND MOTOR CONDUIT BOX HUGGING HOUSING L 100.00",
+    ])[0]
+    assert {"HOUSING", "MOTOR", "SPECIAL CONSTRUCTION"} <= set(mixed["tags"])
+    assert mixed["attributes"]["component"] == "MOTOR"
+    assert mixed["attributes"]["motor_conduit_box_location"] == "HUGGING HOUSING"
+    assert mixed["attributes"]["housing_subcategory"] == "MODIFIED FLANGE"
+    assert "motor_mounting" not in mixed["attributes"]
+
+
+def test_packaging_housing_reference_does_not_tag_housing():
+    packaging = li.extract_items([
+        "For all CAT D/38 Fans: bolted fan to the skid with N 122.00",
+        "scrap wood for blocking under the fan housing,",
+    ])[0]
+    assert "PACKAGING" in packaging["tags"]
+    assert "HOUSING" not in packaging["tags"]
+
+
 def test_flex_connector_flange_scope_and_attrs():
     flex = li.extract_items([
         "Inlet Flanged Expansion Joint L 100.00",
