@@ -198,8 +198,8 @@ DEFAULT_RULES: Dict[str, Any] = {
         "SCREEN": [r"\bscreen"],
         "FLANGE": [r"flange"],
         "FLEX CONNECTOR": [r"flex(ible)?\s*conn", r"expansion\s*joint"],
-        "FLEXIBLE COUPLING": [r"flexible\s*coupling", r"steelflex",
-                              r"thomas\s+series"],
+        "COUPLING": [r"flexible\s*coupling", r"steelflex",
+                     r"thomas\s+series", r"\bhalf\s+coupling\b"],
         "UNITARY BASE": [r"unitary\s*base", r"structural\s*(steel\s*)?base",
                          r"channel\s*base"],
         "BEARINGS": [r"^bearings?\s+(standard|split\s+pillow\s+block)\b",
@@ -224,7 +224,7 @@ DEFAULT_RULES: Dict[str, Any] = {
         "INSPECTION": [r"\binspection\b", r"mill\s*certifications?"],
         "DRAWINGS": [r"\bcertified\s*drawings?\b", r"\bprints?\b",
                      r"\bdrawings?\b"],
-        "MOTOR": [r"\bmotor\b"],
+        "MOTOR": [r"\bmotor\b", r"\bc\s*[- ]?\s*flange\b"],
         "VFD": [r"\bVFD\b", r"variable\s*freq", r"inverter"],
         "EXPLOSION PROOF": [r"explosion(?:\s|;|-)*proof", r"class\s*i+\b.*div"],
         "DRIVE COMPONENTS": [r"sheave\s*/?\s*bushing", r"\bbushing\b",
@@ -622,6 +622,148 @@ def _split_housing_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
         _add_unique(split_types, "SHIPPING")
     if split_types:
         attrs["split_type"] = ", ".join(split_types)
+    return attrs
+
+
+def _is_motor_flange_line(primary: str, norm_blob: str) -> bool:
+    return bool(
+        re.search(r"\bC\s*[- ]?\s*FLANGE\b", norm_blob)
+        or re.search(r"\bMOTOR\b.{0,50}\bFLANGE\b", norm_blob)
+        or re.search(r"\bFLANGE\b.{0,50}\bMOTOR\b", norm_blob)
+    )
+
+
+def _is_non_wheel_end_location(norm_blob: str) -> bool:
+    return bool(re.search(r"\bNON\s*[- ]?\s*WHEEL\s+END\b", norm_blob))
+
+
+def _is_flex_connector_line(norm_blob: str) -> bool:
+    return bool(re.search(r"\b(FLEX(IBLE)?\s+CONNECTOR|EXPANSION\s+JOINT|EJ)\b", norm_blob))
+
+
+def _is_explosion_proof_motor_context(primary: str) -> bool:
+    return bool(
+        re.search(r"\bMOTOR\b", primary)
+        or re.search(r"\bEXPLOSION\s+PROOF\b", primary)
+        or re.search(r"\bCLASS\s*[0-9IVX]+\b.*\bDIV(?:ISION)?\b", primary)
+    )
+
+
+def _explosion_proof_attributes(primary: str, norm_blob: str, raw_tags: set[str]) -> Dict[str, str]:
+    if "EXPLOSION PROOF" not in raw_tags and not re.search(r"\bEXPLOSION\s+PROOF\b", norm_blob):
+        return {}
+    if not _is_explosion_proof_motor_context(primary):
+        return {}
+    attrs: Dict[str, str] = {
+        "component": "MOTOR",
+        "motor_enclosure": "EXPLOSION PROOF",
+    }
+    classes: List[str] = []
+    groups: List[str] = []
+    divisions: List[str] = []
+    for m in re.finditer(r"\bCL(?:ASS|S)?\.?\s*([0-9IVX]+)\b", norm_blob):
+        _add_unique(classes, m.group(1).upper())
+    for m in re.finditer(
+        r"\bGR(?:OU)?PS?\.?\s+([A-Z](?:[\s,]+[A-Z])*)"
+        r"(?=\s+CL(?:ASS|S)?\b|\s+DIV(?:ISION)?\b|$)",
+        norm_blob,
+    ):
+        for letter in re.findall(r"\b[A-Z]\b", m.group(1).upper()):
+            _add_unique(groups, letter)
+    for m in re.finditer(r"\bDIV(?:ISION)?\.?\s*([0-9]+)\b", norm_blob):
+        _add_unique(divisions, m.group(1))
+    if classes:
+        attrs["motor_explosion_class"] = ", ".join(classes)
+    if groups:
+        attrs["motor_explosion_groups"] = ", ".join(groups)
+    if divisions:
+        attrs["motor_explosion_division"] = ", ".join(divisions)
+    return attrs
+
+
+def _flange_attributes(primary: str, norm_blob: str, tags: set[str], raw_tags: set[str]) -> Dict[str, str]:
+    if "FLANGE" not in raw_tags and not re.search(r"\bFLANG(?:E|ED)\b", norm_blob):
+        return {}
+    attrs: Dict[str, str] = {}
+    scopes: List[str] = []
+    if _is_motor_flange_line(primary, norm_blob):
+        attrs["component"] = "MOTOR"
+        attrs["motor_mounting"] = "C-FLANGE" if re.search(r"\bC\s*[- ]?\s*FLANGE\b", norm_blob) else "FLANGE"
+        _add_unique(scopes, "MOTOR")
+    if "FLEX CONNECTOR" in tags or _is_flex_connector_line(norm_blob):
+        _add_unique(scopes, "FLEX CONNECTOR")
+    if _is_non_wheel_end_location(norm_blob):
+        attrs["flange_location"] = "NON-WHEEL END"
+        _add_unique(scopes, "HOUSING")
+    if "INLET" in tags or re.search(r"\bINLET\b", norm_blob):
+        _add_unique(scopes, "INLET")
+    if "OUTLET" in tags or re.search(r"\bOUTLET\b", norm_blob):
+        _add_unique(scopes, "OUTLET")
+    if "HOUSING" in tags and "HOUSING" not in scopes:
+        _add_unique(scopes, "HOUSING")
+    if scopes:
+        attrs["flange_scope"] = ", ".join(scopes)
+    if re.search(r"\bC\s*[- ]?\s*FLANGE\b", norm_blob):
+        attrs["flange_type"] = "C-FLANGE"
+    elif "PUNCHED" in norm_blob:
+        attrs["flange_type"] = "PUNCHED"
+    elif re.search(r"\bFLANGED\b", norm_blob):
+        attrs["flange_type"] = "FLANGED"
+    return attrs
+
+
+def _flex_connector_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "FLEX CONNECTOR" not in tags:
+        return {}
+    attrs: Dict[str, str] = {"component": "FLEX CONNECTOR"}
+    if re.search(r"\b(EXPANSION\s+JOINT|EJ)\b", norm_blob):
+        attrs["flex_connector_type"] = "EXPANSION JOINT"
+    elif re.search(r"\bFLEXIBLE\s+CONNECTOR\b", norm_blob):
+        attrs["flex_connector_type"] = "FLEXIBLE CONNECTOR"
+    elif re.search(r"\bFLEX\s+CONNECTOR\b", norm_blob):
+        attrs["flex_connector_type"] = "FLEX CONNECTOR"
+    used_on: List[str] = []
+    if "INLET" in tags or re.search(r"\bINLET\b", norm_blob):
+        _add_unique(used_on, "INLET")
+    if "OUTLET" in tags or re.search(r"\bOUTLET\b", norm_blob):
+        _add_unique(used_on, "OUTLET")
+    if used_on:
+        attrs["used_on"] = ", ".join(used_on)
+    return attrs
+
+
+def _coupling_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "COUPLING" not in tags:
+        return {}
+    attrs: Dict[str, str] = {
+        "component": "COUPLING",
+        "coupling_subcategory": "FLEXIBLE COUPLING",
+    }
+    if "FALK" in norm_blob or "STEELFLEX" in norm_blob:
+        attrs["manufacturer"] = "FALK"
+        attrs["coupling_type"] = "FALK TYPE T STEELFLEX"
+        attrs["model"] = "TYPE T STEELFLEX"
+    if "REXNORD" in norm_blob:
+        attrs["manufacturer"] = "REXNORD"
+        m = re.search(r"\bREXNORD\s+(THOMAS\s+SERIES\s+\d+)\b", norm_blob)
+        attrs["coupling_type"] = f"REXNORD {m.group(1)}" if m else "REXNORD THOMAS SERIES"
+        attrs["model"] = attrs["coupling_type"].replace("REXNORD ", "")
+    if re.search(r"\bHALF\s+COUPLING\b", norm_blob):
+        attrs["coupling_type"] = "HALF COUPLING"
+    m = re.search(r"\bSIZE\s+([A-Z0-9-]+)\b", norm_blob)
+    if m:
+        attrs["size"] = m.group(1).upper()
+    if "CLEARANCE" in norm_blob:
+        attrs["fit"] = "CLEARANCE"
+    elif "INTERFERENCE" in norm_blob:
+        attrs["fit"] = "INTERFERENCE"
+    m = re.search(r"\b(HORIZONTAL\s+SPLIT\s+COVER\s+T10)\b", norm_blob)
+    if m:
+        attrs["cover_type"] = m.group(1)
+    if re.search(r"\bSET\s+SCREWS?\b", norm_blob):
+        attrs["set_screws"] = "YES"
+    if "CBC MOUNT" in norm_blob:
+        attrs["mounting"] = "CBC MOUNT"
     return attrs
 
 
@@ -1137,6 +1279,18 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t not in _BASE_FAN_DETAIL_TAGS]
     if "SPLIT HOUSING" in tags:
         tags = [t for t in tags if t != "HOUSING"]
+    if "EXPLOSION PROOF" in tags:
+        tags = [t for t in tags if t != "EXPLOSION PROOF"]
+        if _is_explosion_proof_motor_context(primary):
+            _add_unique(tags, "MOTOR")
+    if _is_motor_flange_line(primary, norm_blob):
+        tags = [t for t in tags if t != "FLANGE"]
+        _add_unique(tags, "MOTOR")
+    if _is_non_wheel_end_location(norm_blob):
+        tags = [t for t in tags if t != "WHEEL"]
+        _add_unique(tags, "HOUSING")
+    if "FLEX CONNECTOR" in tags and "FLANGE" in tags and _is_flex_connector_line(norm_blob):
+        tags = [t for t in tags if t != "FLANGE"]
     drain_type = _drain_type(primary, norm_blob)
     if drain_type == "HOUSING DRAIN":
         tags = [t for t in tags if t != "HOUSING"]
@@ -1175,6 +1329,10 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
         attrs["inquiry_num"] = ", ".join(inquiries)
     attrs.update(_drawing_attributes(primary, norm_blob, tags))
     attrs.update(_split_housing_attributes(norm_blob, tags))
+    attrs.update(_explosion_proof_attributes(primary, norm_blob, raw_tags))
+    attrs.update(_flange_attributes(primary, norm_blob, tags, raw_tags))
+    attrs.update(_flex_connector_attributes(norm_blob, tags))
+    attrs.update(_coupling_attributes(norm_blob, tags))
 
     vendor = _label_value(item, "Vendor")
     product = _label_value(item, "Product")

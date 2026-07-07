@@ -317,7 +317,7 @@ def test_tagging():
     assert "COATING" not in li.tag_item(li.normalize_text("Passivation of Welds"))
     assert "STAINLESS STEEL" in li.tag_item(li.normalize_text("Passivation of Welds"))
     assert "LINING" in li.tag_item(li.normalize_text("Firmex liners on blades and housing scroll"))
-    assert "FLEXIBLE COUPLING" in li.tag_item(li.normalize_text("Flexible Coupling Falk Type T Steelflex"))
+    assert "COUPLING" in li.tag_item(li.normalize_text("Flexible Coupling Falk Type T Steelflex"))
     assert "ALUMINUM" in li.tag_item(li.normalize_text("Wheel Aluminium AMCA B"))
     assert "MATERIALS" in li.tag_item(li.normalize_text("Wheel Aluminium AMCA B"))
     assert "WHEEL" in li.tag_item(li.normalize_text("Percent Width 78.7%"))
@@ -673,7 +673,65 @@ def test_explosion_proof_split_detail_line():
         "Enclosure: Premium Explosion",
         "Proof",
     ])[0]
-    assert "EXPLOSION PROOF" in motor["tags"]
+    assert "MOTOR" in motor["tags"]
+    assert "EXPLOSION PROOF" not in motor["tags"]
+    assert motor["attributes"]["component"] == "MOTOR"
+    assert motor["attributes"]["motor_enclosure"] == "EXPLOSION PROOF"
+
+    warranty = li.extract_items([
+        "Exclusive 3 Year Warranty L INC",
+        "Enclosure: Premium Explosion",
+        "Proof",
+    ])[0]
+    assert warranty["tags"] == ["WARRANTY"]
+    assert "motor_enclosure" not in warranty["attributes"]
+
+
+def test_flange_scope_motor_and_non_wheel_end():
+    motor = li.extract_items(["C-Flange Motor Replate L 100.00"])[0]
+    assert "MOTOR" in motor["tags"]
+    assert "FLANGE" not in motor["tags"]
+    assert motor["attributes"]["component"] == "MOTOR"
+    assert motor["attributes"]["motor_mounting"] == "C-FLANGE"
+    assert motor["attributes"]["flange_scope"] == "MOTOR"
+
+    housing = li.extract_items(["Non-Wheel End Flange Reinforcing Gussets L 200.00"])[0]
+    assert "FLANGE" in housing["tags"]
+    assert "HOUSING" in housing["tags"]
+    assert "WHEEL" not in housing["tags"]
+    assert housing["attributes"]["flange_scope"] == "HOUSING"
+    assert housing["attributes"]["flange_location"] == "NON-WHEEL END"
+
+
+def test_flex_connector_flange_scope_and_attrs():
+    flex = li.extract_items([
+        "Inlet Flanged Expansion Joint L 100.00",
+        "Vendor: FlexCom",
+        "Product: Expansion Joint",
+    ])[0]
+    assert "FLEX CONNECTOR" in flex["tags"]
+    assert "FLANGE" not in flex["tags"]
+    assert flex["attributes"]["component"] == "FLEX CONNECTOR"
+    assert flex["attributes"]["flex_connector_type"] == "EXPANSION JOINT"
+    assert flex["attributes"]["used_on"] == "INLET"
+    assert flex["attributes"]["flange_scope"] == "FLEX CONNECTOR, INLET"
+
+
+def test_flexible_coupling_is_coupling_subcategory():
+    coupling = li.extract_items([
+        "Flexible Coupling Falk Type T Steelflex, Size 1070T, Clearance, Horizontal Split Cover T10, Set Screws, CBC Mount L 1,000.00",
+    ])[0]
+    assert "COUPLING" in coupling["tags"]
+    assert "FLEXIBLE COUPLING" not in coupling["tags"]
+    attrs = coupling["attributes"]
+    assert attrs["component"] == "COUPLING"
+    assert attrs["coupling_subcategory"] == "FLEXIBLE COUPLING"
+    assert attrs["coupling_type"] == "FALK TYPE T STEELFLEX"
+    assert attrs["size"] == "1070T"
+    assert attrs["fit"] == "CLEARANCE"
+    assert attrs["cover_type"] == "HORIZONTAL SPLIT COVER T10"
+    assert attrs["set_screws"] == "YES"
+    assert attrs["mounting"] == "CBC MOUNT"
 
 
 def test_search_reaches_inquiry_attributes():
