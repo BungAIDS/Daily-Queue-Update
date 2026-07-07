@@ -1399,6 +1399,87 @@ def test_insulation_splits_motor_details_from_fan_insulation():
     assert plug_panel["attributes"]["insulation_thickness"] == "8\""
     assert plug_panel["attributes"]["insulated_by"] == "CBC"
 
+    housing_lagging = li.extract_items(["Housing Lagging 2\" L 531.00"])[0]
+    assert {"HOUSING", "INSULATION"} <= set(housing_lagging["tags"])
+    assert housing_lagging["attributes"]["insulation_scope"] == "HOUSING"
+    assert housing_lagging["attributes"]["insulation_type"] == "LAGGING"
+    assert housing_lagging["attributes"]["insulation_thickness"] == "2\""
+
+    housing_fiberglass = li.extract_items(["Fan Housing with 2\" Fiberglass Insulation L 531.00"])[0]
+    assert {"HOUSING", "INSULATION"} <= set(housing_fiberglass["tags"])
+    assert housing_fiberglass["attributes"]["insulation_scope"] == "HOUSING"
+    assert housing_fiberglass["attributes"]["insulation_material"] == "FIBERGLASS"
+
+
+def test_label_attributes_and_detail_tag_cleanup():
+    warning = li.extract_items([
+        "Only apply CBC's warning label to the fan. (Except L 100.00",
+        "D/47 will have the vendor's motor nameplate",
+        "applied as well.) All other stickers/labels and",
+        "nameplate will be placed in a bag and shipped with",
+        "fan., Inquiry Num: 15-14-2975",
+    ])[0]
+    assert warning["tags"] == ["LABEL"]
+    assert warning["attributes"]["label_type"] == "WARNING LABEL"
+    assert warning["attributes"]["label_scope"] == "FAN"
+    assert warning["attributes"]["label_handling"] == "OTHER LABELS/NAMEPLATE BAGGED"
+    assert warning["attributes"]["related_nameplate_handling"] == "VENDOR MOTOR NAMEPLATE APPLIED"
+
+    barcode = li.derive_item_fields({"raw": "Shipping barcode label, Inquiry Num: 15-14-2975 L", "details": []})
+    assert {"LABEL", "SHIPPING"} <= set(barcode["tags"])
+    assert barcode["attributes"]["label_type"] == "SHIPPING BARCODE LABEL"
+    assert barcode["attributes"]["label_scope"] == "SHIPPING"
+
+    motor = li.extract_items([
+        "Motor (Multimounting IE3 10 HP 2P 132S 3Ph C 864.10",
+        "Mods: Add tropicalization, RETIE label",
+    ])[0]
+    assert {"LABEL", "MOTOR"} <= set(motor["tags"])
+    assert motor["attributes"]["label_type"] == "RETIE LABEL"
+    assert motor["attributes"]["label_scope"] == "MOTOR"
+
+    marked = li.derive_item_fields({"raw": "Mark all items with LOT/SER Number, Project, & Heat Lot number", "details": []})
+    assert "LABEL" in marked["tags"]
+    assert marked["attributes"]["label_type"] == "ITEM MARKING"
+
+
+def test_lifting_lugs_and_lining_attributes():
+    lugs = li.extract_items(["Lifting Lugs @12:00, Inquiry Num: 374-26-320 L 463.00"])[0]
+    assert "LIFTING LUGS" in lugs["tags"]
+    assert lugs["attributes"]["component"] == "LIFTING LUGS"
+    assert lugs["attributes"]["lug_scope"] == "FAN"
+    assert lugs["attributes"]["lug_position"] == "12:00"
+
+    silencer = li.extract_items([
+        "Aeroacoustic Silentflow inlet silencer C 100.00",
+        "Lifting lugs",
+    ])[0]
+    assert "SILENCER" in silencer["tags"]
+    assert "LIFTING LUGS" not in silencer["tags"]
+
+    housing_scroll = li.extract_items([
+        "Firmex Liners on Blades and Housing Scroll, Inquiry L 10,602.00",
+        "Num: 300-25-3241",
+    ])[0]
+    assert {"HOUSING", "LINING", "WHEEL"} <= set(housing_scroll["tags"])
+    assert housing_scroll["attributes"]["lining_type"] == "FIRMEX"
+    assert housing_scroll["attributes"]["lining_scope"] == "HOUSING SCROLL, WHEEL BLADES"
+
+    scroll_side_sheet = li.extract_items([
+        "Firmex Liners, On Scroll, side sheet, Wheel Blades, L 36,295.00",
+    ])[0]
+    assert {"HOUSING", "LINING", "WHEEL"} <= set(scroll_side_sheet["tags"])
+    assert scroll_side_sheet["attributes"]["lining_scope"] == "HOUSING SCROLL, SIDE SHEET, WHEEL BLADES"
+
+    flex = li.extract_items([
+        "Outlet Expansion Joint C 1,466.00",
+        "10Ga. A36 Flow Liner",
+        "Product: Expansion Joint",
+    ])[0]
+    assert "FLEX CONNECTOR" in flex["tags"]
+    assert "LINING" not in flex["tags"]
+    assert flex["attributes"]["flex_connector_feature"] == "FLOW LINER"
+
 
 def test_drain_attributes():
     housing = li.extract_items(["Housing Drain with Plug, 304 SS Construction L 328.00"])[0]

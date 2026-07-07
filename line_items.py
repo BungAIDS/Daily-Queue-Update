@@ -174,9 +174,11 @@ DEFAULT_RULES: Dict[str, Any] = {
         "LOW LEAKAGE": [r"low\s*[- ]?leak(?:age)?"],
         "COATING": [r"epoxy", r"\bcoat(?:ed|ing|s)?\b", r"paint", r"primer",
                     r"plasite", r"heresite", r"\bzinc\b"],
-        "LINING": [r"rubber\s*lin", r"\blined\b", r"\blining\b", r"abrasion",
+        "LINING": [r"rubber\s*lin", r"\bliners?\b", r"\blined\b", r"\blining\b", r"abrasion",
                    r"firmex"],
-        "INSULATION": [r"insulat"],
+        "INSULATION": [r"insulat",
+                       r"\b(?:housing|fan)\b.*\b(lagging|jacket(?:ed)?|mineral\s+wool|fiberglass|fibre\s*glass)\b",
+                       r"\b(lagging|jacket(?:ed)?|mineral\s+wool|fiberglass|fibre\s*glass)\b.*\b(?:housing|fan)\b"],
         "VIBRATION ISOLATION": [r"isolat", r"rubber[\s-]*in[\s-]*shear",
                                 r"\bRIS\b", r"spring\s*mount", r"seismic",
                                 r"vibration\s*base"],
@@ -215,7 +217,7 @@ DEFAULT_RULES: Dict[str, Any] = {
                      r"^repair\s+bearings?\b", r"^spare\s+bearings?\b",
                      r"^bearing\s+adder\b"],
         "LIFTING LUGS": [r"lifting\s*lugs?"],
-        "LABEL": [r"\blabel\b"],
+        "LABEL": [r"\blabel\b", r"\bmark\s+all\s+items\b", r"\bmarked\s+with\s+this\s+information\b"],
         "NAMEPLATE": [r"nameplate"],
         "PACKAGING": [r"\bcrate\b", r"\bcrating\b", r"shrink\s*wrap",
                       r"\bskid\b", r"ispm\s*(?:wood\s*)?(?:inspection\s*)?(?:stamp|stamping)",
@@ -262,6 +264,7 @@ _MISC_NOTE_COMPONENT_TAGS = {"WHEEL"}
 _BASE_FAN_DETAIL_TAGS = {"MOTOR", "MOUNTING"}
 _BELT_GUARD_DETAIL_TAGS = {"COATING", "MOUNTING", "MOTOR"}
 _DRIVE_TABLE_DETAIL_TAGS = {"DRAWINGS", "MOTOR", "SPECIAL CONSTRUCTION"}
+_LABEL_DETAIL_TAGS = {"MOTOR", "NAMEPLATE"}
 _EXTREME_TEMPERATURE_TAG = "EXTREME TEMP"
 _SHIP_VIA_COMPONENT_TAGS = {
     "ACTUATOR", "DAMPER", "FLEX CONNECTOR", "INLET VANES", "SILENCER", "OUTLET",
@@ -565,11 +568,33 @@ def _motor_insulation_reference(norm_blob: str) -> bool:
 
 def _fan_insulation_reference(norm_blob: str) -> bool:
     return bool(re.search(
-        r"\b(PLUG\s+PANEL|HOUSING|INLET\s+BOX|SILENCER|DUCT|FAN)\b.{0,60}\bINSULAT"
-        r"|\bINSULAT\w*\b.{0,60}\b(PLUG\s+PANEL|HOUSING|INLET\s+BOX|SILENCER|DUCT|FAN)\b",
+        r"\b(PLUG\s+PANEL|HOUSING|INLET\s+BOX|SILENCER|DUCT|FAN)\b.{0,80}\b(INSULAT|LAGGING|JACKET(?:ED)?|MINERAL\s+WOOL|FIBERGLASS|FIBRE\s*GLASS)\b"
+        r"|\b(INSULAT\w*|LAGGING|JACKET(?:ED)?|MINERAL\s+WOOL|FIBERGLASS|FIBRE\s*GLASS)\b.{0,80}\b(PLUG\s+PANEL|HOUSING|INLET\s+BOX|SILENCER|DUCT|FAN)\b",
         norm_blob,
         re.I,
     ))
+
+
+def _is_label_instruction_line(primary: str, norm_blob: str, tags: set[str]) -> bool:
+    if "LABEL" not in tags:
+        return False
+    if re.match(r"^MOTOR\b", primary, re.I):
+        return False
+    return bool(re.search(
+        r"\b(ONLY\s+APPLY\s+CBC.*WARNING\s+LABEL|SHIPPING\s+BARCODE\s+LABEL|"
+        r"FEI\s+LABEL|LABEL\s+REQUIRED\s+ON\s+EACH\s+ITEM|ON\s+FEDEX\s+SHIPPING\s+LABEL|"
+        r"MARK\s+ALL\s+ITEMS|MARKED\s+WITH\s+THIS\s+INFORMATION)\b",
+        norm_blob,
+        re.I,
+    ))
+
+
+def _is_primary_lifting_lugs(primary: str) -> bool:
+    return bool(re.search(r"^LIFTING\s+LUGS?\b", primary, re.I))
+
+
+def _is_flex_connector_flow_liner(norm_blob: str, tags: set[str]) -> bool:
+    return "FLEX CONNECTOR" in tags and bool(re.search(r"\bFLOW\s+LINERS?\b", norm_blob))
 
 
 def _is_motor_insulation_only(primary: str, norm_blob: str, tags: set[str]) -> bool:
@@ -1091,17 +1116,112 @@ def _insulation_attributes(item: Dict[str, Any], primary: str, norm_blob: str, t
         attrs["insulation_scope"] = "INLET BOX"
     elif "SILENCER" in norm_blob:
         attrs["insulation_scope"] = "SILENCER"
+    elif "DUCT" in norm_blob:
+        attrs["insulation_scope"] = "DUCT"
     elif "FAN" in norm_blob:
         attrs["insulation_scope"] = "FAN"
+    if re.search(r"\bACOUSTIC\b|\bSOUND\s+PILLOW\b", norm_blob):
+        attrs["insulation_type"] = "ACOUSTIC"
+    elif re.search(r"\bTHERMAL\b", norm_blob):
+        attrs["insulation_type"] = "THERMAL"
+    elif re.search(r"\bLAGGING\b", norm_blob):
+        attrs["insulation_type"] = "LAGGING"
+    elif re.search(r"\bJACKET(?:ED)?\b", norm_blob):
+        attrs["insulation_type"] = "JACKET"
+    elif re.search(r"\bMINERAL\s+WOOL\b", norm_blob):
+        attrs["insulation_material"] = "MINERAL WOOL"
+    elif re.search(r"\bFIBERGLASS\b|\bFIBRE\s*GLASS\b", norm_blob):
+        attrs["insulation_material"] = "FIBERGLASS"
 
     raw_blob = _item_blob(item)
-    m = re.search(r"\bINSULATION\s+([0-9]+(?:\.[0-9]+)?)\s*(\")?", raw_blob, re.I)
+    m = re.search(
+        r"\b(?:INSULATION|LAGGING)\s+([0-9]+(?:\.[0-9]+)?)\s*(\")?"
+        r"|\b([0-9]+(?:\.[0-9]+)?)\s*(\")?\s+(?:INSULATION|LAGGING)\b",
+        raw_blob,
+        re.I,
+    )
     if m:
-        suffix = '"' if m.group(2) or attrs.get("insulation_scope") else ""
-        attrs["insulation_thickness"] = f"{m.group(1)}{suffix}"
+        value = m.group(1) or m.group(3)
+        suffix = '"' if m.group(2) or m.group(4) or attrs.get("insulation_scope") else ""
+        attrs["insulation_thickness"] = f"{value}{suffix}"
     insulated_by = _label_value(item, "Insulated By")
     if insulated_by:
         attrs["insulated_by"] = insulated_by
+    return attrs
+
+
+def _label_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "LABEL" not in tags:
+        return {}
+    attrs: Dict[str, str] = {}
+    if re.search(r"\bSHIPPING\s+BAR\s*CODE\s+LABEL\b|\bSHIPPING\s+BARCODE\s+LABEL\b", norm_blob):
+        attrs["label_type"] = "SHIPPING BARCODE LABEL"
+        attrs["label_scope"] = "SHIPPING"
+    elif re.search(r"\bFEI\s+LABEL\b", norm_blob):
+        attrs["label_type"] = "FEI LABEL"
+    elif re.search(r"\bWARNING\s+LABEL\b", norm_blob):
+        attrs["label_type"] = "WARNING LABEL"
+        attrs["label_scope"] = "FAN" if "FAN" in norm_blob else "WARNING"
+    elif re.search(r"\bRETIE\s+LABEL\b", norm_blob):
+        attrs["label_type"] = "RETIE LABEL"
+        attrs["label_scope"] = "MOTOR"
+    elif re.search(r"\bLABEL\s+REQUIRED\s+ON\s+EACH\s+ITEM\b", norm_blob):
+        attrs["label_type"] = "ITEM LABEL"
+        attrs["label_scope"] = "EACH ITEM"
+    elif re.search(r"\bMARK\s+ALL\s+ITEMS\b|\bMARKED\s+WITH\s+THIS\s+INFORMATION\b", norm_blob):
+        attrs["label_type"] = "ITEM MARKING"
+        attrs["label_scope"] = "EACH ITEM"
+    elif re.search(r"\bFEDEX\s+SHIPPING\s+LABEL\b|\bSHIPPING\s+LABEL\b", norm_blob):
+        attrs["label_type"] = "SHIPPING LABEL"
+        attrs["label_scope"] = "SHIPPING"
+
+    if re.search(r"\bSTICKERS?\s*/?\s*LABELS?.*\bNAMEPLATE\b.*\bBAG\b", norm_blob):
+        attrs["label_handling"] = "OTHER LABELS/NAMEPLATE BAGGED"
+    if re.search(r"\bVENDOR\s+S\s+MOTOR\s+NAMEPLATE\b.*\bAPPLIED\b", norm_blob):
+        attrs["related_nameplate_handling"] = "VENDOR MOTOR NAMEPLATE APPLIED"
+    return attrs
+
+
+def _lifting_lug_attributes(raw_blob: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "LIFTING LUGS" not in tags:
+        return {}
+    attrs: Dict[str, str] = {
+        "component": "LIFTING LUGS",
+        "lug_type": "LIFTING LUGS",
+    }
+    if "SILENCER" in tags or "SILENCER" in norm_blob:
+        attrs["lug_scope"] = "SILENCER"
+    else:
+        attrs["lug_scope"] = "FAN"
+    m = re.search(r"@\s*([0-9]{1,2}(?::[0-9]{2})?)", raw_blob)
+    if not m:
+        m = re.search(r"@\s*([0-9]{1,2}(?::[0-9]{2})?)", norm_blob)
+    if m:
+        attrs["lug_position"] = m.group(1)
+    return attrs
+
+
+def _lining_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "LINING" not in tags:
+        return {}
+    attrs: Dict[str, str] = {}
+    scopes: List[str] = []
+    if re.search(r"\bINLET\s+BOX\b", norm_blob):
+        _add_unique(scopes, "INLET BOX")
+    if re.search(r"\bHOUSING\s+SCROLL\b|\bSCROLL\b", norm_blob):
+        _add_unique(scopes, "HOUSING SCROLL")
+    if re.search(r"\bSIDE\s+SHEET\b", norm_blob):
+        _add_unique(scopes, "SIDE SHEET")
+    if re.search(r"\bWHEEL\s+BLADES?\b|\bBLADES?\b", norm_blob):
+        _add_unique(scopes, "WHEEL BLADES")
+    if "FIRMEX" in norm_blob:
+        attrs["lining_type"] = "FIRMEX"
+    elif re.search(r"\bRUBBER\s+LIN", norm_blob):
+        attrs["lining_type"] = "RUBBER"
+    if "ABRASION" in norm_blob:
+        attrs["lining_service"] = "ABRASION"
+    if scopes:
+        attrs["lining_scope"] = ", ".join(scopes)
     return attrs
 
 
@@ -1193,6 +1313,10 @@ def _flex_connector_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]
         attrs["flex_connector_type"] = "FLEXIBLE CONNECTOR"
     elif re.search(r"\bFLEX\s+CONNECTOR\b", norm_blob):
         attrs["flex_connector_type"] = "FLEX CONNECTOR"
+    if re.search(r"\bFLOW\s+LINERS?\b", norm_blob):
+        attrs["flex_connector_feature"] = "FLOW LINER"
+    if re.search(r"\bFIBERGLASS\s+SOUND\s+PILLOW\b", norm_blob):
+        attrs["flex_connector_insulation"] = "FIBERGLASS SOUND PILLOW"
     used_on: List[str] = []
     if "INLET" in tags or re.search(r"\bINLET\b", norm_blob):
         _add_unique(used_on, "INLET")
@@ -1883,9 +2007,15 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t != "INLET"]
     if _is_non_inlet_component_mounted_to_inlet_box(primary, norm_blob, set(tags)):
         tags = [t for t in tags if t != "INLET"]
+    if _is_label_instruction_line(primary, norm_blob, set(tags)):
+        tags = [t for t in tags if t not in _LABEL_DETAIL_TAGS]
     if _is_ship_via_note(primary, norm_blob):
         tags = [t for t in tags if t not in _SHIP_VIA_COMPONENT_TAGS]
         _add_unique(tags, "SHIPPING")
+    if "LIFTING LUGS" in tags and not _is_primary_lifting_lugs(primary):
+        tags = [t for t in tags if t != "LIFTING LUGS"]
+    if _is_flex_connector_flow_liner(norm_blob, set(tags)):
+        tags = [t for t in tags if t != "LINING"]
     if _is_motor_flange_line(primary, norm_blob):
         tags = [t for t in tags if t != "FLANGE"]
         _add_unique(tags, "MOTOR")
@@ -1929,6 +2059,11 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t != "INSPECTION"]
     if _is_motor_insulation_only(primary, norm_blob, set(tags)):
         tags = [t for t in tags if t != "INSULATION"]
+    if "LINING" in tags:
+        if re.search(r"\b(SCROLL|SIDE\s+SHEET)\b", norm_blob):
+            _add_unique(tags, "HOUSING")
+        if re.search(r"\b(WHEEL\s+BLADES?|BLADES?)\b", norm_blob):
+            _add_unique(tags, "WHEEL")
     if _is_housing_packaging_reference(norm_blob, set(tags)):
         tags = [t for t in tags if t != "HOUSING"]
     if _is_assembly_note(primary):
@@ -1970,6 +2105,9 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_inspection_attributes(primary, norm_blob, tags))
     attrs.update(_motor_insulation_attributes(norm_blob, tags, raw_tags))
     attrs.update(_insulation_attributes(item, primary, norm_blob, tags))
+    attrs.update(_label_attributes(norm_blob, tags))
+    attrs.update(_lifting_lug_attributes(blob, norm_blob, tags))
+    attrs.update(_lining_attributes(norm_blob, tags))
     attrs.update(_housing_attributes(norm_blob, tags))
     attrs.update(_motor_conduit_box_attributes(norm_blob))
 
