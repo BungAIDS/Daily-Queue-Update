@@ -318,7 +318,7 @@ def test_tagging():
     assert "STAINLESS STEEL" in li.tag_item(li.normalize_text("Passivation of Welds"))
     assert "LINING" in li.tag_item(li.normalize_text("Firmex liners on blades and housing scroll"))
     assert "COUPLING" in li.tag_item(li.normalize_text("Flexible Coupling Falk Type T Steelflex"))
-    assert "EXTREME TEMPERATURE" in li.tag_item(li.normalize_text("High Temp Fan"))
+    assert "EXTREME TEMP" in li.tag_item(li.normalize_text("High Temp Fan"))
     assert "LOW LEAKAGE" in li.tag_item(li.normalize_text("Low Leak IVC"))
     assert "ALUMINUM" in li.tag_item(li.normalize_text("Wheel Aluminium AMCA B"))
     assert "MATERIALS" in li.tag_item(li.normalize_text("Wheel Aluminium AMCA B"))
@@ -846,7 +846,7 @@ def test_low_leakage_and_extreme_temperature_attributes():
     cold_fan = li.extract_items([
         "Base Fan Suitable for -45 C Temperature L 21,101.00",
     ])[0]
-    assert {"BASE FAN", "EXTREME TEMPERATURE"} <= set(cold_fan["tags"])
+    assert {"BASE FAN", "EXTREME TEMP"} <= set(cold_fan["tags"])
     assert cold_fan["attributes"]["temperature_service"] == "LOW TEMPERATURE"
     assert cold_fan["attributes"]["temperature_rating"] == "-45C"
 
@@ -854,7 +854,7 @@ def test_low_leakage_and_extreme_temperature_attributes():
         "Fan and Low Leakage IVC suitable for 175F, Inquiry L",
         "Num: 9-14-164",
     ])[0]
-    assert {"EXTREME TEMPERATURE", "LOW LEAKAGE", "INLET VANES"} <= set(hot_ivc["tags"])
+    assert {"EXTREME TEMP", "LOW LEAKAGE", "INLET VANES"} <= set(hot_ivc["tags"])
     assert hot_ivc["attributes"]["temperature_service"] == "HIGH TEMPERATURE"
     assert hot_ivc["attributes"]["temperature_rating"] == "175F"
     assert hot_ivc["attributes"]["leakage_class"] == "LOW LEAKAGE"
@@ -863,7 +863,7 @@ def test_low_leakage_and_extreme_temperature_attributes():
         "Motor with High Temperature Grease C 1,000.00",
     ])[0]
     assert "MOTOR" in motor_grease["tags"]
-    assert "EXTREME TEMPERATURE" not in motor_grease["tags"]
+    assert "EXTREME TEMP" not in motor_grease["tags"]
     assert motor_grease["attributes"]["component"] == "MOTOR"
     assert motor_grease["attributes"]["grease_type"] == "HIGH TEMPERATURE GREASE"
 
@@ -871,7 +871,7 @@ def test_low_leakage_and_extreme_temperature_attributes():
         "John Crane Double Carbon Shaft Seal, High Temp N 6,040.00",
     ])[0]
     assert "SHAFT SEAL" in shaft_seal["tags"]
-    assert "EXTREME TEMPERATURE" not in shaft_seal["tags"]
+    assert "EXTREME TEMP" not in shaft_seal["tags"]
     assert shaft_seal["attributes"]["component"] == "SHAFT SEAL"
     assert shaft_seal["attributes"]["temperature_service"] == "HIGH TEMPERATURE"
 
@@ -1129,6 +1129,13 @@ def test_data_branch_noise_skipped():
         assert not any(bad in n for n in items), items
 
 
+def test_performance_header_noise_skipped():
+    items = li.extract_items([
+        "MAX TEMP, ELEVATION, DENSITY, COLD START BHP, MOTOR DESCRIPTION, FRAME, HP, INLET BOX, MIXING BOX, FRESH AIR",
+    ])
+    assert items == []
+
+
 def test_used_on_requires_damper_context():
     flange = li.extract_items(["Outlet, Flanged, Punched L STD"])[0]
     assert "used_on" not in flange["attributes"]
@@ -1141,6 +1148,20 @@ def test_used_on_requires_damper_context():
     assert "used_on_review" not in fresh_air["attributes"]
     prespin = li.extract_items(["Actuator for Pre-spin Damper, Bettis #RPED200 C 5,192.00"])[0]
     assert prespin["attributes"]["used_on"] == "PRESPIN DAMPER"
+
+
+def test_without_ivc_does_not_tag_inlet_vanes_or_used_on():
+    item = li.extract_items(["Inlet, Flanged, Punched (without IVC) L 468.00"])[0]
+    assert {"INLET", "FLANGE"} <= set(item["tags"])
+    assert "INLET VANES" not in item["tags"]
+    assert "used_on" not in item["attributes"]
+
+
+def test_inlet_cone_width_does_not_tag_wheel_without_wheel_wording():
+    item = li.extract_items(["Aluminum Inlet Cone, Inlet Cone 100% Width Cartoned (Unpainted) L 752.00"])[0]
+    assert {"INLET", "MATERIALS", "ALUMINUM"} <= set(item["tags"])
+    assert "WHEEL" not in item["tags"]
+    assert item["attributes"]["material_scope"] == "INLET CONE"
 
 
 def test_drain_attributes():

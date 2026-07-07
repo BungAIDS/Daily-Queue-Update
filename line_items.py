@@ -99,6 +99,7 @@ DEFAULT_RULES: Dict[str, Any] = {
         r"^freight\b", r"^fob\b", r"^(sales\s+)?tax\b", r"surcharge",
         r"^lead\s+time\b", r"^customs\s+invoice\b",
         r"^type\s+price\b",                           # "Type Price Freight Markup Net Comm."
+        r"^max\s+temp,\s+elevation,\s+density\b",     # fan performance table header
         r"^page\s+\d+", r"^\d+\s+of\s+\d+$",
         r"^sales\s+order\b", r"^order\s*#", r"^order\s+(no|number|date)\b",
         r"^job\s+(no|number)\b",
@@ -162,7 +163,7 @@ DEFAULT_RULES: Dict[str, Any] = {
                       r"aluminum", r"aluminium"],
         "STAINLESS STEEL": [r"stainless", r"\b304L?\b", r"\b316L?\b", r"passivat"],
         "ALUMINUM": [r"aluminum", r"aluminium"],
-        "EXTREME TEMPERATURE": [
+        "EXTREME TEMP": [
             r"high\s*temp", r"heat\s*fan", r"low\s*temp",
             r"\bsuitable\s+for\s+-?\d{2,3}\s*(?:F|C)\b",
             r"\brated\s+for\s+\d{3}\s*F\b",
@@ -257,7 +258,7 @@ _MISC_NOTE_COMPONENT_TAGS = {"WHEEL"}
 _BASE_FAN_DETAIL_TAGS = {"MOTOR", "MOUNTING"}
 _BELT_GUARD_DETAIL_TAGS = {"COATING", "MOUNTING", "MOTOR"}
 _DRIVE_TABLE_DETAIL_TAGS = {"DRAWINGS", "MOTOR", "SPECIAL CONSTRUCTION"}
-_EXTREME_TEMPERATURE_TAG = "EXTREME TEMPERATURE"
+_EXTREME_TEMPERATURE_TAG = "EXTREME TEMP"
 _ACCESSORY_COATING_TAGS = {
     "BELT GUARD", _GUARD_TAG, "MOTOR", "SILENCER", "FLEX CONNECTOR",
     "WEATHER COVER", "SCREEN",
@@ -482,6 +483,8 @@ def inquiry_numbers(item: Dict[str, Any]) -> List[str]:
 
 
 def _used_on(norm_blob: str) -> str:
+    if _is_without_ivc(norm_blob):
+        return ""
     component_context = ("DAMPER" in norm_blob or "ACTUATOR" in norm_blob
                          or "VOLUME CONTROL" in norm_blob)
     if not component_context and "IVC" not in norm_blob:
@@ -648,6 +651,21 @@ def _is_non_wheel_end_location(norm_blob: str) -> bool:
 
 def _is_flex_connector_line(norm_blob: str) -> bool:
     return bool(re.search(r"\b(FLEX(IBLE)?\s+CONNECTOR|EXPANSION\s+JOINT|EJ)\b", norm_blob))
+
+
+def _is_without_ivc(norm_blob: str) -> bool:
+    return bool(
+        re.search(r"\b(WITHOUT|LESS|NO)\s+IVC\b", norm_blob)
+        or re.search(r"\bWITHOUT\s+INLET\s+VOLUME\s+CONTROL\b", norm_blob)
+    )
+
+
+def _is_inlet_cone_width_without_wheel(norm_blob: str) -> bool:
+    return bool(
+        re.search(r"\bINLET\s+CONE\b", norm_blob)
+        and re.search(r"\b\d+(?:\.\d+)?\s*%\s*WIDTH\b|\bPERCENT\s+WIDTH\b", norm_blob)
+        and not re.search(r"\bWHEEL\b", norm_blob)
+    )
 
 
 def _is_explosion_proof_motor_context(primary: str) -> bool:
@@ -867,7 +885,7 @@ def _temperature_attributes(primary: str, norm_blob: str, tags: set[str], raw_bl
     if direction:
         attrs["temperature_service"] = direction
     elif _is_top_level_extreme_temperature(primary, norm_blob, tags):
-        attrs["temperature_service"] = "EXTREME TEMPERATURE"
+        attrs["temperature_service"] = "EXTREME TEMP"
     if direction and "," not in direction:
         attrs["temperature_direction"] = direction
     if values:
@@ -1412,6 +1430,10 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
     if _is_non_wheel_end_location(norm_blob):
         tags = [t for t in tags if t != "WHEEL"]
         _add_unique(tags, "HOUSING")
+    if _is_without_ivc(norm_blob):
+        tags = [t for t in tags if t != "INLET VANES"]
+    if _is_inlet_cone_width_without_wheel(norm_blob):
+        tags = [t for t in tags if t != "WHEEL"]
     if "FLEX CONNECTOR" in tags and "FLANGE" in tags and _is_flex_connector_line(norm_blob):
         tags = [t for t in tags if t != "FLANGE"]
     temp_blob = f"{norm_blob} {_item_blob(item).upper()}"
