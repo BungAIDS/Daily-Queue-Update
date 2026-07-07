@@ -172,6 +172,92 @@ def apply_vision_result(run: Dict[str, Any], parsed: Dict[str, Any], model: str)
     return True
 
 
+# --------------------------------------------------------------------------- #
+# Vision quality control (pure — no API)                                       #
+# --------------------------------------------------------------------------- #
+CHECK_STATUS = "CHECK VISION"
+
+# Fields that must be a plain number (commas ok). A slash or stray letters in
+# one of these is the classic OCR garble ("4/100 CFM", "20.000 NON-STD").
+_INT_FIELDS = {"CFM", "RPM", "Max RPM", "Tip Speed FPM", "Critical Speed RPM",
+               "Blades", "Bearing L10 Hr", "Wheel Weight Lb", "Motor Weight Lb",
+               "Total Weight Lb", "Total Price", "Wheel Resonance CPM"}
+_DEC_FIELDS = {"SP", "BHP", "Density", "Max HP", "Air Temp F", "Max Temp F",
+               "% Width", "Stress Ratio at Hub", "Stress Ratio at Bearing",
+               "Fan Outlet Area FT2", "Size"}
+# Real arrangements: digit family + optional letter suffix (+ digit after the
+# letter): 4, 4S, 4S1, 8S, 9H, 3D, 7S1... "781"/"88"/"48" are OCR garbles.
+_ARR_OK = re.compile(r"^[1-9](?:[A-Z]{1,2}\d?)?$")
+
+
+def _implausible(key: str, val: str) -> bool:
+    v = (val or "").replace(",", "").strip()
+    if key in _INT_FIELDS:
+        return not re.fullmatch(r"\d+", v)
+    if key in _DEC_FIELDS:
+        return not re.fullmatch(r"\d+(?:\.\d+)?", v)
+    return False
+
+
+def vision_qc(run: Dict[str, Any]) -> List[str]:
+    """Reasons a vision run's extraction looks WRONG and the PDF should be
+    re-read (or hand-checked). Empty list = passes. Where the transcript's
+    targeted parse is clean and the model value is garbled, the field is
+    REPAIRED in place instead of flagged (build what we can from what we know)."""
+    from templates import _parse_chicago_blower
+    vision = run.get("vision") or {}
+    reasons: List[str] = []
+    if not vision:
+        return reasons
+    transcript = vision.get("transcript", "")
+    if not transcript:
+        reasons.append("no transcript saved (trial batch) — cheap to re-read")
+    fields = run.get("fields") or {}
+    parsed = _parse_chicago_blower(transcript) if transcript else {}
+    for k, v in list(fields.items()):
+        if not _implausible(k, str(v)):
+            continue
+        alt = parsed.get(k, "")
+        if alt and not _implausible(k, alt):
+            fields[k] = alt              # repair: pattern value is clean
+            reasons.append(f"repaired {k}: {v!r} -> {alt!r}")
+        else:
+            reasons.append(f"implausible {k}={v!r}")
+    arr = str(fields.get("Arrangement", ""))
+    if arr and not _ARR_OK.fullmatch(arr):
+        alt = str(parsed.get("Arrangement", ""))
+        if alt and _ARR_OK.fullmatch(alt):
+            fields["Arrangement"] = alt   # model slop; the transcript line is clean
+            reasons.append(f"repaired Arrangement: {arr!r} -> {alt!r}")
+        else:
+            reasons.append(f"odd Arrangement {arr!r} (OCR garble?)")
+    # Model vs clean transcript disagreement on hard numbers (>1% apart).
+    for k in ("CFM", "RPM", "BHP", "SP"):
+        a, b = str(fields.get(k, "")).replace(",", ""), str(parsed.get(k, "")).replace(",", "")
+        try:
+            fa, fb = float(a), float(b)
+        except ValueError:
+            continue
+        if fa and fb and abs(fa - fb) / max(fa, fb) > 0.01:
+            reasons.append(f"{k}: model read {a}, transcript says {b}")
+    return reasons
+
+
+def apply_vision_qc(run: Dict[str, Any]) -> List[str]:
+    """Run QC on one vision run; record the verdict. A run with real (non-repair)
+    findings is flagged CHECK VISION so it shows amber in the workbook and gets
+    re-read by the next pdf_vision batch."""
+    reasons = vision_qc(run)
+    if not run.get("vision"):
+        return []
+    run["vision"]["suspect"] = [r for r in reasons if not r.startswith("repaired ")]
+    if run["vision"]["suspect"]:
+        run["status"] = CHECK_STATUS
+    elif run.get("status") == CHECK_STATUS:   # previously flagged, now clean
+        run["status"] = "OK" if run.get("fields") else run.get("status")
+    return reasons
+
+
 def candidate_runs(records: Dict[str, Dict[str, Any]],
                    jobs: Optional[List[str]] = None,
                    redo: bool = False) -> List[Tuple[str, Dict[str, Any]]]:
@@ -188,6 +274,8 @@ def candidate_runs(records: Dict[str, Dict[str, Any]],
                 continue
             if run.get("status") == NO_TEXT_STATUS and not run.get("vision"):
                 out.append((job, run))
+            elif run.get("status") == CHECK_STATUS:
+                out.append((job, run))       # QC-flagged: re-read is the fix
             elif redo and run.get("vision"):
                 out.append((job, run))
     return out

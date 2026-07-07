@@ -28,6 +28,27 @@ tail fixture.
 Outline table: now pulled in FULL (all 16 codes) — see the block-parser entry
 below.
 
+## 2026-07-06 — Vision QC: repair what we can, flag the rest + HANDOFF_PLAN.md
+
+Per DG (low on assistant usage; handing off): `pdf_vision.apply_vision_qc`
+validates every vision run offline — numeric plausibility per field class,
+arrangement whitelist (catches the systematic OCR "S read as 8/5": 7S1->781,
+8S->88), and model-vs-clean-transcript disagreement on CFM/SP/BHP/RPM. Where
+the transcript's targeted parse is clean and the model value garbled, the
+field is REPAIRED in place; otherwise the run is flagged **CHECK VISION**
+(amber in the xlsx) and the next `python pdf_vision.py` re-reads exactly those
+(candidates include CHECK VISION without --redo). Runs inside
+`--reparse-stored`, so one command applies patterns + QC.
+
+Dry-run on the real store: 59 PDFs flagged (see list below), several fields
+auto-repaired (incl. 9 arrangements from model slop like "ARR 8S, 100.0 PCT").
+
+Flagged: 400934 401078 401195 401217 401266 401445 402395 402547 403049 404135 404216 404346 404357 404459 404641 404783 405693 406123 406678 406841 406906 407015 407189 407349 407497 408001 408015 408289 408290 408355 409440 409784 409960 410089 410887 411028 411091 411180 411306 411484 411820 411821 413044 413242 413265 413592 413680 413967 414648 414651 414686 415158 415956 416730 416809 417395 418342 419644 420848
+
+**HANDOFF_PLAN.md** added at repo root: the full big-picture roadmap (system
+map, working loop, P0-P7 priorities with why/how/verify, evidence bar,
+confidence register, command cheat sheet) for the next session to continue.
+
 ## 2026-07-06 — Rank multiple quote runs by currency (71 orders have >1)
 
 Per DG. 71/381 orders carry multiple run files; master.json and the daily

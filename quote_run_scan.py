@@ -131,15 +131,20 @@ def reparse_stored(records: Dict[str, Dict[str, Any]]) -> int:
             fields = {**parsed, **(run.get("fields") or {})} if vision else parsed
             if fields and job:
                 fields.setdefault("Serial", job)
-            if fields == run.get("fields"):
-                continue
+            before = (dict(run.get("fields") or {}), run.get("status"))
             run["fields"] = fields
-            run["summary"] = _cb_summary(fields)
-            if fields:
+            if vision:
+                # QC: repair garbled values where the transcript parse is clean,
+                # flag the rest CHECK VISION (amber; re-read by next pdf_vision).
+                from pdf_vision import apply_vision_qc
+                apply_vision_qc(run)
+            run["summary"] = _cb_summary(run["fields"])
+            if run["fields"] and run.get("status") not in ("CHECK VISION",):
                 run["status"] = "OK"
                 if not vision:
                     run["template"] = "cbc_qt_run_text"
-            changed += 1
+            if (run.get("fields"), run.get("status")) != before:
+                changed += 1
     return changed
 
 

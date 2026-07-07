@@ -124,6 +124,63 @@ def test_carry_vision_forward_survives_rescan():
     assert carry_vision_forward(None, new3)["runs"][0]["status"] == NO_TEXT_STATUS
 
 
+def test_vision_qc_repairs_and_flags():
+    from pdf_vision import apply_vision_qc, CHECK_STATUS
+    # Garbled model value + clean transcript -> repaired in place, not flagged.
+    clean_line = "CHICAGO BLOWER CORP.\n 24100 CFM, 22.00 SP, 198.5 BHP, 1770 RPM,  70 DEG F, DENSITY 0.0750\n"
+    run = {"status": "OK", "fields": {"CFM": "4/100", "RPM": "1770"},
+           "vision": {"model": "m", "transcript": clean_line}}
+    notes = apply_vision_qc(run)
+    assert run["fields"]["CFM"] == "24100"           # repaired from transcript
+    assert run["status"] == "OK"                     # repair is not a flag
+    assert any(n.startswith("repaired CFM") for n in notes)
+    assert run["vision"]["suspect"] == []
+
+    # Garbled value with NO clean source -> flagged CHECK VISION.
+    run2 = {"status": "OK", "fields": {"CFM": "4/100"},
+            "vision": {"model": "m", "transcript": "CHICAGO BLOWER\nno cfm here"}}
+    apply_vision_qc(run2)
+    assert run2["status"] == CHECK_STATUS
+    assert any("implausible CFM" in r for r in run2["vision"]["suspect"])
+
+    # Missing transcript (trial batch) -> flagged for a cheap re-read.
+    run3 = {"status": "OK", "fields": {"Size": "22"}, "vision": {"model": "m"}}
+    apply_vision_qc(run3)
+    assert run3["status"] == CHECK_STATUS
+
+    # Odd arrangement (OCR garble) -> flagged.
+    run4 = {"status": "OK", "fields": {"Arrangement": "781"},
+            "vision": {"model": "m", "transcript": "CHICAGO BLOWER"}}
+    apply_vision_qc(run4)
+    assert any("odd Arrangement" in r for r in run4["vision"]["suspect"])
+
+    # Model and a clean transcript disagree on a hard number -> flagged.
+    run5 = {"status": "OK", "fields": {"CFM": "21900"},
+            "vision": {"model": "m", "transcript": clean_line}}
+    apply_vision_qc(run5)
+    assert any("model read 21900" in r for r in run5["vision"]["suspect"])
+
+    # A clean run passes and a previously-flagged clean run is unflagged.
+    run6 = {"status": CHECK_STATUS, "fields": {"CFM": "24100", "RPM": "1770"},
+            "vision": {"model": "m", "transcript": clean_line}}
+    apply_vision_qc(run6)
+    assert run6["status"] == "OK" and run6["vision"]["suspect"] == []
+
+    # Non-vision runs are untouched.
+    run7 = {"status": "OK", "fields": {"CFM": "bad/val"}}
+    assert apply_vision_qc(run7) == [] and run7["status"] == "OK"
+
+
+def test_qc_flagged_runs_are_reread_candidates():
+    from pdf_vision import CHECK_STATUS
+    records = {"1": {"job": "1", "runs": [
+        {"path": "a.pdf", "status": CHECK_STATUS, "vision": {"model": "m"}},
+        {"path": "b.pdf", "status": "OK", "vision": {"model": "m"}},
+    ]}}
+    got = candidate_runs(records)
+    assert [r["path"] for _, r in got] == ["a.pdf"]   # flagged re-reads without --redo
+
+
 def test_prompt_carries_field_names_and_contract():
     p = build_prompt()
     for name in ("Blade Gauge", "BX", "STB", "Housing", "Hub")[:3]:
