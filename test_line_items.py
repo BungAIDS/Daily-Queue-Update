@@ -318,6 +318,8 @@ def test_tagging():
     assert "STAINLESS STEEL" in li.tag_item(li.normalize_text("Passivation of Welds"))
     assert "LINING" in li.tag_item(li.normalize_text("Firmex liners on blades and housing scroll"))
     assert "COUPLING" in li.tag_item(li.normalize_text("Flexible Coupling Falk Type T Steelflex"))
+    assert "EXTREME TEMPERATURE" in li.tag_item(li.normalize_text("High Temp Fan"))
+    assert "LOW LEAKAGE" in li.tag_item(li.normalize_text("Low Leak IVC"))
     assert "ALUMINUM" in li.tag_item(li.normalize_text("Wheel Aluminium AMCA B"))
     assert "MATERIALS" in li.tag_item(li.normalize_text("Wheel Aluminium AMCA B"))
     assert "WHEEL" in li.tag_item(li.normalize_text("Percent Width 78.7%"))
@@ -830,6 +832,64 @@ def test_balance_attributes():
     assert "BALANCE" in welded["tags"]
     assert welded["attributes"]["balance_type"] == "WELDED BALANCE WEIGHTS"
     assert "balance_grade" not in welded["attributes"]
+
+
+def test_low_leakage_and_extreme_temperature_attributes():
+    low_leak = li.extract_items([
+        "Inlet Volume Control, Low Leak, Automatic L 3,639.00",
+        "Size 4014 Low Leak IVC with rotating ring arm only",
+    ])[0]
+    assert {"INLET VANES", "LOW LEAKAGE"} <= set(low_leak["tags"])
+    assert low_leak["attributes"]["leakage_class"] == "LOW LEAKAGE"
+    assert low_leak["attributes"]["used_on"] == "IVC"
+
+    cold_fan = li.extract_items([
+        "Base Fan Suitable for -45 C Temperature L 21,101.00",
+    ])[0]
+    assert {"BASE FAN", "EXTREME TEMPERATURE"} <= set(cold_fan["tags"])
+    assert cold_fan["attributes"]["temperature_service"] == "LOW TEMPERATURE"
+    assert cold_fan["attributes"]["temperature_rating"] == "-45C"
+
+    hot_ivc = li.extract_items([
+        "Fan and Low Leakage IVC suitable for 175F, Inquiry L",
+        "Num: 9-14-164",
+    ])[0]
+    assert {"EXTREME TEMPERATURE", "LOW LEAKAGE", "INLET VANES"} <= set(hot_ivc["tags"])
+    assert hot_ivc["attributes"]["temperature_service"] == "HIGH TEMPERATURE"
+    assert hot_ivc["attributes"]["temperature_rating"] == "175F"
+    assert hot_ivc["attributes"]["leakage_class"] == "LOW LEAKAGE"
+
+    motor_grease = li.extract_items([
+        "Motor with High Temperature Grease C 1,000.00",
+    ])[0]
+    assert "MOTOR" in motor_grease["tags"]
+    assert "EXTREME TEMPERATURE" not in motor_grease["tags"]
+    assert motor_grease["attributes"]["component"] == "MOTOR"
+    assert motor_grease["attributes"]["grease_type"] == "HIGH TEMPERATURE GREASE"
+
+    shaft_seal = li.extract_items([
+        "John Crane Double Carbon Shaft Seal, High Temp N 6,040.00",
+    ])[0]
+    assert "SHAFT SEAL" in shaft_seal["tags"]
+    assert "EXTREME TEMPERATURE" not in shaft_seal["tags"]
+    assert shaft_seal["attributes"]["component"] == "SHAFT SEAL"
+    assert shaft_seal["attributes"]["temperature_service"] == "HIGH TEMPERATURE"
+
+
+def test_heavy_duty_component_attributes():
+    wheel = li.extract_items(["Wheel, Heavy Duty L 302.00"])[0]
+    assert {"HEAVY DUTY", "WHEEL"} <= set(wheel["tags"])
+    assert wheel["attributes"]["component"] == "WHEEL"
+    assert wheel["attributes"]["duty_rating"] == "HEAVY DUTY"
+
+    housing = li.extract_items(["Housing, Heavy Duty L 4,754.00"])[0]
+    assert {"HEAVY DUTY", "HOUSING"} <= set(housing["tags"])
+    assert housing["attributes"]["component"] == "HOUSING"
+    assert housing["attributes"]["duty_rating"] == "HEAVY DUTY"
+
+    severe_motor = li.extract_items(["Motor TEFC Severe Duty C 1,200.00"])[0]
+    assert "HEAVY DUTY" not in severe_motor["tags"]
+    assert "duty_rating" not in severe_motor["attributes"]
 
 
 def test_bearing_attributes():

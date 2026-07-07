@@ -162,8 +162,15 @@ DEFAULT_RULES: Dict[str, Any] = {
                       r"aluminum", r"aluminium"],
         "STAINLESS STEEL": [r"stainless", r"\b304L?\b", r"\b316L?\b", r"passivat"],
         "ALUMINUM": [r"aluminum", r"aluminium"],
-        "HIGH TEMPERATURE": [r"high\s*temp", r"heat\s*fan"],
+        "EXTREME TEMPERATURE": [
+            r"high\s*temp", r"heat\s*fan", r"low\s*temp",
+            r"\bsuitable\s+for\s+-?\d{2,3}\s*(?:F|C)\b",
+            r"\brated\s+for\s+\d{3}\s*F\b",
+            r"\bto\s*-?\d{2,3}\s*(?:deg(?:ree)?\s*)?C\b",
+            r"\b-\s*\d{2,3}\s*C\s+temperature\b",
+        ],
         "HEAVY DUTY": [r"heavy\s*duty"],
+        "LOW LEAKAGE": [r"low\s*[- ]?leak(?:age)?"],
         "COATING": [r"epoxy", r"\bcoat(?:ed|ing|s)?\b", r"paint", r"primer",
                     r"plasite", r"heresite", r"\bzinc\b"],
         "LINING": [r"rubber\s*lin", r"\blined\b", r"\blining\b", r"abrasion",
@@ -250,6 +257,7 @@ _MISC_NOTE_COMPONENT_TAGS = {"WHEEL"}
 _BASE_FAN_DETAIL_TAGS = {"MOTOR", "MOUNTING"}
 _BELT_GUARD_DETAIL_TAGS = {"COATING", "MOUNTING", "MOTOR"}
 _DRIVE_TABLE_DETAIL_TAGS = {"DRAWINGS", "MOTOR", "SPECIAL CONSTRUCTION"}
+_EXTREME_TEMPERATURE_TAG = "EXTREME TEMPERATURE"
 _ACCESSORY_COATING_TAGS = {
     "BELT GUARD", _GUARD_TAG, "MOTOR", "SILENCER", "FLEX CONNECTOR",
     "WEATHER COVER", "SCREEN",
@@ -507,6 +515,7 @@ def _needs_used_on_review(norm_blob: str, attrs: Dict[str, str]) -> bool:
 
 _MATERIAL_GRADE = re.compile(r"\bT?(304L?|316L?)\s+STAINLESS\s+STEEL\b", re.I)
 _BALANCE_GRADE = re.compile(r"\bG\s*(\d+(?:\.\d+)?)\s+BALANCE\b", re.I)
+_TEMP_VALUE = re.compile(r"(?<![A-Z0-9])(-?\d{2,3})\s*(?:(?:DEG(?:REE)?|°)\s*)?([FC])\b", re.I)
 
 
 def _add_unique(values: List[str], value: str) -> None:
@@ -764,6 +773,120 @@ def _coupling_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
         attrs["set_screws"] = "YES"
     if "CBC MOUNT" in norm_blob:
         attrs["mounting"] = "CBC MOUNT"
+    return attrs
+
+
+def _low_leakage_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "LOW LEAKAGE" not in tags and not re.search(r"\bLOW\s*[- ]?LEAK(?:AGE)?\b", norm_blob):
+        return {}
+    attrs = {"leakage_class": "LOW LEAKAGE"}
+    if "IVC" in norm_blob or "INLET VOLUME CONTROL" in norm_blob or "INLET VANES" in tags:
+        attrs["used_on"] = "IVC"
+    return attrs
+
+
+def _temperature_values(norm_blob: str) -> List[Tuple[int, str]]:
+    values: List[Tuple[int, str]] = []
+    for m in re.finditer(r"\bTO\s*(-?\d{2,3})\s*(?:(?:DEG(?:REE)?|°)\s*)?([FC])\b", norm_blob, re.I):
+        value = int(m.group(1))
+        unit = m.group(2).upper()
+        if (value, unit) not in values:
+            values.append((value, unit))
+    for m in _TEMP_VALUE.finditer(norm_blob):
+        context = norm_blob[max(0, m.start() - 35):m.end() + 35]
+        if not (
+            "°" in m.group(0)
+            or
+            re.search(r"\b(DEG|TEMPERATURE|TEMP|AMBIENT|OPERATION|SERVICE|SUITABLE|RATED|MAX)\b", context)
+            or re.search(r"\b(FOR|AT|TO)\s*$", norm_blob[max(0, m.start() - 10):m.start()])
+            or re.search(r"\bTO\b", norm_blob[m.end():m.end() + 10])
+        ):
+            continue
+        value = int(m.group(1))
+        unit = m.group(2).upper()
+        if (value, unit) not in values:
+            values.append((value, unit))
+    return values
+
+
+def _extreme_temperature_values(norm_blob: str) -> List[Tuple[int, str]]:
+    values: List[Tuple[int, str]] = []
+    for value, unit in _temperature_values(norm_blob):
+        if value < 0 or (unit == "F" and value >= 130) or (unit == "C" and value >= 50):
+            values.append((value, unit))
+    return values
+
+
+def _temperature_label(value: int, unit: str) -> str:
+    return f"{value}{unit}"
+
+
+def _temperature_direction(norm_blob: str, values: List[Tuple[int, str]]) -> str:
+    directions: List[str] = []
+    if re.search(r"\bLOW\s+TEMP(?:ERATURE)?\b", norm_blob) or any(value < 0 for value, _ in values):
+        _add_unique(directions, "LOW TEMPERATURE")
+    if (re.search(r"\b(HIGH\s+TEMP(?:ERATURE)?|HEAT\s+FAN)\b", norm_blob)
+            or any((unit == "F" and value >= 130) or (unit == "C" and value >= 50)
+                   for value, unit in values)):
+        _add_unique(directions, "HIGH TEMPERATURE")
+    return ", ".join(directions)
+
+
+def _temperature_component(primary: str, norm_blob: str, tags: set[str]) -> str:
+    if "SHAFT SEAL" in tags:
+        return "SHAFT SEAL"
+    if _is_top_level_extreme_temperature(primary, norm_blob, tags):
+        return ""
+    if "MOTOR" in tags and not re.match(r"^BASE\s+FAN\b", primary, re.I):
+        return "MOTOR"
+    return ""
+
+
+def _is_top_level_extreme_temperature(primary: str, norm_blob: str, tags: set[str]) -> bool:
+    if re.match(r"^MOTOR\b", primary, re.I) or "SHAFT SEAL" in tags:
+        return False
+    if "BASE FAN" in tags or re.search(r"\bFANS?\b", norm_blob):
+        return True
+    if ("INLET VANES" in tags or "DAMPER" in tags or "SPARK RESISTANT" in tags
+            or "IVC" in norm_blob or "INLET VOLUME CONTROL" in norm_blob):
+        return True
+    return False
+
+
+def _temperature_attributes(primary: str, norm_blob: str, tags: set[str], raw_blob: str) -> Dict[str, str]:
+    temp_blob = f"{norm_blob} {raw_blob.upper()}"
+    values = _extreme_temperature_values(temp_blob)
+    direction = _temperature_direction(temp_blob, values)
+    if not direction and _EXTREME_TEMPERATURE_TAG not in tags:
+        return {}
+
+    attrs: Dict[str, str] = {}
+    component = _temperature_component(primary, norm_blob, tags)
+    if component:
+        attrs["component"] = component
+    if direction:
+        attrs["temperature_service"] = direction
+    elif _is_top_level_extreme_temperature(primary, norm_blob, tags):
+        attrs["temperature_service"] = "EXTREME TEMPERATURE"
+    if direction and "," not in direction:
+        attrs["temperature_direction"] = direction
+    if values:
+        attrs["temperature_rating"] = ", ".join(_temperature_label(value, unit) for value, unit in values)
+    if re.search(r"\bHIGH\s+TEMP(?:ERATURE)?\s+GREASE\b", temp_blob):
+        attrs["grease_type"] = "HIGH TEMPERATURE GREASE"
+    elif re.search(r"\bLOW\s+TEMP(?:ERATURE)?\s+GREASE\b", temp_blob):
+        attrs["grease_type"] = "LOW TEMPERATURE GREASE"
+    return attrs
+
+
+def _heavy_duty_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "HEAVY DUTY" not in tags and not re.search(r"\bHEAVY\s+DUTY\b", norm_blob):
+        return {}
+    attrs = {"duty_rating": "HEAVY DUTY"}
+    if "WHEEL" in tags or re.search(r"\bWHEEL\b", norm_blob):
+        attrs["component"] = "WHEEL"
+    elif "HOUSING" in tags or re.search(r"\bHOUSING\b", norm_blob):
+        attrs["component"] = "HOUSING"
     return attrs
 
 
@@ -1291,6 +1414,14 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         _add_unique(tags, "HOUSING")
     if "FLEX CONNECTOR" in tags and "FLANGE" in tags and _is_flex_connector_line(norm_blob):
         tags = [t for t in tags if t != "FLANGE"]
+    temp_blob = f"{norm_blob} {_item_blob(item).upper()}"
+    has_extreme_temp = bool(_temperature_direction(temp_blob, _extreme_temperature_values(temp_blob)))
+    if (_EXTREME_TEMPERATURE_TAG in tags or has_extreme_temp) and _is_top_level_extreme_temperature(
+        primary, norm_blob, set(tags)
+    ):
+        _add_unique(tags, _EXTREME_TEMPERATURE_TAG)
+    elif _EXTREME_TEMPERATURE_TAG in tags:
+        tags = [t for t in tags if t != _EXTREME_TEMPERATURE_TAG]
     drain_type = _drain_type(primary, norm_blob)
     if drain_type == "HOUSING DRAIN":
         tags = [t for t in tags if t != "HOUSING"]
@@ -1333,6 +1464,9 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_flange_attributes(primary, norm_blob, tags, raw_tags))
     attrs.update(_flex_connector_attributes(norm_blob, tags))
     attrs.update(_coupling_attributes(norm_blob, tags))
+    attrs.update(_low_leakage_attributes(norm_blob, tags))
+    attrs.update(_temperature_attributes(primary, norm_blob, tags, blob))
+    attrs.update(_heavy_duty_attributes(norm_blob, tags))
 
     vendor = _label_value(item, "Vendor")
     product = _label_value(item, "Product")

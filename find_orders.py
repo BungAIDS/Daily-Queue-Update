@@ -82,6 +82,8 @@ def _attrs_label(item: Dict[str, Any]) -> str:
         "flange_scope", "flange_type", "flange_location",
         "flex_connector_type",
         "coupling_subcategory", "coupling_type", "fit", "cover_type", "set_screws",
+        "leakage_class", "duty_rating",
+        "temperature_service", "temperature_direction", "temperature_rating", "grease_type",
         "material", "material_grade", "material_scope", "material_treatment",
         "component_material", "component_material_grade", "component_material_scope",
         "drain_type", "drain_closure", "drain_detail",
