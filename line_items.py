@@ -218,9 +218,10 @@ DEFAULT_RULES: Dict[str, Any] = {
         "LABEL": [r"\blabel\b"],
         "NAMEPLATE": [r"nameplate"],
         "PACKAGING": [r"\bcrate\b", r"\bcrating\b", r"shrink\s*wrap",
-                      r"\bskid\b", r"ispm\s*wood", r"do\s*not\s*stack",
+                      r"\bskid\b", r"ispm\s*(?:wood\s*)?(?:inspection\s*)?(?:stamp|stamping)",
+                      r"ispm\s*wood", r"do\s*not\s*stack",
                       r"metal\s*banding"],
-        "SHIPPING": [r"ship\s*loose", r"freight\s*included", r"\bshipping\b"],
+        "SHIPPING": [r"ship\s*loose", r"ship\s*via", r"freight\s*included", r"\bshipping\b"],
         "WARRANTY": [r"warranty"],
         "MOUNTING": [r"\bmounting\b", r"\bmounted\b", r"\bcbc\s*mount\b"],
         "SPECIAL CONSTRUCTION": [r"set\s*screws?", r"loc\s*tite", r"caulking",
@@ -230,7 +231,9 @@ DEFAULT_RULES: Dict[str, Any] = {
                                  r"\bconduit\b", r"\boverhang\b",
                                  r"effective\s*diameter", r"threaded\s*plug",
                                  r"hole\s*diameters?", r"earthing\s*boss"],
-        "INSPECTION": [r"\binspection\b", r"mill\s*certifications?"],
+        "INSPECTION": [r"\binspection\b",
+                       r"ispm\s*(?:wood\s*)?(?:inspection\s*)?(?:stamp|stamping)",
+                       r"mill\s*certifications?"],
         "DRAWINGS": [r"\bcertified\s*drawings?\b", r"\bprints?\b",
                      r"\bdrawings?\b"],
         "MOTOR": [r"\bmotor\b", r"\bc\s*[- ]?\s*flange\b"],
@@ -260,6 +263,9 @@ _BASE_FAN_DETAIL_TAGS = {"MOTOR", "MOUNTING"}
 _BELT_GUARD_DETAIL_TAGS = {"COATING", "MOUNTING", "MOTOR"}
 _DRIVE_TABLE_DETAIL_TAGS = {"DRAWINGS", "MOTOR", "SPECIAL CONSTRUCTION"}
 _EXTREME_TEMPERATURE_TAG = "EXTREME TEMP"
+_SHIP_VIA_COMPONENT_TAGS = {
+    "ACTUATOR", "DAMPER", "FLEX CONNECTOR", "INLET VANES", "SILENCER", "OUTLET",
+}
 _ACCESSORY_COATING_TAGS = {
     "BELT GUARD", _GUARD_TAG, "MOTOR", "SILENCER", "FLEX CONNECTOR",
     "WEATHER COVER", "SCREEN",
@@ -498,6 +504,8 @@ def _used_on(norm_blob: str) -> str:
         return "OUTLET DAMPER"
     if "DISCHARGE" in norm_blob and ("DAMPER" in norm_blob or "ACTUATOR" in norm_blob):
         return "OUTLET DAMPER"
+    if "INLET VANE DAMPER" in norm_blob or re.search(r"\bIVD\b", norm_blob):
+        return "INLET VANE DAMPER"
     if "IVC" in norm_blob or "INLET VOLUME CONTROL" in norm_blob:
         return "IVC"
     if "INLET" in norm_blob and "DAMPER" in norm_blob:
@@ -515,6 +523,61 @@ def _needs_used_on_review(norm_blob: str, attrs: Dict[str, str]) -> bool:
     if re.search(r"\b(BETTIS|UNIC|EMERSON|ACTUATOR\s*:?)\b", norm_blob, re.I):
         return True
     return False
+
+
+def _is_ivc_actuator_context(norm_blob: str, tags: set[str]) -> bool:
+    return bool(
+        "INLET VANES" in tags
+        and ("ACTUATOR" in tags or re.search(r"\bACTUATOR\b", norm_blob))
+        and re.search(r"\b(IVC|INLET\s+VOLUME\s+CONTROL)\b", norm_blob)
+    )
+
+
+def _is_ship_via_note(primary: str, norm_blob: str) -> bool:
+    return bool(
+        re.search(r"\b(UPDATED|CHANGE|CHANGED)\s+SHIP\s+VIA\b", norm_blob)
+        or re.search(r"\bSHIP\s+VIA\b", primary)
+    )
+
+
+def _is_inspection_line(primary: str, norm_blob: str) -> bool:
+    inspection_patterns = [
+        r"\bISPM\b.*\b(STAMP|STAMPING|INSPECTION)\b",
+        r"\bORDER\s+IS\s+SHIPPING\s+OVERSEAS\b.*\bINSPECTION\s*/?\s*CRATE\s+REPORT\b",
+        r"\bCUSTOMER\s+FINAL\s+INSPECTION\b",
+        r"\bUNWITNESSED\s+DIMENSIONAL\s+INSPECTION\b",
+        r"\bFINAL\s+INSPECTION\s+REPORT\b",
+        r"\bGENERAL\s+MILL\s+CERTIFICATIONS?\b",
+    ]
+    return any(re.search(pattern, primary, re.I) or re.search(pattern, norm_blob, re.I)
+               for pattern in inspection_patterns)
+
+
+def _motor_insulation_reference(norm_blob: str) -> bool:
+    return bool(re.search(
+        r"\b((?:CLASS\s+)?[ABFH]\s+INSULATION|INSULATED\s+BEARINGS?|"
+        r"DUAL\s+INSULATED\s+BEARINGS?|(?:DE|NDE)\s+INSULATED\s+BEARING|"
+        r"INSULATED\s+(?:DE|NDE)\s+BEARING)\b",
+        norm_blob,
+        re.I,
+    ))
+
+
+def _fan_insulation_reference(norm_blob: str) -> bool:
+    return bool(re.search(
+        r"\b(PLUG\s+PANEL|HOUSING|INLET\s+BOX|SILENCER|DUCT|FAN)\b.{0,60}\bINSULAT"
+        r"|\bINSULAT\w*\b.{0,60}\b(PLUG\s+PANEL|HOUSING|INLET\s+BOX|SILENCER|DUCT|FAN)\b",
+        norm_blob,
+        re.I,
+    ))
+
+
+def _is_motor_insulation_only(primary: str, norm_blob: str, tags: set[str]) -> bool:
+    if "INSULATION" not in tags or "MOTOR" not in tags:
+        return False
+    if _fan_insulation_reference(primary) or _fan_insulation_reference(norm_blob):
+        return False
+    return _motor_insulation_reference(norm_blob)
 
 
 _MATERIAL_GRADE = re.compile(r"\bT?(304L?|316L?)\s+STAINLESS\s+STEEL\b", re.I)
@@ -912,6 +975,134 @@ def _inlet_mount_attributes(norm_blob: str) -> Dict[str, str]:
     if re.search(r"\bMOUNTED\s+ON\s+(?:OVERSIZED\s+)?INLET\s+BOX\b", norm_blob):
         return {"mount_location": "INLET BOX"}
     return {}
+
+
+def _inlet_vane_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "INLET VANES" not in tags:
+        return {}
+    attrs: Dict[str, str] = {}
+    subcategories: List[str] = []
+    features: List[str] = []
+
+    def add_subcategory(value: str) -> None:
+        _add_unique(subcategories, value)
+
+    def add_feature(value: str) -> None:
+        _add_unique(features, value)
+
+    if _is_ivc_actuator_context(norm_blob, tags):
+        add_subcategory("IVC ACTUATOR")
+        attrs["ivc_component"] = "ACTUATOR"
+    if "INLET VANE DAMPER" in norm_blob or re.search(r"\bIVD\b", norm_blob):
+        add_subcategory("INLET VANE DAMPER")
+        attrs["damper_subcategory"] = "INLET VANE DAMPER"
+    if re.search(r"\bINLET\b.*\bFLANGED\b.*\bPUNCHED\b.*\bWITH\s+IVC\b", norm_blob):
+        add_subcategory("IVC INLET FLANGE")
+    if not subcategories:
+        add_subcategory("IVC")
+
+    if re.search(r"\bAUTOMATIC\b", norm_blob):
+        attrs["operation"] = "Automatic"
+    elif re.search(r"\bMANUAL\b", norm_blob):
+        attrs["operation"] = "Manual"
+
+    if re.search(r"\bLOCKING(?:\s+QUADRANT)?\b", norm_blob):
+        add_feature("LOCKING QUADRANT")
+    if re.search(r"\bROTATING\s+RING\s+ARM\b", norm_blob):
+        add_feature("ROTATING RING ARM")
+    m = re.search(r"\bSIZE\s+(\d{3,4})\b|\b(\d{3,4})\s+LOW\s+LEAK\s+IVC\b", norm_blob)
+    if m:
+        attrs["ivc_size"] = next(v for v in m.groups() if v)
+    m = re.search(r"(?:@\s*)?([0-9]{1,2})\s+O\s*CLOCK", norm_blob)
+    if m:
+        attrs["ivc_arm_position"] = f"{m.group(1)} O'CLOCK"
+
+    if subcategories:
+        attrs["ivc_subcategory"] = ", ".join(subcategories)
+    if features:
+        attrs["ivc_feature"] = ", ".join(features)
+    attrs.setdefault("used_on", "IVC")
+    return attrs
+
+
+def _inspection_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "INSPECTION" not in tags:
+        return {}
+    attrs: Dict[str, str] = {}
+    if re.search(r"\bISPM\b.*\b(STAMP|STAMPING|INSPECTION)\b", norm_blob):
+        attrs["inspection_subcategory"] = "ISPM WOOD STAMP"
+        if "PACKAGING" in tags:
+            attrs["inspection_scope"] = "PACKAGING"
+    elif re.search(r"\bORDER\s+IS\s+SHIPPING\s+OVERSEAS\b", norm_blob):
+        attrs["inspection_subcategory"] = "OVERSEAS CRATE REPORT"
+        attrs["inspection_scope"] = "PACKAGING"
+    elif re.search(r"\bCUSTOMER\s+FINAL\s+INSPECTION\b", primary):
+        attrs["inspection_subcategory"] = "CUSTOMER FINAL INSPECTION"
+    elif re.search(r"\bUNWITNESSED\s+DIMENSIONAL\s+INSPECTION\b", primary):
+        attrs["inspection_subcategory"] = "DIMENSIONAL INSPECTION"
+        attrs["witnessed"] = "NO"
+    elif re.search(r"\bFINAL\s+INSPECTION\s+REPORT\b", norm_blob):
+        attrs["inspection_subcategory"] = "FINAL INSPECTION REPORT"
+    return attrs
+
+
+def _motor_insulation_attributes(norm_blob: str, tags: set[str], raw_tags: set[str]) -> Dict[str, str]:
+    if "MOTOR" not in tags and "MOTOR" not in raw_tags and not re.search(r"\bMOTOR\b", norm_blob):
+        return {}
+    attrs: Dict[str, str] = {}
+    classes = []
+    for m in re.finditer(r"\b(?:CLASS\s+)?([ABFH])\s+INSULATION\b", norm_blob):
+        _add_unique(classes, m.group(1).upper())
+    if classes:
+        attrs["motor_insulation_class"] = ", ".join(classes)
+
+    if re.search(r"\b(DUAL\s+INSULATED\s+BEARINGS?|INSULATED\s+BEARINGS?\b.*\bDE\b.*\bNDE\b)", norm_blob):
+        attrs["motor_insulated_bearing"] = "DE AND NDE"
+    elif re.search(r"\b(NDE\s+INSULATED\s+BEARING|INSULATED\s+NDE\s+BEARING|INSULATED\s+BEARINGS?\s*\(?NDE)\b", norm_blob):
+        attrs["motor_insulated_bearing"] = "NDE"
+    elif re.search(r"\b(DE\s+INSULATED\s+BEARING|INSULATED\s+DE\s+BEARING|INSULATED\s+BEARINGS?\s*\(?DE)\b", norm_blob):
+        attrs["motor_insulated_bearing"] = "DE"
+    elif re.search(r"\bINSULATED\s+BEARINGS?\b", norm_blob):
+        attrs["motor_insulated_bearing"] = "YES"
+
+    if re.search(r"\bAEGIS\s+RING\b", norm_blob):
+        attrs["motor_shaft_grounding"] = "AEGIS RING"
+    elif re.search(r"\bSHAFT\s+GROUNDING\s+BRUSH\b", norm_blob):
+        attrs["motor_shaft_grounding"] = "SHAFT GROUNDING BRUSH"
+    elif re.search(r"\bSHAFT\s+GROUNDING\s+RING\b", norm_blob):
+        attrs["motor_shaft_grounding"] = "SHAFT GROUNDING RING"
+    elif re.search(r"\bSHAFT\s+GROUNDING\b", norm_blob):
+        attrs["motor_shaft_grounding"] = "SHAFT GROUNDING"
+
+    if re.search(r"\b(VPI|VACUUM\s+PRESSURE\s+IMPREGNATION)\b", norm_blob):
+        attrs["motor_construction"] = "VPI"
+    return attrs
+
+
+def _insulation_attributes(item: Dict[str, Any], primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "INSULATION" not in tags:
+        return {}
+    attrs: Dict[str, str] = {}
+    if "PLUG PANEL" in norm_blob:
+        attrs["insulation_scope"] = "PLUG PANEL"
+    elif "HOUSING" in norm_blob:
+        attrs["insulation_scope"] = "HOUSING"
+    elif "INLET BOX" in norm_blob:
+        attrs["insulation_scope"] = "INLET BOX"
+    elif "SILENCER" in norm_blob:
+        attrs["insulation_scope"] = "SILENCER"
+    elif "FAN" in norm_blob:
+        attrs["insulation_scope"] = "FAN"
+
+    raw_blob = _item_blob(item)
+    m = re.search(r"\bINSULATION\s+([0-9]+(?:\.[0-9]+)?)\s*(\")?", raw_blob, re.I)
+    if m:
+        suffix = '"' if m.group(2) or attrs.get("insulation_scope") else ""
+        attrs["insulation_thickness"] = f"{m.group(1)}{suffix}"
+    insulated_by = _label_value(item, "Insulated By")
+    if insulated_by:
+        attrs["insulated_by"] = insulated_by
+    return attrs
 
 
 def _housing_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
@@ -1692,6 +1883,9 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t != "INLET"]
     if _is_non_inlet_component_mounted_to_inlet_box(primary, norm_blob, set(tags)):
         tags = [t for t in tags if t != "INLET"]
+    if _is_ship_via_note(primary, norm_blob):
+        tags = [t for t in tags if t not in _SHIP_VIA_COMPONENT_TAGS]
+        _add_unique(tags, "SHIPPING")
     if _is_motor_flange_line(primary, norm_blob):
         tags = [t for t in tags if t != "FLANGE"]
         _add_unique(tags, "MOTOR")
@@ -1704,6 +1898,8 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
             tags = [t for t in tags if t != "HOUSING"]
     if _is_without_ivc(norm_blob):
         tags = [t for t in tags if t != "INLET VANES"]
+    if _is_ivc_actuator_context(norm_blob, set(tags)):
+        _add_unique(tags, "DAMPER")
     if _is_inlet_cone_width_without_wheel(norm_blob):
         tags = [t for t in tags if t != "WHEEL"]
     if "FLEX CONNECTOR" in tags and "FLANGE" in tags and _is_flex_connector_line(norm_blob):
@@ -1729,6 +1925,10 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t not in _DRIVE_TABLE_DETAIL_TAGS]
     if "COATING" in tags and _is_paint_line(primary):
         tags = [t for t in tags if t not in _PAINT_SURFACE_TAGS]
+    if "INSPECTION" in tags and not _is_inspection_line(primary, norm_blob):
+        tags = [t for t in tags if t != "INSPECTION"]
+    if _is_motor_insulation_only(primary, norm_blob, set(tags)):
+        tags = [t for t in tags if t != "INSULATION"]
     if _is_housing_packaging_reference(norm_blob, set(tags)):
         tags = [t for t in tags if t != "HOUSING"]
     if _is_assembly_note(primary):
@@ -1766,6 +1966,10 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_inlet_attributes(primary, norm_blob, tags, blob))
     attrs.update(_mixing_box_attributes(norm_blob, tags))
     attrs.update(_inlet_mount_attributes(norm_blob))
+    attrs.update(_inlet_vane_attributes(primary, norm_blob, tags))
+    attrs.update(_inspection_attributes(primary, norm_blob, tags))
+    attrs.update(_motor_insulation_attributes(norm_blob, tags, raw_tags))
+    attrs.update(_insulation_attributes(item, primary, norm_blob, tags))
     attrs.update(_housing_attributes(norm_blob, tags))
     attrs.update(_motor_conduit_box_attributes(norm_blob))
 
@@ -1798,7 +2002,7 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_balance_attributes(norm_blob))
     attrs.update(_bearing_attributes(blob, norm_blob))
 
-    used_on = _used_on(norm_blob)
+    used_on = "" if _is_ship_via_note(primary, norm_blob) else _used_on(norm_blob)
     if used_on:
         attrs["used_on"] = used_on
 

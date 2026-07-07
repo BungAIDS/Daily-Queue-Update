@@ -213,6 +213,8 @@ def test_real_so_ivd_and_buyout_tagging():
     ivd = items["INLET VANE DAMPER"]            # IVD abbreviation expanded
     assert "DAMPER" in ivd["tags"] and "INLET VANES" in ivd["tags"], ivd
     assert any("Ruskin" in d for d in ivd["details"]), ivd["details"]
+    assert ivd["attributes"]["used_on"] == "INLET VANE DAMPER"
+    assert ivd["attributes"]["ivc_subcategory"] == "INLET VANE DAMPER"
     # The flanged expansion-joint buyouts tag FLEX CONNECTOR via "Product:".
     items473 = {it["norm"]: it for it in li.extract_items(REAL_LINES_473)}
     assert "FLEX CONNECTOR" in items473["INLET FLANGED"]["tags"]
@@ -501,9 +503,11 @@ def test_actuator_attributes():
     ])}
     actuator = items["ACTUATOR FOR IVC BETTIS #RPED100 DOUBLE ACTING"]
     attrs = actuator["attributes"]
-    assert {"ACTUATOR", "INLET VANES"} <= set(actuator["tags"])
+    assert {"ACTUATOR", "DAMPER", "INLET VANES"} <= set(actuator["tags"])
     assert attrs["component"] == "ACTUATOR"
     assert attrs["used_on"] == "IVC"
+    assert attrs["ivc_subcategory"] == "IVC ACTUATOR"
+    assert attrs["ivc_component"] == "ACTUATOR"
     assert attrs["vendor"] == "Novaspect"
     assert attrs["product"] == "Actuator"
     assert attrs["manufacturer"] == "Bettis RPD"
@@ -917,10 +921,16 @@ def test_low_leakage_and_extreme_temperature_attributes():
     low_leak = li.extract_items([
         "Inlet Volume Control, Low Leak, Automatic L 3,639.00",
         "Size 4014 Low Leak IVC with rotating ring arm only",
+        "@ 9 o'clock when viewed from the inlet side.",
     ])[0]
     assert {"INLET VANES", "LOW LEAKAGE"} <= set(low_leak["tags"])
     assert low_leak["attributes"]["leakage_class"] == "LOW LEAKAGE"
     assert low_leak["attributes"]["used_on"] == "IVC"
+    assert low_leak["attributes"]["ivc_subcategory"] == "IVC"
+    assert low_leak["attributes"]["operation"] == "Automatic"
+    assert low_leak["attributes"]["ivc_size"] == "4014"
+    assert low_leak["attributes"]["ivc_feature"] == "ROTATING RING ARM"
+    assert low_leak["attributes"]["ivc_arm_position"] == "9 O'CLOCK"
 
     cold_fan = li.extract_items([
         "Base Fan Suitable for -45 C Temperature L 21,101.00",
@@ -953,6 +963,19 @@ def test_low_leakage_and_extreme_temperature_attributes():
     assert "EXTREME TEMP" not in shaft_seal["tags"]
     assert shaft_seal["attributes"]["component"] == "SHAFT SEAL"
     assert shaft_seal["attributes"]["temperature_service"] == "HIGH TEMPERATURE"
+
+
+def test_inlet_vane_manual_locking_quadrant_attributes():
+    manual = li.extract_items([
+        "Inlet Volume Control, 350 F, Manual, with Locking L 2,175.00",
+        "Quadrant",
+        "Handle Location (viewed from inlet side):",
+    ])[0]
+    assert {"DAMPER", "INLET VANES"} <= set(manual["tags"])
+    assert manual["attributes"]["ivc_subcategory"] == "IVC"
+    assert manual["attributes"]["operation"] == "Manual"
+    assert manual["attributes"]["ivc_feature"] == "LOCKING QUADRANT"
+    assert manual["attributes"]["used_on"] == "IVC"
 
 
 def test_heavy_duty_component_attributes():
@@ -1321,6 +1344,60 @@ def test_mixing_box_is_not_inlet_category():
     assert mixing["attributes"]["mixing_box_feature"] == "FGR PORT, FLANGED"
     assert mixing["attributes"]["used_on"] == "INLET BOX"
     assert mixing["attributes"]["used_on_size"] == "300"
+
+
+def test_ship_via_component_list_is_shipping_note():
+    item = li.extract_items([
+        "Damper, Inlet Volume Control, Outlet Damper, Inlet Silencer, Expansion Joint and Updated Ship Via, Additional L 100.00",
+    ])[0]
+    assert item["tags"] == ["SHIPPING"]
+    assert "used_on" not in item["attributes"]
+    assert "component" not in item["attributes"]
+
+
+def test_inspection_subcategories_keep_ispm_and_overseas_crate():
+    ispm = li.derive_item_fields({"raw": "ISPM Wood Inspection Stamp L INC", "details": []})
+    assert {"INSPECTION", "PACKAGING"} <= set(ispm["tags"])
+    assert ispm["attributes"]["inspection_subcategory"] == "ISPM WOOD STAMP"
+    assert ispm["attributes"]["inspection_scope"] == "PACKAGING"
+
+    overseas = li.derive_item_fields({
+        "raw": "Order is shipping overseas; verify order is complete. For parts orders verify counts and sign off on inspection/crate report.",
+        "details": [],
+    })
+    assert {"INSPECTION", "PACKAGING", "SHIPPING"} <= set(overseas["tags"])
+    assert overseas["attributes"]["inspection_subcategory"] == "OVERSEAS CRATE REPORT"
+
+    booth_job_name = li.extract_items([
+        "AMCA B Spark Resistant Construction, Inquiry Num: L 1,338.00",
+        "421906 Fuel Nozzle Inspection Booth 4222426",
+    ])[0]
+    assert "SPARK RESISTANT" in booth_job_name["tags"]
+    assert "INSPECTION" not in booth_job_name["tags"]
+
+
+def test_insulation_splits_motor_details_from_fan_insulation():
+    motor = li.extract_items([
+        "Motor (WEG SPECIAL BUILD C 4,364.67 131.00",
+        "F insulation",
+        "NDE insulated bearing",
+        "DE AEGIS RING",
+        "Vendor: Weg",
+    ])[0]
+    assert "MOTOR" in motor["tags"]
+    assert "INSULATION" not in motor["tags"]
+    assert motor["attributes"]["motor_insulation_class"] == "F"
+    assert motor["attributes"]["motor_insulated_bearing"] == "NDE"
+    assert motor["attributes"]["motor_shaft_grounding"] == "AEGIS RING"
+
+    plug_panel = li.extract_items([
+        "Plug Panel, Insulation 8\" L 531.00",
+        "Insulated By: CBC",
+    ])[0]
+    assert {"INSULATION", "SPECIAL CONSTRUCTION"} <= set(plug_panel["tags"])
+    assert plug_panel["attributes"]["insulation_scope"] == "PLUG PANEL"
+    assert plug_panel["attributes"]["insulation_thickness"] == "8\""
+    assert plug_panel["attributes"]["insulated_by"] == "CBC"
 
 
 def test_drain_attributes():
