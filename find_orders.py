@@ -15,6 +15,7 @@ says "SS SHAFT SLEEVE".
     python find_orders.py --job 421314         # one job's stored items
     python find_orders.py --list-tags          # live tag vocabulary + counts
     python find_orders.py --audit-untagged     # names current rules still miss
+    python find_orders.py --audit-review       # rows marked for human/template review
     python find_orders.py shaft seal --xlsx    # ...write matches to Excel too
     python find_orders.py --xlsx               # full inventory workbook:
                                                # "Line Items" (row per item,
@@ -61,6 +62,9 @@ def _print_hits(hits: List[Dict[str, Any]], terms: List[str] | None = None,
         for it in h["matches"]:
             tags = ", ".join(it.get("tags") or []) or "-"
             print(f"    [{tags}]  {it['raw']}")
+            review_flags = _review_flags_label(it)
+            if review_flags:
+                print(f"        review: {review_flags}")
             attrs = _attrs_label(it)
             if attrs:
                 print(f"        attrs: {attrs}")
@@ -74,7 +78,8 @@ def _attrs_label(item: Dict[str, Any]) -> str:
     if not isinstance(attrs, dict):
         return ""
     keys = [
-        "inquiry_num", "note_type", "component", "used_on", "used_on_review", "vendor", "product",
+        "inquiry_num", "note_type", "component", "component_review",
+        "used_on", "used_on_review", "vendor", "product",
         "split_type",
         "drawing_type", "drawing_scope",
         "motor_enclosure", "motor_mounting", "motor_explosion_class",
@@ -100,6 +105,10 @@ def _attrs_label(item: Dict[str, Any]) -> str:
     return "; ".join(f"{k}={attrs[k]}" for k in keys if attrs.get(k))
 
 
+def _review_flags_label(item: Dict[str, Any]) -> str:
+    return "; ".join(str(x) for x in item.get("review_flags") or [])
+
+
 def _print_untagged_audit(store: Dict[str, Any], limit: int) -> None:
     rows = li.audit_untagged(store, limit=limit)
     if not rows:
@@ -115,6 +124,26 @@ def _print_untagged_audit(store: Dict[str, Any], limit: int) -> None:
         jobs = ",".join(r.get("jobs") or [])
         ai = ", ".join(r.get("ai_tags") or [])
         print(f"{r['count']:5d}  {shown.ljust(min(w, 72))}  {jobs}  {ai}")
+
+
+def _print_review_audit(store: Dict[str, Any], limit: int, tag: str = "") -> None:
+    rows = li.audit_review(store, limit=limit, tag=tag)
+    if not rows:
+        tag_msg = f" for tag {tag!r}" if tag else ""
+        print(f"No line-item review candidates{tag_msg}. ({_store_stats(store)})")
+        return
+    w = max(len(r["norm"]) for r in rows)
+    tag_msg = f" tagged {tag!r}" if tag else ""
+    print(f"Top {len(rows)} line-item template/review candidate(s){tag_msg}")
+    print(f"({'after re-deriving names/tags from stored raw text'}; {_store_stats(store)})")
+    print(f"{'COUNT':>5}  {'NORMALIZED'.ljust(min(w, 64))}  TAGS  REVIEW FLAGS  JOBS")
+    for r in rows:
+        norm = r["norm"]
+        shown = norm if len(norm) <= 64 else norm[:61] + "..."
+        tags = ", ".join(r.get("tags") or []) or "-"
+        flags = "; ".join(r.get("review_flags") or [])
+        jobs = ",".join(r.get("jobs") or [])
+        print(f"{r['count']:5d}  {shown.ljust(min(w, 64))}  {tags}  {flags}  {jobs}")
 
 
 def write_xlsx(hits: List[Dict[str, Any]], path: Path,
@@ -133,8 +162,8 @@ def write_xlsx(hits: List[Dict[str, Any]], path: Path,
     header_font = Font(color="FFFFFF", bold=True)
     link_font = Font(color="0563C1", underline="single")
 
-    headers = ["Job #", "Customer", "CO#", "Tags", "Attributes", "Item (as printed)",
-               "Normalized", "Details", "Qty", "Price", "Section", "SO PDF"]
+    headers = ["Job #", "Customer", "CO#", "Tags", "Review Flags", "Attributes",
+               "Item (as printed)", "Normalized", "Details", "Qty", "Price", "Section", "SO PDF"]
     wb = Workbook()
     ws = wb.active
     ws.title = "Line Items"
@@ -151,15 +180,16 @@ def write_xlsx(hits: List[Dict[str, Any]], path: Path,
             ws.cell(row, 2, h.get("customer", ""))
             ws.cell(row, 3, co)
             ws.cell(row, 4, ", ".join(it.get("tags") or []))
-            ws.cell(row, 5, _attrs_label(it))
-            ws.cell(row, 6, it.get("raw", ""))
-            ws.cell(row, 7, it.get("norm", ""))
-            ws.cell(row, 8, " ; ".join(it.get("details") or []))
-            ws.cell(row, 9, it.get("qty", ""))
-            ws.cell(row, 10, it.get("price", ""))
-            ws.cell(row, 11, it.get("section", ""))
+            ws.cell(row, 5, _review_flags_label(it))
+            ws.cell(row, 6, _attrs_label(it))
+            ws.cell(row, 7, it.get("raw", ""))
+            ws.cell(row, 8, it.get("norm", ""))
+            ws.cell(row, 9, " ; ".join(it.get("details") or []))
+            ws.cell(row, 10, it.get("qty", ""))
+            ws.cell(row, 11, it.get("price", ""))
+            ws.cell(row, 12, it.get("section", ""))
             if h.get("so_pdf"):
-                cell = ws.cell(row, 12, "Open")
+                cell = ws.cell(row, 13, "Open")
                 cell.hyperlink = h["so_pdf"]
                 cell.font = link_font
             row += 1
@@ -250,8 +280,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="List parsed inquiry numbers with order/item counts.")
     ap.add_argument("--audit-untagged", action="store_true",
                     help="List the most common normalized item names current rules still do not tag.")
+    ap.add_argument("--audit-review", action="store_true",
+                    help="List line-item templates marked for human/rule review. Use --tag to narrow it.")
     ap.add_argument("--audit-limit", type=int, default=50,
-                    help="How many --audit-untagged rows to print (0 = all; default 50).")
+                    help="How many audit rows to print (0 = all; default 50).")
     ap.add_argument("--xlsx", nargs="?", const=str(XLSX_DEFAULT), default="", metavar="PATH",
                     help=f"Write the result (or, with no filters, the full inventory) to Excel: "
                          f"a per-item sheet + a green-✓/red jobs-x-features matrix "
@@ -291,6 +323,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.audit_untagged:
         _print_untagged_audit(store, args.audit_limit)
+        return 0
+
+    if args.audit_review:
+        _print_review_audit(store, args.audit_limit, tag=args.tag)
         return 0
 
     if args.job:

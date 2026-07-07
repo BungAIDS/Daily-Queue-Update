@@ -445,9 +445,11 @@ def test_ai_cache_applied():
     rec = store["jobs"]["421314"]
     it = rec["items"][0]
     assert it["norm"] in li.unknown_norms(store)
+    assert it["review_flags"] == ["UNTAGGED"]
     store["ai_tags"][it["norm"]] = ["BASE FAN"]
     li.apply_ai_cache(rec["items"], store)
     assert "BASE FAN" in it["tags"]
+    assert "review_flags" not in it
     # Once cached it's never sent to the API again.
     assert it["norm"] not in li.unknown_norms(store)
 
@@ -485,6 +487,19 @@ def test_audit_untagged_uses_current_rules():
     li.record_job(store, "421000", items)
     rows = li.audit_untagged(store)
     assert [r["norm"] for r in rows] == ["MYSTERY OPTION"], rows
+
+
+def test_audit_review_groups_marked_templates():
+    store = li.load_store(Path("/nonexistent/line_items.json"))
+    li.record_job(store, "421000", li.extract_items([
+        "Mystery Option L 12.00",
+        "Actuator Bettis #RPED200 C 5,192.00",
+        "Extended Grease Fittings L 280.00",
+    ]))
+    rows = {r["norm"]: r for r in li.audit_review(store)}
+    assert rows["MYSTERY OPTION"]["review_flags"] == ["UNTAGGED"]
+    assert any("USED ON REVIEW" in flag for flag in rows["ACTUATOR BETTIS #RPED200"]["review_flags"])
+    assert any("UNCLEAR GREASE TARGET" in flag for flag in rows["EXTENDED GREASE FITTINGS"]["review_flags"])
 
 
 def test_actuator_attributes():
@@ -1038,17 +1053,22 @@ def test_lube_accessories_map_to_bearing_or_motor():
 
     unknown = li.extract_items(["Extended Lube Lines with Zerk Fittings L 100.00"])[0]
     assert {"BEARINGS", "MOTOR"} <= set(unknown["tags"])
+    assert unknown["attributes"]["component_review"] == "UNCLEAR GREASE TARGET - VERIFY MOTOR/BEARINGS/ARRANGEMENT"
+    assert any("UNCLEAR GREASE TARGET" in flag for flag in unknown["review_flags"])
 
     motor = li.extract_items(["Motor Grease Lines L 100.00"])[0]
     assert "MOTOR" in motor["tags"]
     assert "BEARINGS" not in motor["tags"]
+    assert "review_flags" not in motor
 
     bearing = li.extract_items(["Extended Grease Leads to Fan Bearings L 100.00"])[0]
     assert "BEARINGS" in bearing["tags"]
     assert "MOTOR" not in bearing["tags"]
+    assert "review_flags" not in bearing
 
     both = li.extract_items(["Motor Bearing Grease Fittings L 100.00"])[0]
     assert {"BEARINGS", "MOTOR"} <= set(both["tags"])
+    assert "review_flags" not in both
 
     items = {it["norm"]: it for it in li.extract_items([
         "Motor C 1,000.00",
@@ -1058,6 +1078,7 @@ def test_lube_accessories_map_to_bearing_or_motor():
     assert "MOTOR" in items["MOTOR"]["tags"]
     assert "BEARINGS" not in items["MOTOR"]["tags"]
     assert {"BEARINGS", "MOTOR"} <= set(items["EXTENDED GREASE LEADS"]["tags"])
+    assert any("UNCLEAR GREASE TARGET" in flag for flag in items["EXTENDED GREASE LEADS"]["review_flags"])
 
 
 def test_assembly_note_is_misc_note_not_component():

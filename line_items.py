@@ -1826,6 +1826,16 @@ def _lube_component_tags(primary: str, norm_blob: str) -> List[str]:
     return tags
 
 
+def _lube_review_attributes(primary: str, norm_blob: str) -> Dict[str, str]:
+    if not (_LUBE_ACCESSORY.search(primary) or _LUBE_ACCESSORY.search(norm_blob)):
+        return {}
+    has_motor = bool(re.search(r"\bMOTOR\b", norm_blob, re.I))
+    has_bearing = bool(re.search(r"\bBEARINGS?\b", norm_blob, re.I))
+    if has_motor or has_bearing:
+        return {}
+    return {"component_review": "UNCLEAR GREASE TARGET - VERIFY MOTOR/BEARINGS/ARRANGEMENT"}
+
+
 def _guard_attributes(primary: str, norm_blob: str) -> Dict[str, str]:
     attrs: Dict[str, str] = {}
     if _is_belt_guard_line(primary):
@@ -2118,6 +2128,7 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_guard_attributes(primary, norm_blob))
     attrs.update(_coating_attributes(primary, norm_blob, tags, raw_tags))
     attrs.update(_drain_attributes(primary, norm_blob, tags))
+    attrs.update(_lube_review_attributes(primary, norm_blob))
 
     material_attrs = _material_attributes(norm_blob)
     material_owner = _component_material_owner(item, material_attrs, rules)
@@ -2200,6 +2211,27 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     return attrs
 
 
+def _review_flags(tags: List[str], attrs: Dict[str, Any]) -> List[str]:
+    flags: List[str] = []
+    if not tags:
+        flags.append("UNTAGGED")
+    if isinstance(attrs, dict):
+        for key, value in sorted(attrs.items()):
+            if not value or not str(key).endswith("_review"):
+                continue
+            label = str(key).replace("_", " ").upper()
+            flags.append(f"{label}: {value}")
+    return flags
+
+
+def _apply_review_flags(item: Dict[str, Any]) -> None:
+    flags = _review_flags(list(item.get("tags") or []), item.get("attributes") or {})
+    if flags:
+        item["review_flags"] = flags
+    else:
+        item.pop("review_flags", None)
+
+
 def derive_item_fields(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Dict[str, Any]:
     """Re-derive normalized fields for a stored item without mutating it."""
     rules = rules or load_rules()
@@ -2210,8 +2242,9 @@ def derive_item_fields(item: Dict[str, Any], rules: Dict[str, Any] | None = None
     probe = dict(item)
     probe["norm"] = norm
     tags = _final_tags(probe, rules)
+    attrs = component_attributes(probe, rules)
     return {"norm": norm, "qty": qty, "price": price or mark, "ptype": ptype,
-            "tags": tags, "attributes": component_attributes(probe, rules)}
+            "tags": tags, "attributes": attrs, "review_flags": _review_flags(tags, attrs)}
 
 
 # --------------------------------------------------------------------------- #
@@ -2359,6 +2392,7 @@ def extract_items(lines: Iterable[str], rules: Dict[str, Any] | None = None) -> 
     for it in items:
         it["tags"] = _final_tags(it, rules)
         it["attributes"] = component_attributes(it, rules)
+        _apply_review_flags(it)
     return items
 
 
@@ -2414,6 +2448,7 @@ def apply_ai_cache(items: List[Dict[str, Any]], store: Dict[str, Any]) -> None:
         extra = ai.get(it.get("norm", ""))
         if extra and not it.get("tags"):
             it["tags"] = sorted(set(extra))
+            _apply_review_flags(it)
 
 
 def _is_skipped_stored_item(item: Dict[str, Any], rules: Dict[str, Any]) -> bool:
@@ -2441,6 +2476,39 @@ def audit_untagged(store: Dict[str, Any], limit: int = 50) -> List[Dict[str, Any
             for tag in ai.get(norm) or []:
                 if tag not in row["ai_tags"]:
                     row["ai_tags"].append(tag)
+    out = sorted(rows.values(), key=lambda r: (-r["count"], r["norm"]))
+    return out[:limit] if limit else out
+
+
+def audit_review(store: Dict[str, Any], limit: int = 50, tag: str = "") -> List[Dict[str, Any]]:
+    """Most common line-item templates that need a human/rule decision."""
+    rules = load_rules(refresh=True)
+    want_tag = tag.upper().strip()
+    rows: Dict[Tuple[str, Tuple[str, ...], Tuple[str, ...]], Dict[str, Any]] = {}
+    for job, rec in (store.get("jobs") or {}).items():
+        for item in rec.get("items") or []:
+            if _is_skipped_stored_item(item, rules):
+                continue
+            derived = derive_item_fields(item, rules)
+            flags = derived.get("review_flags") or []
+            tags = derived.get("tags") or []
+            if not flags:
+                continue
+            if want_tag and want_tag not in [t.upper() for t in tags]:
+                continue
+            norm = derived["norm"]
+            key = (norm, tuple(tags), tuple(flags))
+            row = rows.setdefault(key, {
+                "norm": norm,
+                "count": 0,
+                "jobs": [],
+                "tags": tags,
+                "review_flags": flags,
+                "sample": str(item.get("raw", "")),
+            })
+            row["count"] += 1
+            if len(row["jobs"]) < 8:
+                row["jobs"].append(str(job))
     out = sorted(rows.values(), key=lambda r: (-r["count"], r["norm"]))
     return out[:limit] if limit else out
 
@@ -2660,6 +2728,10 @@ def renormalize_store(store: Dict[str, Any]) -> int:
             it["norm"] = derived["norm"]
             it["tags"] = derived["tags"]
             it["attributes"] = derived["attributes"]
+            if derived.get("review_flags"):
+                it["review_flags"] = derived["review_flags"]
+            else:
+                it.pop("review_flags", None)
             qty = derived["qty"]
             price = derived["price"]
             ptype = derived["ptype"]
