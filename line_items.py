@@ -117,7 +117,7 @@ DEFAULT_RULES: Dict[str, Any] = {
         # keep them out of the item inventory while preserving real ship-loose
         # priced rows.
         r"^additional\s+shipping\s+notes?\b", r"^traffic\s+note\b",
-        r"shipping\s+barcode", r"do\s+not\s+stack", r"no\s+metal\s+banding",
+        r"shipping\s+barcode", r"^(?!.*\bdrawings?\b).*do\s+not\s+stack", r"no\s+metal\s+banding",
         r"^order\s+is\s+shipping\s+overseas\b", r"^customer\s+broker\b",
         r"^standard\s+address\b", r"^https?\b", r"^ispm\s+wood\b",
         r"^(last\s+choice\s+)?(fedex|ups)\b", r"^please\s+send\b",
@@ -182,6 +182,7 @@ DEFAULT_RULES: Dict[str, Any] = {
                    r"\bdischarge\s+elbow"],
         "WHEEL": [r"\bwheel\b", r"\bpercent\s+width\b", r"%\s*width\b"],
         "HOUSING": [r"\bhousing\b"],
+        "SPLIT HOUSING": [r"\bsplit\s+housings?\b"],
         "SILENCER": [r"silencer", r"muffler", r"sound\s*atten"],
         "ACCESS DOOR": [r"access\s*door", r"inspection\s*door", r"clean\s*out",
                         r"quick\s*open"],
@@ -535,11 +536,21 @@ def _drawing_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[st
         add_type("BOM")
     if re.search(r"\bBUYOUT\b.*\b(PART\s+NUMBERS?|ITEMS?|DRAWINGS?)\b", norm_blob):
         add_type("BUYOUT ITEMS")
-    if re.search(r"\b(COG|CENTER\s+OF\s+GRAVITY|WEIGHTS?|STATIC\s+AND\s+DYNAMIC\s+LOADS?)\b", norm_blob):
+    if re.search(r"\b(CG|COG|CENTER\s+OF\s+GRAVITY|WEIGHTS?|"
+                 r"STATIC\s+AND\s+(?:DYNAMIC|DYMANIC)\s+LOADS?)\b", norm_blob):
         add_type("WEIGHTS/COG/LOADS")
+    if re.search(r"\bGROUNDING\s+LUGS?\b", norm_blob):
+        add_type("GROUNDING/LUGS")
     if re.search(r"\b(WHEEL\s+REMOVAL\s+CLEARANCES?|LIFTING\s+LOCATIONS?|SUGGESTED\s+SCROLL\s+DIMENSIONS)\b",
                  norm_blob):
         add_type("CLEARANCES/LOCATIONS")
+    if re.search(r"\b(ROTATED?|ROTATION|ORIENTATION|ARRANGEMENT)\b", norm_blob):
+        add_type("ORIENTATION/ARRANGEMENT")
+    if (re.search(r"\b(TAG|MARK)\b", norm_blob)
+            and re.search(r"\b(DRAWING|INCLUDED|INCLUDE|TRANSMITTAL)\b", norm_blob)):
+        add_type("TAG/MARKING")
+    if re.search(r"\b(DO\s+NOT\s+STACK|ISPM|STAMP(?:ING)?|STICKER|LABEL)\b", norm_blob):
+        add_type("PACKAGING/MARKING")
     if re.search(r"\b(PLAN\s*VIEW|CUSTOMER\s+DRAWINGS?|MARKED\s+UP\s+CUSTOMER\s+DRAWINGS?)\b", norm_blob):
         add_type("PLAN VIEW/CUSTOMER DRAWING")
     if re.search(r"\b(REFERENCE\s+)?(?:CBC\s+)?OEM\s+DRAWINGS?\b", norm_blob):
@@ -549,6 +560,14 @@ def _drawing_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[st
     if re.search(r"\b(PROVIDE|INCLUDE)\b.*\b(DRAWING|WIRING\s+DIAGRAM|PERFORMANCE\s+DATA\s+SHEET|OMI)\b",
                  norm_blob):
         add_type("VENDOR DOCUMENTATION")
+    if re.search(r"\bPROVIDE\b.*\bDRAWINGS?\s+FOR\s+APPROVAL\b", norm_blob):
+        add_type("VENDOR APPROVAL DRAWING")
+    if re.search(r"\bDRAWING\s+TRANSMITTAL\b", norm_blob):
+        add_type("DRAWING TRANSMITTAL")
+    if re.search(r"\bSYMBOLS?\b", norm_blob):
+        add_type("CUSTOMER SYMBOLS/NOTES")
+    if "SPLIT HOUSING" in tags or re.search(r"\bSPLIT\s+HOUSINGS?\b", norm_blob):
+        add_type("SPLIT HOUSING")
     if re.search(r"\b(DRAWING\s+NOTES?|ADD\s+NOTES?\s+ON\s+THE\s+DRAWING|ON\s+DRAWINGS?\s+ADD)\b",
                  norm_blob):
         add_type("DRAWING NOTES")
@@ -571,6 +590,8 @@ def _drawing_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[st
         add_scope("INLET")
     if "OUTLET" in tags or re.search(r"\bOUTLET\b", norm_blob):
         add_scope("OUTLET")
+    if "SPLIT HOUSING" in tags or re.search(r"\bSPLIT\s+HOUSINGS?\b", norm_blob):
+        add_scope("SPLIT HOUSING")
     if re.search(r"\bCUSTOMER\s+DRAWINGS?\b", norm_blob):
         add_scope("CUSTOMER DRAWING")
 
@@ -1090,6 +1111,8 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t != _GUARD_TAG]
     if _is_base_fan_line(primary):
         tags = [t for t in tags if t not in _BASE_FAN_DETAIL_TAGS]
+    if "SPLIT HOUSING" in tags:
+        tags = [t for t in tags if t != "HOUSING"]
     drain_type = _drain_type(primary, norm_blob)
     if drain_type == "HOUSING DRAIN":
         tags = [t for t in tags if t != "HOUSING"]
@@ -1442,6 +1465,11 @@ def apply_ai_cache(items: List[Dict[str, Any]], store: Dict[str, Any]) -> None:
             it["tags"] = sorted(set(extra))
 
 
+def _is_skipped_stored_item(item: Dict[str, Any], rules: Dict[str, Any]) -> bool:
+    raw = str(item.get("raw", "")).strip()
+    return bool(raw and any(p.search(raw) for p in rules["skip"]))
+
+
 def audit_untagged(store: Dict[str, Any], limit: int = 50) -> List[Dict[str, Any]]:
     """Most common normalized items that current rules still keep but do not tag."""
     rules = load_rules(refresh=True)
@@ -1449,8 +1477,7 @@ def audit_untagged(store: Dict[str, Any], limit: int = 50) -> List[Dict[str, Any
     rows: Dict[str, Dict[str, Any]] = {}
     for job, rec in (store.get("jobs") or {}).items():
         for item in rec.get("items") or []:
-            raw = str(item.get("raw", "")).strip()
-            if any(p.search(raw) for p in rules["skip"]):
+            if _is_skipped_stored_item(item, rules):
                 continue
             derived = derive_item_fields(item, rules)
             norm = derived["norm"]
@@ -1674,7 +1701,10 @@ def renormalize_store(store: Dict[str, Any]) -> int:
     rules = load_rules(refresh=True)
     n = 0
     for rec in (store.get("jobs") or {}).values():
+        kept: List[Dict[str, Any]] = []
         for it in rec.get("items") or []:
+            if _is_skipped_stored_item(it, rules):
+                continue
             derived = derive_item_fields(it, rules)
             it["norm"] = derived["norm"]
             it["tags"] = derived["tags"]
@@ -1688,6 +1718,8 @@ def renormalize_store(store: Dict[str, Any]) -> int:
                 it["price"] = price
             if ptype and not it.get("ptype"):
                 it["ptype"] = ptype
+            kept.append(it)
             n += 1
-        apply_ai_cache(rec.get("items") or [], store)
+        rec["items"] = kept
+        apply_ai_cache(kept, store)
     return n

@@ -328,6 +328,7 @@ def test_tagging():
     assert "ACTUATOR" in li.tag_item(li.normalize_text("Actuator for IVC Bettis #RPED100"))
     assert "3D STEP DRAWINGS" in li.tag_item(li.normalize_text("3D STEP File Drawings"))
     assert "DRIVE COMPONENTS" in li.tag_item(li.normalize_text("Motor Sheave/Bushing 3B5V74/B"))
+    assert "SPLIT HOUSING" in li.tag_item(li.normalize_text("Drawing and split housing released into production"))
     assert "V-BELT DRIVE" in li.tag_item(li.normalize_text("Drive (Max/Min RPM: 1531/1531, 3 belts: B112"))
     assert "SPECIAL CONSTRUCTION" in li.tag_item(li.normalize_text("Tie Rod Support"))
     assert "SPECIAL CONSTRUCTION" in li.tag_item(li.normalize_text("Loc Tite on the set screw threads"))
@@ -457,6 +458,10 @@ def test_ai_cache_does_not_override_current_rules():
 
 def test_renormalize_uses_current_rules():
     store = _seeded_store()
+    store["jobs"]["421314"]["items"].append(
+        {"raw": "Prints:", "norm": "PRINTS", "qty": "", "price": "",
+         "ptype": "", "section": "", "details": [], "tags": ["DRAWINGS"], "attributes": {}}
+    )
     # Sabotage the stored derived fields; renormalize must rebuild from raw.
     for it in store["jobs"]["421314"]["items"]:
         it["norm"], it["tags"] = "WRONG", ["BOGUS"]
@@ -464,6 +469,7 @@ def test_renormalize_uses_current_rules():
     assert n >= len(store["jobs"]["421314"]["items"])
     norms = [it["norm"] for it in store["jobs"]["421314"]["items"]]
     assert "STAINLESS STEEL SHAFT SLEEVE" in norms, norms
+    assert "PRINTS" not in norms
 
 
 def test_audit_untagged_uses_current_rules():
@@ -611,6 +617,16 @@ def test_drawing_note_attributes():
         "Num: 333-25-1622",
         "Add BOM to fan drawing, Inquiry Num: 333-25-1622 L",
         "Plan View on Customer Drawing, Inquiry Num: 333-25-1622 L",
+        "ADDITIONAL FEATURES",
+        "Static and Dymanic Loads on drawing, Inquiry Num: L 500.00",
+        "ADD CG TO FAN DRAWING",
+        "SHOW GROUNDING LUGS ON FAN DRAWING",
+        "Please update the fan / drawing to show the inlet box rotated 270 degrees from the motor side to the 9 o'clock position.",
+        "Add tag to be included on the expansion joint drawing: 1A-EXJ-AXS812",
+        "Should add DO NOT STACK and ISPM Stamping to drawing.",
+        "Change Subject line on Drawing Transmittal to include tag information as it appears on the order face, Inquiry Num: 364-20-200",
+        "Only change on drawings are for CAT purposes added a 1E2999 Symbols",
+        "DRAWING AND SPLIT HOUSING AND RELEASED INTO PRODUCTION",
     ])
     by_raw = {it["raw"]: it for it in items}
     weights = by_raw["Add COG and Weights to the fan drawing, Inquiry L"]["attributes"]
@@ -619,6 +635,18 @@ def test_drawing_note_attributes():
     assert weights["drawing_scope"] == "FAN"
     assert by_raw["Add BOM to fan drawing, Inquiry Num: 333-25-1622 L"]["attributes"]["drawing_type"] == "BOM"
     assert by_raw["Plan View on Customer Drawing, Inquiry Num: 333-25-1622 L"]["attributes"]["drawing_type"] == "PLAN VIEW/CUSTOMER DRAWING"
+    assert by_raw["Static and Dymanic Loads on drawing, Inquiry Num: L 500.00"]["attributes"]["drawing_type"] == "WEIGHTS/COG/LOADS"
+    assert by_raw["ADD CG TO FAN DRAWING"]["attributes"]["drawing_type"] == "WEIGHTS/COG/LOADS"
+    assert by_raw["SHOW GROUNDING LUGS ON FAN DRAWING"]["attributes"]["drawing_type"] == "GROUNDING/LUGS"
+    assert by_raw["Please update the fan / drawing to show the inlet box rotated 270 degrees from the motor side to the 9 o'clock position."]["attributes"]["drawing_type"] == "ORIENTATION/ARRANGEMENT"
+    assert by_raw["Add tag to be included on the expansion joint drawing: 1A-EXJ-AXS812"]["attributes"]["drawing_type"] == "TAG/MARKING"
+    assert by_raw["Should add DO NOT STACK and ISPM Stamping to drawing."]["attributes"]["drawing_type"] == "PACKAGING/MARKING"
+    assert by_raw["Change Subject line on Drawing Transmittal to include tag information as it appears on the order face, Inquiry Num: 364-20-200"]["attributes"]["drawing_type"] == "TAG/MARKING, DRAWING TRANSMITTAL"
+    assert by_raw["Only change on drawings are for CAT purposes added a 1E2999 Symbols"]["attributes"]["drawing_type"] == "CUSTOMER SYMBOLS/NOTES"
+    split = by_raw["DRAWING AND SPLIT HOUSING AND RELEASED INTO PRODUCTION"]
+    assert "SPLIT HOUSING" in split["tags"]
+    assert "HOUSING" not in split["tags"]
+    assert split["attributes"]["drawing_type"] == "SPLIT HOUSING"
 
 
 def test_search_reaches_inquiry_attributes():
