@@ -186,6 +186,7 @@ DEFAULT_RULES: Dict[str, Any] = {
                         r"variable\s*inlet", r"inlet\s*volume\s*control"],
         "INLET": [r"\binlet\s+(open|slip|bell|cone|box|tube|flanged|punched)",
                   r"\binlet\s+direction"],
+        "MIXING BOX": [r"\bmixing\s+box\b"],
         "OUTLET": [r"\boutlet\s+(open|slip|flanged|punched|pressure\s*tap|volume\s*control)",
                    r"\bdischarge\s+elbow"],
         "WHEEL": [r"\bwheel\b", r"\bpercent\s+width\b", r"%\s*width\b"],
@@ -656,6 +657,19 @@ def _is_flex_connector_line(norm_blob: str) -> bool:
     return bool(re.search(r"\b(FLEX(IBLE)?\s+CONNECTOR|EXPANSION\s+JOINT|EJ)\b", norm_blob))
 
 
+def _is_mixing_box_line(primary: str, norm_blob: str) -> bool:
+    return bool(re.match(r"^MIXING\s+BOX\b", primary, re.I) or "MIXING BOX" in norm_blob)
+
+
+def _is_non_inlet_component_mounted_to_inlet_box(primary: str, norm_blob: str, tags: set[str]) -> bool:
+    return bool(
+        "INLET" in tags
+        and not re.search(r"^INLET\b", primary, re.I)
+        and ({"DAMPER", "ACTUATOR", "FLEX CONNECTOR"} & tags)
+        and re.search(r"\bMOUNTED\s+ON\s+(?:OVERSIZED\s+)?INLET\s+BOX\b", norm_blob)
+    )
+
+
 def _is_without_ivc(norm_blob: str) -> bool:
     return bool(
         re.search(r"\b(WITHOUT|LESS|NO)\s+IVC\b", norm_blob)
@@ -762,12 +776,14 @@ def _flange_attributes(primary: str, norm_blob: str, tags: set[str], raw_tags: s
     if _is_non_wheel_end_location(norm_blob):
         attrs["flange_location"] = "NON-WHEEL END"
         _add_unique(scopes, "HOUSING")
-    if "INLET" in tags or re.search(r"\bINLET\b", norm_blob):
+    if "INLET" in tags or ("MIXING BOX" not in tags and re.search(r"\bINLET\b", norm_blob)):
         _add_unique(scopes, "INLET")
     if "OUTLET" in tags or re.search(r"\bOUTLET\b", norm_blob):
         _add_unique(scopes, "OUTLET")
     if "HOUSING" in tags and "HOUSING" not in scopes:
         _add_unique(scopes, "HOUSING")
+    if "MIXING BOX" in tags:
+        _add_unique(scopes, "MIXING BOX")
     if scopes:
         attrs["flange_scope"] = ", ".join(scopes)
     if re.search(r"\bC\s*[- ]?\s*FLANGE\b", norm_blob):
@@ -777,6 +793,125 @@ def _flange_attributes(primary: str, norm_blob: str, tags: set[str], raw_tags: s
     elif re.search(r"\bFLANGED\b", norm_blob):
         attrs["flange_type"] = "FLANGED"
     return attrs
+
+
+def _inlet_attributes(primary: str, norm_blob: str, tags: set[str], raw_blob: str) -> Dict[str, str]:
+    if "INLET" not in tags:
+        return {}
+    attrs: Dict[str, str] = {}
+    subcategories: List[str] = []
+    features: List[str] = []
+
+    def add_subcategory(value: str) -> None:
+        _add_unique(subcategories, value)
+
+    def add_feature(value: str) -> None:
+        _add_unique(features, value)
+
+    if re.search(r"\bINLET,\s*OPEN\b|\bINLET\s+OPEN\b", primary):
+        add_subcategory("OPEN")
+    if re.search(r"\bINLET,\s*SLIP\b|\bINLET\s+SLIP\b", primary):
+        add_subcategory("SLIP")
+    if re.search(r"\bINLET,\s*BELL\b|\bINLET\s+BELL\b", primary):
+        add_subcategory("BELL")
+    if re.search(r"\bINLET\s+CONE\b|\bINTEGRAL\s+INLET\s+CONE\b", primary):
+        add_subcategory("INLET CONE")
+    if re.search(r"\bINLET\s+BOX\b", primary):
+        add_subcategory("INLET BOX")
+    if re.search(r"\bINLET,\s*TUBE\b|\bINLET\s+TUBE\b", primary):
+        add_subcategory("TUBE")
+
+    if "PUNCHED" in primary:
+        add_subcategory("FLANGED/PUNCHED" if "FLANGED" in primary else "PUNCHED")
+        add_feature("PUNCHED")
+    elif "FLANGED" in primary:
+        add_subcategory("FLANGED")
+    if "STANDARD BOLTED" in primary:
+        add_feature("STANDARD BOLTED")
+    if re.search(r"\bWELDED\b", primary):
+        add_feature("WELDED")
+    if re.search(r"\bWITHOUT\s+IVC\b", primary):
+        attrs["ivc_relation"] = "WITHOUT IVC"
+    elif re.search(r"\bWITH\s+IVC\b", primary):
+        attrs["ivc_relation"] = "WITH IVC"
+
+    if "INLET DIRECTION" in primary:
+        add_subcategory("DIRECTION")
+        m = re.search(r"\bINLET\s+DIRECTION\s+((?:VERTICAL|HORIZONTAL)\s+INLET\s+(?:UP|DOWN|LEFT|RIGHT))\b", primary)
+        if m:
+            attrs["inlet_direction"] = m.group(1)
+    if "BOLT ON" in primary or "BOLT-ON" in raw_blob.upper():
+        add_feature("BOLT-ON")
+        attrs["inlet_box_type"] = "BOLT-ON"
+    if "ASSEMBLY" in primary and "INLET BOX" in primary:
+        add_feature("ASSEMBLY")
+        attrs["inlet_box_type"] = "ASSEMBLY"
+    if "GASKET" in primary:
+        add_feature("GASKET")
+    if re.search(r"\bSUPPORT\s+LEGS\b", primary):
+        add_feature("SUPPORT LEGS")
+    if "OVERSIZED" in norm_blob and "INLET BOX" in primary:
+        add_feature("OVERSIZED")
+    if "SHIPPED LOOSE" in norm_blob or "SHIP LOOSE" in norm_blob:
+        attrs["shipping_state"] = "SHIPPED LOOSE"
+    m = re.search(r"\bINLET\s+BOX\s+SIZE\s+(\d+)\b|\bBOX\s+SIZE\s+(\d+)\b", norm_blob)
+    if m:
+        attrs["inlet_box_size"] = next(v for v in m.groups() if v)
+    m = re.search(r"\b(?:INLET\s+CONE\s+)?(\d+)\s*%", primary)
+    if m and "INLET CONE" in primary:
+        attrs["inlet_cone_width_percent"] = m.group(1)
+    m = re.search(r"\bSIZE\s+(\d+)\b", primary)
+    if m and "INLET CONE" in primary:
+        attrs["inlet_size"] = m.group(1)
+    m = re.search(r"INLET\s+BOX\s+POSITION\s*:\s*@\s*([0-9]+)", raw_blob, re.I)
+    if m:
+        attrs["inlet_box_position"] = m.group(1)
+
+    if "ACCESS DOOR" in tags:
+        add_feature("ACCESS DOOR")
+    if "SCREEN" in tags:
+        add_feature("SCREEN")
+    if "LINING" in tags:
+        add_feature("LINING")
+    if re.search(r"\bMOUNTING\s+HARDWARE\b", primary):
+        add_feature("MOUNTING HARDWARE")
+    if "WITHOUT CAULK" in primary:
+        add_feature("WITHOUT CAULK")
+    if "CARTONED" in norm_blob and "INLET CONE" in primary:
+        add_feature("CARTONED")
+
+    if subcategories:
+        attrs["inlet_subcategory"] = ", ".join(subcategories)
+    if features:
+        attrs["inlet_feature"] = ", ".join(features)
+    return attrs
+
+
+def _mixing_box_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "MIXING BOX" not in tags:
+        return {}
+    attrs: Dict[str, str] = {"component": "MIXING BOX"}
+    features: List[str] = []
+    if "FGR PORT" in norm_blob:
+        _add_unique(features, "FGR PORT")
+    if "FLANGED" in norm_blob:
+        _add_unique(features, "FLANGED")
+    if "SHIPPED LOOSE" in norm_blob or "SHIP LOOSE" in norm_blob:
+        attrs["shipping_state"] = "SHIPPED LOOSE"
+    if "INLET BOX" in norm_blob:
+        attrs["used_on"] = "INLET BOX"
+    m = re.search(r"\bSIZE\s+(\d+)\s+INLET\s+BOX\b|\bINLET\s+BOX\s+SIZE\s+(\d+)\b", norm_blob)
+    if m:
+        attrs["used_on_size"] = next(v for v in m.groups() if v)
+    if features:
+        attrs["mixing_box_feature"] = ", ".join(features)
+    return attrs
+
+
+def _inlet_mount_attributes(norm_blob: str) -> Dict[str, str]:
+    if re.search(r"\bMOUNTED\s+ON\s+(?:OVERSIZED\s+)?INLET\s+BOX\b", norm_blob):
+        return {"mount_location": "INLET BOX"}
+    return {}
 
 
 def _housing_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
@@ -1466,11 +1601,12 @@ def _coating_category(primary: str, norm_blob: str, coating_type: str | None) ->
     return coating_type or "COATING"
 
 
-def _coating_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+def _coating_attributes(primary: str, norm_blob: str, tags: set[str], raw_tags: set[str] | None = None) -> Dict[str, str]:
     if not _COATING_WORD.search(norm_blob):
         return {}
     attrs: Dict[str, str] = {}
-    accessory = _is_accessory_coating(primary, tags, norm_blob) or _is_belt_guard_line(primary)
+    context_tags = raw_tags or tags
+    accessory = _is_accessory_coating(primary, context_tags, norm_blob) or _is_belt_guard_line(primary)
     attrs["coating_context"] = "ACCESSORY" if accessory else "FAN"
     if _is_belt_guard_line(primary):
         scope = "BELT GUARD"
@@ -1552,6 +1688,10 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t != "EXPLOSION PROOF"]
         if _is_explosion_proof_motor_context(primary):
             _add_unique(tags, "MOTOR")
+    if "MIXING BOX" in tags and _is_mixing_box_line(primary, norm_blob):
+        tags = [t for t in tags if t != "INLET"]
+    if _is_non_inlet_component_mounted_to_inlet_box(primary, norm_blob, set(tags)):
+        tags = [t for t in tags if t != "INLET"]
     if _is_motor_flange_line(primary, norm_blob):
         tags = [t for t in tags if t != "FLANGE"]
         _add_unique(tags, "MOTOR")
@@ -1623,6 +1763,9 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_low_leakage_attributes(norm_blob, tags))
     attrs.update(_temperature_attributes(primary, norm_blob, tags, blob))
     attrs.update(_heavy_duty_attributes(norm_blob, tags))
+    attrs.update(_inlet_attributes(primary, norm_blob, tags, blob))
+    attrs.update(_mixing_box_attributes(norm_blob, tags))
+    attrs.update(_inlet_mount_attributes(norm_blob))
     attrs.update(_housing_attributes(norm_blob, tags))
     attrs.update(_motor_conduit_box_attributes(norm_blob))
 
@@ -1640,7 +1783,7 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     elif _is_assembly_note(primary):
         attrs["note_type"] = "ASSEMBLY"
     attrs.update(_guard_attributes(primary, norm_blob))
-    attrs.update(_coating_attributes(primary, norm_blob, raw_tags))
+    attrs.update(_coating_attributes(primary, norm_blob, tags, raw_tags))
     attrs.update(_drain_attributes(primary, norm_blob, tags))
 
     material_attrs = _material_attributes(norm_blob)

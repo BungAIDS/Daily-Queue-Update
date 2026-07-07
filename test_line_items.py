@@ -1228,6 +1228,18 @@ def test_used_on_requires_damper_context():
     prespin = li.extract_items(["Actuator for Pre-spin Damper, Bettis #RPED200 C 5,192.00"])[0]
     assert prespin["attributes"]["used_on"] == "PRESPIN DAMPER"
 
+    mounted_damper = li.extract_items([
+        "Fresh Air Damper, Opposed Blade, Without Stuffing L 13,946.00",
+        "Boxes (Shipped Loose), Mounted on Oversized Inlet Box, Automatic",
+        "Product: Actuator",
+        "Vendor: Bettis RPD",
+    ])[0]
+    assert "DAMPER" in mounted_damper["tags"]
+    assert "ACTUATOR" in mounted_damper["tags"]
+    assert "INLET" not in mounted_damper["tags"]
+    assert mounted_damper["attributes"]["used_on"] == "FRESH AIR DAMPER"
+    assert mounted_damper["attributes"]["mount_location"] == "INLET BOX"
+
 
 def test_without_ivc_does_not_tag_inlet_vanes_or_used_on():
     item = li.extract_items(["Inlet, Flanged, Punched (without IVC) L 468.00"])[0]
@@ -1241,6 +1253,74 @@ def test_inlet_cone_width_does_not_tag_wheel_without_wheel_wording():
     assert {"INLET", "MATERIALS", "ALUMINUM"} <= set(item["tags"])
     assert "WHEEL" not in item["tags"]
     assert item["attributes"]["material_scope"] == "INLET CONE"
+    assert item["attributes"]["coating_scope"] == "INLET"
+
+
+def test_inlet_subcategory_attributes():
+    open_inlet = li.extract_items(["Inlet, Open L STD"])[0]
+    assert open_inlet["attributes"]["inlet_subcategory"] == "OPEN"
+
+    slip = li.extract_items(["Inlet, Slip N STD"])[0]
+    assert slip["attributes"]["inlet_subcategory"] == "SLIP"
+
+    bell = li.extract_items(["Inlet, Bell L 656.00"])[0]
+    assert bell["attributes"]["inlet_subcategory"] == "BELL"
+
+    tube = li.extract_items(["Inlet, Tube L STD"])[0]
+    assert tube["attributes"]["inlet_subcategory"] == "TUBE"
+
+    cone = li.extract_items([
+        "INLET CONE 72%, D62 SW, SIZE 200 (Customer N 102.00 10.00",
+        "Part #: 90515, CBC Part #: 62-0-0062)",
+    ])[0]
+    assert cone["attributes"]["inlet_subcategory"] == "INLET CONE"
+    assert cone["attributes"]["inlet_cone_width_percent"] == "72"
+    assert cone["attributes"]["inlet_size"] == "200"
+
+
+def test_inlet_flange_direction_and_box_attributes():
+    punched = li.extract_items(["Inlet, Flanged, Punched (without IVC) L 468.00"])[0]
+    assert punched["attributes"]["inlet_subcategory"] == "FLANGED/PUNCHED"
+    assert punched["attributes"]["inlet_feature"] == "PUNCHED"
+    assert punched["attributes"]["ivc_relation"] == "WITHOUT IVC"
+
+    with_ivc = li.extract_items(["Inlet, Flanged, Punched (with IVC) L 1,453.00"])[0]
+    assert {"INLET", "INLET VANES"} <= set(with_ivc["tags"])
+    assert with_ivc["attributes"]["ivc_relation"] == "WITH IVC"
+    assert with_ivc["attributes"]["used_on"] == "IVC"
+
+    bolted = li.extract_items(['Inlet, Flanged, Standard Bolted (Inlet Dia 10") N STD'])[0]
+    assert bolted["attributes"]["inlet_subcategory"] == "FLANGED"
+    assert bolted["attributes"]["inlet_feature"] == "STANDARD BOLTED"
+
+    direction = li.extract_items(["Inlet Direction: Vertical Inlet Down L STD"])[0]
+    assert direction["attributes"]["inlet_subcategory"] == "DIRECTION"
+    assert direction["attributes"]["inlet_direction"] == "VERTICAL INLET DOWN"
+
+    box = li.extract_items([
+        "Inlet Box, Bolt-on (Shipped Loose), Oversized Inlet L 7,161.00",
+        "Box Size 300 (Inlet Box, Bolt-on (Shipped Loose),",
+        "Bolt-On Inlet Box Position: @ 0",
+    ])[0]
+    assert box["attributes"]["inlet_subcategory"] == "INLET BOX"
+    assert box["attributes"]["inlet_box_type"] == "BOLT-ON"
+    assert box["attributes"]["inlet_box_size"] == "300"
+    assert box["attributes"]["inlet_box_position"] == "0"
+    assert box["attributes"]["shipping_state"] == "SHIPPED LOOSE"
+
+
+def test_mixing_box_is_not_inlet_category():
+    mixing = li.extract_items([
+        "Mixing Box with Flanged FGR Port (Shipped Loose) L 8,297.00",
+        "(Mixing Box With Flanged FGR Port (Shipped Loose), Suitable for Size 300 Inlet Box)",
+    ])[0]
+    assert "MIXING BOX" in mixing["tags"]
+    assert "INLET" not in mixing["tags"]
+    assert mixing["attributes"]["component"] == "MIXING BOX"
+    assert mixing["attributes"]["flange_scope"] == "MIXING BOX"
+    assert mixing["attributes"]["mixing_box_feature"] == "FGR PORT, FLANGED"
+    assert mixing["attributes"]["used_on"] == "INLET BOX"
+    assert mixing["attributes"]["used_on_size"] == "300"
 
 
 def test_drain_attributes():
