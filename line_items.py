@@ -1182,23 +1182,14 @@ def _label_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
     return attrs
 
 
-def _lifting_lug_attributes(raw_blob: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+def _lifting_lug_attributes(tags: set[str]) -> Dict[str, str]:
     if "LIFTING LUGS" not in tags:
         return {}
-    attrs: Dict[str, str] = {
-        "component": "LIFTING LUGS",
-        "lug_type": "LIFTING LUGS",
+    return {
+        "component": "HOUSING",
+        "housing_feature": "LIFTING LUGS",
+        "lifting_lugs": "YES",
     }
-    if "SILENCER" in tags or "SILENCER" in norm_blob:
-        attrs["lug_scope"] = "SILENCER"
-    else:
-        attrs["lug_scope"] = "FAN"
-    m = re.search(r"@\s*([0-9]{1,2}(?::[0-9]{2})?)", raw_blob)
-    if not m:
-        m = re.search(r"@\s*([0-9]{1,2}(?::[0-9]{2})?)", norm_blob)
-    if m:
-        attrs["lug_position"] = m.group(1)
-    return attrs
 
 
 def _lining_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
@@ -2106,7 +2097,7 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_motor_insulation_attributes(norm_blob, tags, raw_tags))
     attrs.update(_insulation_attributes(item, primary, norm_blob, tags))
     attrs.update(_label_attributes(norm_blob, tags))
-    attrs.update(_lifting_lug_attributes(blob, norm_blob, tags))
+    attrs.update(_lifting_lug_attributes(tags))
     attrs.update(_lining_attributes(norm_blob, tags))
     attrs.update(_housing_attributes(norm_blob, tags))
     attrs.update(_motor_conduit_box_attributes(norm_blob))

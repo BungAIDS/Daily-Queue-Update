@@ -1446,9 +1446,10 @@ def test_label_attributes_and_detail_tag_cleanup():
 def test_lifting_lugs_and_lining_attributes():
     lugs = li.extract_items(["Lifting Lugs @12:00, Inquiry Num: 374-26-320 L 463.00"])[0]
     assert "LIFTING LUGS" in lugs["tags"]
-    assert lugs["attributes"]["component"] == "LIFTING LUGS"
-    assert lugs["attributes"]["lug_scope"] == "FAN"
-    assert lugs["attributes"]["lug_position"] == "12:00"
+    assert lugs["attributes"]["component"] == "HOUSING"
+    assert lugs["attributes"]["housing_feature"] == "LIFTING LUGS"
+    assert lugs["attributes"]["lifting_lugs"] == "YES"
+    assert "lug_position" not in lugs["attributes"]
 
     silencer = li.extract_items([
         "Aeroacoustic Silentflow inlet silencer C 100.00",
