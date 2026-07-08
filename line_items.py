@@ -737,6 +737,21 @@ def _is_motor_flange_line(primary: str, norm_blob: str) -> bool:
     )
 
 
+def _is_motor_nameplate_context(primary: str, norm_blob: str) -> bool:
+    if not re.search(r"\b(NAMEPLATE|REPLAT(?:E|ED|ING))\b", norm_blob):
+        return False
+    if re.match(r"^MOTOR\b", primary, re.I):
+        return True
+    if re.search(r"\bMOTOR\b.{0,80}\bNAMEPLATE\b|\bNAMEPLATE\b.{0,80}\bMOTOR\b", norm_blob):
+        return True
+    if re.search(r"\bMOTOR\b", norm_blob) and re.search(r"\bREPLAT(?:E|ED|ING)\b", norm_blob):
+        return True
+    return bool(
+        re.search(r"\b\d+(?:\.\d+)?\s*HP\b", norm_blob)
+        and re.search(r"\b(RPM|FRAME|TEFC|TENV|XP[A-Z]*|PH|HZ|SF)\b", norm_blob)
+    )
+
+
 def _is_non_wheel_end_location(norm_blob: str) -> bool:
     return bool(re.search(r"\bNON\s*[- ]?\s*WHEEL\s+END\b", norm_blob))
 
@@ -1179,6 +1194,58 @@ def _label_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
         attrs["label_handling"] = "OTHER LABELS/NAMEPLATE BAGGED"
     if re.search(r"\bVENDOR\s+S\s+MOTOR\s+NAMEPLATE\b.*\bAPPLIED\b", norm_blob):
         attrs["related_nameplate_handling"] = "VENDOR MOTOR NAMEPLATE APPLIED"
+    return attrs
+
+
+def _mounting_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    attrs: Dict[str, str] = {}
+    if "MOTOR" in tags or _is_motor_nameplate_context(primary, norm_blob):
+        values: List[str] = []
+        if re.search(r"\bC\s*[- ]?\s*FLANGE\b|\bC\s*[- ]?\s*FACE\b", norm_blob):
+            _add_unique(values, "C-FLANGE")
+        if re.search(r"\bFOOT\s*MOUNT(?:ED|ING)?\b|\bFOOTMOUNT(?:ED|ING)?\b", norm_blob):
+            _add_unique(values, "FOOT MOUNTED")
+        if re.search(r"\bWITH\s+FEET\b", norm_blob):
+            _add_unique(values, "WITH FEET")
+        if re.search(r"\b(NO|WITHOUT|LESS)\s+FEET\b", norm_blob):
+            _add_unique(values, "NO FEET")
+        if re.search(r"\bMULTI\s*MOUNT(?:ING)?\b|\bMULTIMOUNT(?:ING)?\b", norm_blob):
+            _add_unique(values, "MULTIMOUNTING")
+        if re.search(r"\bMOTOR\s+MOUNTING\s+FRAME\b", norm_blob):
+            _add_unique(values, "MOTOR MOUNTING FRAME")
+        if re.search(r"\bADJUSTABLE\s+MOTOR\s+BASE\b", norm_blob):
+            attrs["motor_base"] = "ADJUSTABLE MOTOR BASE"
+        if values:
+            attrs["component"] = "MOTOR"
+            attrs["motor_mounting"] = ", ".join(values)
+    if re.search(r"\bCBC\s+MOUNT(?:ED)?\b", norm_blob):
+        attrs.setdefault("mounting", "CBC MOUNT")
+    return attrs
+
+
+def _nameplate_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "LABEL" in tags and "NAMEPLATE" not in tags:
+        return {}
+    if "NAMEPLATE" not in tags and not _is_motor_nameplate_context(primary, norm_blob):
+        return {}
+    attrs: Dict[str, str] = {}
+    if "MOTOR" in tags or _is_motor_nameplate_context(primary, norm_blob):
+        attrs["component"] = "MOTOR"
+        attrs["motor_nameplate"] = "YES"
+        if re.search(r"\bREPLACE\s+NAMEPLATE\b", norm_blob):
+            attrs["motor_nameplate_action"] = "REPLACE NAMEPLATE"
+        elif re.search(r"\bREPLAT(?:E|ED|ING)\b", norm_blob):
+            attrs["motor_nameplate_action"] = "REPLATE"
+        elif re.search(r"\bNAMEPLATE\s+RR\b", norm_blob):
+            attrs["motor_nameplate_action"] = "REPLACE NAMEPLATE"
+    elif "HOUSING" in tags or _is_nameplate_housing_mount(norm_blob):
+        attrs["nameplate_mount_location"] = "HOUSING"
+        if re.search(r"\bRIVETED\s+TO\s+HOUSING\b", norm_blob):
+            attrs["nameplate_mounting"] = "RIVETED"
+    else:
+        attrs["component"] = "NAMEPLATE"
+        if "STAINLESS STEEL" in tags or "STAINLESS STEEL" in norm_blob:
+            attrs["nameplate_type"] = "STAINLESS STEEL"
     return attrs
 
 
@@ -2010,6 +2077,8 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t != "INLET"]
     if _is_label_instruction_line(primary, norm_blob, set(tags)):
         tags = [t for t in tags if t not in _LABEL_DETAIL_TAGS]
+    if "NAMEPLATE" in tags and _is_motor_nameplate_context(primary, norm_blob):
+        _add_unique(tags, "MOTOR")
     if _is_ship_via_note(primary, norm_blob):
         tags = [t for t in tags if t not in _SHIP_VIA_COMPONENT_TAGS]
         _add_unique(tags, "SHIPPING")
@@ -2074,6 +2143,8 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         _add_unique(tags, tag)
     if _component_material_owner(item, _material_attributes(norm_blob), rules):
         tags = [t for t in tags if t not in _MATERIAL_TAGS]
+    if "MOUNTING" in tags:
+        tags = [t for t in tags if t != "MOUNTING"]
     return sorted(tags)
 
 
@@ -2107,6 +2178,8 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_motor_insulation_attributes(norm_blob, tags, raw_tags))
     attrs.update(_insulation_attributes(item, primary, norm_blob, tags))
     attrs.update(_label_attributes(norm_blob, tags))
+    attrs.update(_mounting_attributes(primary, norm_blob, tags))
+    attrs.update(_nameplate_attributes(primary, norm_blob, tags))
     attrs.update(_lifting_lug_attributes(tags))
     attrs.update(_lining_attributes(norm_blob, tags))
     attrs.update(_housing_attributes(norm_blob, tags))

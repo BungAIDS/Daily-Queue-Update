@@ -519,6 +519,7 @@ def test_actuator_attributes():
     actuator = items["ACTUATOR FOR IVC BETTIS #RPED100 DOUBLE ACTING"]
     attrs = actuator["attributes"]
     assert {"ACTUATOR", "DAMPER", "INLET VANES"} <= set(actuator["tags"])
+    assert "MOUNTING" not in actuator["tags"]
     assert attrs["component"] == "ACTUATOR"
     assert attrs["used_on"] == "IVC"
     assert attrs["ivc_subcategory"] == "IVC ACTUATOR"
@@ -542,10 +543,12 @@ def test_drive_attributes():
         "Sheave/Bushing: 3B5V86/B (2 3/16\"), Actual SF:",
         "1.31, Actual CD: 44.34)",
         "Constant Speed, SF: 1.3",
+        "CBC Mount",
     ])}
     drive = items["DRIVE MAX MIN RPM 1531 1531 3 BELTS B112"]
     attrs = drive["attributes"]
     assert {"V-BELT DRIVE", "DRIVE COMPONENTS"} <= set(drive["tags"])
+    assert "MOUNTING" not in drive["tags"]
     assert attrs["component"] == "V-BELT DRIVE"
     assert attrs["belt_qty"] == "3"
     assert attrs["belt"] == "B112"
@@ -560,6 +563,7 @@ def test_drive_attributes():
     assert attrs["actual_sf"] == "1.31"
     assert attrs["actual_cd"] == "44.34"
     assert attrs["service_factor"] == "1.3"
+    assert attrs["mounting"] == "CBC MOUNT"
 
 
 def test_selected_drive_table_attributes():
@@ -711,9 +715,12 @@ def test_explosion_proof_split_detail_line():
 def test_flange_scope_motor_and_non_wheel_end():
     motor = li.extract_items(["C-Flange Motor Replate L 100.00"])[0]
     assert "MOTOR" in motor["tags"]
+    assert "MOUNTING" not in motor["tags"]
     assert "FLANGE" not in motor["tags"]
     assert motor["attributes"]["component"] == "MOTOR"
     assert motor["attributes"]["motor_mounting"] == "C-FLANGE"
+    assert motor["attributes"]["motor_nameplate"] == "YES"
+    assert motor["attributes"]["motor_nameplate_action"] == "REPLATE"
     assert motor["attributes"]["flange_scope"] == "MOTOR"
 
     housing = li.extract_items(["Non-Wheel End Flange Reinforcing Gussets L 200.00"])[0]
@@ -770,6 +777,8 @@ def test_housing_construction_and_nameplate_mount_attributes():
     assert {"HOUSING", "MATERIALS", "NAMEPLATE", "STAINLESS STEEL"} <= set(nameplate["tags"])
     assert nameplate["attributes"]["housing_subcategory"] == "NAMEPLATE LOCATION"
     assert nameplate["attributes"]["mount_location"] == "HOUSING"
+    assert nameplate["attributes"]["nameplate_mount_location"] == "HOUSING"
+    assert nameplate["attributes"]["nameplate_mounting"] == "RIVETED"
     assert nameplate["attributes"]["material_scope"] == "NAMEPLATE, HARDWARE"
 
 
@@ -1456,12 +1465,23 @@ def test_label_attributes_and_detail_tag_cleanup():
         "Mods: Add tropicalization, RETIE label",
     ])[0]
     assert {"LABEL", "MOTOR"} <= set(motor["tags"])
+    assert "MOUNTING" not in motor["tags"]
     assert motor["attributes"]["label_type"] == "RETIE LABEL"
     assert motor["attributes"]["label_scope"] == "MOTOR"
+    assert motor["attributes"]["motor_mounting"] == "MULTIMOUNTING"
 
     marked = li.derive_item_fields({"raw": "Mark all items with LOT/SER Number, Project, & Heat Lot number", "details": []})
     assert "LABEL" in marked["tags"]
     assert marked["attributes"]["label_type"] == "ITEM MARKING"
+
+    spec_nameplate = li.extract_items([
+        "125HP,1785RPM,3PH,60HZ,444T,TEFC,F1 L 6,476.60",
+        "M15B Replace Nameplate - RR #47",
+    ])[0]
+    assert {"MOTOR", "NAMEPLATE"} <= set(spec_nameplate["tags"])
+    assert "MOUNTING" not in spec_nameplate["tags"]
+    assert spec_nameplate["attributes"]["component"] == "MOTOR"
+    assert spec_nameplate["attributes"]["motor_nameplate_action"] == "REPLACE NAMEPLATE"
 
 
 def test_lifting_lugs_and_lining_attributes():
