@@ -19,8 +19,8 @@ scanned PDFs ──pdf_vision.py (Claude API)──>  (full doc text), vision.tr
         data_push.py ──> git branch `order-data`  <── remote assistant reads this
 ```
 
-- **The store is a corpus.** Every run keeps its full text (`raw_lines`, cap
-  250) or vision `transcript`. New extraction patterns are applied WITHOUT
+- **The store is a corpus.** Every run keeps its full text (`raw_lines`, backstop
+  10000) or vision `transcript`. New extraction patterns are applied WITHOUT
   touching Z: or the API: `python quote_run_scan.py --reparse-stored`
   (seconds). This is the core loop: design pattern → test on corpus →
   reparse-stored → publish.
@@ -101,12 +101,13 @@ two trailing columns (WR2, weight) are dropped. Extend the row regexes with
 two more capture patterns per component (`Blade WR2`, `Blade Weight Lb`, ...).
 Watch the HUB row (5 numbers: wr2, weight, total weight, price).
 
-### P3 — Multi-printout files (correctness risk)
-Some files concatenate several run printouts (400567 has 4 SIZE values in one
-file). First-match-wins reads the FIRST printout. Split text on the
-`---...--- / CHICAGO BLOWER CORP.` header boundary, parse each segment, pick
-the most-current segment (reuse `run_rank.revision_key` on in-text CO/REV
-markers + completeness). Verify against 400567, 400076.
+### P3 — Multi-printout files  [4S/8S case: DONE]
+`templates.select_primary_run_text` splits a doc into pages and, when a fan is
+quoted in both an arrangement-4 and an 8/9, keeps only the arr-4 (DG's rule) —
+fixed the 16 dual files and the 8S-bearing-leak bug. REMAINING RISK: other
+multi-printout combos (two genuinely different fans, or a fan + accessory in one
+file) still fall through to first-match. Low frequency, unverified — if one
+turns up, extend select_primary_run_text (it already has the page split).
 
 ### P4 — The 14 UNRECOGNIZED (.doc/.xls) — mostly damper quote runs
 Old binary formats; no Python reader in-repo. Options: (a) DG bulk-converts
