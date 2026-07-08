@@ -190,8 +190,11 @@ DEFAULT_RULES: Dict[str, Any] = {
                   r"\binlet\s+direction"],
         "MIXING BOX": [r"\bmixing\s+box\b"],
         "OUTLET": [r"\boutlet\s+(open|slip|flanged|punched|pressure\s*tap|volume\s*control)",
+                   r"\bslip\s+outlet\b",
                    r"\bdischarge\s+elbow"],
-        "WHEEL": [r"\bwheel\b", r"\bpercent\s+width\b", r"%\s*width\b"],
+        "WHEEL": [r"\bwheel\b", r"\bpercent\s+width\b", r"%\s*width\b",
+                  r"effective\s*diameter", r"cast\s*hub",
+                  r"taper\s*lock\s*bushing", r"taperlock\s*bushing"],
         "HOUSING": [r"\bhousing\b"],
         "SPLIT HOUSING": [r"\bsplit\s+housings?\b",
                           r"\bshipping\s+splits?\b",
@@ -242,12 +245,13 @@ DEFAULT_RULES: Dict[str, Any] = {
         "MOTOR": [r"\bmotor\b", r"\bc\s*[- ]?\s*flange\b"],
         "VFD": [r"\bVFD\b", r"variable\s*freq", r"inverter"],
         "EXPLOSION PROOF": [r"explosion(?:\s|;|-)*proof", r"class\s*i+\b.*div"],
-        "DRIVE COMPONENTS": [r"sheave\s*/?\s*bushing", r"\bbushing\b",
+        "DRIVE COMPONENTS": [r"sheave\s*/?\s*bushing",
+                             r"\b(?:motor|mtr|fan)\s+bushing\b",
                              r"\bactual\s+sf\b", r"\bactual\s+cd\b",
                              r"selected\s+drive", r"center\s+distance",
                              r"^\d{3,4}\s+\d{3,4}\s+[A-Z]{1,2}\d+\s+\d+\s+"],
         "V-BELT DRIVE": [r"^drive\b", r"v[\s-]*belt", r"sheave",
-                         r"bushing", r"drive\s*set"],
+                         r"drive\s*set"],
         "BALANCE": [r"\bG\s*\d+(?:\.\d+)?\s+balance\b",
                     r"welded\s+balance\s+weights?"],
         "TESTING": [r"witness", r"\btest"],
@@ -651,6 +655,7 @@ def _is_packaging_inspection_primary(primary: str, tags: set[str]) -> bool:
     return bool(
         "INSPECTION" in tags
         and "PACKAGING" in tags
+        and not ({"DRAWINGS", "3D STEP DRAWINGS"} & tags)
         and re.search(r"\b(ISPM|WOOD\s+INSPECTION\s+STAMP|LUMBER|SKID)\b", primary)
     )
 
@@ -1714,6 +1719,70 @@ def _spare_parts_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dic
     return attrs
 
 
+def _wheel_attributes(primary: str, norm_blob: str, tags: set[str], raw_blob: str = "") -> Dict[str, str]:
+    if "WHEEL" not in tags:
+        return {}
+    attrs: Dict[str, str] = {}
+    features: List[str] = []
+
+    if re.search(r"\bEFFECTIVE\s+DIAMETER\b", norm_blob):
+        _add_unique(features, "EFFECTIVE DIAMETER")
+        m = re.search(r"\b(\d+(?:\.\d+)?)\s*%\s+EFFECTIVE\s+DIAMETER\b", norm_blob)
+        if m:
+            attrs["wheel_effective_diameter_percent"] = m.group(1)
+    if re.search(r"\bCAST\s+HUB\b", norm_blob):
+        _add_unique(features, "CAST HUB")
+        attrs["wheel_hub_construction"] = "CAST HUB"
+        if "STRAIGHT BORE" in norm_blob:
+            attrs["wheel_hub_bore"] = "STRAIGHT BORE"
+    if re.search(r"\bTAPER\s*LOCK\s+BUSHING\b|\bTAPERLOCK\s+BUSHING\b", norm_blob):
+        _add_unique(features, "TAPER LOCK BUSHING")
+        attrs["wheel_hub_construction"] = "TAPER LOCK BUSHING"
+        bore_pattern = r"(\d+[-\s]\d+/\d+|\d+/\d+|\d+(?:\.\d+)?)"
+        bore_blob = raw_blob.upper() if raw_blob else norm_blob
+        m = re.search(rf"\bBORE\s*:?\s*{bore_pattern}\b", bore_blob)
+        if not m:
+            m = re.search(rf"\b{bore_pattern}\s*(?:\"|''|INCH(?:ES)?)?\s+BORE\b", bore_blob)
+        if m:
+            attrs["wheel_bore"] = re.sub(r"\s+", "-", m.group(1).strip()) + '"'
+
+    if features:
+        attrs["component"] = "WHEEL"
+        attrs["wheel_feature"] = ", ".join(features)
+    return attrs
+
+
+def _unitary_base_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "UNITARY BASE" not in tags:
+        return {}
+    attrs: Dict[str, str] = {"component": "UNITARY BASE"}
+    types: List[str] = []
+    details: List[str] = []
+
+    if re.search(r"\bUNITARY\s+BASE\b", norm_blob):
+        _add_unique(types, "UNITARY BASE")
+    if re.search(r"\bCOMMON\s*/?\s+UNITARY\s+BASE\b", norm_blob):
+        _add_unique(details, "COMMON UNITARY BASE")
+    if re.search(r"\bSTRUCTURAL\s+(?:STEEL\s+)?BASE\b", norm_blob):
+        _add_unique(types, "STRUCTURAL STEEL BASE")
+    if re.search(r"\bCHANNEL\s+BASE\b", norm_blob):
+        _add_unique(types, "CHANNEL BASE")
+        m = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:\"|INCH(?:ES)?)?\s+CHANNEL\s+BASE\b", norm_blob)
+        if m:
+            attrs["unitary_base_size"] = f"{m.group(1)}\""
+    if re.search(r"\bSLIP\s+OUTLET\b.*\bCHANNEL\s+BASE\b", norm_blob):
+        _add_unique(details, "OUTLET EXTENDS PAST CHANNEL BASE")
+        m = re.search(r"\bPAST\s+CHANNEL\s+BASE\s+BY\s+(\d+(?:\.\d+)?)\b", norm_blob)
+        if m:
+            attrs["unitary_base_clearance"] = f"{m.group(1)}\""
+
+    if types:
+        attrs["unitary_base_type"] = ", ".join(types)
+    if details:
+        attrs["unitary_base_detail"] = ", ".join(details)
+    return attrs
+
+
 def _special_construction_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
     if "SPECIAL CONSTRUCTION" not in tags:
         return {}
@@ -2251,6 +2320,62 @@ def _drive_table_attributes(item: Dict[str, Any]) -> Dict[str, str]:
     return attrs
 
 
+def _is_drive_context(primary: str, norm_blob: str) -> bool:
+    if _is_drive_table_line(primary):
+        return True
+    if re.search(r"\bWARRANTY\b", primary) and not re.match(
+        r"^(?:SPARE\s+)?V\s*[- ]?\s*BELT\s+DRIVE\b|^(?:NPO\s+)?(?:REPAIR|REPLACEMENT)\s+DRIVE\s+SET\b",
+        primary,
+        re.I,
+    ):
+        return False
+    if re.match(r"^DRIVE\b", primary, re.I):
+        return True
+    if re.match(r"^(?:SPARE\s+)?V\s*[- ]?\s*BELT\s+DRIVE\b", primary, re.I):
+        return True
+    if re.match(r"^(?:NPO\s+)?(?:REPAIR|REPLACEMENT)\s+DRIVE\s+SET\b", primary, re.I):
+        return True
+    if re.match(r"^CENTER\s+DISTANCE\b", primary, re.I):
+        return True
+    if re.search(r"\b(MOTOR|MTR|FAN)\s+SHEAVE\b", norm_blob):
+        return True
+    if re.search(r"\b(ACTUAL\s+SF|ACTUAL\s+CD|SPECIFIED\s+MINIMUM\s+BELT\s+SERVICE\s+FACTOR)\b", norm_blob):
+        return True
+    if re.search(r"\bSELECTED\s+DRIVE\b", norm_blob):
+        return True
+    if re.search(r"\bV\s*[- ]?\s*BELT\s+DRIVE\b", norm_blob):
+        return True
+    if re.search(r"\bDRIVE\s+SET\b", norm_blob) and "WARRANTY" not in primary:
+        return True
+    return False
+
+
+def _drive_detail_subcategory(primary: str, norm_blob: str) -> str:
+    if _is_drive_table_line(primary):
+        return "SELECTED DRIVE TABLE" if "SELECTED DRIVE" in norm_blob or primary.startswith("*") else "DRIVE TABLE"
+    if re.match(r"^CENTER\s+DISTANCE\b", primary, re.I):
+        return "CENTER DISTANCE"
+    if re.match(r"^(?:SPARE\s+)?V\s*[- ]?\s*BELT\s+DRIVE\b", primary, re.I):
+        return "V-BELT DRIVE"
+    if re.match(r"^(?:NPO\s+)?(?:REPAIR|REPLACEMENT)\s+DRIVE\s+SET\b", primary, re.I):
+        return "DRIVE SET"
+    if re.search(r"\b(MOTOR|MTR|FAN)\s+SHEAVE\b|\bSHEAVE\s*/?\s+BUSHING\b", norm_blob):
+        return "SHEAVE/BUSHING"
+    if re.search(r"\bCENTER\s+DISTANCE\b", norm_blob):
+        return "CENTER DISTANCE"
+    if re.search(r"\bDRIVE\s+SET\b", norm_blob):
+        return "DRIVE SET"
+    return "V-BELT DRIVE"
+
+
+def _has_drive_component_detail(primary: str, norm_blob: str) -> bool:
+    return bool(
+        _is_drive_table_line(primary)
+        or re.search(r"\b(MOTOR|MTR|FAN)\s+SHEAVE\b|\bSHEAVE\s*/?\s+BUSHING\b", norm_blob)
+        or re.search(r"\b(ACTUAL\s+SF|ACTUAL\s+CD|CENTER\s+DISTANCE|SELECTED\s+DRIVE)\b", norm_blob)
+    )
+
+
 def _balance_attributes(norm_blob: str) -> Dict[str, str]:
     attrs: Dict[str, str] = {}
     types: List[str] = []
@@ -2761,6 +2886,16 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t != "SHIPPING"]
     if "SPARE PARTS" in tags and not _is_spare_parts_primary(primary):
         tags = [t for t in tags if t != "SPARE PARTS"]
+    if {"V-BELT DRIVE", "DRIVE COMPONENTS"} & set(tags):
+        if _is_drive_context(primary, norm_blob):
+            _add_unique(tags, "V-BELT DRIVE")
+            if _has_drive_component_detail(primary, norm_blob):
+                _add_unique(tags, "DRIVE COMPONENTS")
+            if "MOTOR" in tags and (not re.match(r"^MOTOR\b", primary, re.I)
+                                    or re.match(r"^MOTOR\s+SHEAVE\b", primary, re.I)):
+                tags = [t for t in tags if t != "MOTOR"]
+        else:
+            tags = [t for t in tags if t not in {"V-BELT DRIVE", "DRIVE COMPONENTS"}]
     if _is_belt_guard_line(primary):
         tags = [t for t in tags if t not in _BELT_GUARD_DETAIL_TAGS]
     elif _is_accessory_coating(primary, tag_set, norm_blob):
@@ -2817,6 +2952,8 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_split_housing_attributes(norm_blob, tags))
     attrs.update(_explosion_proof_attributes(primary, norm_blob, raw_tags))
     attrs.update(_special_construction_attributes(primary, norm_blob, tags))
+    attrs.update(_wheel_attributes(primary, norm_blob, tags, blob))
+    attrs.update(_unitary_base_attributes(primary, norm_blob, tags))
     attrs.update(_flange_attributes(primary, norm_blob, tags, raw_tags))
     attrs.update(_flex_connector_attributes(norm_blob, tags))
     attrs.update(_coupling_attributes(norm_blob, tags))
@@ -2914,6 +3051,7 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     is_drive = bool({"V-BELT DRIVE", "DRIVE COMPONENTS"} & tags)
     if is_drive:
         attrs.setdefault("component", "V-BELT DRIVE")
+        attrs["drive_subcategory"] = _drive_detail_subcategory(primary, norm_blob)
         m = re.search(r"Max/Min RPM:\s*(\d+)\s*/\s*(\d+)", blob, re.I)
         if m:
             attrs["max_rpm"], attrs["min_rpm"] = m.group(1), m.group(2)

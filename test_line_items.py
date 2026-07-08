@@ -335,6 +335,8 @@ def test_tagging():
     assert "SPLIT HOUSING" in li.tag_item(li.normalize_text("Drawing and split housing released into production"))
     assert "SPLIT HOUSING" in li.tag_item(li.normalize_text("Shipping Split"))
     assert "V-BELT DRIVE" in li.tag_item(li.normalize_text("Drive (Max/Min RPM: 1531/1531, 3 belts: B112"))
+    assert "WHEEL" in li.tag_item(li.normalize_text("110% Effective Diameter"))
+    assert "WHEEL" in li.tag_item(li.normalize_text("Cast Hub with Straight Bore"))
     assert "SPECIAL CONSTRUCTION" in li.tag_item(li.normalize_text("Tie Rod Support"))
     assert "SPECIAL CONSTRUCTION" in li.tag_item(li.normalize_text("Loc Tite on the set screw threads"))
     assert "SPECIAL CONSTRUCTION" in li.tag_item(li.normalize_text("Continuous Weld Airstream"))
@@ -548,8 +550,10 @@ def test_drive_attributes():
     drive = items["DRIVE MAX MIN RPM 1531 1531 3 BELTS B112"]
     attrs = drive["attributes"]
     assert {"V-BELT DRIVE", "DRIVE COMPONENTS"} <= set(drive["tags"])
+    assert "MOTOR" not in drive["tags"]
     assert "MOUNTING" not in drive["tags"]
     assert attrs["component"] == "V-BELT DRIVE"
+    assert attrs["drive_subcategory"] == "SHEAVE/BUSHING"
     assert attrs["belt_qty"] == "3"
     assert attrs["belt"] == "B112"
     assert attrs["max_rpm"] == "1531"
@@ -576,7 +580,9 @@ def test_selected_drive_table_attributes():
     ])
     drive = items[0]
     attrs = drive["attributes"]
+    assert "V-BELT DRIVE" in drive["tags"]
     assert "DRIVE COMPONENTS" in drive["tags"]
+    assert attrs["drive_subcategory"] == "SELECTED DRIVE TABLE"
     assert attrs["belt"] == "B116"
     assert attrs["belt_qty"] == "3"
     assert attrs["drive_sheave_bushing"] == "3TB80 Q1"
@@ -618,6 +624,63 @@ def test_selected_drive_table_attributes():
     assert compact_attrs["driven_bushing"] == "H"
     assert compact_attrs["actual_sf"] == "1.25"
     assert compact_attrs["actual_cd"] == "21.14"
+
+    center = li.extract_items([
+        "Center Distance with allowance for install and take-up: 32.24 - 35.24",
+    ])[0]
+    assert {"V-BELT DRIVE", "DRIVE COMPONENTS"} <= set(center["tags"])
+    assert center["attributes"]["drive_subcategory"] == "CENTER DISTANCE"
+    assert center["attributes"]["center_distance_range"] == "32.24 - 35.24"
+
+    wheel_bushing = li.extract_items([
+        "Wheel, Taper Lock Bushing (Bore: 1-3/8) L 981.00",
+    ])[0]
+    assert "WHEEL" in wheel_bushing["tags"]
+    assert "V-BELT DRIVE" not in wheel_bushing["tags"]
+    assert "DRIVE COMPONENTS" not in wheel_bushing["tags"]
+    assert wheel_bushing["attributes"]["component"] == "WHEEL"
+    assert wheel_bushing["attributes"]["wheel_feature"] == "TAPER LOCK BUSHING"
+    assert wheel_bushing["attributes"]["wheel_bore"] == '1-3/8"'
+
+    warranty = li.derive_item_fields({
+        "raw": "year warranty from date of shipment **Drive sets will have standard warranty offered by vendor",
+        "details": [],
+    })
+    assert warranty["tags"] == ["WARRANTY"]
+
+    anti_short = li.extract_items([
+        "Vertical mounting plate with 4 studs at 90 degrees. L 1,057.00",
+        "Tack and weld conduit box to housing. Anti-short",
+        "bushing. Extend motor leads, includes flexible",
+        "conduit and labor, Inquiry Num: 15-9-2056",
+    ])[0]
+    assert "SPECIAL CONSTRUCTION" in anti_short["tags"]
+    assert "V-BELT DRIVE" not in anti_short["tags"]
+    assert "DRIVE COMPONENTS" not in anti_short["tags"]
+
+
+def test_unitary_base_attributes():
+    channel = li.extract_items(["8\" Channel Base, Inquiry Num: 253-24-1651 L 2,215.00"])[0]
+    assert "UNITARY BASE" in channel["tags"]
+    assert channel["attributes"]["component"] == "UNITARY BASE"
+    assert channel["attributes"]["unitary_base_type"] == "CHANNEL BASE"
+    assert channel["attributes"]["unitary_base_size"] == '8"'
+
+    common = li.extract_items([
+        "Special Product Design (Base Fan with CW and CCW L 24,032.00",
+        "Wheel and Housing, Dual Shaft Motor and Common",
+        "Unitary Base, Inquiry Num: 333-26-1551)",
+    ])[0]
+    assert "UNITARY BASE" in common["tags"]
+    assert common["attributes"]["unitary_base_type"] == "UNITARY BASE"
+    assert common["attributes"]["unitary_base_detail"] == "COMMON UNITARY BASE"
+
+    outlet_note = li.extract_items([
+        "slip outlet-to extend past channel base by 2\", L 1,641.00",
+    ])[0]
+    assert {"OUTLET", "UNITARY BASE"} <= set(outlet_note["tags"])
+    assert outlet_note["attributes"]["unitary_base_detail"] == "OUTLET EXTENDS PAST CHANNEL BASE"
+    assert outlet_note["attributes"]["unitary_base_clearance"] == '2"'
 
 
 def test_inquiry_number_attributes():
@@ -1649,8 +1712,23 @@ def test_special_construction_stainless_and_testing_attributes():
     assert code_weld["attributes"]["welding_code"] == "AWS D14.6"
 
     effective = li.extract_items(["110% Effective Diameter, Inquiry Num: 909-26-465 L 1,000.00"])[0]
+    assert "WHEEL" in effective["tags"]
+    assert effective["attributes"]["component"] == "WHEEL"
     assert effective["attributes"]["special_construction_type"] == "EFFECTIVE DIAMETER"
     assert effective["attributes"]["effective_diameter_percent"] == "110"
+    assert effective["attributes"]["wheel_feature"] == "EFFECTIVE DIAMETER"
+    assert effective["attributes"]["wheel_effective_diameter_percent"] == "110"
+
+    cast_hub = li.extract_items([
+        "Cast Hub with Straight Bore (Original CAT Design, L",
+        "PN 512-1835), Inquiry Num: 311-19-1989",
+    ])[0]
+    assert {"SPECIAL CONSTRUCTION", "WHEEL"} <= set(cast_hub["tags"])
+    assert cast_hub["attributes"]["component"] == "WHEEL"
+    assert cast_hub["attributes"]["special_construction_type"] == "CAST HUB"
+    assert cast_hub["attributes"]["wheel_feature"] == "CAST HUB"
+    assert cast_hub["attributes"]["wheel_hub_construction"] == "CAST HUB"
+    assert cast_hub["attributes"]["wheel_hub_bore"] == "STRAIGHT BORE"
 
     pressure = li.extract_items(["Outlet Pressure Tap L 432.00"])[0]
     assert {"OUTLET", "SPECIAL CONSTRUCTION"} <= set(pressure["tags"])

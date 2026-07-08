@@ -95,6 +95,9 @@ def _attrs_label(item: Dict[str, Any]) -> str:
         "temperature_service", "temperature_direction", "temperature_rating", "grease_type",
         "special_construction_type", "special_construction_scope",
         "special_construction_detail", "effective_diameter_percent", "welding_code",
+        "wheel_feature", "wheel_effective_diameter_percent", "wheel_hub_construction",
+        "wheel_hub_bore", "wheel_bore",
+        "unitary_base_type", "unitary_base_size", "unitary_base_detail", "unitary_base_clearance",
         "material", "material_grade", "material_scope", "material_treatment",
         "component_material", "component_material_grade", "component_material_scope",
         "drain_type", "drain_closure", "drain_detail",
@@ -114,7 +117,7 @@ def _attrs_label(item: Dict[str, Any]) -> str:
         "balance_type", "balance_grade",
         "bearing_type", "bearing_bore",
         "manufacturer", "model", "size", "operation", "supplied_by", "mounting", "fail_power", "fail_signal",
-        "belt_qty", "belt", "selected_drive", "drive_sheave", "drive_bushing",
+        "drive_subcategory", "belt_qty", "belt", "selected_drive", "drive_sheave", "drive_bushing",
         "driven_sheave", "driven_bushing", "drive_sheave_bushing", "driven_sheave_bushing",
         "actual_sf", "actual_cd", "service_factor", "center_distance_range",
     ]
