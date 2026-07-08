@@ -154,7 +154,7 @@ DEFAULT_RULES: Dict[str, Any] = {
     "tags": {
         "BASE FAN": [r"^base\s+fan\b"],
         "ACTUATOR": [r"\bactuator\b"],
-        "SPARK RESISTANT": [r"spark"],
+        "SPARK RESISTANT": [r"spark", r"\bAMCA\s+(?:TYPE\s+)?[ABC]\b"],
         "SHAFT SEAL": [r"shaft\s*seal", r"stuffing\s*box", r"lip\s*seal",
                        r"ceramic\s*felt"],
         "SHAFT SLEEVE": [r"shaft\s*sleeve"],
@@ -251,7 +251,7 @@ DEFAULT_RULES: Dict[str, Any] = {
         "BALANCE": [r"\bG\s*\d+(?:\.\d+)?\s+balance\b",
                     r"welded\s+balance\s+weights?"],
         "TESTING": [r"witness", r"\btest"],
-        "SPARE PARTS": [r"spare"],
+        "SPARE PARTS": [r"\bspare\b", r"^(?:npo\s+)?(?:repair|replacement)\b"],
         "3D STEP DRAWINGS": [r"3d\s+(step\s+)?(file\s+)?drawings?"],
     },
 }
@@ -267,6 +267,10 @@ _BELT_GUARD_DETAIL_TAGS = {"COATING", "MOUNTING", "MOTOR"}
 _DRIVE_TABLE_DETAIL_TAGS = {"DRAWINGS", "MOTOR", "SPECIAL CONSTRUCTION"}
 _LABEL_DETAIL_TAGS = {"MOTOR", "NAMEPLATE"}
 _EXTREME_TEMPERATURE_TAG = "EXTREME TEMP"
+_PACKAGING_INSPECTION_DETAIL_TAGS = {
+    "COATING", "FLANGE", "INLET", "MATERIALS", "OUTLET", "SCREEN",
+    "SILENCER", "STAINLESS STEEL", "ALUMINUM",
+}
 _SHIP_VIA_COMPONENT_TAGS = {
     "ACTUATOR", "DAMPER", "FLEX CONNECTOR", "INLET VANES", "SILENCER", "OUTLET",
 }
@@ -637,6 +641,18 @@ def _is_incidental_shipping_reference(primary: str, norm_blob: str, tags: set[st
         norm_blob,
     )
     return bool(warranty_shipment and not real_shipping_instruction)
+
+
+def _is_spare_parts_primary(primary: str) -> bool:
+    return bool(re.search(r"^(?:NPO\s+)?(?:SPARE|REPAIR|REPLACEMENT)\b", primary))
+
+
+def _is_packaging_inspection_primary(primary: str, tags: set[str]) -> bool:
+    return bool(
+        "INSPECTION" in tags
+        and "PACKAGING" in tags
+        and re.search(r"\b(ISPM|WOOD\s+INSPECTION\s+STAMP|LUMBER|SKID)\b", primary)
+    )
 
 
 _MATERIAL_GRADE = re.compile(r"\bT?(304L?|316L?)\s+STAINLESS\s+STEEL\b", re.I)
@@ -1541,6 +1557,132 @@ def _shipping_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
     return attrs
 
 
+def _silencer_attributes(primary: str, norm_blob: str, tags: set[str], product: str = "",
+                         blob: str = "") -> Dict[str, str]:
+    if "SILENCER" not in tags:
+        return {}
+    attrs: Dict[str, str] = {}
+    product_norm = normalize_text(product) if product else ""
+    primary_context = f"{primary} {product_norm}".strip()
+    direction_source = primary_context or norm_blob
+    used_on: List[str] = []
+    if re.search(r"\bINLET\b", direction_source):
+        _add_unique(used_on, "INLET")
+    if re.search(r"\b(OUTLET|DISCHARGE)\b", direction_source):
+        _add_unique(used_on, "OUTLET")
+    if not used_on and re.search(r"\bINLET\b", norm_blob):
+        _add_unique(used_on, "INLET")
+    if not used_on and re.search(r"\b(OUTLET|DISCHARGE)\b", norm_blob):
+        _add_unique(used_on, "OUTLET")
+    if used_on:
+        attrs["silencer_used_on"] = ", ".join(used_on)
+
+    if re.search(r"\bCIRCULAR\s+DISCHARGE\s+SILENCER\b|\bCIB\b", norm_blob):
+        attrs["silencer_subcategory"] = "CIRCULAR DISCHARGE SILENCER"
+    elif "OUTLET" in used_on:
+        attrs["silencer_subcategory"] = "OUTLET SILENCER"
+    elif "INLET" in used_on:
+        attrs["silencer_subcategory"] = "INLET SILENCER"
+    else:
+        attrs["silencer_subcategory"] = "SILENCER"
+
+    model_patterns = (
+        r"\bMODEL\s*:?\s*([A-Z0-9]+(?:[-\s][A-Z0-9]+){0,3})\b",
+        r"\b(?:VAW\s+)?SILENCER\s+([0-9A-Z]+VRSB[-\s][A-Z0-9]+)\b",
+        r"\b([0-9]{2}VCIB[-\s]V99[-\s]SN\d+)\b",
+        r"\b((?:CI|IB|SI)[-\s]\d+[-\s][A-Z0-9.]+|[0-9]+[-\s]TA[-\s][A-Z0-9]+)\b",
+    )
+    for pattern in model_patterns:
+        m = re.search(pattern, norm_blob)
+        if m:
+            model = re.sub(r"\s+", "-", m.group(1).strip())
+            model = re.sub(
+                r"-(AND|WITH|INCLUDES?|INLET|OUTLET|DISCHARGE|SILENCER|UNIT|VENDOR|PRODUCT).*$",
+                "",
+                model,
+            )
+            attrs["silencer_model"] = model
+            break
+
+    m = re.search(r"\b(\d{2,3})\s*DBA\b", norm_blob)
+    if m:
+        attrs["silencer_noise_target"] = f"{m.group(1)} DBA"
+    pressure_blob = re.sub(r"\s+", " ", blob or norm_blob)
+    m = re.search(
+        r"\b(?:Pressure\s+Drop|total\s+pressure\s+drop(?:\s+of)?)\s*:?\s*(\d+(?:\.\d+)?|\.\d+)",
+        pressure_blob,
+        re.I,
+    )
+    if m and m.group(1):
+        attrs["pressure_drop"] = m.group(1)
+
+    features: List[str] = []
+    for label, pattern in (
+        ("PIEZOMETER TUBE", r"\bPIEZOMETER\s+TUBE\b"),
+        ("VELOCITY TUBE", r"\bVELOCITY\s+TUBE\b"),
+        ("THERMOWELL PORT", r"\bTHERMOWELL\s+PORT\b"),
+        ("TRASH SCREEN", r"\bTRASH\s+SCREEN\b"),
+        ("RAIN HOOD", r"\bRAIN\s+HOOD\b|\bRAINHOOD\b"),
+        ("FILTER", r"\bFILTER\b"),
+        ("SUPPORT LEGS", r"\b(SUPPORT|EXTENDED)\s+LEGS?\b"),
+        ("HARDWARE/GASKET", r"\b(H\s*&\s*G|H\s+G|HARDWARE\s+AND\s+GASKET|GASKET)\b"),
+        ("LIFTING LUGS", r"\bLIFTING\s+LUGS?\b"),
+        ("MOUNTING HARDWARE", r"\bMOUNTING\s+HARDWARE\b"),
+    ):
+        if re.search(pattern, norm_blob):
+            _add_unique(features, label)
+    if features:
+        attrs["silencer_feature"] = ", ".join(features)
+    return attrs
+
+
+def _spark_resistant_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "SPARK RESISTANT" not in tags:
+        return {}
+    attrs = {"spark_resistant": "YES"}
+    m = re.search(r"\bAMCA\s+(?:TYPE\s+)?([ABC])\b", norm_blob)
+    if not m:
+        m = re.search(r"\bSPARK\s+RESISTANT\s+CONSTRUCTION\s+([ABC])\b", norm_blob)
+    if m:
+        attrs["spark_resistant_type"] = f"AMCA {m.group(1).upper()}"
+    return attrs
+
+
+def _spare_parts_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "SPARE PARTS" not in tags:
+        return {}
+    attrs: Dict[str, str] = {}
+    if re.match(r"^SPARE\b", primary):
+        attrs["spare_part_type"] = "SPARE"
+    elif re.match(r"^(?:NPO\s+)?REPAIR\b", primary):
+        attrs["spare_part_type"] = "REPAIR"
+    elif re.match(r"^(?:NPO\s+)?REPLACEMENT\b", primary):
+        attrs["spare_part_type"] = "REPLACEMENT"
+
+    component = ""
+    if "BEARINGS" in tags:
+        component = "BEARINGS"
+    elif "V-BELT DRIVE" in tags or "DRIVE COMPONENTS" in tags:
+        component = "V-BELT DRIVE"
+    elif "WHEEL" in tags:
+        component = "WHEEL"
+    elif "INLET VANES" in tags:
+        component = "IVC"
+    elif "INLET" in tags or "INLET CONE" in norm_blob:
+        component = "INLET CONE"
+    elif re.search(r"\bROTOR\s+ASSEMBLY\b", norm_blob):
+        component = "ROTOR ASSEMBLY"
+    elif re.search(r"\bSHAFT\b", norm_blob):
+        component = "SHAFT"
+    elif re.search(r"\bFAN\s+KIT\b", norm_blob):
+        component = "FAN KIT"
+    elif re.search(r"\bFAN\b", norm_blob):
+        component = "FAN"
+    if component:
+        attrs["spare_part_component"] = component
+    return attrs
+
+
 def _lining_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
     if "LINING" not in tags:
         return {}
@@ -2154,6 +2296,8 @@ def _is_fan_coating_line(primary: str, tags: set[str]) -> bool:
 def _is_accessory_coating(primary: str, tags: set[str], norm_blob: str) -> bool:
     if "COATING" not in tags:
         return False
+    if "SILENCER" in tags and _COATING_WORD.search(norm_blob):
+        return True
     if _is_fan_coating_line(primary, tags):
         return False
     if _is_belt_guard_line(primary) or _is_shaft_bearing_guard_line(primary):
@@ -2272,7 +2416,11 @@ def _coating_attributes(primary: str, norm_blob: str, tags: set[str], raw_tags: 
         return {}
     attrs: Dict[str, str] = {}
     context_tags = raw_tags or tags
-    accessory = _is_accessory_coating(primary, context_tags, norm_blob) or _is_belt_guard_line(primary)
+    accessory = (
+        _is_accessory_coating(primary, context_tags, norm_blob)
+        or ("SILENCER" in tags and _COATING_WORD.search(norm_blob))
+        or _is_belt_guard_line(primary)
+    )
     attrs["coating_context"] = "ACCESSORY" if accessory else "FAN"
     if _is_belt_guard_line(primary):
         scope = "BELT GUARD"
@@ -2408,6 +2556,8 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t != "MOTOR"]
     if _is_incidental_shipping_reference(primary, norm_blob, set(tags)):
         tags = [t for t in tags if t != "SHIPPING"]
+    if "SPARE PARTS" in tags and not _is_spare_parts_primary(primary):
+        tags = [t for t in tags if t != "SPARE PARTS"]
     if _is_belt_guard_line(primary):
         tags = [t for t in tags if t not in _BELT_GUARD_DETAIL_TAGS]
     elif _is_accessory_coating(primary, tag_set, norm_blob):
@@ -2418,6 +2568,8 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t not in _PAINT_SURFACE_TAGS]
     if "INSPECTION" in tags and not _is_inspection_line(primary, norm_blob):
         tags = [t for t in tags if t != "INSPECTION"]
+    if _is_packaging_inspection_primary(primary, set(tags)):
+        tags = [t for t in tags if t not in _PACKAGING_INSPECTION_DETAIL_TAGS]
     if _is_motor_insulation_only(primary, norm_blob, set(tags)):
         tags = [t for t in tags if t != "INSULATION"]
     if "LINING" in tags:
@@ -2452,6 +2604,10 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     inquiries = inquiry_numbers(item)
     if inquiries:
         attrs["inquiry_num"] = ", ".join(inquiries)
+    if _is_packaging_inspection_primary(primary, tags):
+        attrs.update(_inspection_attributes(primary, norm_blob, tags))
+        attrs.update(_shipping_attributes(norm_blob, tags))
+        return attrs
     attrs.update(_drawing_attributes(primary, norm_blob, tags))
     attrs.update(_split_housing_attributes(norm_blob, tags))
     attrs.update(_explosion_proof_attributes(primary, norm_blob, raw_tags))
@@ -2487,6 +2643,9 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
         attrs["vendor"] = vendor
     if product and not base_fan:
         attrs["product"] = product
+    attrs.update(_silencer_attributes(primary, norm_blob, tags, product, blob))
+    attrs.update(_spark_resistant_attributes(norm_blob, tags))
+    attrs.update(_spare_parts_attributes(primary, norm_blob, tags))
     admin_note = _is_admin_note(primary)
     if admin_note:
         attrs["note_type"] = "ADMIN"

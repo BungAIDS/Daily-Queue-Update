@@ -1563,6 +1563,80 @@ def test_screen_and_shaft_cooler_attributes():
     assert attrs["material_scope"] == "SHAFT COOLER"
 
 
+def test_silencer_spare_parts_and_spark_resistant_attributes():
+    silencer = li.extract_items([
+        "VAW Inlet Silencer model 12VRSB-S81 and with C 5,629.00",
+        "VWH1-16x18 inlet rainhood with galvanized screen.",
+        "Designed for 85 dBA @ 3 feet, Pressure Drop: .19",
+        "Vendor: VAW Systems",
+        "Ship Direct",
+        "Product: Inlet Silencer",
+    ])[0]
+    attrs = silencer["attributes"]
+    assert {"SILENCER", "SHIPPING"} <= set(silencer["tags"])
+    assert attrs["silencer_subcategory"] == "INLET SILENCER"
+    assert attrs["silencer_used_on"] == "INLET"
+    assert attrs["silencer_model"] == "12VRSB-S81"
+    assert attrs["silencer_noise_target"] == "85 DBA"
+    assert attrs["pressure_drop"] == ".19"
+    assert "RAIN HOOD" in attrs["silencer_feature"]
+    assert attrs["shipping_method"] == "SHIP DIRECT"
+    assert attrs["coating_context"] == "ACCESSORY"
+
+    discharge = li.extract_items([
+        "CIB - Circular Discharge silencer C 1,616.00",
+        "Model: 06VCIB-V99-SN4400",
+        "Unit Wt: 63 lbs",
+        "Vendor: VAW Systems",
+        "Product: Outlet Silencer",
+    ])[0]
+    attrs = discharge["attributes"]
+    assert "SILENCER" in discharge["tags"]
+    assert attrs["silencer_subcategory"] == "CIRCULAR DISCHARGE SILENCER"
+    assert attrs["silencer_used_on"] == "OUTLET"
+    assert attrs["silencer_model"] == "06VCIB-V99-SN4400"
+
+    ispm = li.derive_item_fields({
+        "raw": "ISPM Wood Inspection Stamp L INC",
+        "details": ["One (1) Aeroacoustic Silentflow Model 6-TA-2B discharge silencer as per submittal."],
+    })
+    assert ispm["tags"] == ["INSPECTION", "PACKAGING"]
+    assert ispm["attributes"] == {
+        "inspection_subcategory": "ISPM WOOD STAMP",
+        "inspection_scope": "PACKAGING",
+    }
+
+    repair = li.extract_items([
+        "Repair Shaft (Qty: 1), Inquiry Num: 340-25-943RP N 768.00",
+    ])[0]
+    assert "SPARE PARTS" in repair["tags"]
+    assert repair["attributes"]["spare_part_type"] == "REPAIR"
+    assert repair["attributes"]["spare_part_component"] == "SHAFT"
+
+    replacement = li.extract_items([
+        "Replacement Drive Set (Ship Direct) (Qty: 1), N 692.00",
+    ])[0]
+    assert {"SPARE PARTS", "SHIPPING", "V-BELT DRIVE"} <= set(replacement["tags"])
+    assert replacement["attributes"]["spare_part_type"] == "REPLACEMENT"
+    assert replacement["attributes"]["spare_part_component"] == "V-BELT DRIVE"
+
+    support_lugs = li.extract_items([
+        "Support Lugs, Fan Inlet and Outlet, Inquiry Num: L 898.00",
+        "421837 SPARE FAN FOR SN 413585 1220",
+    ])[0]
+    assert "SPARE PARTS" not in support_lugs["tags"]
+
+    spark_wheel = li.extract_items(["Wheel, Aluminum (AMCA B) L INC"])[0]
+    assert {"ALUMINUM", "MATERIALS", "SPARK RESISTANT", "WHEEL"} <= set(spark_wheel["tags"])
+    assert spark_wheel["attributes"]["spark_resistant"] == "YES"
+    assert spark_wheel["attributes"]["spark_resistant_type"] == "AMCA B"
+
+    spark = li.extract_items(["Spark Resistant Construction, AMCA Type C, 650 Deg F L 1,686.00", "Max"])[0]
+    assert "SPARK RESISTANT" in spark["tags"]
+    assert spark["attributes"]["spark_resistant_type"] == "AMCA C"
+    assert spark["attributes"]["temperature_rating"] == "650F"
+
+
 def test_shaft_seal_sleeve_and_shipping_attributes():
     seal = li.extract_items(["Shaft Seal (Not Gas Tight), 304 SS Construction L 461.00"])[0]
     attrs = seal["attributes"]
