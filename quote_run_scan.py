@@ -168,10 +168,12 @@ def carry_vision_forward(old_rec: Optional[Dict[str, Any]],
 def run_rows(records: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Flatten the per-job store into one row per run (a job can have several:
     e.g. the quote and the production run; `history\\` copies are not swept)."""
-    from run_rank import rank_runs
+    from run_rank import dedupe_runs
     rows: List[Dict[str, Any]] = []
     for rec in sorted(records.values(), key=lambda r: r.get("job", "")):
-        for run in rank_runs(rec.get("runs", [])):   # most-current run first
+        # One row per distinct run, most-current first: format-dupes (.txt+.pdf)
+        # and superseded CO/REV copies collapse to the active run.
+        for run in dedupe_runs(rec.get("runs", [])):
             f = run.get("fields", {}) or {}
             other = "; ".join(f"{k}={v}" for k, v in f.items() if k not in CORE_FIELDS)
             rows.append({

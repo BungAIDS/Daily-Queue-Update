@@ -48,13 +48,17 @@ def test_run_rows_splits_core_and_other():
     assert "Size" in CORE_FIELDS               # sanity
 
 
-def test_run_rows_one_row_per_run_sorted():
+def test_run_rows_sorted_and_deduped():
     records = {
         "b": {"job": "421473", "type": "GL", "folder": "f", "runs": [
+            # Two genuinely distinct runs (different fans) -> two rows, kept.
             {"file": "quote run.txt", "path": "p1", "template": "cbc_qt_run_text",
-             "summary": "", "status": "OK", "fields": {"Size": "37"}},
-            {"file": "history/quote run.txt", "path": "p2", "template": "cbc_qt_run_text",
-             "summary": "", "status": "OK", "fields": {"Size": "37"}},
+             "summary": "", "status": "OK", "fields": {"Size": "37", "Design": "16A"}},
+            {"file": "quote run 2.txt", "path": "p2", "template": "cbc_qt_run_text",
+             "summary": "", "status": "OK", "fields": {"Size": "40", "Design": "64"}},
+            # A format-duplicate of the first (.pdf, same spec) -> collapses away.
+            {"file": "quote run.pdf", "path": "p1b", "template": "pdf",
+             "summary": "", "status": "OK", "fields": {"Size": "37", "Design": "16A"}},
         ]},
         "a": {"job": "420990", "type": "GL", "folder": "f", "runs": [
             {"file": "qt run.txt", "path": "p3", "template": "cbc_qt_run_text",
@@ -62,7 +66,9 @@ def test_run_rows_one_row_per_run_sorted():
         ]},
     }
     rows = run_rows(records)
-    assert [r["job"] for r in rows] == ["420990", "421473", "421473"]  # sorted by job
+    assert [r["job"] for r in rows] == ["420990", "421473", "421473"]   # sorted; dupe collapsed
+    files = {r["file"] for r in rows if r["job"] == "421473"}
+    assert files == {"quote run.txt", "quote run 2.txt"}               # both distinct kept
 
 
 def test_scan_one_finds_runs_recursively(tmp: Path):

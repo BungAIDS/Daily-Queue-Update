@@ -44,6 +44,27 @@ def rank_runs(runs: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(runs, key=key, reverse=True)
 
 
+def _identity(run: Dict[str, Any]) -> Tuple:
+    """What makes two run records 'the same run' — same fan spec. Format
+    duplicates (.txt + .pdf) and old CO/REV copies of one fan share this; two
+    genuinely different fans don't. Falls back to the file name when unparsed."""
+    f = run.get("fields") or {}
+    ident = (f.get("Size"), f.get("Design"), f.get("Arrangement"))
+    if all(x in (None, "") for x in ident):
+        return ("file", run.get("file", ""))
+    return ident
+
+
+def dedupe_runs(runs: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """One row per distinct run: the most-current copy of each fan spec. Collapses
+    format duplicates and superseded CO/REV copies; keeps genuinely different
+    fans. Order follows rank_runs (most-current first)."""
+    seen: Dict[Tuple, Dict[str, Any]] = {}
+    for run in rank_runs(runs):
+        seen.setdefault(_identity(run), run)   # ranked head of each identity wins
+    return list(seen.values())
+
+
 def rank_paths(paths: Sequence[Path]) -> List[Path]:
     """Run FILES on disk, most-current first (name signals, then mtime)."""
     def key(p: Path) -> Tuple[int, int, float]:

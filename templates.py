@@ -416,7 +416,49 @@ def _parse_outline_dims(text: str) -> Dict[str, str]:
     return out
 
 
+# A run file sometimes quotes the SAME fan in two mounting arrangements — an
+# arrangement-4 (wheel on the motor shaft) and an arrangement-8/9 (fan on its
+# own bearings) — as two printouts in one document. Per DG the arrangement-4 is
+# the built unit, so it wins; the others are dropped BEFORE parsing, otherwise
+# the 8/9 run's bearing/rotor section leaks onto the (bearing-less) 4 fan.
+_ARR_LINE = re.compile(r"\bARR\s+(\d[0-9A-Z]*)", re.I)
+_PAGE_BOUNDARY = re.compile(r"^\s*-{15,}\s*$")
+
+
+def select_primary_run_text(text: str) -> str:
+    """When a document concatenates runs in more than one arrangement family and
+    one of them is arrangement 4, return only that run's pages. Single-run docs
+    (one family) are returned unchanged."""
+    lines = text.splitlines()
+    pages: List[List[str]] = []
+    cur: List[str] = []
+    for ln in lines:
+        if _PAGE_BOUNDARY.match(ln):
+            if cur:
+                pages.append(cur)
+            cur = []
+        else:
+            cur.append(ln)
+    if cur:
+        pages.append(cur)
+    if len(pages) <= 1:
+        return text
+    arr_of: List[Optional[str]] = []
+    last: Optional[str] = None
+    for pg in pages:
+        m = _ARR_LINE.search("\n".join(pg))
+        a = m.group(1).upper().rstrip(",") if m else last
+        arr_of.append(a)
+        last = a or last
+    families = {a[0] for a in arr_of if a}
+    if "4" not in families or len(families) <= 1:
+        return text                       # no arr-4 to prefer, or a single run
+    kept = ["\n".join(pg) for pg, a in zip(pages, arr_of) if a and a[0] == "4"]
+    return "\n".join(kept) if kept else text
+
+
 def _parse_chicago_blower(text: str) -> Dict[str, str]:
+    text = select_primary_run_text(text)   # arr-4 wins a dual-arrangement doc
     fields: Dict[str, str] = {}
     for label, pat in _CB_PATTERNS:
         m = re.search(pat, text, re.I | re.M)

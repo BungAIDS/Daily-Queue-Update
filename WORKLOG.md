@@ -28,6 +28,39 @@ tail fixture.
 Outline table: now pulled in FULL (all 16 codes) — see the block-parser entry
 below.
 
+## 2026-07-06 — Dual-arr selection, dedupe, and the OBSOLETE archiver
+
+Per DG's answers to the cleanup questions:
+
+1. **4S/8S dual files -> keep arr-4** (16 files). A doc that quotes the same fan
+   in an arrangement-4 (motor-mounted) AND an arrangement-8/9 (on bearings) is
+   two printouts in one file; DG: the arr-4 is the built unit.
+   `templates.select_primary_run_text` splits the doc into pages, keeps only the
+   arr-4 pages, drops the rest — called at the top of `_parse_chicago_blower`.
+   This also fixes a real bug: the 8S run's bearing/rotor section was leaking
+   onto the (bearing-less) 4S fan via first-match. Validated on the real 413224
+   (4S+8S x6 -> just 4S, no bearing leak); 13 raw + a few vision duals fixed.
+
+2. **Dedupe format-dupes/old revs** (DG: keep the .txt). `run_rank.dedupe_runs`
+   collapses runs that share a fan spec (Size/Design/Arr) to the most-current
+   copy; genuinely different fans survive. `run_rows` uses it, so the xlsx shows
+   one row per distinct run. Real corpus: 467 run files -> 420 rows (47 dupes/
+   old-revs collapsed).
+
+   Plus **`archive_obsolete.py`** — moves non-active quote runs AND sales orders
+   (format dupes, old CO/REV, older SO revisions) into `<job>\OBSOLETE\` so the
+   live folder holds only the active file. SAFE: DRY RUN by default (--apply to
+   move), MOVES never deletes, name clashes get a numbered suffix, writes an undo
+   manifest to BACKLOG_DIR, `--undo <manifest>` reverses it. Launcher: Tools ->
+   Archive Obsolete Runs/SOs (Apply is a confirmed checkbox). NOTE: acts on Z:,
+   untestable from the sandbox — tested on synthetic folders; DG must DRY RUN and
+   eyeball before --apply.
+
+3. **Dampers: skipped** for now (per DG).
+
+Tests: select_primary + no-leak (test_templates), dedupe_runs (test_run_rank),
+archiver plan/dry-run/apply/undo/clash (test_archive_obsolete). 20 suites green.
+
 ## 2026-07-06 — Vision re-reads escalate, compare, and stop (no blind re-pay)
 
 DG asked the right question: "are we confident scanning again solves anything?

@@ -21,8 +21,65 @@ from pathlib import Path
 from templates import (
     QuoteRunContext, _design_num, _rtf_to_text, match_template, parse_quote_run,
     kv_from_lines, kv_from_rows, summarize, _parse_chicago_blower,
+    select_primary_run_text,
     D64WheelConstruction, ChicagoBlowerQtRun, QtRunText,
 )
+
+
+# A real dual-arrangement document (job 413224): the SAME fan quoted as an
+# arrangement-4 (motor-mounted, no bearings) and an arrangement-8 (on bearings),
+# two printouts in one file. Per DG the arr-4 is the built unit.
+REAL_DUAL_4S_8S = """\
+---------------------------------------
+CONFIDENTIAL
+               MON APR  1 12:56:15 CST 2024
+               CHICAGO BLOWER CORP.
+ SN#413224
+ SIZE 3612,DESIGN 5500 ,ARR 4S ,100.0 PCT,DISCH UB ,ROT CW
+ EFFECTIVE WHEEL DIA. 37 1/4
+   14400 CFM, 16.80 SP, 50.1 BHP, 1770 RPM, 70 DEG F, DENSITY 0.0739
+ WHEEL WEIGHT  190 LB, THRUST  120 LB, WR2  240 LB-FT2
+ BASE , 326T  FR MOTOR                                     440    3800
+---------------------------------------
+               MON APR  1 12:56:15 CST 2024
+               CHICAGO BLOWER CORP.
+ SN#413224
+ SIZE 3612,DESIGN 5500 ,ARR 8S ,100.0 PCT,DISCH UB ,ROT CW
+ EFFECTIVE WHEEL DIA. 37 1/4
+   14400 CFM, 16.80 SP, 50.1 BHP, 1770 RPM, 70 DEG F, DENSITY 0.0739
+ ROTOR WR2  55 LB-FT2, ROTOR MAX RPM 1800, MTL. 1045 STEEL
+ SHAFT DIA  2 3/16, BRG CENTERS 20, CRITICAL SPEED  4200 RPM
+    SIDE    STATIC  DYN. THRUST  L10 HR   P/C
+ DRIVE-FIXED   301     15      0  400000 0.0224
+---------------------------------------
+               MON APR  1 12:56:15 CST 2024
+               CHICAGO BLOWER CORP.
+ SN#413224
+ SIZE 3612,DESIGN 5500 ,ARR 8S ,100.0 PCT,DISCH UB ,ROT CW
+      AXIAL VIEW                               IN.          MM
+  N   HSG WIDTH OS                            22  3/4       578
+"""
+
+
+def test_select_primary_run_prefers_arr4():
+    sel = select_primary_run_text(REAL_DUAL_4S_8S)
+    assert "ARR 4S" in sel
+    assert "ARR 8S" not in sel                    # the whole 8S run is dropped
+    # And the 8S run's bearing/rotor section must NOT leak into the kept text.
+    assert "ROTOR WR2" not in sel and "DRIVE-FIXED" not in sel and "SHAFT DIA" not in sel
+    # A single-arrangement document is returned unchanged.
+    assert select_primary_run_text(REAL_CBC_QT_RUN) == REAL_CBC_QT_RUN
+
+
+def test_dual_arr4_parse_has_no_8s_bearing_leak():
+    f = _parse_chicago_blower(REAL_DUAL_4S_8S)
+    assert f["Arrangement"] == "4S"
+    assert f["Wheel Weight Lb"] == "190"          # the arr-4's own block
+    assert f["Motor Frame"] == "326T"
+    # None of the arr-8 fan's bearing/rotor fields are attributed to the arr-4.
+    for leaked in ("Shaft Dia", "Brg Centers", "Critical Speed RPM",
+                   "Rotor WR2", "Bearing L10 Hr", "Drive Brg Mount"):
+        assert leaked not in f, f"8S field {leaked} leaked onto the 4S fan"
 
 
 # A real Chicago Blower "Qt Run" text (job 421579, captured 2026-06-15). The
