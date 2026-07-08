@@ -97,6 +97,8 @@ def _attrs_label(item: Dict[str, Any]) -> str:
         "coating_context", "coating_category", "coating_scope", "coating_process",
         "coating_state", "coating_type", "coating_color", "alternate_coating_color", "coats",
         "guard_type", "guard_material", "tach_hole", "tach_hole_location",
+        "screen_subcategory", "screen_feature", "screen_diameter", "screen_size",
+        "shaft_cooler", "shaft_cooler_type", "shaft_cooler_construction",
         "balance_type", "balance_grade",
         "bearing_type", "bearing_bore",
         "manufacturer", "model", "size", "operation", "supplied_by", "mounting", "fail_power", "fail_signal",

@@ -1272,7 +1272,12 @@ def test_used_on_requires_damper_context():
     flange = li.extract_items(["Outlet, Flanged, Punched L STD"])[0]
     assert "used_on" not in flange["attributes"]
     damper = li.extract_items(["Outlet Damper, Opposed L 100.00"])[0]
+    assert "OUTLET" not in damper["tags"]
     assert damper["attributes"]["used_on"] == "OUTLET DAMPER"
+    volume = li.extract_items(["Outlet Volume Control, Manual L 691.00"])[0]
+    assert "DAMPER" in volume["tags"]
+    assert "OUTLET" not in volume["tags"]
+    assert volume["attributes"]["used_on"] == "OUTLET DAMPER"
     discharge = li.extract_items(["Actuator for Discharge Damper, Bettis #RPED200 C 5,192.00"])[0]
     assert discharge["attributes"]["used_on"] == "OUTLET DAMPER"
     fresh_air = li.extract_items(["Change Actuator Location for the FA damper to be on motor side of fan L 100.00"])[0]
@@ -1521,6 +1526,41 @@ def test_lifting_lugs_and_lining_attributes():
     assert "FLEX CONNECTOR" in flex["tags"]
     assert "LINING" not in flex["tags"]
     assert flex["attributes"]["flex_connector_feature"] == "FLOW LINER"
+
+
+def test_screen_and_shaft_cooler_attributes():
+    inlet = li.extract_items(["Inlet Screen, Standard, 304 SS Construction L 975.00"])[0]
+    attrs = inlet["attributes"]
+    assert "SCREEN" in inlet["tags"]
+    assert attrs["component"] == "SCREEN"
+    assert attrs["screen_subcategory"] == "SCREEN"
+    assert attrs["screen_feature"] == "STANDARD"
+    assert attrs["used_on"] == "INLET"
+    assert attrs["material_scope"] == "INLET, SCREEN"
+
+    outlet = li.extract_items(["Outlet Screen, Outlet Screen (Shipped Loose) N 55.00"])[0]
+    assert outlet["attributes"]["component"] == "SCREEN"
+    assert outlet["attributes"]["used_on"] == "OUTLET"
+    assert outlet["attributes"]["shipping_state"] == "SHIPPED LOOSE"
+
+    silencer = li.extract_items([
+        "VAW Inlet Silencer With Piezometer tube C 5,716.00",
+        'thermowell port, trash screen, with Support Legs for 38" centerline Height',
+        "Product: Inlet Silencer",
+    ])[0]
+    assert {"SCREEN", "SILENCER"} <= set(silencer["tags"])
+    assert "component" not in silencer["attributes"]
+    assert silencer["attributes"]["screen_subcategory"] == "TRASH SCREEN"
+    assert silencer["attributes"]["used_on"] == "SILENCER"
+
+    shaft = li.extract_items(["Shaft Cooler, Cast Aluminum Construction L 271.00"])[0]
+    attrs = shaft["attributes"]
+    assert {"ALUMINUM", "MATERIALS", "SHAFT COOLER"} <= set(shaft["tags"])
+    assert attrs["component"] == "SHAFT COOLER"
+    assert attrs["shaft_cooler"] == "YES"
+    assert attrs["shaft_cooler_type"] == "SHAFT COOLER"
+    assert attrs["shaft_cooler_construction"] == "CAST"
+    assert attrs["material_scope"] == "SHAFT COOLER"
 
 
 def test_drain_attributes():

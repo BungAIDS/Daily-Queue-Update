@@ -1259,6 +1259,116 @@ def _lifting_lug_attributes(tags: set[str]) -> Dict[str, str]:
     }
 
 
+def _screen_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "SCREEN" not in tags:
+        return {}
+    attrs: Dict[str, str] = {}
+    subcategories: List[str] = []
+    features: List[str] = []
+    used_on: List[str] = []
+
+    def add_subcategory(value: str) -> None:
+        _add_unique(subcategories, value)
+
+    def add_feature(value: str) -> None:
+        _add_unique(features, value)
+
+    def add_used_on(value: str) -> None:
+        _add_unique(used_on, value)
+
+    direct_screen = bool(
+        re.match(r"^(?:OUTLET\s+AND\s+INLET\s+SCREEN|(?:INLET|OUTLET)\s+(?:WIRE\s+)?SCREEN|SCREEN)\b", primary)
+        or re.search(r"\bINLET\s+SCREEN\s+MOUNTING\s+RING\b", primary)
+        or re.search(r"\bSELF\s+TAPPERS?\b.*\bINLET\s+SCREEN\b", primary)
+        or re.match(r"^(?:LASER\s*[- ]?\s*CUT|OVERSIZED|STANDARD)\b.*\bSCREEN\b", primary)
+    )
+
+    if re.search(r"\bTRASH\s+SCREEN\b", norm_blob):
+        add_subcategory("TRASH SCREEN")
+    if re.search(r"\bWIRE\s+SCREEN\s+GUARD\b|\bWIRE\s+SCREEN\b", norm_blob):
+        add_subcategory("WIRE SCREEN GUARD")
+    if re.search(r"\bSCREEN\s+MOUNTING\s+RING\b", norm_blob):
+        add_subcategory("MOUNTING RING")
+    if re.search(
+        r"\bSELF\s+TAPPERS?\b.*\bSCREEN\b|"
+        r"\bSCREEN\b.{0,40}\bHARDWARE\b|"
+        r"\bHARDWARE\b.{0,40}\bSCREEN\b",
+        norm_blob,
+    ):
+        add_subcategory("HARDWARE")
+    if re.search(r"\b(RAIN\s*HOOD|RAINHOOD|WEATHER\s+HOOD|WEATHER\s+COVER)\b", norm_blob):
+        add_subcategory("RAINHOOD SCREEN")
+        add_used_on("WEATHER COVER")
+    if not subcategories:
+        add_subcategory("SCREEN")
+
+    if re.search(r"\bOVERSIZED\b", norm_blob):
+        add_feature("OVERSIZED")
+    if re.search(r"\bSTANDARD\b", norm_blob):
+        add_feature("STANDARD")
+    if re.search(r"\bLASER\s*[- ]?\s*CUT\b", norm_blob):
+        add_feature("LASER-CUT")
+    if re.search(r"\bBOLT\s*[- ]?\s*ON\b", norm_blob):
+        add_feature("BOLT-ON")
+    if re.search(r"\bCBC\s+MOUNT(?:ED)?\b", norm_blob):
+        add_feature("CBC MOUNT")
+    if re.search(r"\bSHIPPED\s+LOOSE\b|\bSHIP\s+LOOSE\b", norm_blob):
+        attrs["shipping_state"] = "SHIPPED LOOSE"
+
+    silencer_context = "SILENCER" in tags or "SILENCER" in norm_blob
+    if silencer_context and not direct_screen:
+        if re.search(r"\bINLET\s+SCREEN\b|\bSCREEN\b.{0,20}\bINLET\b", norm_blob):
+            add_used_on("INLET")
+        if re.search(r"\b(OUTLET|DISCHARGE)\s+SCREEN\b|\bSCREEN\b.{0,20}\b(OUTLET|DISCHARGE)\b", norm_blob):
+            add_used_on("OUTLET")
+    else:
+        if re.search(r"\bINLET\b.{0,40}\bSCREEN\b|\bSCREEN\b.{0,40}\bINLET\b", norm_blob):
+            add_used_on("INLET")
+        if re.search(r"\b(OUTLET|DISCHARGE)\b.{0,40}\bSCREEN\b|\bSCREEN\b.{0,40}\b(OUTLET|DISCHARGE)\b", norm_blob):
+            add_used_on("OUTLET")
+    if silencer_context:
+        add_used_on("SILENCER")
+
+    if re.search(r"\bMOUNTED\s+TO\s+BELL\b", norm_blob):
+        attrs["mount_location"] = "BELL"
+    elif re.search(r"\bMOUNTED\s+TO\s+FAN\b", norm_blob):
+        attrs["mount_location"] = "FAN"
+    elif re.search(r"\bMOUNTED\s+TO\s+INLET\s+CONE\b", norm_blob):
+        attrs["mount_location"] = "INLET CONE"
+
+    m = re.search(r"\bINLET\s+DIA\s+([0-9]+(?:\.[0-9]+)?)\b", norm_blob)
+    if m:
+        attrs["screen_diameter"] = m.group(1)
+    m = re.search(r"\bSIZE\s+([0-9]{2,4})\b", primary)
+    if m:
+        attrs["screen_size"] = m.group(1)
+
+    if direct_screen:
+        attrs["component"] = "SCREEN"
+    if subcategories:
+        attrs["screen_subcategory"] = ", ".join(subcategories)
+    if features:
+        attrs["screen_feature"] = ", ".join(features)
+    if used_on:
+        attrs["used_on"] = ", ".join(used_on)
+    return attrs
+
+
+def _shaft_cooler_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "SHAFT COOLER" not in tags:
+        return {}
+    attrs: Dict[str, str] = {"shaft_cooler": "YES"}
+    if re.match(r"^(SHAFT\s+COOLER|HEAT\s+SLINGER)\b", primary):
+        attrs["component"] = "SHAFT COOLER"
+    if re.search(r"\bHEAT\s+SLINGER\b", norm_blob):
+        attrs["shaft_cooler_type"] = "HEAT SLINGER"
+    else:
+        attrs["shaft_cooler_type"] = "SHAFT COOLER"
+    if "CAST" in norm_blob:
+        attrs["shaft_cooler_construction"] = "CAST"
+    return attrs
+
+
 def _lining_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
     if "LINING" not in tags:
         return {}
@@ -2117,6 +2227,8 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t != "HOUSING"]
     elif drain_type == "INLET BOX DRAIN":
         tags = [t for t in tags if t != "INLET"]
+    if "OUTLET" in tags and "DAMPER" in tags and _used_on(norm_blob) == "OUTLET DAMPER":
+        tags = [t for t in tags if t != "OUTLET"]
     if _is_belt_guard_line(primary):
         tags = [t for t in tags if t not in _BELT_GUARD_DETAIL_TAGS]
     elif _is_accessory_coating(primary, tag_set, norm_blob):
@@ -2181,6 +2293,8 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_mounting_attributes(primary, norm_blob, tags))
     attrs.update(_nameplate_attributes(primary, norm_blob, tags))
     attrs.update(_lifting_lug_attributes(tags))
+    attrs.update(_screen_attributes(primary, norm_blob, tags))
+    attrs.update(_shaft_cooler_attributes(primary, norm_blob, tags))
     attrs.update(_lining_attributes(norm_blob, tags))
     attrs.update(_housing_attributes(norm_blob, tags))
     attrs.update(_motor_conduit_box_attributes(norm_blob))
