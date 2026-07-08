@@ -227,7 +227,7 @@ DEFAULT_RULES: Dict[str, Any] = {
                      r"\bUPS\s+ground\b"],
         "WARRANTY": [r"warranty"],
         "MOUNTING": [r"\bmounting\b", r"\bmounted\b", r"\bcbc\s*mount\b"],
-        "SPECIAL CONSTRUCTION": [r"set\s*screws?", r"loc\s*tite", r"caulking",
+        "SPECIAL CONSTRUCTION": [r"set\s*screws?", r"loc\s*tite", r"\bcaulk(?:ing)?\b",
                                  r"\bweld(?:ing)?\b", r"tie\s*rod\s*support",
                                  r"buffer\s*tube", r"cast\s*hub",
                                  r"plug\s*panel", r"pressure\s*tap",
@@ -848,6 +848,37 @@ def _is_motor_conduit_box_location(norm_blob: str) -> bool:
             norm_blob,
         )
     )
+
+
+def _is_motor_conduit_box_context(primary: str, norm_blob: str) -> bool:
+    if not re.search(r"\bCONDUIT\s+BOX\b", norm_blob):
+        return False
+    return bool(
+        re.search(r"^MOTOR\s+CONDUIT\s+BOX\s+LOCATION\b", primary)
+        or re.search(r"\bVIEWED\s+FROM\s+OUTLET\b", norm_blob)
+        or re.search(r"\bF[123]\s+CONDUIT\s+BOX\b", norm_blob)
+        or re.search(r"\b(ROTATE\s+MOTOR\s+CONDUIT\s+BOX|KNOCKOUT\s+FACES|"
+                     r"CONDUIT\s+BOX\s+(?:HUGGING|LOCATION)|"
+                     r"MOUNT\s+CONDUIT\s+BOX\s+AS\s+CLOSE)\b", norm_blob)
+        or _is_motor_conduit_box_location(norm_blob)
+    )
+
+
+def _is_pure_motor_conduit_box_location(primary: str, norm_blob: str) -> bool:
+    if not _is_motor_conduit_box_context(primary, norm_blob):
+        return False
+    return not bool(
+        re.search(r"\b(RUN\s+SECOND\s+CONDUIT|THREADED\s+PLUG|VERTICAL\s+MOUNTING\s+PLATE|"
+                  r"FLEXIBLE\s+CONDUIT|AUXILIARY\s+BOX)\b", norm_blob)
+    )
+
+
+def _is_testing_context(primary: str, norm_blob: str, tags: set[str]) -> bool:
+    if re.search(r"\b(TEST|WITNESS|INSPECTION|AMP\s+DRAW|ROUTINE\s+TEST|IEEE\s*112)\b", primary):
+        return True
+    if "MOTOR" in tags and re.search(r"\b(IEEE\s*112|ROUTINE\s+TEST|UNWITNESSED)\b", norm_blob):
+        return True
+    return False
 
 
 def _has_housing_engineering_feature(norm_blob: str) -> bool:
@@ -1683,6 +1714,167 @@ def _spare_parts_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dic
     return attrs
 
 
+def _special_construction_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "SPECIAL CONSTRUCTION" not in tags:
+        return {}
+    attrs: Dict[str, str] = {}
+    types: List[str] = []
+    scopes: List[str] = []
+    details: List[str] = []
+
+    def add_type(value: str) -> None:
+        _add_unique(types, value)
+
+    def add_scope(value: str) -> None:
+        _add_unique(scopes, value)
+
+    def add_detail(value: str) -> None:
+        _add_unique(details, value)
+
+    if re.search(r"\bEFFECTIVE\s+DIAMETER\b", norm_blob):
+        add_type("EFFECTIVE DIAMETER")
+        m = re.search(r"\b(\d+(?:\.\d+)?)\s*%\s+EFFECTIVE\s+DIAMETER\b", norm_blob)
+        if m:
+            attrs["effective_diameter_percent"] = m.group(1)
+    if re.search(r"\bCONTINUOUS\s+WELD\b", norm_blob):
+        add_type("CONTINUOUS WELD")
+        if "AIRSTREAM" in norm_blob:
+            add_scope("AIRSTREAM")
+        if "EXTERIOR" in norm_blob:
+            add_scope("EXTERIOR")
+    if re.search(r"\bAWS\s+D\d+(?:\.\d+)?\s+CODE\s+WELDING\b", norm_blob):
+        add_type("CODE WELDING")
+        codes = re.findall(r"\bAWS\s+D\d+(?:\.\d+)?\b", norm_blob)
+        if codes:
+            attrs["welding_code"] = ", ".join(dict.fromkeys(codes))
+        if "STATIC COMPONENTS" in norm_blob:
+            add_scope("STATIC COMPONENTS")
+        if "ROTATING COMPONENTS" in norm_blob:
+            add_scope("ROTATING COMPONENTS")
+    if re.search(r"\bEARTHING\s+BOSS\b", norm_blob):
+        add_type("EARTHING BOSS")
+    if re.search(r"\bPRESSURE\s+TAP\b", norm_blob):
+        add_type("PRESSURE TAP")
+        if "OUTLET" in norm_blob:
+            add_scope("OUTLET")
+        elif "INLET" in norm_blob:
+            add_scope("INLET")
+    if re.search(r"\bTIE\s+ROD\s+SUPPORT\b", norm_blob):
+        add_type("TIE ROD SUPPORT")
+    if re.search(r"\bPLUG\s+PANEL\b", norm_blob):
+        add_type("PLUG PANEL")
+    if re.search(r"\bTHREADED\s+PLUG\b", norm_blob):
+        add_type("THREADED PLUG")
+        if "CONDUIT BOX" in norm_blob:
+            add_scope("CONDUIT BOX")
+        if "GUARD" in norm_blob:
+            add_scope("GUARD")
+    if re.search(r"\bRUN\s+SECOND\s+CONDUIT\b", norm_blob):
+        add_type("AUXILIARY CONDUIT")
+        add_detail("SECOND CONDUIT")
+    if re.search(r"\bSET\s+SCREWS?\b", norm_blob):
+        add_type("SET SCREWS")
+        if re.search(r"\bDOUBLE\s+BLADE\s+PITCH\b", norm_blob):
+            add_detail("DOUBLE BLADE PITCH")
+    if re.search(r"\bLOC\s*TITE\b|\bLOCTITE\b", norm_blob):
+        add_type("LOC TITE")
+    if re.search(r"\bCAULK(?:ING)?\b", norm_blob):
+        add_type("CAULKING")
+        if "SILICONE FREE" in norm_blob:
+            add_detail("SILICONE-FREE")
+        if "WITHOUT CAULK" in norm_blob:
+            add_detail("WITHOUT CAULK")
+    if re.search(r"\bBUFFER\s+TUBE\b", norm_blob):
+        add_type("BUFFER TUBE")
+    if re.search(r"\bCAST\s+HUB\b", norm_blob):
+        add_type("CAST HUB")
+        if "STRAIGHT BORE" in norm_blob:
+            add_detail("STRAIGHT BORE")
+    if re.search(r"\bHOLE\s+DIAMETERS?\b", norm_blob):
+        add_type("HOLE DIAMETERS")
+    if re.search(r"\bOVERHANG\b", norm_blob):
+        add_type("OVERHANG")
+    if re.search(r"\bWELD\s+NUTS?\b", norm_blob):
+        add_type("WELD NUTS")
+        if "INLET" in norm_blob:
+            add_scope("INLET")
+    if re.search(r"\bVERTICAL\s+MOUNTING\s+PLATE\b", norm_blob):
+        add_type("VERTICAL MOUNTING PLATE")
+        add_scope("MOTOR CONDUIT BOX")
+
+    if types:
+        attrs["special_construction_type"] = ", ".join(types)
+    if scopes:
+        attrs["special_construction_scope"] = ", ".join(scopes)
+    if details:
+        attrs["special_construction_detail"] = ", ".join(details)
+    return attrs
+
+
+def _testing_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "TESTING" not in tags:
+        return {}
+    attrs: Dict[str, str] = {}
+    types: List[str] = []
+    statuses: List[str] = []
+    measurements: List[str] = []
+
+    def add_type(value: str) -> None:
+        _add_unique(types, value)
+
+    def add_status(value: str) -> None:
+        _add_unique(statuses, value)
+
+    def add_measurement(value: str) -> None:
+        _add_unique(measurements, value)
+
+    if re.search(r"\bMECHANICAL\s+RUN\s+TEST\b", norm_blob):
+        add_type("MECHANICAL RUN TEST")
+    elif re.search(r"\bRUN\s+TEST\b", norm_blob):
+        add_type("RUN TEST")
+    if re.search(r"\bSOAP\s+BUBBLE\s+PRESSURE\s+TEST\b", norm_blob):
+        add_type("SOAP BUBBLE PRESSURE TEST")
+    if re.search(r"\bOVERSPEED\s+TEST\b", norm_blob):
+        add_type("OVERSPEED TEST")
+    if re.search(r"\bDIMENSIONAL\s+INSPECTION\b", norm_blob):
+        add_type("DIMENSIONAL INSPECTION")
+    if re.search(r"\b(IEEE\s*112|ROUTINE\s+TEST)\b", norm_blob):
+        add_type("MOTOR ROUTINE TEST")
+    if re.search(r"\bAMP\s+DRAW\b", norm_blob):
+        add_type("AMP DRAW MEASUREMENT")
+        add_measurement("AMP DRAW")
+    if re.search(r"\bRUN\s+TEST\s+REPORTS?\b|\bTEST\s+REPORTS?\b", norm_blob):
+        add_type("TEST REPORT")
+
+    if re.search(r"\bSTANDARD\b", primary):
+        add_status("STANDARD")
+    if re.search(r"\b(REQUIRED|CUSTOMER\s+WITNESS)\b", norm_blob):
+        add_status("REQUIRED")
+    if re.search(r"\bNOT\s+AVAILABLE\b", norm_blob):
+        add_status("NOT AVAILABLE")
+    if re.search(r"\bN\s*/?\s*A\b", norm_blob):
+        add_status("N/A")
+    if re.search(r"\bCUSTOMER\s+WITNESS\b", norm_blob):
+        attrs["witnessed"] = "CUSTOMER"
+    elif re.search(r"\bUNWITNESSED\b", norm_blob):
+        attrs["witnessed"] = "NO"
+    m = re.search(r"\b(\d+)\s+HOUR\b", norm_blob)
+    if m:
+        attrs["testing_duration"] = f"{m.group(1)} HOUR"
+    if re.search(r"\bVIBRATION\s+READINGS?\b", norm_blob):
+        add_measurement("VIBRATION READINGS")
+    voltages = re.findall(r"\b\d{3,4}\s*V\b", norm_blob)
+    if voltages:
+        attrs["testing_voltage"] = ", ".join(dict.fromkeys(v.replace(" ", "") for v in voltages))
+    if types:
+        attrs["testing_type"] = ", ".join(types)
+    if statuses:
+        attrs["testing_status"] = ", ".join(statuses)
+    if measurements:
+        attrs["testing_measurements"] = ", ".join(measurements)
+    return attrs
+
+
 def _lining_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
     if "LINING" not in tags:
         return {}
@@ -1769,8 +1961,8 @@ def _housing_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
     return attrs
 
 
-def _motor_conduit_box_attributes(norm_blob: str) -> Dict[str, str]:
-    if not _is_motor_conduit_box_location(norm_blob):
+def _motor_conduit_box_attributes(primary: str, norm_blob: str) -> Dict[str, str]:
+    if not _is_motor_conduit_box_context(primary, norm_blob):
         return {}
     attrs = {
         "component": "MOTOR",
@@ -1782,6 +1974,15 @@ def _motor_conduit_box_attributes(norm_blob: str) -> Dict[str, str]:
         attrs["motor_conduit_box_location"] = "CLOSE TO HOUSING"
     elif re.search(r"\b(TACK\s+AND\s+WELD|WELD\s+CONDUIT\s+BOX|CONDUIT\s+BOX\s+TO\s+HOUSING)\b", norm_blob):
         attrs["motor_conduit_box_location"] = "MOUNTED TO HOUSING"
+    else:
+        m = re.search(r"\b(F[123]|RF)\s+CONDUIT\s+BOX\b", norm_blob)
+        if m:
+            attrs["motor_conduit_box_location"] = m.group(1).upper()
+    m = re.search(r"(?:@\s*)?([0-9]{1,2})\s*:?\s*00\b", norm_blob)
+    if m and "VIEWED FROM OUTLET" in norm_blob:
+        attrs["motor_conduit_box_position"] = f"{m.group(1)}:00 VIEWED FROM OUTLET"
+    if re.search(r"\bKNOCKOUT\s+FACES?.{0,20}\bDOWNWARD\b", norm_blob):
+        attrs["motor_conduit_box_orientation"] = "KNOCKOUT FACES DOWNWARD"
     return attrs
 
 
@@ -2523,8 +2724,10 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
     if _is_non_wheel_end_location(norm_blob):
         tags = [t for t in tags if t != "WHEEL"]
         _add_unique(tags, "HOUSING")
-    if _is_motor_conduit_box_location(norm_blob):
+    if _is_motor_conduit_box_context(primary, norm_blob):
         _add_unique(tags, "MOTOR")
+        if _is_pure_motor_conduit_box_location(primary, norm_blob) and not _has_housing_engineering_feature(norm_blob):
+            tags = [t for t in tags if t != "SPECIAL CONSTRUCTION"]
         if not _has_housing_engineering_feature(norm_blob):
             tags = [t for t in tags if t != "HOUSING"]
     if _is_without_ivc(norm_blob):
@@ -2568,6 +2771,8 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t not in _PAINT_SURFACE_TAGS]
     if "INSPECTION" in tags and not _is_inspection_line(primary, norm_blob):
         tags = [t for t in tags if t != "INSPECTION"]
+    if "TESTING" in tags and not _is_testing_context(primary, norm_blob, set(tags)):
+        tags = [t for t in tags if t != "TESTING"]
     if _is_packaging_inspection_primary(primary, set(tags)):
         tags = [t for t in tags if t not in _PACKAGING_INSPECTION_DETAIL_TAGS]
     if _is_motor_insulation_only(primary, norm_blob, set(tags)):
@@ -2611,6 +2816,7 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_drawing_attributes(primary, norm_blob, tags))
     attrs.update(_split_housing_attributes(norm_blob, tags))
     attrs.update(_explosion_proof_attributes(primary, norm_blob, raw_tags))
+    attrs.update(_special_construction_attributes(primary, norm_blob, tags))
     attrs.update(_flange_attributes(primary, norm_blob, tags, raw_tags))
     attrs.update(_flex_connector_attributes(norm_blob, tags))
     attrs.update(_coupling_attributes(norm_blob, tags))
@@ -2634,7 +2840,7 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_shaft_sleeve_attributes(norm_blob, tags))
     attrs.update(_lining_attributes(norm_blob, tags))
     attrs.update(_housing_attributes(norm_blob, tags))
-    attrs.update(_motor_conduit_box_attributes(norm_blob))
+    attrs.update(_motor_conduit_box_attributes(primary, norm_blob))
 
     vendor = _label_value(item, "Vendor")
     product = _label_value(item, "Product")
@@ -2653,6 +2859,7 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     elif _is_assembly_note(primary):
         attrs["note_type"] = "ASSEMBLY"
     attrs.update(_shipping_attributes(norm_blob, tags))
+    attrs.update(_testing_attributes(primary, norm_blob, tags))
     attrs.update(_guard_attributes(primary, norm_blob))
     attrs.update(_coating_attributes(primary, norm_blob, tags, raw_tags))
     attrs.update(_drain_attributes(primary, norm_blob, tags))

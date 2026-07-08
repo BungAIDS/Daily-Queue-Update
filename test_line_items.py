@@ -1637,6 +1637,71 @@ def test_silencer_spare_parts_and_spark_resistant_attributes():
     assert spark["attributes"]["temperature_rating"] == "650F"
 
 
+def test_special_construction_stainless_and_testing_attributes():
+    weld = li.extract_items(["Continuous Weld Airstream, Inquiry Num: 253-24-1651 L 4,744.00"])[0]
+    assert "SPECIAL CONSTRUCTION" in weld["tags"]
+    assert weld["attributes"]["special_construction_type"] == "CONTINUOUS WELD"
+    assert weld["attributes"]["special_construction_scope"] == "AIRSTREAM"
+
+    code_weld = li.extract_items(["AWS D14.6 Code Welding on Rotating Components L 3,357.00"])[0]
+    assert code_weld["attributes"]["special_construction_type"] == "CODE WELDING"
+    assert code_weld["attributes"]["special_construction_scope"] == "ROTATING COMPONENTS"
+    assert code_weld["attributes"]["welding_code"] == "AWS D14.6"
+
+    effective = li.extract_items(["110% Effective Diameter, Inquiry Num: 909-26-465 L 1,000.00"])[0]
+    assert effective["attributes"]["special_construction_type"] == "EFFECTIVE DIAMETER"
+    assert effective["attributes"]["effective_diameter_percent"] == "110"
+
+    pressure = li.extract_items(["Outlet Pressure Tap L 432.00"])[0]
+    assert {"OUTLET", "SPECIAL CONSTRUCTION"} <= set(pressure["tags"])
+    assert pressure["attributes"]["special_construction_type"] == "PRESSURE TAP"
+    assert pressure["attributes"]["special_construction_scope"] == "OUTLET"
+
+    conduit = li.extract_items([
+        "Motor Conduit Box Location L STD",
+        "Viewed from Outlet: @8:00",
+    ])[0]
+    assert conduit["tags"] == ["MOTOR"]
+    assert conduit["attributes"]["component"] == "MOTOR"
+    assert conduit["attributes"]["motor_conduit_box_position"] == "8:00 VIEWED FROM OUTLET"
+
+    knockout = li.extract_items([
+        "Rotate motor conduit box so knockout faces L",
+        "downward, Inquiry Num: 374-26-1537",
+    ])[0]
+    assert "MOTOR" in knockout["tags"]
+    assert "SPECIAL CONSTRUCTION" not in knockout["tags"]
+    assert knockout["attributes"]["motor_conduit_box_orientation"] == "KNOCKOUT FACES DOWNWARD"
+
+    run_test = li.extract_items([
+        "Mechanical Run Test, 2 Hour - Vibration readings L 2,288.00",
+        "taken every 15 minutes",
+        "Customer witness",
+    ])[0]
+    assert "TESTING" in run_test["tags"]
+    assert run_test["attributes"]["testing_type"] == "MECHANICAL RUN TEST"
+    assert run_test["attributes"]["testing_duration"] == "2 HOUR"
+    assert run_test["attributes"]["testing_measurements"] == "VIBRATION READINGS"
+    assert run_test["attributes"]["witnessed"] == "CUSTOMER"
+
+    voltage_test = li.derive_item_fields({
+        "raw": "Mechanical Run Test 380V / 400V / 415V /460V via Delta connection.",
+        "details": [],
+    })
+    assert voltage_test["attributes"]["testing_voltage"] == "380V, 400V, 415V, 460V"
+
+    hardware = li.derive_item_fields({
+        "raw": "3/8-16 hardware to mount housing to Drive cover Plate.",
+        "details": ["D37/D38 Run Test, Grey, Sticker provided in separate bag."],
+    })
+    assert "TESTING" not in hardware["tags"]
+
+    stainless = li.extract_items(["Airstream, 304 SS Construction L 1,000.00"])[0]
+    assert {"MATERIALS", "STAINLESS STEEL"} <= set(stainless["tags"])
+    assert stainless["attributes"]["material_grade"] == "304 SS"
+    assert stainless["attributes"]["material_scope"] == "AIRSTREAM"
+
+
 def test_shaft_seal_sleeve_and_shipping_attributes():
     seal = li.extract_items(["Shaft Seal (Not Gas Tight), 304 SS Construction L 461.00"])[0]
     attrs = seal["attributes"]
