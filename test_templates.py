@@ -71,15 +71,21 @@ def test_select_primary_run_prefers_arr4():
     assert select_primary_run_text(REAL_CBC_QT_RUN) == REAL_CBC_QT_RUN
 
 
-def test_dual_arr4_parse_has_no_8s_bearing_leak():
+def test_dual_arr4_wins_and_arr8_fills_gaps():
+    # Per DG: the arr-4 is authoritative for what it provides; anything the
+    # arr-8 section adds that the arr-4 didn't have is KEPT (never overwritten).
     f = _parse_chicago_blower(REAL_DUAL_4S_8S)
-    assert f["Arrangement"] == "4S"
+    assert f["Arrangement"] == "4S"               # 4S wins the shared spec
     assert f["Wheel Weight Lb"] == "190"          # the arr-4's own block
     assert f["Motor Frame"] == "326T"
-    # None of the arr-8 fan's bearing/rotor fields are attributed to the arr-4.
-    for leaked in ("Shaft Dia", "Brg Centers", "Critical Speed RPM",
-                   "Rotor WR2", "Bearing L10 Hr", "Drive Brg Mount"):
-        assert leaked not in f, f"8S field {leaked} leaked onto the 4S fan"
+    assert f["Drive"] == "Motor mounted"
+    # The arr-8's extra sections (absent from the motor-mounted arr-4) are kept.
+    assert f["Shaft Dia"] == "2 3/16"
+    assert f["Brg Centers"] == "20"
+    assert f["Critical Speed RPM"] == "4200"
+    assert f["Rotor WR2"] == "55"
+    assert f["Bearing L10 Hr"] == "400000"
+    assert f["Housing Width (N)"] == "22 3/4"
 
 
 # A real Chicago Blower "Qt Run" text (job 421579, captured 2026-06-15). The

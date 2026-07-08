@@ -460,7 +460,19 @@ def select_primary_run_text(text: str) -> str:
 
 
 def _parse_chicago_blower(text: str) -> Dict[str, str]:
-    text = select_primary_run_text(text)   # arr-4 wins a dual-arrangement doc
+    """Parse a CB run. For a dual-arrangement doc (a fan quoted as arr-4 AND
+    arr-8/9), the arr-4 is authoritative (DG's rule), but anything in the arr-8
+    section that the arr-4 didn't provide is kept — the arr-4 never gets
+    overwritten, the 8/9 only fills gaps (extra bearing/outline/accessory data)."""
+    primary = select_primary_run_text(text)
+    fields = _cb_extract(primary)
+    if primary != text:                    # a dual doc was trimmed to arr-4
+        for k, v in _cb_extract(text).items():
+            fields.setdefault(k, v)         # keep non-conflicting arr-8 data
+    return fields
+
+
+def _cb_extract(text: str) -> Dict[str, str]:
     fields: Dict[str, str] = {}
     for label, pat in _CB_PATTERNS:
         m = re.search(pat, text, re.I | re.M)
