@@ -313,7 +313,7 @@ def test_tagging():
     assert "MATERIALS" in li.tag_item(li.normalize_text("304SST Airstream"))
     assert "COATING" in li.tag_item("EPOXY COATED INTERIOR AND EXTERIOR")
     assert "VIBRATION ISOLATION" in li.tag_item("VIBRATION ISOLATORS RUBBER IN SHEAR")
-    assert "V-BELT DRIVE" in li.tag_item(li.normalize_text("Drive"))
+    assert "DRIVE COMPONENTS" in li.tag_item(li.normalize_text("Drive"))
     assert "VIBRATION ISOLATION" in li.tag_item(li.normalize_text("Vibration Base"))
     assert "INLET VANES" in li.tag_item(li.normalize_text("Inlet Volume Control Automatic"))
     assert "COATING" not in li.tag_item(li.normalize_text("Passivation of Welds"))
@@ -334,7 +334,7 @@ def test_tagging():
     assert "DRIVE COMPONENTS" in li.tag_item(li.normalize_text("Motor Sheave/Bushing 3B5V74/B"))
     assert "SPLIT HOUSING" in li.tag_item(li.normalize_text("Drawing and split housing released into production"))
     assert "SPLIT HOUSING" in li.tag_item(li.normalize_text("Shipping Split"))
-    assert "V-BELT DRIVE" in li.tag_item(li.normalize_text("Drive (Max/Min RPM: 1531/1531, 3 belts: B112"))
+    assert "DRIVE COMPONENTS" in li.tag_item(li.normalize_text("Drive (Max/Min RPM: 1531/1531, 3 belts: B112"))
     assert "WHEEL" in li.tag_item(li.normalize_text("110% Effective Diameter"))
     assert "WHEEL" in li.tag_item(li.normalize_text("Cast Hub with Straight Bore"))
     assert "SPECIAL CONSTRUCTION" in li.tag_item(li.normalize_text("Tie Rod Support"))
@@ -549,10 +549,11 @@ def test_drive_attributes():
     ])}
     drive = items["DRIVE MAX MIN RPM 1531 1531 3 BELTS B112"]
     attrs = drive["attributes"]
-    assert {"V-BELT DRIVE", "DRIVE COMPONENTS"} <= set(drive["tags"])
+    assert "DRIVE COMPONENTS" in drive["tags"]
+    assert "V-BELT DRIVE" not in drive["tags"]
     assert "MOTOR" not in drive["tags"]
     assert "MOUNTING" not in drive["tags"]
-    assert attrs["component"] == "V-BELT DRIVE"
+    assert attrs["component"] == "DRIVE COMPONENTS"
     assert attrs["drive_subcategory"] == "SHEAVE/BUSHING"
     assert attrs["belt_qty"] == "3"
     assert attrs["belt"] == "B112"
@@ -570,6 +571,36 @@ def test_drive_attributes():
     assert attrs["mounting"] == "CBC MOUNT"
 
 
+def test_vfd_attributes_are_motor_details():
+    motor = li.extract_items([
+        "Motor C 254.83",
+        "Vendor: Toshiba or equivalent",
+        "3 HP, 3600 RPM, Enclosure: TEFC Premium",
+        "VFD Suitable",
+    ])[0]
+    assert {"MOTOR", "VFD"} <= set(motor["tags"])
+    assert motor["attributes"]["component"] == "MOTOR"
+    assert motor["attributes"]["vfd_context"] == "MOTOR"
+    assert motor["attributes"]["motor_vfd_suitability"] == "VFD SUITABLE"
+
+    inverter = li.derive_item_fields({
+        "raw": "Duty, Inverter Duty 15:1 CT, 20:1 VT",
+        "details": [],
+    })
+    assert "VFD" in inverter["tags"]
+    assert inverter["attributes"]["component"] == "MOTOR"
+    assert inverter["attributes"]["motor_vfd_suitability"] == "INVERTER DUTY"
+    assert inverter["attributes"]["motor_vfd_speed_range"] == "15:1 CT, 20:1 VT"
+
+    by_others = li.derive_item_fields({
+        "raw": "VFD by others, motor complete with AEGIS bearing protection ring",
+        "details": [],
+    })
+    assert "VFD" in by_others["tags"]
+    assert by_others["attributes"]["component"] == "MOTOR"
+    assert by_others["attributes"]["vfd_supplied_by"] == "OTHERS"
+
+
 def test_selected_drive_table_attributes():
     items = li.extract_items([
         "1515/1515 B116 3 3TB80 Q1 3B5V94 B 1.49 45.24 436.00",
@@ -580,8 +611,8 @@ def test_selected_drive_table_attributes():
     ])
     drive = items[0]
     attrs = drive["attributes"]
-    assert "V-BELT DRIVE" in drive["tags"]
     assert "DRIVE COMPONENTS" in drive["tags"]
+    assert "V-BELT DRIVE" not in drive["tags"]
     assert attrs["drive_subcategory"] == "SELECTED DRIVE TABLE"
     assert attrs["belt"] == "B116"
     assert attrs["belt_qty"] == "3"
@@ -628,7 +659,8 @@ def test_selected_drive_table_attributes():
     center = li.extract_items([
         "Center Distance with allowance for install and take-up: 32.24 - 35.24",
     ])[0]
-    assert {"V-BELT DRIVE", "DRIVE COMPONENTS"} <= set(center["tags"])
+    assert "DRIVE COMPONENTS" in center["tags"]
+    assert "V-BELT DRIVE" not in center["tags"]
     assert center["attributes"]["drive_subcategory"] == "CENTER DISTANCE"
     assert center["attributes"]["center_distance_range"] == "32.24 - 35.24"
 
@@ -657,6 +689,45 @@ def test_selected_drive_table_attributes():
     assert "SPECIAL CONSTRUCTION" in anti_short["tags"]
     assert "V-BELT DRIVE" not in anti_short["tags"]
     assert "DRIVE COMPONENTS" not in anti_short["tags"]
+
+
+def test_vibration_isolation_attributes_and_motor_bearing_cleanup():
+    spring = li.extract_items([
+        "Isolator, Spring 1\" Deflection (364 - 405 Frame) C 511.00",
+        "Furnished By: CBC",
+        "Ship Direct (Freight Included)",
+    ])[0]
+    assert {"SHIPPING", "VIBRATION ISOLATION"} <= set(spring["tags"])
+    assert spring["attributes"]["component"] == "VIBRATION ISOLATION"
+    assert spring["attributes"]["vibration_isolation_type"] == "SPRING ISOLATOR"
+    assert spring["attributes"]["isolation_deflection"] == '1"'
+    assert spring["attributes"]["isolation_frame"] == "364 - 405"
+    assert spring["attributes"]["furnished_by"] == "CBC"
+
+    rubber = li.extract_items([
+        "Isolator, Rubber 1/2\" Deflection (0 - 326 Frame) C 314.00",
+        "Furnished By: CBC",
+    ])[0]
+    assert rubber["attributes"]["vibration_isolation_type"] == "RUBBER ISOLATOR"
+    assert rubber["attributes"]["isolation_deflection"] == '1/2"'
+
+    base = li.extract_items(["Spring type vibration base with Isolators (Ship Direct) L 1,346.00"])[0]
+    assert "VIBRATION ISOLATION" in base["tags"]
+    assert base["attributes"]["vibration_isolation_type"] == "VIBRATION BASE, SPRING ISOLATOR"
+
+    motor_bearing = li.extract_items([
+        "Motor (EM4400T-G C 5,386.17",
+        "M2F Add Isolated Bearings for NEMA 404 to 405",
+    ])[0]
+    assert "MOTOR" in motor_bearing["tags"]
+    assert "VIBRATION ISOLATION" not in motor_bearing["tags"]
+
+    warranty = li.derive_item_fields({
+        "raw": "carry only the warranty passed onto us by the component manufacturer. Motor has warranty. Isolators have 1 year warranty",
+        "details": [],
+    })
+    assert "WARRANTY" in warranty["tags"]
+    assert "VIBRATION ISOLATION" not in warranty["tags"]
 
 
 def test_unitary_base_attributes():
@@ -1679,9 +1750,10 @@ def test_silencer_spare_parts_and_spark_resistant_attributes():
     replacement = li.extract_items([
         "Replacement Drive Set (Ship Direct) (Qty: 1), N 692.00",
     ])[0]
-    assert {"SPARE PARTS", "SHIPPING", "V-BELT DRIVE"} <= set(replacement["tags"])
+    assert {"DRIVE COMPONENTS", "SPARE PARTS", "SHIPPING"} <= set(replacement["tags"])
+    assert "V-BELT DRIVE" not in replacement["tags"]
     assert replacement["attributes"]["spare_part_type"] == "REPLACEMENT"
-    assert replacement["attributes"]["spare_part_component"] == "V-BELT DRIVE"
+    assert replacement["attributes"]["spare_part_component"] == "DRIVE COMPONENTS"
 
     support_lugs = li.extract_items([
         "Support Lugs, Fan Inlet and Outlet, Inquiry Num: L 898.00",
@@ -1811,7 +1883,8 @@ def test_shaft_seal_sleeve_and_shipping_attributes():
     assert "SHAFT SEAL" not in motor_lip["tags"]
 
     direct = li.extract_items(["Replacement Drive Set (Ship Direct) (Qty: 1), N 692.00"])[0]
-    assert {"SHIPPING", "V-BELT DRIVE"} <= set(direct["tags"])
+    assert {"DRIVE COMPONENTS", "SHIPPING"} <= set(direct["tags"])
+    assert "V-BELT DRIVE" not in direct["tags"]
     assert direct["attributes"]["shipping_method"] == "SHIP DIRECT"
 
     split_direct = li.derive_item_fields({
