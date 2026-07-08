@@ -31,8 +31,14 @@ scanned PDFs ──pdf_vision.py (Claude API)──>  (full doc text), vision.tr
 - **Vision runs**: model fields win overlaps (it saw the image; the transcript
   is derivative OCR). Patterns fill gaps. `pdf_vision.apply_vision_qc` repairs
   garbled values from clean transcript parses and flags the rest
-  `CHECK VISION` (amber; auto re-read by the next `python pdf_vision.py` run,
-  costs well under a cent each).
+  `CHECK VISION`. A CHECK VISION run is re-read ONCE by the next
+  `python pdf_vision.py`, but the re-read is **escalated** (higher-res render +
+  the model is told exactly what looked wrong) and the two readings are
+  **compared**; if they still don't converge after `MAX_VISION_ATTEMPTS` (2) the
+  run goes to `NEEDS HUMAN` — terminal, never auto-re-read/re-paid again, orange
+  in the workbook with a reason. A later parser/repair that makes it clean
+  clears it back to OK. So: re-reads escalate, compare, and stop — no infinite
+  re-pay, no silent same-model repeat.
 - **Multiple runs per order** (71/381): `run_rank.py` ranks by CO# > REV >
   file mtime > field count. Master keeps ALL runs under `drive_runs`.
 - **Money rules**: a vision result is never re-paid (`--redo` overrides;

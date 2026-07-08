@@ -279,9 +279,11 @@ def write_workbook(records: Dict[str, Dict[str, Any]], path: Path) -> Path:
         cell.fill = header_fill
 
     drawing_fill = PatternFill("solid", fgColor="D9D9D9")  # grey: a drawing, nothing to parse
+    human_fill = PatternFill("solid", fgColor="F4B183")    # orange: a person must eyeball it
     status_fill = {"OK": ok_fill, "NO FIELDS": warn_fill,
                    "UNRECOGNIZED FORMAT": bad_fill, "PDF (no text layer)": bad_fill,
-                   "DRAWING": drawing_fill}
+                   "DRAWING": drawing_fill,
+                   "CHECK VISION": warn_fill, "NEEDS HUMAN": human_fill}
     for i, row in enumerate(rows, start=2):
         ws.cell(i, 1, row["job"])
         ws.cell(i, 2, row["type"])
@@ -394,11 +396,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             log.error("Could not read --list file %s (%s)", args.list, e)
             return 1
     if args.reparse_attention:
-        # DRAWING is a settled classification (a drawing has no fields to pull),
-        # not something a parser fix will ever change — don't re-flag it forever.
+        # Statuses a Z: re-parse can't move: DRAWING (no fields to pull), and the
+        # vision-only CHECK VISION / NEEDS HUMAN (a scanned PDF has no text layer
+        # — those are the pdf_vision re-read loop's job, not this one).
+        _settled = ("OK", "DRAWING", "CHECK VISION", "NEEDS HUMAN")
         attention = sorted({
             rec.get("job", "") for rec in records.values()
-            if any(run.get("status") not in ("OK", "DRAWING")
+            if any(run.get("status") not in _settled
                    for run in rec.get("runs", []))
         } - {""})
         if attention:

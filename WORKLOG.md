@@ -28,6 +28,29 @@ tail fixture.
 Outline table: now pulled in FULL (all 16 codes) — see the block-parser entry
 below.
 
+## 2026-07-06 — Vision re-reads escalate, compare, and stop (no blind re-pay)
+
+DG asked the right question: "are we confident scanning again solves anything?
+will we compare the 2 results?" It didn't before — a CHECK VISION run was
+re-read with identical settings (same model would repeat the same OCR error)
+and the new result overwrote the old with no comparison, and a stubborn PDF
+would re-read (and re-pay) every future batch. Reworked:
+
+- **Escalated re-read**: `read_scanned_pdf(hints=, hi_res=)`. A re-read renders
+  at 2576px/scale 3 (was 1568/2) AND `build_prompt(hints)` tells the model the
+  exact prior complaints ("implausible CFM='4/100'", "odd Arrangement '781'").
+- **Compare + give up**: `apply_vision_result` tracks `attempts` and stashes the
+  prior reading's `prior_fields`. After a re-read still fails QC and
+  `attempts >= MAX_VISION_ATTEMPTS (2)`, `escalate_to_human` compares the two
+  reads (`compare_readings` on hard-number fields) and sets terminal **NEEDS
+  HUMAN** with a reason — "two reads disagree — CFM: 28000 vs 26843" or "two
+  reads agree but values look wrong — ...".
+- **Terminal**: NEEDS HUMAN is never a re-read candidate and QC won't re-open it
+  (but a later pattern fix that makes it clean clears it to OK). Excluded from
+  `--reparse-attention` (a Z: re-parse can't fix a scan). Orange in the xlsx.
+- Tests: hints-in-prompt, attempt/prior tracking, compare_readings,
+  escalate disagree/agree, NEEDS HUMAN terminal + cl- ear-on-fix. 19 suites green.
+
 ## 2026-07-06 — Vision QC: repair what we can, flag the rest + HANDOFF_PLAN.md
 
 Per DG (low on assistant usage; handing off): `pdf_vision.apply_vision_qc`

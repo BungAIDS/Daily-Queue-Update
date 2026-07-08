@@ -20,6 +20,19 @@ Results are written back into the quote-run progress store (and from there the
 workbook + live_master.json via master_sync), and each PDF is only ever paid
 for once — a run that has a vision result is skipped unless --redo is passed.
 
+QUALITY LOOP (so a re-read is worth paying for):
+  - After each read, apply_vision_qc validates the fields (numeric plausibility,
+    arrangement whitelist, model-vs-transcript disagreement). Garbled values are
+    REPAIRED from the clean transcript parse where possible.
+  - A run that still looks wrong is flagged CHECK VISION and re-read ONCE — but
+    the re-read is escalated: a higher-resolution render plus the specific list
+    of what looked wrong, so it isn't a coin-flip repeat.
+  - The two readings are COMPARED. If they still disagree (or agree on an
+    implausible value) after MAX_VISION_ATTEMPTS, the run goes to NEEDS HUMAN
+    (terminal — never auto-re-read/re-paid again; orange in the workbook, with a
+    reason citing the conflict). A later parser fix that makes it clean clears
+    it back to OK.
+
 Cost: ~1-2k input tokens per page + a few hundred output tokens. On the default
 Haiku model that is well under a cent per document; the whole 100+ document
 backlog is on the order of a dollar, one time.
@@ -82,10 +95,20 @@ _FIELD_NAMES = [
 ]
 
 
-def build_prompt() -> str:
+def build_prompt(hints: Optional[List[str]] = None) -> str:
     names = ", ".join(_FIELD_NAMES)
+    lead = ""
+    if hints:
+        # A re-read: tell the model exactly what a prior reading got wrong, so a
+        # second identical pass isn't just wishful. Focus its attention.
+        lead = ("A PREVIOUS automated reading of THIS document looked wrong:\n  - "
+                + "\n  - ".join(hints[:8]) + "\n"
+                "Look at those areas especially carefully and read the digits/"
+                "letters exactly as printed. If a value is genuinely illegible, "
+                "OMIT it rather than guessing.\n\n")
     return (
-        "You are reading a scanned document from a fan manufacturer's job folder.\n"
+        lead
+        + "You are reading a scanned document from a fan manufacturer's job folder.\n"
         "First decide what it is:\n"
         '  - "quote_run": a selection-program Qt Run / quote run / construction run'
         " form (a typed data sheet: SIZE/DESIGN/ARR spec line, CFM/SP/BHP"
@@ -146,16 +169,22 @@ def parse_vision_response(text: str) -> Dict[str, Any]:
 
 def apply_vision_result(run: Dict[str, Any], parsed: Dict[str, Any], model: str) -> bool:
     """Fold a parsed vision result into a run record (in place). Returns True
-    when the run was updated (a usable classification came back)."""
+    when the run was updated (a usable classification came back). Tracks the
+    attempt count and stashes the PRIOR reading's fields so a re-read can be
+    compared against the reading it's replacing (see escalate_to_human)."""
     doc_type = parsed.get("doc_type")
     if doc_type == "error":
         return False                       # leave the run flagged; retried next time
+    prior = run.get("vision") or {}
     run["vision"] = {"model": model,
                      "at": datetime.now().isoformat(timespec="seconds"),
                      "doc_type": doc_type, "note": parsed.get("note", ""),
                      # Full transcription — kept so new fields can be re-parsed
                      # from the stored text later without re-paying the API.
-                     "transcript": parsed.get("transcript", "")}
+                     "transcript": parsed.get("transcript", ""),
+                     "attempts": int(prior.get("attempts", 0)) + 1,
+                     # The immediately-prior reading, so a re-read can compare.
+                     "prior_fields": dict(run.get("fields") or {}) if prior else None}
     run["template"] = "pdf_vision"
     if doc_type == "drawing":
         run["fields"] = {}
@@ -175,7 +204,9 @@ def apply_vision_result(run: Dict[str, Any], parsed: Dict[str, Any], model: str)
 # --------------------------------------------------------------------------- #
 # Vision quality control (pure — no API)                                       #
 # --------------------------------------------------------------------------- #
-CHECK_STATUS = "CHECK VISION"
+CHECK_STATUS = "CHECK VISION"        # extraction looks wrong; re-read (escalated)
+NEEDS_HUMAN = "NEEDS HUMAN"          # re-reads exhausted; a person must eyeball it
+MAX_VISION_ATTEMPTS = 2             # after this many reads, stop re-paying — go human
 
 # Fields that must be a plain number (commas ok). A slash or stray letters in
 # one of these is the classic OCR garble ("4/100 CFM", "20.000 NON-STD").
@@ -245,17 +276,51 @@ def vision_qc(run: Dict[str, Any]) -> List[str]:
 
 def apply_vision_qc(run: Dict[str, Any]) -> List[str]:
     """Run QC on one vision run; record the verdict. A run with real (non-repair)
-    findings is flagged CHECK VISION so it shows amber in the workbook and gets
-    re-read by the next pdf_vision batch."""
+    findings is flagged CHECK VISION so it shows amber and gets re-read — UNLESS
+    it already exhausted its re-reads (NEEDS HUMAN stays terminal). A run that is
+    now clean (e.g. a later pattern repaired the field) is cleared to OK."""
     reasons = vision_qc(run)
     if not run.get("vision"):
         return []
     run["vision"]["suspect"] = [r for r in reasons if not r.startswith("repaired ")]
     if run["vision"]["suspect"]:
-        run["status"] = CHECK_STATUS
-    elif run.get("status") == CHECK_STATUS:   # previously flagged, now clean
+        if run.get("status") != NEEDS_HUMAN:   # don't re-open an exhausted run
+            run["status"] = CHECK_STATUS
+    elif run.get("status") in (CHECK_STATUS, NEEDS_HUMAN):   # now clean -> clear it
         run["status"] = "OK" if run.get("fields") else run.get("status")
     return reasons
+
+
+_CMP_FIELDS = _INT_FIELDS | _DEC_FIELDS | {"Arrangement"}
+
+
+def compare_readings(prior: Dict[str, Any], new: Dict[str, Any]) -> List[str]:
+    """Hard-number fields where two vision readings of the same PDF disagree —
+    the evidence that a re-read didn't converge and a human is needed."""
+    prior, new = prior or {}, new or {}
+    diffs = []
+    for k in sorted(set(prior) | set(new)):
+        if k not in _CMP_FIELDS:
+            continue
+        pv, nv = str(prior.get(k, "")).strip(), str(new.get(k, "")).strip()
+        if pv and nv and pv != nv:
+            diffs.append(f"{k}: {pv} vs {nv}")
+    return diffs
+
+
+def escalate_to_human(run: Dict[str, Any]) -> None:
+    """Called when a re-read still fails QC and attempts are exhausted: mark the
+    run NEEDS HUMAN (terminal — never auto-re-read again) with a reason that
+    says whether the two reads DISAGREED (compare them) or AGREED-but-implausible."""
+    vision = run.get("vision") or {}
+    suspect = vision.get("suspect", [])
+    diffs = compare_readings(vision.get("prior_fields") or {}, run.get("fields") or {})
+    if diffs:
+        reason = "two reads disagree — " + "; ".join(diffs[:4])
+    else:
+        reason = "two reads agree but values look wrong — " + "; ".join(suspect[:4])
+    vision["human_reason"] = reason
+    run["status"] = NEEDS_HUMAN
 
 
 def candidate_runs(records: Dict[str, Dict[str, Any]],
@@ -285,15 +350,17 @@ def candidate_runs(records: Dict[str, Dict[str, Any]],
 # PDF rendering + the API call                                                #
 # --------------------------------------------------------------------------- #
 def render_pdf_images(path: Path, max_pages: int = PDF_VISION_MAX_PAGES,
-                      long_edge: int = _LONG_EDGE) -> List[bytes]:
+                      long_edge: int = _LONG_EDGE, scale: float = 2.0) -> List[bytes]:
     """First page(s) of the PDF as PNG bytes, downscaled so a page stays at a
-    sane token cost. pypdfium2 ships with pdfplumber, so no new dependency."""
+    sane token cost. pypdfium2 ships with pdfplumber, so no new dependency.
+    A re-read passes a bigger `long_edge`/`scale` to give the model more to work
+    with (2576px is the model's max useful resolution)."""
     import pypdfium2 as pdfium
     pdf = pdfium.PdfDocument(str(path))
     try:
         images: List[bytes] = []
         for i in range(min(len(pdf), max_pages)):
-            pil = pdf[i].render(scale=2.0).to_pil()
+            pil = pdf[i].render(scale=scale).to_pil()
             if max(pil.size) > long_edge:
                 ratio = long_edge / max(pil.size)
                 pil = pil.resize((max(1, int(pil.width * ratio)),
@@ -307,11 +374,19 @@ def render_pdf_images(path: Path, max_pages: int = PDF_VISION_MAX_PAGES,
 
 
 def read_scanned_pdf(path: Path, model: str = PDF_VISION_MODEL,
-                     max_pages: int = PDF_VISION_MAX_PAGES) -> Dict[str, Any]:
+                     max_pages: int = PDF_VISION_MAX_PAGES,
+                     hints: Optional[List[str]] = None,
+                     hi_res: bool = False) -> Dict[str, Any]:
     """Render one PDF and ask Claude to classify + extract. Returns the parsed
-    {doc_type, fields, note} dict; doc_type 'error' on any failure (never raises)."""
+    {doc_type, fields, note} dict; doc_type 'error' on any failure (never raises).
+    A re-read passes `hints` (what looked wrong before) and `hi_res=True` (render
+    at the model's max useful resolution) so the second pass is a real retry,
+    not a coin-flip repeat."""
     try:
-        images = render_pdf_images(path, max_pages=max_pages)
+        if hi_res:
+            images = render_pdf_images(path, max_pages=max_pages, long_edge=2576, scale=3.0)
+        else:
+            images = render_pdf_images(path, max_pages=max_pages)
     except Exception as e:  # noqa: BLE001 - a corrupt PDF must not kill the batch
         return {"doc_type": "error", "fields": {}, "note": f"render failed ({e})"}
     if not images:
@@ -324,7 +399,7 @@ def read_scanned_pdf(path: Path, model: str = PDF_VISION_MODEL,
                     "data": base64.standard_b64encode(img).decode("ascii")}}
         for img in images
     ]
-    content.append({"type": "text", "text": build_prompt()})
+    content.append({"type": "text", "text": build_prompt(hints)})
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     try:
         response = client.messages.create(
@@ -376,21 +451,37 @@ def main(argv: Optional[List[str]] = None) -> int:
                  "" if args.redo else " without a vision result")
         return 0
 
-    log.info("Reading %d scanned PDF(s) with %s (~%d page(s) each). "
-             "Rough cost: well under a cent per document on Haiku.",
-             len(todo), args.model, args.max_pages)
+    n_reread = sum(1 for _, r in todo if r.get("status") == CHECK_STATUS and r.get("vision"))
+    log.info("Reading %d scanned PDF(s) with %s (~%d page(s) each; %d of them are "
+             "escalated re-reads). Rough cost: well under a cent per document on Haiku.",
+             len(todo), args.model, args.max_pages, n_reread)
     t0 = time.monotonic()
     counts = {"quote_run": 0, "drawing": 0, "other": 0, "error": 0}
     for n, (job, run) in enumerate(todo, start=1):
         path = Path(run.get("path", ""))
-        parsed = read_scanned_pdf(path, model=args.model, max_pages=args.max_pages)
+        # A re-read: a prior reading looked wrong. Give the model the specific
+        # complaints and a higher-resolution render, so this pass is a real retry.
+        prior = run.get("vision") or {}
+        is_reread = bool(prior) and run.get("status") == CHECK_STATUS
+        hints = prior.get("suspect") if is_reread else None
+        parsed = read_scanned_pdf(path, model=args.model, max_pages=args.max_pages,
+                                  hints=hints, hi_res=is_reread)
         doc_type = parsed.get("doc_type", "error")
         counts[doc_type] = counts.get(doc_type, 0) + 1
         if apply_vision_result(run, parsed, args.model):
+            apply_vision_qc(run)          # repair what we can; re-flag the rest
+            # Still bad after enough attempts? Compare the two reads and hand off.
+            if run.get("status") == CHECK_STATUS and \
+                    run["vision"].get("attempts", 1) >= MAX_VISION_ATTEMPTS:
+                escalate_to_human(run)
             save_progress(records)        # each answer costs money — never lose one
+            extra = ""
+            if run.get("status") == NEEDS_HUMAN:
+                extra = f"  [{run['vision'].get('human_reason', '')}]"
+            elif run.get("fields"):
+                extra = f" ({len(run['fields'])} fields)"
             log.info("  [%d/%d] %s %s -> %s%s", n, len(todo), job, path.name,
-                     run["status"],
-                     f" ({len(run.get('fields') or {})} fields)" if run.get("fields") else "")
+                     run["status"], extra)
         else:
             log.warning("  [%d/%d] %s %s -> %s (left flagged; will retry next run)",
                         n, len(todo), job, path.name, parsed.get("note", "error"))
