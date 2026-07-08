@@ -1563,6 +1563,76 @@ def test_screen_and_shaft_cooler_attributes():
     assert attrs["material_scope"] == "SHAFT COOLER"
 
 
+def test_shaft_seal_sleeve_and_shipping_attributes():
+    seal = li.extract_items(["Shaft Seal (Not Gas Tight), 304 SS Construction L 461.00"])[0]
+    attrs = seal["attributes"]
+    assert {"MATERIALS", "SHAFT SEAL", "STAINLESS STEEL"} <= set(seal["tags"])
+    assert attrs["component"] == "SHAFT SEAL"
+    assert attrs["shaft_seal_type"] == "NOT GAS TIGHT"
+    assert attrs["material_scope"] == "SHAFT SEAL"
+
+    sleeve = li.extract_items(["SS Shaft Sleeve L 184.00"])[0]
+    attrs = sleeve["attributes"]
+    assert {"MATERIALS", "SHAFT SLEEVE", "STAINLESS STEEL"} <= set(sleeve["tags"])
+    assert attrs["component"] == "SHAFT SLEEVE"
+    assert attrs["shaft_sleeve"] == "YES"
+    assert attrs["used_on"] == "SHAFT"
+    assert attrs["material_scope"] == "SHAFT SLEEVE"
+
+    damper = li.extract_items([
+        "Outlet Damper, Opposed Blade, With Stuffing Boxes (Shipped Loose) L 10,545.00",
+    ])[0]
+    assert "DAMPER" in damper["tags"]
+    assert "SHIPPING" in damper["tags"]
+    assert "SHAFT SEAL" not in damper["tags"]
+    assert damper["attributes"]["shipping_state"] == "SHIPPED LOOSE"
+
+    motor_lip = li.derive_item_fields({
+        "raw": "Duty, Double Lip Seals Both Ends, CE Mark, IP55 Protection, Inverter Duty 15:1 Constant Torque",
+        "details": [],
+    })
+    assert "SHAFT SEAL" not in motor_lip["tags"]
+
+    direct = li.extract_items(["Replacement Drive Set (Ship Direct) (Qty: 1), N 692.00"])[0]
+    assert {"SHIPPING", "V-BELT DRIVE"} <= set(direct["tags"])
+    assert direct["attributes"]["shipping_method"] == "SHIP DIRECT"
+
+    split_direct = li.derive_item_fields({
+        "raw": 'Isolators, Floor- Spring 1" Deflection (OCT1) (Ship N 683.00',
+        "details": ["Direct), Inquiry Num: 362-26-1261"],
+    })
+    assert {"SHIPPING", "VIBRATION ISOLATION"} <= set(split_direct["tags"])
+    assert split_direct["attributes"]["shipping_method"] == "SHIP DIRECT"
+
+    shipping_info = li.derive_item_fields({
+        "raw": "SHIPPING INFORMATION AND INVOICE INSTRUCTIONS",
+        "details": [],
+    })
+    assert shipping_info["tags"] == ["SHIPPING"]
+    assert shipping_info["attributes"]["shipping_instruction"] == "SHIPPING/INVOICE INSTRUCTIONS"
+
+    aux = li.derive_item_fields({
+        "raw": "All auxiliary items except motor are to be ship loose.",
+        "details": [],
+    })
+    assert aux["tags"] == ["SHIPPING"]
+    assert aux["attributes"]["shipping_state"] == "SHIPPED LOOSE"
+    assert aux["attributes"]["shipping_instruction"] == "SHIP AUXILIARY ITEMS LOOSE"
+    assert aux["attributes"]["shipping_scope"] == "AUXILIARY ITEMS EXCEPT MOTOR"
+
+    warranty = li.derive_item_fields({
+        "raw": "1 Year warranty from date of shipment. Drive sets will have standard warranty offered by vendor.",
+        "details": [],
+    })
+    assert "SHIPPING" not in warranty["tags"]
+
+    ship_date_warranty = li.derive_item_fields({
+        "raw": "Extended Warranty: Chicago Blower's standard",
+        "details": ["warranty extended to 24 months from ship date."],
+    })
+    assert "SHIPPING" not in ship_date_warranty["tags"]
+
+
 def test_drain_attributes():
     housing = li.extract_items(["Housing Drain with Plug, 304 SS Construction L 328.00"])[0]
     attrs = housing["attributes"]

@@ -99,6 +99,8 @@ def _attrs_label(item: Dict[str, Any]) -> str:
         "guard_type", "guard_material", "tach_hole", "tach_hole_location",
         "screen_subcategory", "screen_feature", "screen_diameter", "screen_size",
         "shaft_cooler", "shaft_cooler_type", "shaft_cooler_construction",
+        "shaft_seal_type", "shaft_sleeve", "shaft_sleeve_type",
+        "shipping_state", "shipping_method", "shipping_instruction", "shipping_scope",
         "balance_type", "balance_grade",
         "bearing_type", "bearing_bore",
         "manufacturer", "model", "size", "operation", "supplied_by", "mounting", "fail_power", "fail_signal",

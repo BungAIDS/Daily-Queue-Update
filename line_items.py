@@ -223,7 +223,8 @@ DEFAULT_RULES: Dict[str, Any] = {
                       r"\bskid\b", r"ispm\s*(?:wood\s*)?(?:inspection\s*)?(?:stamp|stamping)",
                       r"ispm\s*wood", r"do\s*not\s*stack",
                       r"metal\s*banding"],
-        "SHIPPING": [r"ship\s*loose", r"ship\s*via", r"freight\s*included", r"\bshipping\b"],
+        "SHIPPING": [r"\bship(?:ped|ping|ments?)?\b", r"freight", r"\bBOL\b",
+                     r"\bUPS\s+ground\b"],
         "WARRANTY": [r"warranty"],
         "MOUNTING": [r"\bmounting\b", r"\bmounted\b", r"\bcbc\s*mount\b"],
         "SPECIAL CONSTRUCTION": [r"set\s*screws?", r"loc\s*tite", r"caulking",
@@ -603,6 +604,39 @@ def _is_motor_insulation_only(primary: str, norm_blob: str, tags: set[str]) -> b
     if _fan_insulation_reference(primary) or _fan_insulation_reference(norm_blob):
         return False
     return _motor_insulation_reference(norm_blob)
+
+
+def _is_non_fan_shaft_seal_context(primary: str, norm_blob: str, tags: set[str]) -> bool:
+    if "SHAFT SEAL" not in tags:
+        return False
+    if re.search(r"\bSHAFT\s+SEALS?\b|\bCERAMIC\s+FELT\b", norm_blob):
+        return False
+    if "DAMPER" in tags and re.search(r"\bSTUFFING\s+BOX(?:ES)?\b", norm_blob):
+        return True
+    if re.search(r"\bDOUBLE\s+LIP\s+SEALS?\s+BOTH\s+ENDS\b", norm_blob):
+        return True
+    return False
+
+
+def _is_incidental_shipping_reference(primary: str, norm_blob: str, tags: set[str]) -> bool:
+    if "SHIPPING" not in tags:
+        return False
+    if "LABEL" in tags:
+        real_shipping_label = re.search(r"\b(SHIPPING\s+BAR\s*CODE\s+LABEL|SHIPPING\s+BARCODE\s+LABEL|FEDEX\s+SHIPPING\s+LABEL|SHIPPING\s+LABEL)\b", norm_blob)
+        if not real_shipping_label and re.search(r"\b(SHIPPED|SHIP)\s+WITH\s+(?:THE\s+)?FAN\b", norm_blob):
+            return True
+    warranty_shipment = re.search(
+        r"\b(WARRANTY|MONTHS?)\b.{0,120}\b(SHIPMENT|SHIP\s+DATE|DATE\s+OF\s+SHIP)\b|"
+        r"\b(SHIPMENT|SHIP\s+DATE|DATE\s+OF\s+SHIP)\b.{0,120}\b(WARRANTY|MONTHS?)\b",
+        norm_blob,
+    )
+    real_shipping_instruction = re.search(
+        r"\b(SHIP\s+DIRECT|DIRECT\s+SHIP|SHIP\s+LOOSE|SHIPPED\s+LOOSE|SHIP\s+VIA|"
+        r"SHIPPING\s+INSTRUCTIONS?|SHIPMENT\s+ONLINE|BOL|FREIGHT|SHIP\s+COMPLETE|"
+        r"SHIP\s+WITH\s+FANS?)\b",
+        norm_blob,
+    )
+    return bool(warranty_shipment and not real_shipping_instruction)
 
 
 _MATERIAL_GRADE = re.compile(r"\bT?(304L?|316L?)\s+STAINLESS\s+STEEL\b", re.I)
@@ -1369,6 +1403,144 @@ def _shaft_cooler_attributes(primary: str, norm_blob: str, tags: set[str]) -> Di
     return attrs
 
 
+def _shaft_seal_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "SHAFT SEAL" not in tags:
+        return {}
+    attrs: Dict[str, str] = {"component": "SHAFT SEAL"}
+    types: List[str] = []
+    if re.search(r"\bNOT\s+GAS\s+TIGHT\b", norm_blob):
+        _add_unique(types, "NOT GAS TIGHT")
+    if re.search(r"\bLEAK\s+RESISTANT\b", norm_blob):
+        _add_unique(types, "LEAK RESISTANT")
+    if re.search(r"\bPTFE\b", norm_blob):
+        _add_unique(types, "PTFE SEAL RING")
+    if re.search(r"\bDOUBLE\s+CARBON\b", norm_blob):
+        _add_unique(types, "DOUBLE CARBON")
+    if re.search(r"\bCERAMIC\s+FELT\b", norm_blob):
+        _add_unique(types, "CERAMIC FELT")
+    if re.search(r"\bLIP\s+SEALS?\b", norm_blob):
+        _add_unique(types, "LIP SEAL")
+    if re.search(r"\bSTUFFING\s+BOX(?:ES)?\b", norm_blob):
+        _add_unique(types, "STUFFING BOX")
+    if types:
+        attrs["shaft_seal_type"] = ", ".join(types)
+    if re.search(r"\bJOHN\s+CRANE\b", norm_blob):
+        attrs["manufacturer"] = "JOHN CRANE"
+    return attrs
+
+
+def _shaft_sleeve_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "SHAFT SLEEVE" not in tags:
+        return {}
+    attrs: Dict[str, str] = {
+        "component": "SHAFT SLEEVE",
+        "shaft_sleeve": "YES",
+        "used_on": "SHAFT",
+    }
+    if re.search(r"\bSPLIT\s+SLEEVE\b", norm_blob):
+        attrs["shaft_sleeve_type"] = "SPLIT SLEEVE"
+    return attrs
+
+
+def _shipping_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "SHIPPING" not in tags:
+        return {}
+    attrs: Dict[str, str] = {}
+    states: List[str] = []
+    methods: List[str] = []
+    instructions: List[str] = []
+    scopes: List[str] = []
+
+    def add_state(value: str) -> None:
+        _add_unique(states, value)
+
+    def add_method(value: str) -> None:
+        _add_unique(methods, value)
+
+    def add_instruction(value: str) -> None:
+        _add_unique(instructions, value)
+
+    def add_scope(value: str) -> None:
+        _add_unique(scopes, value)
+
+    if re.search(r"\bSHIP(?:PED)?\s+LOOSE\b|\bSHIP\s+LOOSE\b", norm_blob):
+        add_state("SHIPPED LOOSE")
+    if re.search(r"\bDIRECT\s+SHIP\b|\bSHIP\b(?:\s+\S+){0,8}\s+DIRECT\b", norm_blob):
+        add_method("SHIP DIRECT")
+    if re.search(r"\bFREIGHT\s+INCLUDED\b", norm_blob):
+        add_method("FREIGHT INCLUDED")
+    if re.search(r"\bSHIP\s+VIA\b", norm_blob):
+        add_instruction("SHIP VIA")
+    if re.search(r"\bUPDATED\s+SHIP\s+VIA\b", norm_blob):
+        add_instruction("UPDATED SHIP VIA")
+    if re.search(r"\bUPS\s+GROUND\b", norm_blob):
+        add_method("UPS GROUND")
+    if re.search(r"\bDOMESTIC\s+FREIGHT\b", norm_blob):
+        add_method("DOMESTIC FREIGHT")
+    if re.search(r"\bCATERPILLAR\b", norm_blob):
+        add_method("CATERPILLAR SHIPPING PORTAL")
+
+    if re.search(r"\bSHIP\s+WITH\s+FANS?\b", norm_blob):
+        add_instruction("SHIP WITH REFERENCED FANS")
+        add_scope("FAN")
+    if re.search(r"\bALL\s+AUXILIARY\s+ITEMS\s+EXCEPT\s+MOTOR\b", norm_blob):
+        add_instruction("SHIP AUXILIARY ITEMS LOOSE")
+        add_scope("AUXILIARY ITEMS EXCEPT MOTOR")
+    if re.search(r"\bPICTURES?\b.*\bPRIOR\s+TO\s+SHIPPING\b", norm_blob):
+        add_instruction("PICTURES PRIOR TO SHIPPING")
+        add_scope("FAN")
+    if re.search(r"\b(SHIPPING\s+(?:PAPERS|DOCUMENTS|BOXES)|PACKING\s+LIST|BOL)\b", norm_blob):
+        add_instruction("SHIPPING DOCUMENTS/MARKING")
+    if re.search(r"\b(SHIPPING\s+INSTRUCTIONS?|SHIPPING\s+INFORMATION|INVOICE\s+INSTRUCTIONS)\b", norm_blob):
+        add_instruction("SHIPPING/INVOICE INSTRUCTIONS")
+    if re.search(r"\bSHIPPING\s+PAPERS\b", norm_blob):
+        add_instruction("MARK SHIPPING PAPERS")
+    if re.search(r"\bENTER\s+SHIPMENT\s+ONLINE\b|\bSHIPMENT\s+ONLINE\b", norm_blob):
+        add_instruction("ENTER SHIPMENT ONLINE")
+    if re.search(r"\bDIMENSIONS?\s+TO\s+SET\s+UP\s+SHIPMENT\b|\bSET\s+UP\s+SHIPMENT\b", norm_blob):
+        add_instruction("SHIPMENT SETUP DIMENSIONS")
+    if re.search(r"\bSEND\b.{0,80}\bCUSTOMS?\s+DOCUMENTS?\b.{0,80}\bSHIPMENT\b", norm_blob):
+        add_instruction("SEND CUSTOMS DOCUMENTS")
+    if re.search(r"\bDOES?\s+NOT\s+SHIP\s+EARLY\b|\bNOT\s+SHIP\s+EARLY\b", norm_blob):
+        add_instruction("DO NOT SHIP EARLY")
+    if re.search(r"\bSHIP\s+COMPLETE\b|\bNO\s+PARTIAL\b", norm_blob):
+        add_instruction("SHIP COMPLETE")
+    if re.search(r"\bWEIGHT\b.*\bDIMS?\b|\bDIMS?\b.*\bWEIGHT\b", norm_blob):
+        add_instruction("PROVIDE WEIGHT/DIMS")
+    if re.search(r"\bMOTOR\s+BASE\b.*\bSHIPPING\s+PURPOSES\b", norm_blob):
+        add_instruction("MOTOR BASE FOR SHIPPING ONLY")
+        add_scope("MOTOR BASE")
+    if re.search(r"\bSHIPPING\s+COVERS?\b", norm_blob):
+        attrs["component"] = "SHIPPING COVER"
+        if "INLET" in norm_blob:
+            add_scope("INLET")
+        if "OUTLET" in norm_blob:
+            add_scope("OUTLET")
+
+    for tag, scope in (
+        ("MOTOR", "MOTOR"),
+        ("FLEX CONNECTOR", "FLEX CONNECTOR"),
+        ("DAMPER", "DAMPER"),
+        ("INLET VANES", "IVC"),
+        ("SILENCER", "SILENCER"),
+        ("VIBRATION ISOLATION", "VIBRATION ISOLATION"),
+        ("PACKAGING", "PACKAGING"),
+        ("LABEL", "LABEL"),
+    ):
+        if tag in tags:
+            add_scope(scope)
+
+    if states:
+        attrs["shipping_state"] = ", ".join(states)
+    if methods:
+        attrs["shipping_method"] = ", ".join(methods)
+    if instructions:
+        attrs["shipping_instruction"] = ", ".join(instructions)
+    if scopes:
+        attrs["shipping_scope"] = ", ".join(scopes)
+    return attrs
+
+
 def _lining_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
     if "LINING" not in tags:
         return {}
@@ -1885,6 +2057,7 @@ def _material_attributes(norm_blob: str) -> Dict[str, str]:
         ("DRAIN", r"\bDRAIN\b"),
         ("SHAFT COOLER", r"\bSHAFT\s+COOLER\b"),
         ("SHAFT SEAL", r"\bSHAFT\s+SEAL\b"),
+        ("SHAFT SLEEVE", r"\bSHAFT\s+SLEEVE\b"),
         ("SCREEN", r"\bSCREEN\b"),
         ("FLEX CONNECTOR", r"\b(FLEX(IBLE)?\s+CONNECTOR|EXPANSION\s+JOINT|EJ)\b"),
         ("SILENCER", r"\bSILENCER\b"),
@@ -1899,7 +2072,7 @@ def _material_attributes(norm_blob: str) -> Dict[str, str]:
             continue
         if re.search(pattern, norm_blob):
             add_scope(scope)
-    if "SHAFT" in norm_blob and not {"SHAFT COOLER", "SHAFT SEAL"} & set(scopes):
+    if "SHAFT" in norm_blob and not {"SHAFT COOLER", "SHAFT SEAL", "SHAFT SLEEVE"} & set(scopes):
         add_scope("SHAFT")
     if _is_nameplate_housing_mount(norm_blob):
         scopes = [s for s in scopes if s != "HOUSING"]
@@ -2229,6 +2402,12 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t != "INLET"]
     if "OUTLET" in tags and "DAMPER" in tags and _used_on(norm_blob) == "OUTLET DAMPER":
         tags = [t for t in tags if t != "OUTLET"]
+    if _is_non_fan_shaft_seal_context(primary, norm_blob, set(tags)):
+        tags = [t for t in tags if t != "SHAFT SEAL"]
+    if "SHIPPING" in tags and re.search(r"\bALL\s+AUXILIARY\s+ITEMS\s+EXCEPT\s+MOTOR\b", norm_blob):
+        tags = [t for t in tags if t != "MOTOR"]
+    if _is_incidental_shipping_reference(primary, norm_blob, set(tags)):
+        tags = [t for t in tags if t != "SHIPPING"]
     if _is_belt_guard_line(primary):
         tags = [t for t in tags if t not in _BELT_GUARD_DETAIL_TAGS]
     elif _is_accessory_coating(primary, tag_set, norm_blob):
@@ -2295,6 +2474,8 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_lifting_lug_attributes(tags))
     attrs.update(_screen_attributes(primary, norm_blob, tags))
     attrs.update(_shaft_cooler_attributes(primary, norm_blob, tags))
+    attrs.update(_shaft_seal_attributes(norm_blob, tags))
+    attrs.update(_shaft_sleeve_attributes(norm_blob, tags))
     attrs.update(_lining_attributes(norm_blob, tags))
     attrs.update(_housing_attributes(norm_blob, tags))
     attrs.update(_motor_conduit_box_attributes(norm_blob))
@@ -2312,6 +2493,7 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
         return attrs
     elif _is_assembly_note(primary):
         attrs["note_type"] = "ASSEMBLY"
+    attrs.update(_shipping_attributes(norm_blob, tags))
     attrs.update(_guard_attributes(primary, norm_blob))
     attrs.update(_coating_attributes(primary, norm_blob, tags, raw_tags))
     attrs.update(_drain_attributes(primary, norm_blob, tags))
