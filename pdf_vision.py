@@ -164,7 +164,9 @@ def parse_vision_response(text: str) -> Dict[str, Any]:
                 fields[key] = val
     return {"doc_type": doc_type, "fields": fields,
             "note": str(data.get("note", "")).strip()[:300],
-            "transcript": str(data.get("transcript", "")).strip()[:20000]}
+            # Generous cap (a runaway backstop, not a real limit) so a long
+            # scanned doc's transcript isn't clipped in the corpus.
+            "transcript": str(data.get("transcript", "")).strip()[:80000]}
 
 
 def apply_vision_result(run: Dict[str, Any], parsed: Dict[str, Any], model: str) -> bool:
@@ -403,7 +405,10 @@ def read_scanned_pdf(path: Path, model: str = PDF_VISION_MODEL,
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     try:
         response = client.messages.create(
-            model=model, max_tokens=6000,   # fields + the full transcription
+            # Room for fields + a full transcription of even a long doc. Output
+            # tokens are billed only for what's generated, so short docs (most)
+            # cost nothing extra; only a genuinely long scan spends more.
+            model=model, max_tokens=12000,
             messages=[{"role": "user", "content": content}],
         )
     except anthropic.APIError as e:

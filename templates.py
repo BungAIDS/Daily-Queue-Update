@@ -238,7 +238,9 @@ class _TextLineMixin:
 
     def _from_text(self, ctx: QuoteRunContext) -> Dict[str, Any]:
         lines = [ln.rstrip() for ln in ctx.text().splitlines() if ln.strip()]
-        return {"fields": kv_from_lines(lines), "raw_lines": lines[:40]}
+        # Store the whole document (RAW_LINES_CAP is a runaway backstop, not a
+        # real limit) so non-CB text runs are a full corpus for future patterns.
+        return {"fields": kv_from_lines(lines), "raw_lines": lines[:RAW_LINES_CAP]}
 
 
 # Chicago Blower engineering "Qt Run" text — the selection-program dump. The
@@ -531,10 +533,13 @@ def _cb_summary(fields: Dict[str, str]) -> str:
 # matched the file name, like a vendor quote or a markup.)
 SELECTION_PROGRAM_MARKERS = ("CHICAGO BLOWER", "SN#")
 
-# How many document lines a template returns as raw_lines. Generous on purpose:
-# the sweep persists them to its store, making the store a re-parsable corpus
-# (design new per-arrangement patterns, re-extract without re-reading Z:).
-RAW_LINES_CAP = 250
+# How many document lines a template returns as raw_lines. The sweep persists
+# these to its store, making the store a re-parsable corpus (design new patterns,
+# re-extract without re-reading Z:), so a truncated tail = fields we can't
+# re-parse offline. This is NOT a functional limit — it's a pure runaway
+# backstop set far above any real run (the longest, a dual 4S/8S 8-pager, is
+# well under 1000 lines). No real quote run is ever truncated.
+RAW_LINES_CAP = 10000
 
 
 def is_selection_program(text: str) -> bool:

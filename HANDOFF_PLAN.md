@@ -120,11 +120,11 @@ Still generic key/value. Needs ONE real sheet from DG (or read cells from the
 stored raw_lines cell-dump) to pin a real mapping. Ask DG which fields matter
 (inner/outer wheel rows?).
 
-### P6 — Raise the raw_lines cap + mtime backfill (one full rescan)
-Cap 250 truncates long docs (410087, 410088, 416869 hit it — tail sections
-lost from the corpus). Raise `templates.RAW_LINES_CAP` to ~600, then have DG
-run ONE full `--rescan` (~10 min; vision results carry forward) — this also
-backfills `mtime` on every run, strengthening run_rank. Then publish.
+### P6 — mtime backfill (one full rescan)  [cap: DONE]
+The raw_lines cap is now a 10000-line runaway backstop (was 250) — no real doc
+truncates. A full `--rescan` still backfills `mtime` on every run (strengthens
+run_rank) and re-stores the 42 previously-clipped runs at full length; DG runs
+it once (~10 min; vision results carry forward), then publishes.
 
 ### P7 — Surfacing decisions (DG's call, then trivial)
 Which new fields deserve their own Live Queue / report columns vs staying in

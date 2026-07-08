@@ -28,6 +28,25 @@ tail fixture.
 Outline table: now pulled in FULL (all 16 codes) — see the block-parser entry
 below.
 
+## 2026-07-06 — Remove the storage truncation (raw_lines / transcript caps)
+
+DG: the 250-line cap shouldn't be a thing. It only ever bit the OFFLINE corpus/
+--reparse-stored loop (the live parse always used full text), but 42 runs were
+being clipped, so tail sections (outline dims, totals on long/dual docs) were
+lost to offline re-parsing. Fixes:
+- `templates.RAW_LINES_CAP` 250 -> 10000 (a pure runaway backstop; the longest
+  real run, a dual 4S/8S 8-pager, is well under 1000 lines). Applied to the CB,
+  PDF, and generic-text templates (the generic one was also silently capped at
+  40 lines).
+- `drive_run.py` stored only the first 40 lines as raw_lines though it already
+  kept the full `text` — dropped that slice.
+- Vision transcript char cap 20000 -> 80000 and the vision `max_tokens`
+  6000 -> 12000, so a long SCANNED doc's transcript isn't clipped either (output
+  tokens are billed only when generated, so short docs — most — cost nothing
+  extra). Store grows ~1-2 MB; negligible.
+Takes full effect on the next `--rescan` (which re-stores the 42 clipped runs at
+full length). 20 suites green.
+
 ## 2026-07-06 — Dual-arr selection, dedupe, and the OBSOLETE archiver
 
 Per DG's answers to the cleanup questions:
