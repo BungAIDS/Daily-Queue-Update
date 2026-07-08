@@ -730,6 +730,30 @@ def test_vibration_isolation_attributes_and_motor_bearing_cleanup():
     assert "VIBRATION ISOLATION" not in warranty["tags"]
 
 
+def test_warranty_attributes_do_not_leak_component_tags():
+    warranty = li.derive_item_fields({
+        "raw": "carry only the warranty passed onto us by the component manufacturer. Motor has a standard 3-year warranty. Isolators have 1 year warranty",
+        "details": [],
+    })
+    assert warranty["tags"] == ["WARRANTY"]
+    attrs = warranty["attributes"]
+    assert attrs["note_type"] == "WARRANTY"
+    assert attrs["warranty_duration"] == "3 YEARS, 1 YEAR"
+    assert attrs["warranty_scope"] == "MOTOR, VIBRATION ISOLATION"
+    assert attrs["warranty_source"] == "COMPONENT MANUFACTURER"
+
+    motor = li.derive_item_fields({
+        "raw": "Motor (ABB C 26,730.00",
+        "details": [
+            "Warranty 3 years, S.S. Nameplate, IP55 Protection",
+            "300HP, 1200RPM, 449TC Frame, Inverter Duty 20:1 VT, 4:1 CT",
+        ],
+    })
+    assert "MOTOR" in motor["tags"]
+    assert "WARRANTY" not in motor["tags"]
+    assert motor["attributes"]["motor_warranty"] == "3 YEARS"
+
+
 def test_unitary_base_attributes():
     channel = li.extract_items(["8\" Channel Base, Inquiry Num: 253-24-1651 L 2,215.00"])[0]
     assert "UNITARY BASE" in channel["tags"]
@@ -1697,6 +1721,48 @@ def test_screen_and_shaft_cooler_attributes():
     assert attrs["material_scope"] == "SHAFT COOLER"
 
 
+def test_weather_cover_attributes_and_reference_cleanup():
+    motor = li.extract_items([
+        "Motor (5hp 3470 rpm 3ph 184tc with drip cover C 342.91",
+        "CEM3613T\\M8A Install Dripcover on TEFC or ODP)",
+        "Vendor: Baldor/Reliance",
+    ])[0]
+    assert {"MOTOR", "WEATHER COVER"} <= set(motor["tags"])
+    assert motor["attributes"]["component"] == "MOTOR"
+    assert motor["attributes"]["weather_cover_type"] == "DRIP COVER"
+    assert motor["attributes"]["weather_cover_scope"] == "MOTOR"
+
+    rainhood = li.extract_items([
+        "Bolt-On 3 Sided Inlet Rainhood with Inlet Screen L 1,383.00",
+        "CBC Mount",
+    ])[0]
+    assert {"SCREEN", "WEATHER COVER"} <= set(rainhood["tags"])
+    assert rainhood["attributes"]["component"] == "WEATHER COVER"
+    assert rainhood["attributes"]["weather_cover_type"] == "RAINHOOD"
+    assert rainhood["attributes"]["weather_cover_used_on"] == "INLET"
+    assert rainhood["attributes"]["weather_cover_feature"] == "INLET SCREEN"
+    assert rainhood["attributes"]["mounting"] == "CBC MOUNT"
+
+    inlet_hood = li.extract_items([
+        "Inlet Hood Model VWH5-36 includes 1 set H&G each C 2,640.00",
+        "Hood std.",
+        "Vendor: VAW Systems",
+        "Ship Direct",
+        "Product: Inlet Silencer",
+    ])[0]
+    assert {"SILENCER", "SHIPPING", "WEATHER COVER"} <= set(inlet_hood["tags"])
+    assert inlet_hood["attributes"]["weather_cover_type"] == "INLET HOOD"
+    assert inlet_hood["attributes"]["weather_cover_model"] == "VWH5-36"
+    assert inlet_hood["attributes"]["weather_cover_scope"] == "SILENCER"
+
+    drawing_note = li.derive_item_fields({
+        "raw": "Engineering to show fan plus accessory weight, including rainhood, motor weight and total assembled weight on the drawing.",
+        "details": [],
+    })
+    assert "DRAWINGS" in drawing_note["tags"]
+    assert "WEATHER COVER" not in drawing_note["tags"]
+
+
 def test_silencer_spare_parts_and_spark_resistant_attributes():
     silencer = li.extract_items([
         "VAW Inlet Silencer model 12VRSB-S81 and with C 5,629.00",
@@ -1707,13 +1773,16 @@ def test_silencer_spare_parts_and_spark_resistant_attributes():
         "Product: Inlet Silencer",
     ])[0]
     attrs = silencer["attributes"]
-    assert {"SILENCER", "SHIPPING"} <= set(silencer["tags"])
+    assert {"SILENCER", "SHIPPING", "WEATHER COVER"} <= set(silencer["tags"])
     assert attrs["silencer_subcategory"] == "INLET SILENCER"
     assert attrs["silencer_used_on"] == "INLET"
     assert attrs["silencer_model"] == "12VRSB-S81"
     assert attrs["silencer_noise_target"] == "85 DBA"
     assert attrs["pressure_drop"] == ".19"
     assert "RAIN HOOD" in attrs["silencer_feature"]
+    assert attrs["weather_cover_type"] == "RAINHOOD"
+    assert attrs["weather_cover_model"] == "VWH1-16X18"
+    assert attrs["weather_cover_feature"] == "GALVANIZED SCREEN"
     assert attrs["shipping_method"] == "SHIP DIRECT"
     assert attrs["coating_context"] == "ACCESSORY"
 

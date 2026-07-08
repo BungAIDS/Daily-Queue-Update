@@ -79,6 +79,8 @@ def _attrs_label(item: Dict[str, Any]) -> str:
         return ""
     keys = [
         "inquiry_num", "note_type", "component", "component_review",
+        "warranty_type", "warranty_duration", "warranty_scope", "warranty_start",
+        "warranty_source",
         "used_on", "used_on_review", "vendor", "product",
         "split_type",
         "drawing_type", "drawing_scope",
@@ -86,6 +88,7 @@ def _attrs_label(item: Dict[str, Any]) -> str:
         "motor_explosion_groups", "motor_explosion_division", "motor_base",
         "motor_feature", "motor_conduit_box_location", "motor_conduit_box_position",
         "motor_conduit_box_orientation",
+        "motor_warranty",
         "motor_nameplate", "motor_nameplate_action",
         "nameplate_type", "nameplate_mount_location", "nameplate_mounting",
         "flange_scope", "flange_type", "flange_location",
@@ -107,6 +110,8 @@ def _attrs_label(item: Dict[str, Any]) -> str:
         "coating_context", "coating_category", "coating_scope", "coating_process",
         "coating_state", "coating_type", "coating_color", "alternate_coating_color", "coats",
         "guard_type", "guard_material", "tach_hole", "tach_hole_location",
+        "weather_cover_type", "weather_cover_scope", "weather_cover_used_on",
+        "weather_cover_model", "weather_cover_feature",
         "screen_subcategory", "screen_feature", "screen_diameter", "screen_size",
         "shaft_cooler", "shaft_cooler_type", "shaft_cooler_construction",
         "shaft_seal_type", "shaft_sleeve", "shaft_sleeve_type",

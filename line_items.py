@@ -209,7 +209,10 @@ DEFAULT_RULES: Dict[str, Any] = {
             r"\bshaft\b.*\bbearing\b.*\bguard\b",
             r"\bguard\b.*\bshaft\b.*\bbearing\b",
         ],
-        "WEATHER COVER": [r"weather\s*(cover|hood|proof)"],
+        "WEATHER COVER": [r"weather\s*(cover|hood|proof)",
+                          r"rain\s*hood", r"rainhood",
+                          r"drip\s*cover", r"dripcover",
+                          r"\binlet\s+hood\b"],
         "SCREEN": [r"\bscreen"],
         "FLANGE": [r"flange"],
         "FLEX CONNECTOR": [r"flex(ible)?\s*conn", r"expansion\s*joint"],
@@ -281,6 +284,10 @@ _SHIP_VIA_COMPONENT_TAGS = {
 _ACCESSORY_COATING_TAGS = {
     "BELT GUARD", _GUARD_TAG, "MOTOR", "SILENCER", "FLEX CONNECTOR",
     "WEATHER COVER", "SCREEN",
+}
+_WARRANTY_SCOPE_TAGS = {
+    "MOTOR", "VIBRATION ISOLATION", "DRIVE COMPONENTS", "BEARINGS",
+    "FLEX CONNECTOR", "SILENCER", "SCREEN", "WEATHER COVER",
 }
 _LUBE_ACCESSORY = re.compile(
     r"\b(EXTENDED\s+LUBE|LUBE\s+LINES?|GREASE\s+(LINES?|FITTINGS?|LEADS?)|ZERK\s+FITTINGS?)\b",
@@ -1172,6 +1179,66 @@ def _inspection_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict
     return attrs
 
 
+def _warranty_durations(norm_blob: str) -> List[str]:
+    durations: List[str] = []
+
+    def add_duration(number: str, unit: str) -> None:
+        singular = unit.upper().startswith("YEAR")
+        label = "YEAR" if singular else "MONTH"
+        if number != "1":
+            label += "S"
+        _add_unique(durations, f"{number} {label}")
+
+    patterns = (
+        r"\b(\d+)\s*[- ]?\s*(YEAR|YEARS|MONTH|MONTHS)\b.{0,40}\bWARRANTY\b",
+        r"\bWARRANTY\b.{0,80}\b(\d+)\s*[- ]?\s*(YEAR|YEARS|MONTH|MONTHS)\b",
+    )
+    for pattern in patterns:
+        for m in re.finditer(pattern, norm_blob):
+            add_duration(m.group(1), m.group(2))
+    return durations
+
+
+def _warranty_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "WARRANTY" not in tags:
+        return {}
+    attrs: Dict[str, str] = {"note_type": "WARRANTY"}
+    if "EXTENDED WARRANTY" in norm_blob:
+        attrs["warranty_type"] = "EXTENDED WARRANTY"
+    elif "EXCLUSIVE" in norm_blob:
+        attrs["warranty_type"] = "EXCLUSIVE WARRANTY"
+    elif "STANDARD" in norm_blob:
+        attrs["warranty_type"] = "STANDARD WARRANTY"
+
+    durations = _warranty_durations(norm_blob)
+    if durations:
+        attrs["warranty_duration"] = ", ".join(durations)
+
+    scopes: List[str] = []
+    if re.search(r"\b(CHICAGO\s+BLOWER|CBC)\b.*\b(MANUFACTURED\s+ITEMS|STANDARD)\b", norm_blob):
+        _add_unique(scopes, "CBC MANUFACTURED ITEMS")
+    if "BUYOUT ITEMS" in norm_blob:
+        _add_unique(scopes, "BUYOUT ITEMS")
+    if "MOTOR" in norm_blob:
+        _add_unique(scopes, "MOTOR")
+    if re.search(r"\bISOLATORS?\b", norm_blob):
+        _add_unique(scopes, "VIBRATION ISOLATION")
+    if "DRIVE SET" in norm_blob:
+        _add_unique(scopes, "DRIVE COMPONENTS")
+    if scopes:
+        attrs["warranty_scope"] = ", ".join(scopes)
+
+    if re.search(r"\b(DATE\s+OF\s+SHIPMENT|SHIP\s+DATE)\b", norm_blob):
+        attrs["warranty_start"] = "SHIP DATE"
+    if "COMPONENT MANUFACTURER" in norm_blob:
+        attrs["warranty_source"] = "COMPONENT MANUFACTURER"
+    elif "VENDOR" in norm_blob:
+        attrs["warranty_source"] = "VENDOR"
+    elif re.search(r"\b(CHICAGO\s+BLOWER|CBC)\b", norm_blob):
+        attrs["warranty_source"] = "CBC"
+    return attrs
+
+
 def _motor_insulation_attributes(norm_blob: str, tags: set[str], raw_tags: set[str]) -> Dict[str, str]:
     if "MOTOR" not in tags and "MOTOR" not in raw_tags and not re.search(r"\bMOTOR\b", norm_blob):
         return {}
@@ -1202,6 +1269,15 @@ def _motor_insulation_attributes(norm_blob: str, tags: set[str], raw_tags: set[s
 
     if re.search(r"\b(VPI|VACUUM\s+PRESSURE\s+IMPREGNATION)\b", norm_blob):
         attrs["motor_construction"] = "VPI"
+    return attrs
+
+
+def _motor_warranty_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "MOTOR" not in tags or "WARRANTY" not in norm_blob:
+        return {}
+    attrs: Dict[str, str] = {}
+    durations = _warranty_durations(norm_blob)
+    attrs["motor_warranty"] = ", ".join(durations) if durations else "YES"
     return attrs
 
 
@@ -1437,6 +1513,66 @@ def _screen_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str
         attrs["screen_feature"] = ", ".join(features)
     if used_on:
         attrs["used_on"] = ", ".join(used_on)
+    return attrs
+
+
+def _weather_cover_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if "WEATHER COVER" not in tags:
+        return {}
+    attrs: Dict[str, str] = {}
+    types: List[str] = []
+    features: List[str] = []
+    scopes: List[str] = []
+    used_on: List[str] = []
+
+    if re.search(r"\bDRIP\s*COVER|DRIPCOVER\b", norm_blob):
+        _add_unique(types, "DRIP COVER")
+    if re.search(r"\bRAIN\s*HOOD|RAINHOOD\b", norm_blob):
+        _add_unique(types, "RAINHOOD")
+    if "INLET HOOD" in norm_blob:
+        _add_unique(types, "INLET HOOD")
+    if "WEATHER HOOD" in norm_blob:
+        _add_unique(types, "WEATHER HOOD")
+    if "WEATHER COVER" in norm_blob:
+        _add_unique(types, "WEATHER COVER")
+    if "WEATHERPROOF" in norm_blob or "WEATHER PROOF" in norm_blob:
+        _add_unique(types, "WEATHERPROOF")
+
+    if "MOTOR" in tags or re.match(r"^MOTOR\b", primary):
+        _add_unique(scopes, "MOTOR")
+        attrs["component"] = "MOTOR"
+    if "SILENCER" in tags or "SILENCER" in norm_blob:
+        _add_unique(scopes, "SILENCER")
+    if re.search(r"\bINLET\b", norm_blob):
+        _add_unique(used_on, "INLET")
+    if re.search(r"\b(OUTLET|DISCHARGE)\b", norm_blob):
+        _add_unique(used_on, "OUTLET")
+
+    if re.search(r"\bINLET\s+SCREEN\b", norm_blob):
+        _add_unique(features, "INLET SCREEN")
+    if "TRASH SCREEN" in norm_blob:
+        _add_unique(features, "TRASH SCREEN")
+    if re.search(r"\bGALVANIZ(?:ED|ING)?\s+SCREEN\b", norm_blob):
+        _add_unique(features, "GALVANIZED SCREEN")
+    if re.search(r"\bFILTER\b", norm_blob):
+        _add_unique(features, "FILTER")
+    if re.search(r"\bCBC\s+MOUNT(?:ED)?\b", norm_blob):
+        attrs["mounting"] = "CBC MOUNT"
+
+    model_match = re.search(r"\b((?:VWH|FBH)\d+(?:\s*[-]?\s*[0-9]+[A-Z]?(?:X[0-9]+)?)?)\b", norm_blob)
+    if model_match:
+        attrs["weather_cover_model"] = re.sub(r"\s+", "-", model_match.group(1).strip())
+
+    if types:
+        attrs["weather_cover_type"] = ", ".join(types)
+    if scopes:
+        attrs["weather_cover_scope"] = ", ".join(scopes)
+    if used_on:
+        attrs["weather_cover_used_on"] = ", ".join(used_on)
+    if features:
+        attrs["weather_cover_feature"] = ", ".join(features)
+    if not scopes:
+        attrs.setdefault("component", "WEATHER COVER")
     return attrs
 
 
@@ -2689,6 +2825,15 @@ def _is_admin_note(primary: str) -> bool:
     return bool(re.search(r"\b(SLOW\s+PAY\s+ADDITION|PAYMODE[-\s]*X|FEE|CHARGE)\b", primary, re.I))
 
 
+def _is_weather_cover_reference_only(primary: str, norm_blob: str) -> bool:
+    if not re.search(r"\b(RAIN\s*HOOD|RAINHOOD|WEATHER\s+COVER|WEATHER\s+HOOD|DRIP\s*COVER|DRIPCOVER|INLET\s+HOOD)\b", norm_blob):
+        return False
+    return bool(
+        re.search(r"\b(ENGINEERING|DRAWINGS?)\b", primary)
+        and re.search(r"\b(SHOW|WEIGHT|DRAWING)\b", primary)
+    )
+
+
 def _is_fan_coating_line(primary: str, tags: set[str]) -> bool:
     if _is_paint_line(primary) or re.match(r"^(SPECIAL\s+PAINT|PRE\s+COATING)\b", primary, re.I):
         return True
@@ -2898,6 +3043,10 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         return [_MISC_NOTE_TAG]
     if "WARRANTY" in tags and not re.search(r"\bWARRANTY\b", primary, re.I):
         tags = [t for t in tags if t != "WARRANTY"]
+    if "WARRANTY" in tags:
+        tags = [t for t in tags if t not in _WARRANTY_SCOPE_TAGS]
+    if "WEATHER COVER" in tags and _is_weather_cover_reference_only(primary, norm_blob):
+        tags = [t for t in tags if t != "WEATHER COVER"]
     if _GUARD_TAG in tags and not _is_shaft_bearing_guard_line(primary):
         tags = [t for t in tags if t != _GUARD_TAG]
     if _is_base_fan_line(primary):
@@ -3047,12 +3196,14 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_inlet_vane_attributes(primary, norm_blob, tags))
     attrs.update(_inspection_attributes(primary, norm_blob, tags))
     attrs.update(_motor_insulation_attributes(norm_blob, tags, raw_tags))
+    attrs.update(_motor_warranty_attributes(norm_blob, tags))
     attrs.update(_insulation_attributes(item, primary, norm_blob, tags))
     attrs.update(_label_attributes(norm_blob, tags))
     attrs.update(_mounting_attributes(primary, norm_blob, tags))
     attrs.update(_nameplate_attributes(primary, norm_blob, tags))
     attrs.update(_lifting_lug_attributes(tags))
     attrs.update(_screen_attributes(primary, norm_blob, tags))
+    attrs.update(_weather_cover_attributes(primary, norm_blob, tags))
     attrs.update(_shaft_cooler_attributes(primary, norm_blob, tags))
     attrs.update(_shaft_seal_attributes(norm_blob, tags))
     attrs.update(_shaft_sleeve_attributes(norm_blob, tags))
@@ -3076,6 +3227,7 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
         return attrs
     elif _is_assembly_note(primary):
         attrs["note_type"] = "ASSEMBLY"
+    attrs.update(_warranty_attributes(norm_blob, tags))
     attrs.update(_shipping_attributes(norm_blob, tags))
     attrs.update(_testing_attributes(primary, norm_blob, tags))
     attrs.update(_guard_attributes(primary, norm_blob))
