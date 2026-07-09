@@ -365,7 +365,7 @@ def base_actions() -> list[LauncherAction]:
             "find_orders",
             "Search / Inspect",
             "Find Orders By Line Items",
-            "Search the line-items store by terms, tag, job number, or write an Excel inventory.",
+            "Search the line-items store by terms/tag/job, rank the backlog by similarity to a job (DWG-reuse candidates), or write an Excel inventory.",
             "find_orders.py",
             options=(
                 option("terms", "Search terms", "Space-separated terms. By default all terms must match.", kind="args", positional=True, split=True),
@@ -373,6 +373,9 @@ def base_actions() -> list[LauncherAction]:
                 option("tag", "Feature tag", "Filter by canonical feature tag, such as SHAFT SEAL.", arg="--tag"),
                 option("fuzzy", "Fuzzy ratio", "Optional typo-tolerant ratio. Example: 0.84.", arg="--fuzzy"),
                 option("job", "Single job", "Show stored items for one job number.", arg="--job"),
+                option("like", "Similar to job", "Rank the backlog by how much of this job's Sales Order each other order shares.", arg="--like"),
+                option("dwg", "Only custom-DWG jobs", "Keep only jobs whose AutoCAD scan found custom drawings. With 'Similar to job' this is the DWG-reuse shortlist.", kind="check", arg="--dwg"),
+                option("top", "Similar jobs to show", "How many ranked jobs 'Similar to job' prints. Blank = 15, 0 = all.", arg="--top"),
                 option("list_tags", "List tags", "Show the live tag vocabulary and counts.", kind="check", arg="--list-tags"),
                 option("xlsx", "Write Excel workbook", "Write an Excel inventory/matrix. If output path is blank, the script chooses the default.", kind="check", arg="--xlsx"),
             ),

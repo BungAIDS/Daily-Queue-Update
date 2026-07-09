@@ -567,16 +567,27 @@ python find_orders.py shaft seal       # orders whose SO matches BOTH terms
 python find_orders.py --any teflon viton
 python find_orders.py --tag "SHAFT SEAL"     # by canonical tag
 python find_orders.py cermic felt --fuzzy    # typo-tolerant
+python find_orders.py shaft seal --dwg # ...only jobs with custom AutoCAD DWGs
+python find_orders.py --like 421314    # rank the backlog by similarity to a job
+python find_orders.py --like 421314 --dwg    # DWG-reuse shortlist for that job
 python find_orders.py --job 421314     # what's stored for one job
 python find_orders.py --list-tags      # the live tag vocabulary + counts
 python find_orders.py --xlsx           # full inventory workbook (AutoFilter) —
                                        # filter line items straight in Excel
 ```
 
+Every result also shows the job's **custom AutoCAD drawings** (from the DWG
+scan store) and its CAD folder, so a feature search doubles as "who already
+drew this?". `--like` ranks every other order by how much of the given job's
+Sales Order it shares — rare shared features score highest and identical
+normalized lines count double — and `--like ... --dwg` is the reuse shortlist:
+similar jobs that already have custom drawings on file.
+
 `--xlsx` writes two tabs: **Line Items** (one row per item) and a **Feature
 Matrix** — one row per order, one column per feature tag, **green ✓** when the
 order has that feature and **red** when it doesn't, exactly like the AutoCAD
-DWG matrix. Searching first (`python find_orders.py shaft seal --xlsx`) limits
+DWG matrix, plus each order's custom-DWG list linked to its CAD folder.
+Searching first (`python find_orders.py shaft seal --xlsx`) limits
 the matrix to the matching orders, but each row still shows that order's full
 feature profile.
 

@@ -3,6 +3,34 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-07-09 — DWG-aware search + `--like` similarity ranking (find_orders)
+
+Goal: surface the backfilled SO data WITHOUT widening the live queue workbook
+(way too many columns), and take the first programmatic step toward "new order
+comes in → which backlog jobs already have a custom DWG for this?".
+
+- `find_orders.py` now joins the AutoCAD scan store into every view: each hit
+  prints its custom-DWG suffixes + CAD folder (`attach_dwg`/`_dwg_label`), and
+  `--dwg` keeps only jobs the scan found custom drawings for.
+- New `--like JOB` mode (`similar_jobs`): ranks every other order by
+  rarity-weighted SO overlap — each shared canonical tag scores
+  1/(#jobs with that tag), each IDENTICAL normalized line scores 2/(#jobs with
+  that line) — so rare shared features dominate and MOTOR-on-everything counts
+  for almost nothing. `--like 421314 --dwg` = the DWG-reuse shortlist. `--top`
+  caps the list (default 15).
+- `--xlsx`: "Custom DWGs" column on both sheets; on the Feature Matrix it
+  hyperlinks to the job's CAD folder (link only set when there IS a label —
+  openpyxl otherwise displays the bare target in the empty cell).
+- Launcher `find_orders` action gained "Similar to job", "Only custom-DWG
+  jobs", "Similar jobs to show" options. Tests: `test_find_orders.py` (pure
+  dict-in/dict-out, in CI after test_line_items).
+- Deliberately NOT added to the live workbook. Next step for the auto-recommend
+  goal: watch.py calls `similar_jobs` for each NEW order against the store and
+  puts the top DWG-reuse candidates in the notification/one compact column —
+  `similar_jobs` is already pure and store-driven so it can be called as-is.
+  An AI pass (send the new order's lines + the top-N shortlist, not the whole
+  DB) can sit on top later if the ranking alone isn't judgey enough.
+
 ## 2026-07-09 — Hub/coupling/box fields + coverage tagging ("read right over it")
 
 DG's asks: (1) fabricated hubs have no cast part number but do carry hub data
