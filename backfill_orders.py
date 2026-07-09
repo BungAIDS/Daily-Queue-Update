@@ -20,6 +20,7 @@ Options:
     --force       reprocess selected jobs           --rescan     ignore saved progress
     --newest-first process high job numbers first   --retry-not-found recheck misses
     --from-dwg-progress use saved AutoCAD scan job list instead of walking Z:
+    --passes N    retry incomplete jobs this many times in the same run
 
 Outputs (under BACKLOG_DIR):
     backfill_progress.json   resumable per-job store (source of truth)
@@ -65,6 +66,7 @@ log = logging.getLogger("backfill")
 
 PROGRESS_PATH = BACKLOG_DIR / "backfill_progress.json"
 WORKBOOK_PATH = BACKLOG_DIR / "backlog.xlsx"
+RETRYABLE_STATUSES = {"error", "not-found", "no-SO"}
 
 
 # --------------------------------------------------------------------------- #
@@ -101,15 +103,11 @@ def _board_args(page) -> Dict[str, str]:
     return out
 
 
-def _open_via_loaddetail(page, job: str, args_js: str) -> bool:
+def _open_via_loaddetail(page, job: str, args_js: str, doc_timeout_ms: int = 120000) -> bool:
     page.evaluate(_trigger_js(args_js))
     try:
-        # The modal's docs typically load in ~30s. The backfill is serial
-        # (uncontended), so 45s is ample headroom — the daily run's parallel
-        # fetch keeps its longer 90s wait. This bounds the per-job worst case
-        # on an all-day grind.
-        page.locator("#modalDetail a").filter(
-            has_text=re.compile(re.escape(job))).first.wait_for(state="attached", timeout=45000)
+        page.locator("#modalDetail a[href*='downloaddoc.aspx']").first.wait_for(
+            state="attached", timeout=doc_timeout_ms)
         return True
     except Exception:  # noqa: BLE001
         return False
@@ -137,15 +135,15 @@ def find_search_box(page):
     return best
 
 
-def _modal_has_job(page, job: str) -> bool:
+def _modal_has_docs(page) -> bool:
     try:
-        return page.locator("#modalDetail a").filter(
-            has_text=re.compile(re.escape(job))).count() > 0
+        return page.locator("#modalDetail a[href*='downloaddoc.aspx']").count() > 0
     except Exception:  # noqa: BLE001
         return False
 
 
-def open_order_detail(page, job: str) -> bool:
+def open_order_detail(page, job: str, search_timeout_s: float = 75.0,
+                      doc_timeout_ms: int = 120000) -> bool:
     """Surface `job`'s documents in #modalDetail via the queue's search box.
 
     Types the job number into the search bar, submits (Enter, plus an optional
@@ -171,13 +169,13 @@ def open_order_detail(page, job: str) -> bool:
             pass
     # Poll: the search may re-render the board (postback/filter) or open the
     # detail directly. Either way, wait for the order to surface.
-    deadline = time.monotonic() + 20
+    deadline = time.monotonic() + search_timeout_s
     while time.monotonic() < deadline:
         page.wait_for_timeout(500)
         amap = _board_args(page)
-        if job in amap and _open_via_loaddetail(page, job, amap[job]):
+        if job in amap and _open_via_loaddetail(page, job, amap[job], doc_timeout_ms):
             return True
-        if _modal_has_job(page, job):
+        if _modal_has_docs(page):
             return True
     return False
 
@@ -362,11 +360,12 @@ async def _board_args_async(page) -> Dict[str, str]:
     return out
 
 
-async def _open_via_loaddetail_async(page, job: str, args_js: str) -> bool:
+async def _open_via_loaddetail_async(page, job: str, args_js: str,
+                                     doc_timeout_ms: int = 120000) -> bool:
     await page.evaluate(_trigger_js(args_js))
     try:
-        await page.locator("#modalDetail a").filter(
-            has_text=re.compile(re.escape(job))).first.wait_for(state="attached", timeout=90000)
+        await page.locator("#modalDetail a[href*='downloaddoc.aspx']").first.wait_for(
+            state="attached", timeout=doc_timeout_ms)
         return True
     except Exception:  # noqa: BLE001
         return False
@@ -390,15 +389,15 @@ async def find_search_box_async(page):
     return best
 
 
-async def _modal_has_job_async(page, job: str) -> bool:
+async def _modal_has_docs_async(page) -> bool:
     try:
-        return await page.locator("#modalDetail a").filter(
-            has_text=re.compile(re.escape(job))).count() > 0
+        return await page.locator("#modalDetail a[href*='downloaddoc.aspx']").count() > 0
     except Exception:  # noqa: BLE001
         return False
 
 
-async def open_order_detail_async(page, job: str) -> bool:
+async def open_order_detail_async(page, job: str, search_timeout_s: float = 75.0,
+                                  doc_timeout_ms: int = 120000) -> bool:
     box = await find_search_box_async(page)
     if box is None:
         return False
@@ -416,13 +415,13 @@ async def open_order_detail_async(page, job: str) -> bool:
                 await btn.first.click()
         except Exception:  # noqa: BLE001
             pass
-    deadline = time.monotonic() + 20
+    deadline = time.monotonic() + search_timeout_s
     while time.monotonic() < deadline:
         await page.wait_for_timeout(500)
         amap = await _board_args_async(page)
-        if job in amap and await _open_via_loaddetail_async(page, job, amap[job]):
+        if job in amap and await _open_via_loaddetail_async(page, job, amap[job], doc_timeout_ms):
             return True
-        if await _modal_has_job_async(page, job):
+        if await _modal_has_docs_async(page):
             return True
     return False
 
@@ -469,10 +468,12 @@ async def _close_modal_async(page) -> None:
 
 
 async def process_one_async(page, context, job: str, folder: str = "",
-                            li_store: Dict[str, Any] | None = None) -> Dict[str, Any]:
+                            li_store: Dict[str, Any] | None = None,
+                            search_timeout_s: float = 75.0,
+                            doc_timeout_ms: int = 120000) -> Dict[str, Any]:
     rec: Dict[str, Any] = {"job": job, "status": "", "scanned_at": datetime.now().isoformat(timespec="seconds")}
     try:
-        if not await open_order_detail_async(page, job):
+        if not await open_order_detail_async(page, job, search_timeout_s, doc_timeout_ms):
             rec["status"] = "not-found"
             return rec
         docs = await _collect_docs_async(page)
@@ -544,7 +545,9 @@ async def _backfill_worker(worker_id: int, context, queue: asyncio.Queue,
                            dwg: Dict[str, Dict[str, Any]],
                            li_store: Dict[str, Any],
                            state: Dict[str, int],
-                           total: int, delay: float) -> None:
+                           total: int, delay: float, pass_no: int,
+                           search_timeout_s: float,
+                           doc_timeout_ms: int) -> None:
     try:
         page = await _open_backfill_page(context)
     except Exception as e:  # noqa: BLE001
@@ -558,7 +561,8 @@ async def _backfill_worker(worker_id: int, context, queue: asyncio.Queue,
                 break
             try:
                 records[job] = await process_one_async(
-                    page, context, job, dwg.get(job, {}).get("folder", ""), li_store=li_store)
+                    page, context, job, dwg.get(job, {}).get("folder", ""), li_store=li_store,
+                    search_timeout_s=search_timeout_s, doc_timeout_ms=doc_timeout_ms)
             except Exception as e:  # noqa: BLE001
                 log.warning("Backfill error for %s: %s", job, e)
                 records[job] = {
@@ -569,8 +573,8 @@ async def _backfill_worker(worker_id: int, context, queue: asyncio.Queue,
             finally:
                 state["processed"] += 1
                 processed = state["processed"]
-                log.info("  backfill %d/%d  (%s -> %s)",
-                         processed, total, job, records[job].get("status"))
+                log.info("  pass %d backfill %d/%d  (%s -> %s)",
+                         pass_no, processed, total, job, records[job].get("status"))
                 if processed % 25 == 0:
                     save_progress(records)
                     line_items.save_store(li_store)
@@ -585,13 +589,15 @@ async def _backfill_worker(worker_id: int, context, queue: asyncio.Queue,
 async def _run_parallel_backfill(jobs: List[str], records: Dict[str, Dict[str, Any]],
                                  dwg: Dict[str, Dict[str, Any]],
                                  li_store: Dict[str, Any],
-                                 parallel: int, delay: float) -> tuple[int, int]:
+                                 parallel: int, delay: float, passes: int,
+                                 search_timeout_s: float,
+                                 doc_timeout_ms: int) -> tuple[int, int]:
     if not jobs:
         return 0, 0
     from playwright.async_api import async_playwright
 
     rc = 0
-    state = {"processed": 0}
+    processed_total = 0
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(storage_state=str(STORAGE_STATE_PATH), accept_downloads=True)
@@ -608,30 +614,45 @@ async def _run_parallel_backfill(jobs: List[str], records: Dict[str, Dict[str, A
             finally:
                 await page.close()
 
-            queue: asyncio.Queue = asyncio.Queue()
-            for job in jobs:
-                queue.put_nowait(job)
-            n = min(max(1, parallel), len(jobs))
-            log.info("Backfill fetch: %d job(s), %d parallel...", len(jobs), n)
-            results = await asyncio.gather(
-                *[asyncio.create_task(_backfill_worker(i + 1, context, queue, records, dwg,
-                                                       li_store, state, len(jobs), delay))
-                  for i in range(n)],
-                return_exceptions=True,
-            )
-            for err in results:
-                if isinstance(err, Exception):
-                    log.warning("Backfill worker failed: %s", err)
-            if state["processed"] < len(jobs):
-                rc = 1
-                log.warning("%d job(s) were not processed because every worker stopped early.",
-                            len(jobs) - state["processed"])
+            todo = list(jobs)
+            for pass_no in range(1, max(1, passes) + 1):
+                queue: asyncio.Queue = asyncio.Queue()
+                for job in todo:
+                    queue.put_nowait(job)
+                state = {"processed": 0}
+                n = min(max(1, parallel), len(todo))
+                log.info("Backfill fetch pass %d/%d: %d job(s), %d parallel...",
+                         pass_no, max(1, passes), len(todo), n)
+                results = await asyncio.gather(
+                    *[asyncio.create_task(_backfill_worker(
+                        i + 1, context, queue, records, dwg, li_store, state,
+                        len(todo), delay, pass_no, search_timeout_s, doc_timeout_ms))
+                      for i in range(n)],
+                    return_exceptions=True,
+                )
+                processed_total += state["processed"]
+                for err in results:
+                    if isinstance(err, Exception):
+                        log.warning("Backfill worker failed: %s", err)
+                if state["processed"] < len(todo):
+                    rc = 1
+                    log.warning("%d job(s) were not processed because every worker stopped early.",
+                                len(todo) - state["processed"])
+                if pass_no >= max(1, passes):
+                    break
+                retry = [job for job in todo
+                         if (records.get(job) or {}).get("status") in RETRYABLE_STATUSES]
+                if not retry:
+                    break
+                log.info("  %d job(s) incomplete after pass %d; retrying those.",
+                         len(retry), pass_no)
+                todo = retry
         finally:
             with contextlib.suppress(Exception):
                 await context.close()
             with contextlib.suppress(Exception):
                 await browser.close()
-    return state["processed"], rc
+    return processed_total, rc
 
 
 # --------------------------------------------------------------------------- #
@@ -785,6 +806,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--limit", type=int, default=0, help="Stop after N orders this run (0 = no limit).")
     ap.add_argument("--parallel", type=int, default=SO_CONCURRENCY,
                     help=f"How many CBC Insider searches to run at once (default SO_CONCURRENCY={SO_CONCURRENCY}).")
+    ap.add_argument("--passes", type=int, default=2,
+                    help="Retry not-found/no-SO/error jobs within this run (default 2).")
+    ap.add_argument("--search-timeout", type=float, default=75.0,
+                    help="Seconds to wait for search results/detail to surface per job (default 75).")
+    ap.add_argument("--doc-timeout", type=float, default=120.0,
+                    help="Seconds to wait for document links after opening detail (default 120).")
     ap.add_argument("--min-job", type=int, default=autocad_scan.DEFAULT_MIN_JOB,
                     help=f"On a folder sweep, skip job numbers below this (default {autocad_scan.DEFAULT_MIN_JOB}).")
     ap.add_argument("--max-job", type=int, default=0, help="Skip job numbers above this (0 = no cap).")
@@ -828,7 +855,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     processed = 0
     if pending:
         processed, rc = asyncio.run(_run_parallel_backfill(
-            pending, records, dwg, li_store, args.parallel, args.delay))
+            pending, records, dwg, li_store, args.parallel, args.delay,
+            args.passes, args.search_timeout, int(args.doc_timeout * 1000)))
     else:
         log.info("No pending jobs to backfill.")
 
@@ -839,7 +867,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         master_sync.run("backfill", "line_items")
     except Exception as e:  # noqa: BLE001
         log.warning("Could not sync backfill to the live master (%s)", e)
-    out = write_workbook(records, dwg, Path(args.out))
+    out: Path | None = None
+    try:
+        out = write_workbook(records, dwg, Path(args.out))
+    except PermissionError as e:
+        rc = 1
+        log.warning("Could not write %s (%s). Close the workbook and rerun to refresh it; "
+                    "progress JSON and line-item stores were already saved.", args.out, e)
     by_status: Dict[str, int] = {}
     for r in records.values():
         by_status[r.get("status", "?")] = by_status.get(r.get("status", "?"), 0) + 1
@@ -849,7 +883,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         log.info("  %d job(s) not found via search - if that seems high, the search box may need "
                  "CBC_SEARCH_SELECTOR / CBC_SEARCH_BUTTON set (see `discover_documents.py --probe`).",
                  by_status["not-found"])
-    log.info("  Wrote %s", out)
+    if out:
+        log.info("  Wrote %s", out)
     return rc
 
 

@@ -71,13 +71,13 @@ def test_d64_wheel_construction_xlsx():
         ["421492_314-26-1647 D64 Wheel Construction (Inner).xlsx"], runs
 
 
-def test_so_ignores_cs_salesorder():
-    # CS_SalesOrder (the OrderVerificationReportViewer doc) must not be taken
-    # for the Sales Order — CO# keys off CBC_SalesOrder revisions only.
-    for docs, fn in ((DOCS_421473, "421473 - Sales Order.pdf"),
-                     (DOCS_421492, "421492 - Sales Order.pdf")):
+def test_so_accepts_cs_salesorder():
+    # Some historical orders file their actual Sales Order as CS_SalesOrder,
+    # so CBC_ and CS_ SalesOrder pid types are the same document family.
+    for docs, fn in ((DOCS_421473, "OrderVerificationReportViewer_04ccbc64-2e6e-4c0d"),
+                     (DOCS_421492, "OrderVerificationReportViewer_de47e417-9c6f-4271")):
         so = _latest_of_type(docs, SO_TYPE)
-        assert so[1]["fn"] == fn and so[1]["rev"] == 1
+        assert so[1]["fn"] == fn and so[1]["rev"] == 2
 
 
 def test_dedicated_pid_type_sorts_first():

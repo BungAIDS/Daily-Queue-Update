@@ -488,9 +488,12 @@ def _parse_doc(href: str) -> Dict[str, Any]:
 
 
 def _norm_type(t: str | None) -> str:
-    """Normalize a pid type for comparison: lowercase, drop a leading 'cbc_'."""
+    """Normalize a pid type for comparison: lowercase, drop site prefixes."""
     t = (t or "").lower()
-    return t[4:] if t.startswith("cbc_") else t
+    for prefix in ("cbc_", "cs_"):
+        if t.startswith(prefix):
+            return t[len(prefix):]
+    return t
 
 
 def _latest_of_type(docs: List, type_name: str):

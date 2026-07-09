@@ -614,7 +614,7 @@ python backfill_orders.py                  # all real AutoCAD job folders
 python backfill_orders.py --list jobs.txt  # or a file of job numbers
 python backfill_orders.py --range 420000 421000
 python backfill_orders.py --limit 100 --parallel 8
-python backfill_orders.py --limit 500 --parallel 8 --newest-first --from-dwg-progress --max-job 430000
+python backfill_orders.py --limit 500 --parallel 8 --newest-first --from-dwg-progress --min-job 401000 --max-job 430000 --delay 0
 python backfill_orders.py 421314 421388 --force --parallel 2  # recheck known jobs
 ```
 
@@ -633,6 +633,12 @@ skipped by default so a long scan can keep moving; add `--retry-not-found` after
 fixing a selector/session issue or when you want to recheck misses. If the
 AutoCAD DWG scan has already run, `--from-dwg-progress` uses that saved job list
 and avoids rewalking the network folder tree for every batch.
+
+The old `400xxx` and lower orders may live behind a different CBC Insider lookup
+path; use `--min-job 401000` for the normal search-box backfill until that path
+is added. The scanner retries incomplete rows (`not-found`, `no-SO`, `error`) in
+the same run by default (`--passes 2`) and waits longer for document links than
+the live watcher because the backlog batches are unattended.
 
 Old orders are opened through the queue page's **"search order" / "find order"**
 box — the backfill types each job number in and opens the surfaced order. The
