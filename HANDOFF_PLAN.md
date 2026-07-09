@@ -58,7 +58,7 @@ scanned PDFs ──pdf_vision.py (Claude API)──>  (full doc text), vision.tr
   14 UNRECOGNIZED (.doc/.xls). 128 scanned PDFs read by vision (all quote
   runs, none drawings); 123 have transcripts (5 from the pre-transcript trial
   don't — QC flags them).
-- ~54 fields/run average after the arrangement-section templates.
+- ~58 fields/run average (after the 2026-07-09 hub/coupling/box batch).
 - **59 vision runs flagged `CHECK VISION`** by QC (list in WORKLOG / filter
   the xlsx Status column): dominant cause is OCR misreading **S as 8/5** in
   arrangements ("7S1"→"781", "8S"→"88"), plus model/transcript disagreements
@@ -79,27 +79,41 @@ scanned PDFs ──pdf_vision.py (Claude API)──>  (full doc text), vision.tr
   404795, 400567, 410087) against the PDFs. Each ❌ becomes a pattern fix +
   regression test.
 
-### P1 — Coupling-shaft block + accessory lines (next pattern batch)
-Measured top uncaptured clusters (counts = lines across corpus):
-- 164x `MAX SHAFT DIAMETER AT FAN SHAFT HALF COUPLING = N.N` (+ MIN 164x,
-  NOM 110x) → fields `Coupling Max/Min/Nom Shaft Dia`.
-- 94x `KEYWAY DIMENSIONS FOR HALF COUPLING = N.N X N.N` → `Coupling Keyway`.
-- 164x `THE BEARING TEMPERATURE AT N F AMBIENT IS ACCEPTABLE.` → flag field.
-- 108x `REINFORCED INLET CONE INCL. PER SK-N-N` → `Inlet Cone SK`.
-- 106x `SHAFT SAFETY GUARD  n  n` → accessory presence (+weight/price cols).
-- 81x `FRAME BASED ON ODP, OTHERWISE SPECIFY ITEM N` → Motor Enclosure
-  default when no explicit TEFC/ODP (don't overwrite an explicit one).
-- 88x `BASE NOT SIZED FOR GEAR BOX...` note; 122x `ORDER N` (cross-check vs
-  job#); 76x `OVERALL DIMENSIONS:` block (L×W×H — parse the lines after it).
-METHOD: same as before — pin shapes from the corpus, add to `_CB_PATTERNS`,
-add real-fixture tests, run the coverage matrix script (in WORKLOG/git
-history of this chat's scripts), `--reparse-stored`, verify counts.
+### P1 — Coupling-shaft block + hub/box/accessory lines  [DONE 2026-07-09]
+Landed: `Coupling Max/Min/Nom Shaft Dia`, `Coupling Keyway`; fabricated-hub
+`Hub Tube/Flanges/Centers` + `Hub Bore/OD/Bushing`; `Box B/C`, `Inlet Box
+Angle`; `Inlet Cone`; `Safety Guard`. Plus `Sheave PD` reads `SPECIFIED PD`
+and `Hub` accepts plural `HUBS`. Coverage tagging (below) now measures what's
+left. Still-open sub-items rolled into P1b:
+- `THE BEARING TEMPERATURE AT N F AMBIENT IS ACCEPTABLE.` → flag field.
+- `FRAME BASED ON ODP, OTHERWISE SPECIFY ITEM N` → Motor Enclosure default when
+  no explicit TEFC/ODP (don't overwrite an explicit one).
+- `BASE NOT SIZED FOR GEAR BOX...` note; `ORDER N` (cross-check vs job#).
 
-### P2 — Wheel-construction table: per-component WR2 + weight
-The table rows (`BLADES 1/4 ASTM... 81 54`) already yield material+gauge; the
-two trailing columns (WR2, weight) are dropped. Extend the row regexes with
-two more capture patterns per component (`Blade WR2`, `Blade Weight Lb`, ...).
-Watch the HUB row (5 numbers: wr2, weight, total weight, price).
+### P1c — Coverage tagging ("read right over it")  [DONE 2026-07-09]
+`templates.coverage_tags(text, fields)` = high-precision probes: a data family
+whose keyword is present but which produced no field. `missed_data_lines()` =
+the actual uncaptured lines (noise-filtered, capped 15). Both stored per run
+(`coverage_tags`, `missed_data`) via `quote_run_scan.apply_coverage`, surfaced
+in the workbook **Review** column. Self-clearing: add a pattern → the tag drops
+on the next reparse, so the tag count is a live coverage metric. After P1 only
+2/450 runs are tagged (both legitimate specials). To add a family: append a
+`(tag, keyword-regex, field-keys)` probe to `_COVERAGE_PROBES`.
+
+### P2 — Alternate outline format + spun sideplate + WR2/weight (next batch)
+Top remaining uncaptured clusters (measured 2026-07-09, ~8.0k non-noise lines):
+- **Alternate outline dims** (`D = 56 1/16`, `A = 22 13/16`, and the packed
+  `D = .. ,F/2 = .. ,FA = ..` lines — DA/DB/DC/CA-CE/FF/FR/FY... `code inch mm`,
+  ~113 runs). A second outline format with ~40 detail codes beyond the AXIAL/
+  SIDE VIEW table. Biggest gap; needs a block parser like `_parse_outline_dims`
+  keyed on `CODE = inch  mm` (some codes overlap the table — don't overwrite).
+- **Spun sideplate** row (`SIDEPL,SPUN 0.075 (14) ..`, 179 lines) — a wheel-
+  table variant the sideplate regex misses.
+- **Wheel-table trailing columns**: the WR2 + weight (+ price) after each
+  component row (`BLADES 1/4 ASTM.. 81 54`) are dropped. Extend the row regexes
+  with two more captures per component. Watch the HUB row (5 numbers).
+- `GOOD FOR $..` (price variant), `OUT ANGLE`, `OUTLINE DIM. FORM SK-` refs,
+  `BURN TAPES`/`CHANNEL` accessory rows.
 
 ### P3 — Multi-printout files  [4S/8S case: DONE]
 `templates.select_primary_run_text` splits a doc into pages and, when a fan is
@@ -112,9 +126,13 @@ turns up, extend select_primary_run_text (it already has the page split).
 ### P4 — The 14 UNRECOGNIZED (.doc/.xls) — mostly damper quote runs
 Old binary formats; no Python reader in-repo. Options: (a) DG bulk-converts
 to .docx via Word once (folder script), then existing docx path reads them;
-(b) add a `docx2txt`-style .doc extractor dep. Then design a DAMPER template
-(different product line — fields unknown; get a sample first). The `damper`
-column already flags them.
+(b) add a `docx2txt`-style .doc extractor dep. The `damper` column already
+flags them. NOTE (2026-07-09): the *readable* damper docs are full fan runs
+(the fan the damper attaches to) — often the order's ONLY run — so we extract
+the fan run and flag `damper=True` rather than stripping fields (stripping would
+blank 419624/418421/405167). Box B/C/Inlet-Box/Cone now capture the damper
+geometry. A DAMPER-specific template (blade count, damper size) is additive and
+needs a sample of which damper fields DG wants.
 
 ### P5 — D64 wheel-construction xlsx (27 runs)
 Still generic key/value. Needs ONE real sheet from DG (or read cells from the

@@ -3,6 +3,66 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-07-09 — Hub/coupling/box fields + coverage tagging ("read right over it")
+
+DG's asks: (1) fabricated hubs have no cast part number but do carry hub data
+(HUB TUBE 3/4, HUB FLANGES 1/2, HUB BORE/OD) that we were reading right over;
+(2) "there are similar cases where we miss info because it doesn't match — TAG
+these"; (3) how much is still missing. All grounded on the real corpus
+(`git show origin/order-data:quote_run_scan_progress.json`), tested, reparsed.
+
+New CB fields (`templates.py` `_CB_PATTERNS`, all real corpus shapes):
+- **Fabricated hub** (no part number): `Hub Tube Gauge/Material`,
+  `Hub Flanges Gauge/Material`, `Hub Centers Material`, `Hub Bore`, `Hub OD`,
+  `Hub Bushing` (`Q2 BUSHING ..`). Fixes the 421572-style hub. `Hub Bore` also
+  fires on cast hubs.
+- **Half-coupling shaft block**: `Coupling Max/Min/Nom Shaft Dia`,
+  `Coupling Keyway` (`= 0.3750 X 0.1875`). ~36% of runs.
+- **Inlet/damper box**: `Box B`, `Box C` (`BOX B X C: 73 IN. X 15 1/2 IN.`),
+  `Inlet Box Angle` (spec-line `,BOX 270`; `BOX 0` = no box, skipped).
+- **Inlet Cone** (`REINFORCED INLET CONE INCL. PER SK-19-72`) + **Safety Guard**
+  presence flag (`SHAFT SAFETY GUARD`).
+- Two bug fixes surfaced by the tag: `Sheave PD` now also reads `SPECIFIED PD`
+  (customer item-59 override), and the `Hub` part-number pattern accepts the
+  plural `HUBS 19-5-21`.
+
+**Coverage tagging** (`templates.coverage_tags` / `missed_data_lines`, wired
+through `quote_run_scan.apply_coverage`, stored on each run as `coverage_tags`
++ `missed_data`, surfaced in the new workbook **Review** column, amber):
+- `coverage_tags` = high-precision, self-clearing probes — a data family whose
+  keyword is in the doc but produced NO field ("read right over it"). After the
+  new patterns only **2 of 450** runs are tagged, both legitimate specials: a
+  fabricated FEA-markup billet hub (415970), and a dual-motor shared-sheave
+  drive (417445). Add a pattern for a family → its tag disappears on reparse, so
+  the tag count is a live coverage metric.
+- `missed_data` = the actual uncaptured data lines (noise-filtered, capped 15)
+  behind the tags, so a human/next pass sees exactly what's still read over.
+
+Avg fields/run **54 → 58**. Full suite green (test_line_items still skipped —
+sandbox pdfminer/cryptography panic, pre-existing).
+
+**How much is still missing (uncaptured, non-noise data lines, uncapped):**
+~8.0k lines across 294 text runs. Ranked remaining clusters (the next batch):
+- **Alternate outline-dimension format** (`D = 56 1/16`, `A = 22 13/16`, the
+  DA/DB/DC/CA-CE/FF/FR/FY... `code = inch  mm` list, ~113 runs). Same geometry
+  family as the AXIAL/SIDE VIEW table we already parse, but a second compact
+  format with ~40 extra detail codes not in the table. Biggest gap.
+- **Spun sideplate** construction row (`SIDEPL,SPUN 0.075 (14) ..`, 179 lines) —
+  a wheel-table variant our sideplate row regex misses.
+- **Accessory rows**: `BURN TAPES`, `CHANNEL`/stiffener, and the trailing
+  WR2/weight/price columns on every wheel-construction row (the P2 item).
+- `GOOD FOR $..` (price variant), `OUT ANGLE`, `OUTLINE DIM. FORM SK-` refs.
+
+**Damper docs** (DG: "only damper-relevant info should count"): investigated all
+19 damper-flagged runs. The readable ones are *full fan runs* (the fan the
+damper attaches to) — and for 419624/418421/405167 the damper-titled file is the
+order's ONLY run, so stripping fan fields would blank the order. The 10 `.doc`
+ones are unreadable binary (yield nothing already). So the correct,
+non-destructive behavior is what we have: extract the fan run + carry the
+`damper=True` flag (filterable). The new Box B/C/Inlet-Box/Cone fields now also
+capture the damper-relevant geometry. Damper-*specific* fields (blade count,
+damper size) would be additive — needs a sample of what damper data DG wants.
+
 ## 2026-07-01 — Shaft/bearing geometry + outline dims (BX/STB/N/F etc.)
 
 DG pointed at the full job-421579 run (the earlier samples were trimmed above

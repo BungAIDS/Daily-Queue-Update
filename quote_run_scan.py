@@ -79,6 +79,15 @@ CORE_FIELDS = [
     "Total Weight Lb", "Total Price",
     "Hub", "Coupling", "Drive", "Engineering Approval", "FEA Analysis",
     "Non-Std Wheel Materials", "Shrink Fit", "Factory Run Test",
+    # Fabricated-hub construction (no cast part number) + hub bore/OD/bushing
+    "Hub Tube Gauge", "Hub Tube Material", "Hub Flanges Gauge",
+    "Hub Flanges Material", "Hub Centers Material",
+    "Hub Bore", "Hub OD", "Hub Bushing",
+    # Half-coupling shaft geometry + keyway
+    "Coupling Max Shaft Dia", "Coupling Min Shaft Dia", "Coupling Nom Shaft Dia",
+    "Coupling Keyway",
+    # Inlet/damper box + inlet cone + accessory presence
+    "Box B", "Box C", "Inlet Box Angle", "Inlet Cone", "Safety Guard",
 ]
 
 
@@ -106,6 +115,32 @@ def classify_status(template: str, fields: Dict[str, Any], raw_lines: List[str],
     if ext == ".pdf" and not raw_lines:
         return "PDF (no text layer)"   # a drawing/scanned run, not a parsing gap
     return "NO FIELDS"                 # readable, but no fields pulled — needs tuning
+
+
+def apply_coverage(run: Dict[str, Any]) -> None:
+    """Tag a run when it carries recognizable engineering data we didn't
+    structure ("we read right over it") — DG's ask. Sets `coverage_tags` (the
+    data families present-but-uncaptured) and `missed_data` (the actual lines),
+    both self-clearing as patterns improve. Only meaningful for selection-program
+    runs; a keyless run has nothing to compare against."""
+    from templates import coverage_tags, missed_data_lines, is_selection_program
+    vision = run.get("vision") or {}
+    text = "\n".join(run.get("raw_lines") or []) or vision.get("transcript", "")
+    fields = run.get("fields") or {}
+    if not text or not fields or not is_selection_program(text):
+        run.pop("coverage_tags", None)
+        run.pop("missed_data", None)
+        return
+    tags = coverage_tags(text, fields)
+    missed = missed_data_lines(text, fields)
+    if tags:
+        run["coverage_tags"] = tags
+    else:
+        run.pop("coverage_tags", None)
+    if missed:
+        run["missed_data"] = missed
+    else:
+        run.pop("missed_data", None)
 
 
 def reparse_stored(records: Dict[str, Dict[str, Any]]) -> int:
@@ -139,6 +174,7 @@ def reparse_stored(records: Dict[str, Dict[str, Any]]) -> int:
                 from pdf_vision import apply_vision_qc
                 apply_vision_qc(run)
             run["summary"] = _cb_summary(run["fields"])
+            apply_coverage(run)
             if run["fields"] and run.get("status") not in ("CHECK VISION",):
                 run["status"] = "OK"
                 if not vision:
@@ -181,6 +217,9 @@ def run_rows(records: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "type": rec.get("type", ""),
                 "status": run.get("status", ""),
                 "damper": run.get("damper", False),
+                # Data families present in the doc but not structured — the
+                # "we read right over it" flag; empty = fully captured.
+                "review": ", ".join(run.get("coverage_tags") or []),
                 "template": run.get("template", ""),
                 "file": run.get("file", ""),
                 "path": run.get("path", ""),
@@ -209,7 +248,7 @@ def scan_one(job: str, jtype: str, folder: Path) -> Dict[str, Any]:
         r = parse_quote_run(f)
         if r["fields"] and "Serial" not in r["fields"]:
             r["fields"]["Serial"] = job   # runs often omit the SN# header
-        runs.append({
+        run = {
             "file": f.name,
             "path": str(f),
             "template": r["template"],
@@ -221,7 +260,9 @@ def scan_one(job: str, jtype: str, folder: Path) -> Dict[str, Any]:
             # re-parsable corpus (new patterns re-extract without re-reading Z:).
             "raw_lines": r["raw_lines"],
             "mtime": _mtime(f),   # recency signal for ranking multiple runs
-        })
+        }
+        apply_coverage(run)   # tag data families present-but-uncaptured
+        runs.append(run)
     return {
         "job": job,
         "type": jtype,
@@ -269,7 +310,7 @@ def write_workbook(records: Dict[str, Dict[str, Any]], path: Path) -> Path:
     bad_fill = PatternFill("solid", fgColor="FFC7CE")    # red: unrecognized / no text
 
     rows = run_rows(records)
-    fixed = ["Job #", "Type", "Status", "Template", "Run File", "Damper"]
+    fixed = ["Job #", "Type", "Status", "Template", "Run File", "Damper", "Review"]
     headers = fixed + CORE_FIELDS + ["Other", "Summary", "Folder"]
 
     wb = Workbook()
@@ -297,6 +338,9 @@ def write_workbook(records: Dict[str, Dict[str, Any]], path: Path) -> Path:
             fcell.hyperlink = row["path"]
             fcell.font = link_font
         ws.cell(i, 6, "DAMPER" if row["damper"] else "")
+        rcell = ws.cell(i, 7, row["review"])
+        if row["review"]:
+            rcell.fill = warn_fill   # amber: data present we didn't structure
         for k, name in enumerate(CORE_FIELDS, start=len(fixed) + 1):
             ws.cell(i, k, row["core"].get(name, ""))
         base = len(fixed) + len(CORE_FIELDS)
