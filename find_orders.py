@@ -381,7 +381,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         out = write_xlsx(hits, Path(args.xlsx), store)
         n = sum(len(h["matches"]) for h in hits)
         print(f"\nWrote {n} item row(s) across {len(hits)} order(s) "
-              f"(+ the green-✓/red Feature Matrix tab) -> {out}")
+              f"(+ the green-check/red Feature Matrix tab) -> {out}")
     return 0
 
 
