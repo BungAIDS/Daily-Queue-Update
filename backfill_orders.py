@@ -113,6 +113,27 @@ def _open_via_loaddetail(page, job: str, args_js: str, doc_timeout_ms: int = 120
         return False
 
 
+def _open_matching_card(page, job: str, doc_timeout_ms: int = 120000) -> bool:
+    """Open the surfaced order row by clicking it instead of replaying loadDetail().
+
+    Some legacy order rows carry punctuation in their inline loadDetail arguments.
+    Browser-clicking the original row is more faithful than rebuilding that
+    JavaScript string and avoids syntax errors on odd argument text.
+    """
+    for c in page.locator(CONTAINER_SELECTOR).all():
+        m = re.search(r"loadDetail\((.*?)\)", c.get_attribute("onclick") or "")
+        if not m or _jobnum(m.group(1).strip()) != job:
+            continue
+        try:
+            c.evaluate("(el) => el.click()")
+            page.locator("#modalDetail a[href*='downloaddoc.aspx']").first.wait_for(
+                state="attached", timeout=doc_timeout_ms)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+    return False
+
+
 def find_search_box(page):
     """Locate the queue page's "search order" / "find order" box, or None.
 
@@ -172,8 +193,7 @@ def open_order_detail(page, job: str, search_timeout_s: float = 75.0,
     deadline = time.monotonic() + search_timeout_s
     while time.monotonic() < deadline:
         page.wait_for_timeout(500)
-        amap = _board_args(page)
-        if job in amap and _open_via_loaddetail(page, job, amap[job], doc_timeout_ms):
+        if _open_matching_card(page, job, doc_timeout_ms):
             return True
         if _modal_has_docs(page):
             return True
@@ -371,6 +391,21 @@ async def _open_via_loaddetail_async(page, job: str, args_js: str,
         return False
 
 
+async def _open_matching_card_async(page, job: str, doc_timeout_ms: int = 120000) -> bool:
+    for c in await page.locator(CONTAINER_SELECTOR).all():
+        m = re.search(r"loadDetail\((.*?)\)", await c.get_attribute("onclick") or "")
+        if not m or _jobnum(m.group(1).strip()) != job:
+            continue
+        try:
+            await c.evaluate("(el) => el.click()")
+            await page.locator("#modalDetail a[href*='downloaddoc.aspx']").first.wait_for(
+                state="attached", timeout=doc_timeout_ms)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+    return False
+
+
 async def find_search_box_async(page):
     if CBC_SEARCH_SELECTOR:
         loc = page.locator(CBC_SEARCH_SELECTOR)
@@ -418,8 +453,7 @@ async def open_order_detail_async(page, job: str, search_timeout_s: float = 75.0
     deadline = time.monotonic() + search_timeout_s
     while time.monotonic() < deadline:
         await page.wait_for_timeout(500)
-        amap = await _board_args_async(page)
-        if job in amap and await _open_via_loaddetail_async(page, job, amap[job], doc_timeout_ms):
+        if await _open_matching_card_async(page, job, doc_timeout_ms):
             return True
         if await _modal_has_docs_async(page):
             return True
