@@ -238,7 +238,9 @@ class _TextLineMixin:
 
     def _from_text(self, ctx: QuoteRunContext) -> Dict[str, Any]:
         lines = [ln.rstrip() for ln in ctx.text().splitlines() if ln.strip()]
-        return {"fields": kv_from_lines(lines), "raw_lines": lines[:40]}
+        # Store the whole document (RAW_LINES_CAP is a runaway backstop, not a
+        # real limit) so non-CB text runs are a full corpus for future patterns.
+        return {"fields": kv_from_lines(lines), "raw_lines": lines[:RAW_LINES_CAP]}
 
 
 # Chicago Blower engineering "Qt Run" text — the selection-program dump. The
@@ -314,8 +316,9 @@ _CB_PATTERNS = [
     ("Housing to Wheel CG", r"HOUSING TO WHEEL CG\s+([\d.]+)"),
     ("Housing to Hub Inlet Face", r"HOUSING TO HUB INLET FACE\s+([\d.]+)"),
     # Belt-drive sheave data (arr 9/1): "FAN SHEAVE  ASSUMED PD  6.2 IN, 4000 FPM"
-    # and "AT 2585 RPM, MIN PD  3.0 IN, 2030 FPM".
-    ("Sheave PD", r"ASSUMED PD\s+([\d.]+)\s*IN"),
+    # and "AT 2585 RPM, MIN PD  3.0 IN, 2030 FPM". The PD is ASSUMED (auto-sized)
+    # or SPECIFIED (customer item-59 override) — both are the fan sheave PD.
+    ("Sheave PD", r"(?:ASSUMED|SPECIFIED)\s+PD\s+([\d.]+)\s*IN"),
     ("Min Sheave PD", r"MIN PD\s+([\d.]+)"),
     # Motor / base (motor-mounted arrangements): "BASE , 405T FR MOTOR",
     # "ADJUSTABLE BASE, 365TS FR MOTOR, MOTOR POSITION Z".
@@ -352,8 +355,35 @@ _CB_PATTERNS = [
     # Some runs have no construction table — just a single wheel-material line.
     ("Wheel Material", r"^\s*WHEEL MATERIAL\s+([A-Z0-9][A-Z0-9 .\-]+?)\s*$"),
     ("Class", r"\bCLASS\s+(\d+)\b"),
-    ("Hub", r"\bHUB\s+([0-9][0-9\-]+)"),
+    ("Hub", r"\bHUBS?\s+([0-9][0-9\-]+)"),
     ("Coupling", r"\bCOUPLING\s+([A-Z][A-Z0-9 ]+?)\s*,\s*SIZE"),
+    # Fabricated hub (no cast part number): a HUB TUBE / HUB FLANGES / HUB
+    # CENTERS block in the wheel-construction table, each a gauge + material row
+    # like the blade rows. e.g. "HUB TUBE  3/4  AISI 1026 HFSM  1  23".
+    ("Hub Tube Gauge", r"\bHUB TUBE\s+(" + _GA + r")\s+[A-Z]"),
+    ("Hub Tube Material", r"\bHUB TUBE\s+" + _GA + r"\s+([A-Z][A-Z0-9 .\-]+?)\s+\d+\s+\d"),
+    ("Hub Flanges Gauge", r"\bHUB FLANGES\s+(" + _GA + r")\s+[A-Z]"),
+    ("Hub Flanges Material", r"\bHUB FLANGES\s+" + _GA + r"\s+([A-Z][A-Z0-9 .\-]+?)\s+\d+\s+\d"),
+    ("Hub Centers Material", r"\bHUB CENTERS\s+\S+\s+([A-Z][A-Z0-9 .\-]+?)\s+\d+\s+\d"),
+    # Hub bore/OD — present on both cast ("HUB 19-5-16 BORE 2 15/16 CAST IRON")
+    # and fabricated ("HUB BORE 2 11/16, HUB OD 7.00") hubs.
+    ("Hub Bore", r"\bBORE\s+([\d ./]+?)\s*(?:,|CAST|C\.\s*IRON|HUB OD|$)"),
+    ("Hub OD", r"\bHUB OD\s+([\d.]+)"),
+    ("Hub Bushing", r"\b(Q\d\s+BUSHING\s+[\d ./]+)"),
+    # Shaft/coupling geometry (belt & coupled runs): the half-coupling shaft
+    # diameters and keyway, a large uncaptured cluster.
+    ("Coupling Max Shaft Dia", r"MAX SHAFT DIA(?:METER)?\s+AT FAN SHAFT HALF COUPLING\s*=\s*([\d.]+)"),
+    ("Coupling Min Shaft Dia", r"MIN SHAFT DIA(?:METER)?\s+AT FAN SHAFT HALF COUPLING\s*=\s*([\d.]+)"),
+    ("Coupling Nom Shaft Dia", r"NOM SHAFT DIA(?:METER)?\s+AT FAN SHAFT HALF COUPLING\s*=\s*([\d.]+)"),
+    ("Coupling Keyway", r"KEYWAY DIMENSIONS FOR HALF COUPLING\s*=\s*([\d. /]+X[\d. /]+)"),
+    # Inlet-box / damper box dimensions (fans with an inlet box or damper):
+    # "BOX B X C:  80  IN. X  17  IN." and the box code on the spec line.
+    ("Box B", r"BOX B X C:\s+([\d ./]+?)\s+IN"),
+    ("Box C", r"BOX B X C:[^\n]*?IN\.?\s*X\s+([\d ./]+?)\s+IN"),
+    # Inlet-box orientation angle on the spec line (",BOX 270"). BOX 0 means no
+    # inlet box, so only a non-zero angle is captured.
+    ("Inlet Box Angle", r"\bBOX\s+([1-9]\d*)\b"),
+    ("Inlet Cone", r"REINFORCED INLET CONE INCL\. PER (SK[E]?-[0-9-]+)"),
 ]
 # Compact summary, in engineering-useful order (only the present fields show).
 _CB_SUMMARY_ORDER = [
@@ -416,7 +446,61 @@ def _parse_outline_dims(text: str) -> Dict[str, str]:
     return out
 
 
+# A run file sometimes quotes the SAME fan in two mounting arrangements — an
+# arrangement-4 (wheel on the motor shaft) and an arrangement-8/9 (fan on its
+# own bearings) — as two printouts in one document. Per DG the arrangement-4 is
+# the built unit, so it wins; the others are dropped BEFORE parsing, otherwise
+# the 8/9 run's bearing/rotor section leaks onto the (bearing-less) 4 fan.
+_ARR_LINE = re.compile(r"\bARR\s+(\d[0-9A-Z]*)", re.I)
+_PAGE_BOUNDARY = re.compile(r"^\s*-{15,}\s*$")
+
+
+def select_primary_run_text(text: str) -> str:
+    """When a document concatenates runs in more than one arrangement family and
+    one of them is arrangement 4, return only that run's pages. Single-run docs
+    (one family) are returned unchanged."""
+    lines = text.splitlines()
+    pages: List[List[str]] = []
+    cur: List[str] = []
+    for ln in lines:
+        if _PAGE_BOUNDARY.match(ln):
+            if cur:
+                pages.append(cur)
+            cur = []
+        else:
+            cur.append(ln)
+    if cur:
+        pages.append(cur)
+    if len(pages) <= 1:
+        return text
+    arr_of: List[Optional[str]] = []
+    last: Optional[str] = None
+    for pg in pages:
+        m = _ARR_LINE.search("\n".join(pg))
+        a = m.group(1).upper().rstrip(",") if m else last
+        arr_of.append(a)
+        last = a or last
+    families = {a[0] for a in arr_of if a}
+    if "4" not in families or len(families) <= 1:
+        return text                       # no arr-4 to prefer, or a single run
+    kept = ["\n".join(pg) for pg, a in zip(pages, arr_of) if a and a[0] == "4"]
+    return "\n".join(kept) if kept else text
+
+
 def _parse_chicago_blower(text: str) -> Dict[str, str]:
+    """Parse a CB run. For a dual-arrangement doc (a fan quoted as arr-4 AND
+    arr-8/9), the arr-4 is authoritative (DG's rule), but anything in the arr-8
+    section that the arr-4 didn't provide is kept — the arr-4 never gets
+    overwritten, the 8/9 only fills gaps (extra bearing/outline/accessory data)."""
+    primary = select_primary_run_text(text)
+    fields = _cb_extract(primary)
+    if primary != text:                    # a dual doc was trimmed to arr-4
+        for k, v in _cb_extract(text).items():
+            fields.setdefault(k, v)         # keep non-conflicting arr-8 data
+    return fields
+
+
+def _cb_extract(text: str) -> Dict[str, str]:
     fields: Dict[str, str] = {}
     for label, pat in _CB_PATTERNS:
         m = re.search(pat, text, re.I | re.M)
@@ -473,12 +557,109 @@ def _parse_chicago_blower(text: str) -> Dict[str, str]:
         fields["Shrink Fit"] = "Yes"
     if "RUN TEST AT FACTORY" in up:
         fields["Factory Run Test"] = "Yes"
+    if "SHAFT SAFETY GUARD" in up:
+        fields["Safety Guard"] = "Yes"
     return fields
 
 
 def _cb_summary(fields: Dict[str, str]) -> str:
     parts = [f"{k}={fields[k]}" for k in _CB_SUMMARY_ORDER if k in fields]
     return "; ".join(parts)
+
+
+# --- Coverage tagging: "we read right over it because it doesn't match" -------
+# DG's ask: when a run carries recognizable engineering data (hub construction,
+# a sheave PD, a half-coupling) but our patterns produced NO field for that
+# family, we must TAG the run so the miss is visible instead of silently dropped.
+# Each probe is (tag, keyword-present regex, the field keys that mean the family
+# WAS structured). Keyword present + none of those keys captured = a real miss.
+# The tag is self-clearing: add a pattern that captures the family and the tag
+# disappears on the next reparse — the tag count is a live coverage metric.
+_COVERAGE_PROBES = [
+    # A hub-construction line: a hub keyword, "HUB SPECIAL", or a hub part
+    # number ("HUB 19-5-218", "HUBS 19-5-21"). NOT "STRESS RATIO AT HUB 0.34"
+    # (a ratio, not a hub) — hence the AT-HUB exclusion and the dash requirement
+    # on the part-number form.
+    ("hub", re.compile(
+        r"(?<!AT )\bHUBS?\s+(?:TUBE|FLANGES|CENTERS|BORE|OD|HARDWARE|SPECIAL|\d+\s*-)", re.I),
+     ("Hub", "Hub Tube Gauge", "Hub Tube Material", "Hub Flanges Gauge",
+      "Hub Flanges Material", "Hub Centers Material", "Hub Bore", "Hub OD",
+      "Hub Bushing")),
+    ("coupling", re.compile(r"\bHALF COUPLING\b|\bCOUPLING\b", re.I),
+     ("Coupling", "Coupling Max Shaft Dia", "Coupling Min Shaft Dia",
+      "Coupling Nom Shaft Dia", "Coupling Keyway")),
+    ("inlet_box", re.compile(r"\bBOX B X C\b|\bINLET BOX\b", re.I),
+     ("Box B", "Box C", "Inlet Box Size")),
+    ("sheave", re.compile(r"\bFAN SHEAVE\b", re.I),
+     ("Sheave PD", "Min Sheave PD")),
+    ("inlet_cone", re.compile(r"REINFORCED INLET CONE", re.I),
+     ("Inlet Cone",)),
+]
+
+# Lines that carry no field-worthy data — timestamps, the numeric parameter
+# dump, item-code dumps, inquiry/order numbers, note banners. Excluded from the
+# "missed data lines" review list so what's left is genuine uncaptured content.
+_MISS_NOISE = re.compile(
+    r"^[\s\-=*_/.]*$"
+    r"|^\s*\d+\s+[\d.]+\s*,"                       # param dump: '  10  2800.0000,'
+    r"|'\s*[A-Z0-9 ]{1,4}\s*'"                     # item-code dump: "2 'LS  '"
+    r"|CONFIDENTIAL|CHICAGO BLOWER|INQUIRY|SN#|ORDER #"
+    r"|\*\*\*"                                     # note banners
+    r"|^\s*(?:MON|TUE|WED|THU|FRI|SAT|SUN)\b"      # timestamp lines
+    r"|^\s*\d{3}-\d{2}-\d+\s*$"                    # bare inquiry number
+    r"|^\s*(?:\d+\s+){5,}\d*\s*$"                  # numeric matrix rows
+    r"|NOTE|ACCEPTABLE|NOT VALID|APPROVED BY|SPECIFY ITEM"
+    r"|BASED ON|OTHERWISE|ASSUMED|CAN SPECIFY|IGNORED|CAN TRY",
+    re.I)
+_MISS_NUM = re.compile(r"\d+(?:\s+\d+/\d+|/\d+|\.\d+)?")
+
+
+def _num_tokens(s: str) -> set:
+    return {m.group(0).strip() for m in _MISS_NUM.finditer(s)}
+
+
+def coverage_tags(text: str, fields: Dict[str, str]) -> List[str]:
+    """High-precision tags: a data family whose keyword is in the text but which
+    produced no field — the "we read right over it" case DG flagged. Empty for a
+    fully-captured run. Returned sorted for stable output/tests."""
+    up = (text or "").upper()
+    tags = []
+    for tag, kw, keys in _COVERAGE_PROBES:
+        if kw.search(up) and not any(fields.get(k) for k in keys):
+            tags.append(tag)
+    return sorted(tags)
+
+
+def missed_data_lines(text: str, fields: Dict[str, str], cap: int = 15) -> List[str]:
+    """The review aid behind the coverage tags: the actual document lines that
+    carry a value not reflected in any captured field — so a human (or the next
+    pattern-design pass) can see exactly what's still being read over. Noise
+    (timestamps, param/code dumps, banners) is filtered out; capped so a run
+    with a long uncaptured tail doesn't bloat the store."""
+    captured_nums: set = set()
+    captured_words: set = set()
+    for k, v in fields.items():
+        captured_nums |= _num_tokens(str(v))
+        captured_words |= {t for t in re.split(r"[^A-Za-z]+", k.upper()) if len(t) > 2}
+    out: List[str] = []
+    seen = set()
+    for ln in (text or "").splitlines():
+        s = ln.strip()
+        if len(s) < 8 or _MISS_NOISE.search(s) or not any(c.isdigit() for c in s):
+            continue
+        nums = _num_tokens(s)
+        if not nums or nums <= captured_nums:
+            continue                                  # every value already captured
+        label = re.split(r"\d", s, 1)[0]
+        lwords = {t for t in re.split(r"[^A-Za-z]+", label.upper()) if len(t) > 2}
+        if lwords & captured_words:
+            continue                                  # label maps to a captured field
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+        if len(out) >= cap:
+            break
+    return out
 
 
 # The header that marks the CBC selection-program "Qt Run" layout — the
@@ -489,10 +670,13 @@ def _cb_summary(fields: Dict[str, str]) -> str:
 # matched the file name, like a vendor quote or a markup.)
 SELECTION_PROGRAM_MARKERS = ("CHICAGO BLOWER", "SN#")
 
-# How many document lines a template returns as raw_lines. Generous on purpose:
-# the sweep persists them to its store, making the store a re-parsable corpus
-# (design new per-arrangement patterns, re-extract without re-reading Z:).
-RAW_LINES_CAP = 250
+# How many document lines a template returns as raw_lines. The sweep persists
+# these to its store, making the store a re-parsable corpus (design new patterns,
+# re-extract without re-reading Z:), so a truncated tail = fields we can't
+# re-parse offline. This is NOT a functional limit — it's a pure runaway
+# backstop set far above any real run (the longest, a dual 4S/8S 8-pager, is
+# well under 1000 lines). No real quote run is ever truncated.
+RAW_LINES_CAP = 10000
 
 
 def is_selection_program(text: str) -> bool:

@@ -505,6 +505,22 @@ def base_actions() -> list[LauncherAction]:
             "seed_yesterday.py",
         ),
         LauncherAction(
+            "archive_obsolete",
+            "Tools",
+            "Archive Obsolete Runs/SOs",
+            "Moves non-active quote runs and sales orders (format duplicates, old CO#/REV copies, "
+            "older SO revisions) into an OBSOLETE subfolder per job, so each folder holds only the "
+            "current file. DRY RUN by default (shows what would move, moves nothing) — tick Apply "
+            "to actually move. It MOVES, never deletes, and writes an undo manifest.",
+            "archive_obsolete.py",
+            options=(
+                option("jobs", "Job(s)", "Space-separated job numbers. Blank = all.", kind="args", positional=True, split=True),
+                option("apply", "Apply (move for real)", "Actually move files. Leave OFF for a dry run first.", kind="check", arg="--apply", confirm="This moves files into OBSOLETE subfolders on Z:. Continue?"),
+                option("runs_only", "Quote runs only", "Only the quote-run archive (skip sales orders).", kind="check", arg="--runs"),
+                option("sales_only", "Sales orders only", "Only sales-order folders (skip quote runs).", kind="check", arg="--sales"),
+            ),
+        ),
+        LauncherAction(
             "data_push",
             "Tools",
             "Publish Order Data",

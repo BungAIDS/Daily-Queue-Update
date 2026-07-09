@@ -12,7 +12,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from run_rank import rank_paths, rank_runs, revision_key
+from run_rank import dedupe_runs, rank_paths, rank_runs, revision_key
 
 
 def test_revision_key():
@@ -74,6 +74,26 @@ def test_rank_paths_by_name_then_disk_mtime(tmp: Path):
     assert ranked[1] == new and ranked[2] == old    # then newest first
     missing = tmp / "gone.txt"                      # stat() failure ranks last, no raise
     assert rank_paths([new, missing])[0] == new
+
+
+def test_dedupe_runs_collapses_dupes_keeps_distinct():
+    # Same fan as .txt + .pdf, plus an old CO of the same fan -> one row (the
+    # current .txt, ranked by CO# then format/mtime). A different fan stays.
+    txt = {"file": "Quote Run.txt", "fields": {"Size": "20", "Design": "16A", "Arrangement": "9H"},
+           "mtime": 200}
+    pdf = {"file": "Quote Run.pdf", "fields": {"Size": "20", "Design": "16A", "Arrangement": "9H"},
+           "mtime": 100}
+    co = {"file": "Quote Run CO#1.txt", "fields": {"Size": "20", "Design": "16A", "Arrangement": "9H"},
+          "mtime": 150}
+    other = {"file": "Damper.txt", "fields": {"Size": "40", "Design": "64", "Arrangement": "4S"},
+             "mtime": 50}
+    got = dedupe_runs([txt, pdf, co, other])
+    files = {r["file"] for r in got}
+    assert files == {"Quote Run CO#1.txt", "Damper.txt"}   # CO#1 wins its group; other kept
+    # Unparsed runs fall back to file identity (never merged blindly).
+    a = {"file": "a.txt", "fields": {}}
+    b = {"file": "b.txt", "fields": {}}
+    assert len(dedupe_runs([a, b])) == 2
 
 
 def main() -> int:

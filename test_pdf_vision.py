@@ -124,11 +124,138 @@ def test_carry_vision_forward_survives_rescan():
     assert carry_vision_forward(None, new3)["runs"][0]["status"] == NO_TEXT_STATUS
 
 
+def test_vision_qc_repairs_and_flags():
+    from pdf_vision import apply_vision_qc, CHECK_STATUS
+    # Garbled model value + clean transcript -> repaired in place, not flagged.
+    clean_line = "CHICAGO BLOWER CORP.\n 24100 CFM, 22.00 SP, 198.5 BHP, 1770 RPM,  70 DEG F, DENSITY 0.0750\n"
+    run = {"status": "OK", "fields": {"CFM": "4/100", "RPM": "1770"},
+           "vision": {"model": "m", "transcript": clean_line}}
+    notes = apply_vision_qc(run)
+    assert run["fields"]["CFM"] == "24100"           # repaired from transcript
+    assert run["status"] == "OK"                     # repair is not a flag
+    assert any(n.startswith("repaired CFM") for n in notes)
+    assert run["vision"]["suspect"] == []
+
+    # Garbled value with NO clean source -> flagged CHECK VISION.
+    run2 = {"status": "OK", "fields": {"CFM": "4/100"},
+            "vision": {"model": "m", "transcript": "CHICAGO BLOWER\nno cfm here"}}
+    apply_vision_qc(run2)
+    assert run2["status"] == CHECK_STATUS
+    assert any("implausible CFM" in r for r in run2["vision"]["suspect"])
+
+    # Missing transcript (trial batch) -> flagged for a cheap re-read.
+    run3 = {"status": "OK", "fields": {"Size": "22"}, "vision": {"model": "m"}}
+    apply_vision_qc(run3)
+    assert run3["status"] == CHECK_STATUS
+
+    # Odd arrangement (OCR garble) -> flagged.
+    run4 = {"status": "OK", "fields": {"Arrangement": "781"},
+            "vision": {"model": "m", "transcript": "CHICAGO BLOWER"}}
+    apply_vision_qc(run4)
+    assert any("odd Arrangement" in r for r in run4["vision"]["suspect"])
+
+    # Model and a clean transcript disagree on a hard number -> flagged.
+    run5 = {"status": "OK", "fields": {"CFM": "21900"},
+            "vision": {"model": "m", "transcript": clean_line}}
+    apply_vision_qc(run5)
+    assert any("model read 21900" in r for r in run5["vision"]["suspect"])
+
+    # A clean run passes and a previously-flagged clean run is unflagged.
+    run6 = {"status": CHECK_STATUS, "fields": {"CFM": "24100", "RPM": "1770"},
+            "vision": {"model": "m", "transcript": clean_line}}
+    apply_vision_qc(run6)
+    assert run6["status"] == "OK" and run6["vision"]["suspect"] == []
+
+    # Non-vision runs are untouched.
+    run7 = {"status": "OK", "fields": {"CFM": "bad/val"}}
+    assert apply_vision_qc(run7) == [] and run7["status"] == "OK"
+
+
+def test_qc_flagged_runs_are_reread_candidates():
+    from pdf_vision import CHECK_STATUS
+    records = {"1": {"job": "1", "runs": [
+        {"path": "a.pdf", "status": CHECK_STATUS, "vision": {"model": "m"}},
+        {"path": "b.pdf", "status": "OK", "vision": {"model": "m"}},
+    ]}}
+    got = candidate_runs(records)
+    assert [r["path"] for _, r in got] == ["a.pdf"]   # flagged re-reads without --redo
+
+
 def test_prompt_carries_field_names_and_contract():
     p = build_prompt()
     for name in ("Blade Gauge", "BX", "STB", "Housing", "Hub")[:3]:
         assert name in p
     assert "doc_type" in p and "quote_run" in p and "drawing" in p
+
+
+def test_reread_prompt_includes_hints():
+    from pdf_vision import build_prompt
+    plain = build_prompt()
+    assert "PREVIOUS" not in plain
+    hinted = build_prompt(["implausible CFM='4/100'", "odd Arrangement '781'"])
+    assert "PREVIOUS automated reading" in hinted
+    assert "4/100" in hinted and "781" in hinted     # the model is told what was wrong
+
+
+def test_apply_vision_result_tracks_attempts_and_prior():
+    from pdf_vision import apply_vision_result
+    run = {"status": "PDF (no text layer)", "fields": {}}
+    apply_vision_result(run, {"doc_type": "quote_run",
+                              "fields": {"CFM": "4/100"}, "transcript": "t"}, "m")
+    assert run["vision"]["attempts"] == 1
+    assert run["vision"]["prior_fields"] is None     # first read has no prior
+    # Second read records the attempt and stashes the reading it replaced.
+    apply_vision_result(run, {"doc_type": "quote_run",
+                              "fields": {"CFM": "24100"}, "transcript": "t"}, "m")
+    assert run["vision"]["attempts"] == 2
+    assert run["vision"]["prior_fields"] == {"CFM": "4/100"}
+
+
+def test_compare_readings_flags_only_disagreements():
+    from pdf_vision import compare_readings
+    assert compare_readings({"CFM": "28000"}, {"CFM": "26843"}) == ["CFM: 28000 vs 26843"]
+    assert compare_readings({"CFM": "22500"}, {"CFM": "22500"}) == []   # agree -> nothing
+    # Non-hard-number fields aren't compared (prose varies harmlessly).
+    assert compare_readings({"note": "a"}, {"note": "b"}) == []
+
+
+def test_escalate_to_human_disagree_and_agree():
+    from pdf_vision import escalate_to_human, NEEDS_HUMAN
+    # Two reads disagree on a hard number -> NEEDS HUMAN citing the conflict.
+    run = {"status": "CHECK VISION", "fields": {"CFM": "26843"},
+           "vision": {"suspect": ["CFM: model read 26843, transcript says 8"],
+                      "prior_fields": {"CFM": "28000"}, "attempts": 2}}
+    escalate_to_human(run)
+    assert run["status"] == NEEDS_HUMAN
+    assert "disagree" in run["vision"]["human_reason"]
+    assert "28000 vs 26843" in run["vision"]["human_reason"]
+    # Two reads agree but the value is still implausible -> different reason.
+    run2 = {"status": "CHECK VISION", "fields": {"CFM": "4/100"},
+            "vision": {"suspect": ["implausible CFM='4/100'"],
+                       "prior_fields": {"CFM": "4/100"}, "attempts": 2}}
+    escalate_to_human(run2)
+    assert run2["status"] == NEEDS_HUMAN
+    assert "agree but" in run2["vision"]["human_reason"]
+
+
+def test_needs_human_is_terminal_not_a_reread_candidate():
+    from pdf_vision import NEEDS_HUMAN, apply_vision_qc
+    # A NEEDS HUMAN run is not picked up for auto-re-read (only CHECK VISION is).
+    records = {"1": {"job": "1", "runs": [
+        {"path": "done.pdf", "status": NEEDS_HUMAN, "vision": {"model": "m"}},
+        {"path": "retry.pdf", "status": "CHECK VISION", "vision": {"model": "m"}},
+    ]}}
+    assert [r["path"] for _, r in candidate_runs(records)] == ["retry.pdf"]
+    # QC must NOT re-open a NEEDS HUMAN run into the re-read pool...
+    run = {"status": NEEDS_HUMAN, "fields": {"CFM": "4/100"},
+           "vision": {"model": "m", "transcript": "no cfm"}}
+    apply_vision_qc(run)
+    assert run["status"] == NEEDS_HUMAN
+    # ...but if a later fix makes it clean, QC clears it to OK.
+    run2 = {"status": NEEDS_HUMAN, "fields": {"CFM": "24100"},
+            "vision": {"model": "m", "transcript": "CHICAGO BLOWER\n 24100 CFM, 5.0 SP"}}
+    apply_vision_qc(run2)
+    assert run2["status"] == "OK"
 
 
 def main() -> int:

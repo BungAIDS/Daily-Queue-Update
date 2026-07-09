@@ -3,6 +3,66 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-07-09 — Hub/coupling/box fields + coverage tagging ("read right over it")
+
+DG's asks: (1) fabricated hubs have no cast part number but do carry hub data
+(HUB TUBE 3/4, HUB FLANGES 1/2, HUB BORE/OD) that we were reading right over;
+(2) "there are similar cases where we miss info because it doesn't match — TAG
+these"; (3) how much is still missing. All grounded on the real corpus
+(`git show origin/order-data:quote_run_scan_progress.json`), tested, reparsed.
+
+New CB fields (`templates.py` `_CB_PATTERNS`, all real corpus shapes):
+- **Fabricated hub** (no part number): `Hub Tube Gauge/Material`,
+  `Hub Flanges Gauge/Material`, `Hub Centers Material`, `Hub Bore`, `Hub OD`,
+  `Hub Bushing` (`Q2 BUSHING ..`). Fixes the 421572-style hub. `Hub Bore` also
+  fires on cast hubs.
+- **Half-coupling shaft block**: `Coupling Max/Min/Nom Shaft Dia`,
+  `Coupling Keyway` (`= 0.3750 X 0.1875`). ~36% of runs.
+- **Inlet/damper box**: `Box B`, `Box C` (`BOX B X C: 73 IN. X 15 1/2 IN.`),
+  `Inlet Box Angle` (spec-line `,BOX 270`; `BOX 0` = no box, skipped).
+- **Inlet Cone** (`REINFORCED INLET CONE INCL. PER SK-19-72`) + **Safety Guard**
+  presence flag (`SHAFT SAFETY GUARD`).
+- Two bug fixes surfaced by the tag: `Sheave PD` now also reads `SPECIFIED PD`
+  (customer item-59 override), and the `Hub` part-number pattern accepts the
+  plural `HUBS 19-5-21`.
+
+**Coverage tagging** (`templates.coverage_tags` / `missed_data_lines`, wired
+through `quote_run_scan.apply_coverage`, stored on each run as `coverage_tags`
++ `missed_data`, surfaced in the new workbook **Review** column, amber):
+- `coverage_tags` = high-precision, self-clearing probes — a data family whose
+  keyword is in the doc but produced NO field ("read right over it"). After the
+  new patterns only **2 of 450** runs are tagged, both legitimate specials: a
+  fabricated FEA-markup billet hub (415970), and a dual-motor shared-sheave
+  drive (417445). Add a pattern for a family → its tag disappears on reparse, so
+  the tag count is a live coverage metric.
+- `missed_data` = the actual uncaptured data lines (noise-filtered, capped 15)
+  behind the tags, so a human/next pass sees exactly what's still read over.
+
+Avg fields/run **54 → 58**. Full suite green (test_line_items still skipped —
+sandbox pdfminer/cryptography panic, pre-existing).
+
+**How much is still missing (uncaptured, non-noise data lines, uncapped):**
+~8.0k lines across 294 text runs. Ranked remaining clusters (the next batch):
+- **Alternate outline-dimension format** (`D = 56 1/16`, `A = 22 13/16`, the
+  DA/DB/DC/CA-CE/FF/FR/FY... `code = inch  mm` list, ~113 runs). Same geometry
+  family as the AXIAL/SIDE VIEW table we already parse, but a second compact
+  format with ~40 extra detail codes not in the table. Biggest gap.
+- **Spun sideplate** construction row (`SIDEPL,SPUN 0.075 (14) ..`, 179 lines) —
+  a wheel-table variant our sideplate row regex misses.
+- **Accessory rows**: `BURN TAPES`, `CHANNEL`/stiffener, and the trailing
+  WR2/weight/price columns on every wheel-construction row (the P2 item).
+- `GOOD FOR $..` (price variant), `OUT ANGLE`, `OUTLINE DIM. FORM SK-` refs.
+
+**Damper docs** (DG: "only damper-relevant info should count"): investigated all
+19 damper-flagged runs. The readable ones are *full fan runs* (the fan the
+damper attaches to) — and for 419624/418421/405167 the damper-titled file is the
+order's ONLY run, so stripping fan fields would blank the order. The 10 `.doc`
+ones are unreadable binary (yield nothing already). So the correct,
+non-destructive behavior is what we have: extract the fan run + carry the
+`damper=True` flag (filterable). The new Box B/C/Inlet-Box/Cone fields now also
+capture the damper-relevant geometry. Damper-*specific* fields (blade count,
+damper size) would be additive — needs a sample of what damper data DG wants.
+
 ## 2026-07-01 — Shaft/bearing geometry + outline dims (BX/STB/N/F etc.)
 
 DG pointed at the full job-421579 run (the earlier samples were trimmed above
@@ -27,6 +87,102 @@ tail fixture.
 
 Outline table: now pulled in FULL (all 16 codes) — see the block-parser entry
 below.
+
+## 2026-07-06 — Remove the storage truncation (raw_lines / transcript caps)
+
+DG: the 250-line cap shouldn't be a thing. It only ever bit the OFFLINE corpus/
+--reparse-stored loop (the live parse always used full text), but 42 runs were
+being clipped, so tail sections (outline dims, totals on long/dual docs) were
+lost to offline re-parsing. Fixes:
+- `templates.RAW_LINES_CAP` 250 -> 10000 (a pure runaway backstop; the longest
+  real run, a dual 4S/8S 8-pager, is well under 1000 lines). Applied to the CB,
+  PDF, and generic-text templates (the generic one was also silently capped at
+  40 lines).
+- `drive_run.py` stored only the first 40 lines as raw_lines though it already
+  kept the full `text` — dropped that slice.
+- Vision transcript char cap 20000 -> 80000 and the vision `max_tokens`
+  6000 -> 12000, so a long SCANNED doc's transcript isn't clipped either (output
+  tokens are billed only when generated, so short docs — most — cost nothing
+  extra). Store grows ~1-2 MB; negligible.
+Takes full effect on the next `--rescan` (which re-stores the 42 clipped runs at
+full length). 20 suites green.
+
+## 2026-07-06 — Dual-arr selection, dedupe, and the OBSOLETE archiver
+
+Per DG's answers to the cleanup questions:
+
+1. **4S/8S dual files -> keep arr-4** (16 files). A doc that quotes the same fan
+   in an arrangement-4 (motor-mounted) AND an arrangement-8/9 (on bearings) is
+   two printouts in one file; DG: the arr-4 is the built unit.
+   `templates.select_primary_run_text` splits the doc into pages, keeps only the
+   arr-4 pages, drops the rest — called at the top of `_parse_chicago_blower`.
+   This also fixes a real bug: the 8S run's bearing/rotor section was leaking
+   onto the (bearing-less) 4S fan via first-match. Validated on the real 413224
+   (4S+8S x6 -> just 4S, no bearing leak); 13 raw + a few vision duals fixed.
+
+2. **Dedupe format-dupes/old revs** (DG: keep the .txt). `run_rank.dedupe_runs`
+   collapses runs that share a fan spec (Size/Design/Arr) to the most-current
+   copy; genuinely different fans survive. `run_rows` uses it, so the xlsx shows
+   one row per distinct run. Real corpus: 467 run files -> 420 rows (47 dupes/
+   old-revs collapsed).
+
+   Plus **`archive_obsolete.py`** — moves non-active quote runs AND sales orders
+   (format dupes, old CO/REV, older SO revisions) into `<job>\OBSOLETE\` so the
+   live folder holds only the active file. SAFE: DRY RUN by default (--apply to
+   move), MOVES never deletes, name clashes get a numbered suffix, writes an undo
+   manifest to BACKLOG_DIR, `--undo <manifest>` reverses it. Launcher: Tools ->
+   Archive Obsolete Runs/SOs (Apply is a confirmed checkbox). NOTE: acts on Z:,
+   untestable from the sandbox — tested on synthetic folders; DG must DRY RUN and
+   eyeball before --apply.
+
+3. **Dampers: skipped** for now (per DG).
+
+Tests: select_primary + no-leak (test_templates), dedupe_runs (test_run_rank),
+archiver plan/dry-run/apply/undo/clash (test_archive_obsolete). 20 suites green.
+
+## 2026-07-06 — Vision re-reads escalate, compare, and stop (no blind re-pay)
+
+DG asked the right question: "are we confident scanning again solves anything?
+will we compare the 2 results?" It didn't before — a CHECK VISION run was
+re-read with identical settings (same model would repeat the same OCR error)
+and the new result overwrote the old with no comparison, and a stubborn PDF
+would re-read (and re-pay) every future batch. Reworked:
+
+- **Escalated re-read**: `read_scanned_pdf(hints=, hi_res=)`. A re-read renders
+  at 2576px/scale 3 (was 1568/2) AND `build_prompt(hints)` tells the model the
+  exact prior complaints ("implausible CFM='4/100'", "odd Arrangement '781'").
+- **Compare + give up**: `apply_vision_result` tracks `attempts` and stashes the
+  prior reading's `prior_fields`. After a re-read still fails QC and
+  `attempts >= MAX_VISION_ATTEMPTS (2)`, `escalate_to_human` compares the two
+  reads (`compare_readings` on hard-number fields) and sets terminal **NEEDS
+  HUMAN** with a reason — "two reads disagree — CFM: 28000 vs 26843" or "two
+  reads agree but values look wrong — ...".
+- **Terminal**: NEEDS HUMAN is never a re-read candidate and QC won't re-open it
+  (but a later pattern fix that makes it clean clears it to OK). Excluded from
+  `--reparse-attention` (a Z: re-parse can't fix a scan). Orange in the xlsx.
+- Tests: hints-in-prompt, attempt/prior tracking, compare_readings,
+  escalate disagree/agree, NEEDS HUMAN terminal + cl- ear-on-fix. 19 suites green.
+
+## 2026-07-06 — Vision QC: repair what we can, flag the rest + HANDOFF_PLAN.md
+
+Per DG (low on assistant usage; handing off): `pdf_vision.apply_vision_qc`
+validates every vision run offline — numeric plausibility per field class,
+arrangement whitelist (catches the systematic OCR "S read as 8/5": 7S1->781,
+8S->88), and model-vs-clean-transcript disagreement on CFM/SP/BHP/RPM. Where
+the transcript's targeted parse is clean and the model value garbled, the
+field is REPAIRED in place; otherwise the run is flagged **CHECK VISION**
+(amber in the xlsx) and the next `python pdf_vision.py` re-reads exactly those
+(candidates include CHECK VISION without --redo). Runs inside
+`--reparse-stored`, so one command applies patterns + QC.
+
+Dry-run on the real store: 59 PDFs flagged (see list below), several fields
+auto-repaired (incl. 9 arrangements from model slop like "ARR 8S, 100.0 PCT").
+
+Flagged: 400934 401078 401195 401217 401266 401445 402395 402547 403049 404135 404216 404346 404357 404459 404641 404783 405693 406123 406678 406841 406906 407015 407189 407349 407497 408001 408015 408289 408290 408355 409440 409784 409960 410089 410887 411028 411091 411180 411306 411484 411820 411821 413044 413242 413265 413592 413680 413967 414648 414651 414686 415158 415956 416730 416809 417395 418342 419644 420848
+
+**HANDOFF_PLAN.md** added at repo root: the full big-picture roadmap (system
+map, working loop, P0-P7 priorities with why/how/verify, evidence bar,
+confidence register, command cheat sheet) for the next session to continue.
 
 ## 2026-07-06 — Rank multiple quote runs by currency (71 orders have >1)
 

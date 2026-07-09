@@ -79,6 +79,15 @@ CORE_FIELDS = [
     "Total Weight Lb", "Total Price",
     "Hub", "Coupling", "Drive", "Engineering Approval", "FEA Analysis",
     "Non-Std Wheel Materials", "Shrink Fit", "Factory Run Test",
+    # Fabricated-hub construction (no cast part number) + hub bore/OD/bushing
+    "Hub Tube Gauge", "Hub Tube Material", "Hub Flanges Gauge",
+    "Hub Flanges Material", "Hub Centers Material",
+    "Hub Bore", "Hub OD", "Hub Bushing",
+    # Half-coupling shaft geometry + keyway
+    "Coupling Max Shaft Dia", "Coupling Min Shaft Dia", "Coupling Nom Shaft Dia",
+    "Coupling Keyway",
+    # Inlet/damper box + inlet cone + accessory presence
+    "Box B", "Box C", "Inlet Box Angle", "Inlet Cone", "Safety Guard",
 ]
 
 
@@ -108,6 +117,32 @@ def classify_status(template: str, fields: Dict[str, Any], raw_lines: List[str],
     return "NO FIELDS"                 # readable, but no fields pulled — needs tuning
 
 
+def apply_coverage(run: Dict[str, Any]) -> None:
+    """Tag a run when it carries recognizable engineering data we didn't
+    structure ("we read right over it") — DG's ask. Sets `coverage_tags` (the
+    data families present-but-uncaptured) and `missed_data` (the actual lines),
+    both self-clearing as patterns improve. Only meaningful for selection-program
+    runs; a keyless run has nothing to compare against."""
+    from templates import coverage_tags, missed_data_lines, is_selection_program
+    vision = run.get("vision") or {}
+    text = "\n".join(run.get("raw_lines") or []) or vision.get("transcript", "")
+    fields = run.get("fields") or {}
+    if not text or not fields or not is_selection_program(text):
+        run.pop("coverage_tags", None)
+        run.pop("missed_data", None)
+        return
+    tags = coverage_tags(text, fields)
+    missed = missed_data_lines(text, fields)
+    if tags:
+        run["coverage_tags"] = tags
+    else:
+        run.pop("coverage_tags", None)
+    if missed:
+        run["missed_data"] = missed
+    else:
+        run.pop("missed_data", None)
+
+
 def reparse_stored(records: Dict[str, Dict[str, Any]]) -> int:
     """Re-run the (current, improved) Chicago Blower parser over the text each
     run already carries — raw_lines from the sweep, or the vision transcript —
@@ -131,15 +166,21 @@ def reparse_stored(records: Dict[str, Dict[str, Any]]) -> int:
             fields = {**parsed, **(run.get("fields") or {})} if vision else parsed
             if fields and job:
                 fields.setdefault("Serial", job)
-            if fields == run.get("fields"):
-                continue
+            before = (dict(run.get("fields") or {}), run.get("status"))
             run["fields"] = fields
-            run["summary"] = _cb_summary(fields)
-            if fields:
+            if vision:
+                # QC: repair garbled values where the transcript parse is clean,
+                # flag the rest CHECK VISION (amber; re-read by next pdf_vision).
+                from pdf_vision import apply_vision_qc
+                apply_vision_qc(run)
+            run["summary"] = _cb_summary(run["fields"])
+            apply_coverage(run)
+            if run["fields"] and run.get("status") not in ("CHECK VISION",):
                 run["status"] = "OK"
                 if not vision:
                     run["template"] = "cbc_qt_run_text"
-            changed += 1
+            if (run.get("fields"), run.get("status")) != before:
+                changed += 1
     return changed
 
 
@@ -163,10 +204,12 @@ def carry_vision_forward(old_rec: Optional[Dict[str, Any]],
 def run_rows(records: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Flatten the per-job store into one row per run (a job can have several:
     e.g. the quote and the production run; `history\\` copies are not swept)."""
-    from run_rank import rank_runs
+    from run_rank import dedupe_runs
     rows: List[Dict[str, Any]] = []
     for rec in sorted(records.values(), key=lambda r: r.get("job", "")):
-        for run in rank_runs(rec.get("runs", [])):   # most-current run first
+        # One row per distinct run, most-current first: format-dupes (.txt+.pdf)
+        # and superseded CO/REV copies collapse to the active run.
+        for run in dedupe_runs(rec.get("runs", [])):
             f = run.get("fields", {}) or {}
             other = "; ".join(f"{k}={v}" for k, v in f.items() if k not in CORE_FIELDS)
             rows.append({
@@ -174,6 +217,9 @@ def run_rows(records: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "type": rec.get("type", ""),
                 "status": run.get("status", ""),
                 "damper": run.get("damper", False),
+                # Data families present in the doc but not structured — the
+                # "we read right over it" flag; empty = fully captured.
+                "review": ", ".join(run.get("coverage_tags") or []),
                 "template": run.get("template", ""),
                 "file": run.get("file", ""),
                 "path": run.get("path", ""),
@@ -202,7 +248,7 @@ def scan_one(job: str, jtype: str, folder: Path) -> Dict[str, Any]:
         r = parse_quote_run(f)
         if r["fields"] and "Serial" not in r["fields"]:
             r["fields"]["Serial"] = job   # runs often omit the SN# header
-        runs.append({
+        run = {
             "file": f.name,
             "path": str(f),
             "template": r["template"],
@@ -214,7 +260,9 @@ def scan_one(job: str, jtype: str, folder: Path) -> Dict[str, Any]:
             # re-parsable corpus (new patterns re-extract without re-reading Z:).
             "raw_lines": r["raw_lines"],
             "mtime": _mtime(f),   # recency signal for ranking multiple runs
-        })
+        }
+        apply_coverage(run)   # tag data families present-but-uncaptured
+        runs.append(run)
     return {
         "job": job,
         "type": jtype,
@@ -262,7 +310,7 @@ def write_workbook(records: Dict[str, Dict[str, Any]], path: Path) -> Path:
     bad_fill = PatternFill("solid", fgColor="FFC7CE")    # red: unrecognized / no text
 
     rows = run_rows(records)
-    fixed = ["Job #", "Type", "Status", "Template", "Run File", "Damper"]
+    fixed = ["Job #", "Type", "Status", "Template", "Run File", "Damper", "Review"]
     headers = fixed + CORE_FIELDS + ["Other", "Summary", "Folder"]
 
     wb = Workbook()
@@ -274,9 +322,11 @@ def write_workbook(records: Dict[str, Dict[str, Any]], path: Path) -> Path:
         cell.fill = header_fill
 
     drawing_fill = PatternFill("solid", fgColor="D9D9D9")  # grey: a drawing, nothing to parse
+    human_fill = PatternFill("solid", fgColor="F4B183")    # orange: a person must eyeball it
     status_fill = {"OK": ok_fill, "NO FIELDS": warn_fill,
                    "UNRECOGNIZED FORMAT": bad_fill, "PDF (no text layer)": bad_fill,
-                   "DRAWING": drawing_fill}
+                   "DRAWING": drawing_fill,
+                   "CHECK VISION": warn_fill, "NEEDS HUMAN": human_fill}
     for i, row in enumerate(rows, start=2):
         ws.cell(i, 1, row["job"])
         ws.cell(i, 2, row["type"])
@@ -288,6 +338,9 @@ def write_workbook(records: Dict[str, Dict[str, Any]], path: Path) -> Path:
             fcell.hyperlink = row["path"]
             fcell.font = link_font
         ws.cell(i, 6, "DAMPER" if row["damper"] else "")
+        rcell = ws.cell(i, 7, row["review"])
+        if row["review"]:
+            rcell.fill = warn_fill   # amber: data present we didn't structure
         for k, name in enumerate(CORE_FIELDS, start=len(fixed) + 1):
             ws.cell(i, k, row["core"].get(name, ""))
         base = len(fixed) + len(CORE_FIELDS)
@@ -389,11 +442,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             log.error("Could not read --list file %s (%s)", args.list, e)
             return 1
     if args.reparse_attention:
-        # DRAWING is a settled classification (a drawing has no fields to pull),
-        # not something a parser fix will ever change — don't re-flag it forever.
+        # Statuses a Z: re-parse can't move: DRAWING (no fields to pull), and the
+        # vision-only CHECK VISION / NEEDS HUMAN (a scanned PDF has no text layer
+        # — those are the pdf_vision re-read loop's job, not this one).
+        _settled = ("OK", "DRAWING", "CHECK VISION", "NEEDS HUMAN")
         attention = sorted({
             rec.get("job", "") for rec in records.values()
-            if any(run.get("status") not in ("OK", "DRAWING")
+            if any(run.get("status") not in _settled
                    for run in rec.get("runs", []))
         } - {""})
         if attention:
