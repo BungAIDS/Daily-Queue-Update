@@ -117,7 +117,7 @@ def run_list(want_job: str | None) -> None:
         page.goto(CBC_QUEUE_URL or CBC_URL, wait_until="domcontentloaded", timeout=30000)
         if "login" in page.url.lower() or page.locator('input[type="password"]').count() > 0:
             raise SystemExit("Landed on login — session expired. Re-run `python login.py`.")
-        page.wait_for_selector(CONTAINER_SELECTOR, timeout=30000)
+        page.wait_for_selector("body", timeout=30000)
 
         rows = _board_args(page)
         log.info("Found %d order rows.", len(rows))

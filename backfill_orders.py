@@ -5,9 +5,9 @@ backlog of historical jobs, opens each one's detail, downloads + parses its
 Sales Order and (if present) construction/drive run, merges in the AutoCAD DWG
 scan, and writes a master backlog workbook.
 
-It is deliberately serial ("1 by 1") and gentle on the server, and it writes its
-progress after every job — kill it any time and re-run to pick up where it left
-off.
+It searches orders one-by-one per worker, with a bounded worker pool
+(`--parallel`, default SO_CONCURRENCY=8). It writes progress throughout the run —
+kill it any time and re-run to pick up where it left off.
 
 Job source (pick one; default is the AutoCAD folders):
     python backfill_orders.py                     # every job folder under AUTOCAD_JOBS_DIR
@@ -15,8 +15,11 @@ Job source (pick one; default is the AutoCAD folders):
     python backfill_orders.py --list jobs.txt     # one job number per line
     python backfill_orders.py --range 420000 421000
 Options:
-    --limit N     stop after N jobs this run        --delay S   seconds between jobs (default 1.0)
-    --rescan      ignore saved progress             --out PATH  workbook path
+    --limit N     stop after N jobs this run        --parallel N workers (default 8)
+    --delay S     seconds between jobs/worker       --out PATH   workbook path
+    --force       reprocess selected jobs           --rescan     ignore saved progress
+    --newest-first process high job numbers first   --retry-not-found recheck misses
+    --from-dwg-progress use saved AutoCAD scan job list instead of walking Z:
 
 Outputs (under BACKLOG_DIR):
     backfill_progress.json   resumable per-job store (source of truth)
@@ -32,6 +35,8 @@ with a clear message rather than grinding the whole list if it can't be found.
 from __future__ import annotations
 
 import argparse
+import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -45,7 +50,7 @@ from urllib.parse import urljoin
 from config import (
     CBC_URL, CBC_QUEUE_URL, STORAGE_STATE_PATH,
     SALES_ORDER_DIR, DRIVE_RUN_DIR, BACKLOG_DIR, AUTOCAD_JOBS_DIR,
-    CBC_SEARCH_SELECTOR, CBC_SEARCH_BUTTON,
+    CBC_SEARCH_SELECTOR, CBC_SEARCH_BUTTON, SO_CONCURRENCY,
 )
 from templates import parse_quote_run
 from sales_orders import (
@@ -216,6 +221,32 @@ def _close_modal(page) -> None:
         pass
 
 
+def _best_run_path(paths: List[Path]) -> str:
+    if not paths:
+        return ""
+    try:
+        from run_rank import rank_paths
+        ranked = rank_paths(paths)
+        return str(ranked[0]) if ranked else str(paths[0])
+    except Exception:  # noqa: BLE001 - ranking is nice-to-have, never fatal
+        return str(paths[0])
+
+
+def _quote_run_design(rec: Dict[str, Any]) -> str:
+    return str(rec.get("design") or rec.get("so_design") or rec.get("so_design_desc") or "")
+
+
+def _attach_quote_run_parse(rec: Dict[str, Any], dr_path: str | None) -> None:
+    if not dr_path:
+        return
+    qr = parse_quote_run(dr_path, design=_quote_run_design(rec))
+    rec["drive_run"] = qr.get("fields", {})
+    rec["drive_run_summary"] = qr.get("summary", "")
+    rec["drive_run_template"] = qr.get("template", "")
+    if qr.get("design") is not None:
+        rec["drive_run_design"] = qr.get("design")
+
+
 def process_one(page, context, job: str, folder: str = "",
                 li_store: Dict[str, Any] | None = None) -> Dict[str, Any]:
     """Open one order via the search box, download + parse its SO and quote run.
@@ -265,10 +296,6 @@ def process_one(page, context, job: str, folder: str = "",
                 if got and not dr_pdf:
                     dr_pdf = got
             rec["drive_run_pdf"] = dr_pdf or ""
-            if dr_pdf:
-                qr = parse_quote_run(dr_pdf, design=rec.get("design"))
-                rec["drive_run_summary"] = qr.get("summary", "")
-                rec["drive_run_template"] = qr.get("template", "")
         if folder:
             # Always scan the AutoCAD folder — cheap rglob, catches runs that
             # only live there and any folder copies alongside document ones.
@@ -276,10 +303,13 @@ def process_one(page, context, job: str, folder: str = "",
             if hits:
                 if not rec.get("has_drive_run"):
                     rec["has_drive_run"] = True
-                    rec["drive_run_pdf"] = str(hits[0])
+                    dr_pdf = _best_run_path(hits)
+                    rec["drive_run_pdf"] = dr_pdf
                 dr_count += len(hits)
         if dr_count:
             rec["drive_run_count"] = dr_count
+        if dr_pdf:
+            _attach_quote_run_parse(rec, dr_pdf)
 
         # "ok" only when every document we found actually downloaded — a found-
         # but-failed download stays "error" so the resume retries it, instead of
@@ -296,6 +326,312 @@ def process_one(page, context, job: str, folder: str = "",
     finally:
         _close_modal(page)
     return rec
+
+
+# --------------------------------------------------------------------------- #
+# Async browser helpers (parallel backfill)                                    #
+# --------------------------------------------------------------------------- #
+async def _open_backfill_page(context):
+    page = await context.new_page()
+    last = None
+    for attempt in (1, 2, 3):
+        try:
+            await page.goto(CBC_QUEUE_URL or CBC_URL, wait_until="domcontentloaded", timeout=60000)
+            if "login" in page.url.lower() or await page.locator('input[type="password"]').count() > 0:
+                raise RuntimeError("Landed on login - session expired. Re-run `python login.py`.")
+            # Old-order backfill is driven by the search box. The dispatch list
+            # may be empty or filtered away, so requiring normal queue rows here
+            # blocks a perfectly usable search page.
+            await page.wait_for_selector("body", timeout=45000)
+            return page
+        except Exception as e:  # noqa: BLE001
+            last = e
+            if attempt < 3:
+                await page.wait_for_timeout(3000 * attempt)
+    with contextlib.suppress(Exception):
+        await page.close()
+    raise RuntimeError(f"Could not open CBC queue page: {last}")
+
+
+async def _board_args_async(page) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for c in await page.locator(CONTAINER_SELECTOR).all():
+        m = re.search(r"loadDetail\((.*?)\)", await c.get_attribute("onclick") or "")
+        if m:
+            out[_jobnum(m.group(1).strip())] = m.group(1).strip()
+    return out
+
+
+async def _open_via_loaddetail_async(page, job: str, args_js: str) -> bool:
+    await page.evaluate(_trigger_js(args_js))
+    try:
+        await page.locator("#modalDetail a").filter(
+            has_text=re.compile(re.escape(job))).first.wait_for(state="attached", timeout=90000)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def find_search_box_async(page):
+    if CBC_SEARCH_SELECTOR:
+        loc = page.locator(CBC_SEARCH_SELECTOR)
+        return loc.first if await loc.count() else None
+    best = None
+    for el in await page.locator("input[type=text], input[type=search], input:not([type])").all():
+        blob = " ".join(filter(None, [
+            await el.get_attribute("placeholder"), await el.get_attribute("aria-label"),
+            await el.get_attribute("title"), await el.get_attribute("id"),
+            await el.get_attribute("name"),
+        ])).lower()
+        if "search" in blob or "find" in blob:
+            if "order" in blob:
+                return el
+            best = best or el
+    return best
+
+
+async def _modal_has_job_async(page, job: str) -> bool:
+    try:
+        return await page.locator("#modalDetail a").filter(
+            has_text=re.compile(re.escape(job))).count() > 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def open_order_detail_async(page, job: str) -> bool:
+    box = await find_search_box_async(page)
+    if box is None:
+        return False
+    try:
+        await box.click()
+        await box.fill("")
+        await box.fill(job)
+        await box.press("Enter")
+    except Exception:  # noqa: BLE001
+        return False
+    if CBC_SEARCH_BUTTON:
+        try:
+            btn = page.locator(CBC_SEARCH_BUTTON)
+            if await btn.count():
+                await btn.first.click()
+        except Exception:  # noqa: BLE001
+            pass
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        await page.wait_for_timeout(500)
+        amap = await _board_args_async(page)
+        if job in amap and await _open_via_loaddetail_async(page, job, amap[job]):
+            return True
+        if await _modal_has_job_async(page, job):
+            return True
+    return False
+
+
+async def _collect_docs_async(page) -> List[Dict[str, Any]]:
+    docs = []
+    for a in await page.locator("#modalDetail a").all():
+        href = await a.get_attribute("href") or ""
+        if "downloaddoc.aspx" in href.lower():
+            d = _parse_doc(href)
+            d["href"] = href
+            docs.append((href, d))
+    return docs
+
+
+async def _download_async(context, page_url: str, href: str, dest: Path) -> Optional[str]:
+    if dest.exists():
+        return str(dest)
+    url = urljoin(page_url, href)
+    for attempt in (1, 2, 3):
+        try:
+            resp = await context.request.get(url, timeout=60000)
+            body = await resp.body()
+            err = _download_error(resp.status, body, dest.suffix.lower() == ".pdf")
+            if err:
+                raise RuntimeError(err)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(body)
+            return str(dest)
+        except Exception as e:  # noqa: BLE001
+            if attempt == 3:
+                log.warning("  download failed for %s after %d tries: %s", dest.name, attempt, e)
+            else:
+                await asyncio.sleep(2 * attempt)
+    return None
+
+
+async def _close_modal_async(page) -> None:
+    try:
+        await page.evaluate("() => window.jQuery && jQuery('#modalDetail').modal('hide')")
+        await page.wait_for_timeout(250)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def process_one_async(page, context, job: str, folder: str = "",
+                            li_store: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    rec: Dict[str, Any] = {"job": job, "status": "", "scanned_at": datetime.now().isoformat(timespec="seconds")}
+    try:
+        if not await open_order_detail_async(page, job):
+            rec["status"] = "not-found"
+            return rec
+        docs = await _collect_docs_async(page)
+
+        so_pdf = dr_pdf = None
+        so = _latest_of_type(docs, SO_TYPE)
+        if so:
+            href, doc = so
+            rec["co_number"] = (doc["rev"] - 1) if doc["rev"] and doc["rev"] > 1 else 0
+            so_pdf = await _download_async(context, page.url, href, SALES_ORDER_DIR / job / _so_filename(job, doc["rev"]))
+            if so_pdf:
+                p = parse_sales_order_pdf(so_pdf)
+                rec.update({
+                    "so_design_desc": p.get("design_desc", ""), "so_size": p.get("size", ""),
+                    "so_arrangement": p.get("arrangement", ""), "so_motor_pos": p.get("motor_pos", ""),
+                    "so_class": p.get("fan_class", ""), "so_rotation": p.get("rotation", ""),
+                    "so_discharge": p.get("discharge", ""), "so_pct_width": p.get("pct_width", ""),
+                    "so_wheel_type": p.get("wheel_type", ""),
+                    "so_design_temp": p.get("design_temp", ""), "so_max_temp": p.get("max_temp", ""),
+                    "so_special_temp": p.get("special_temp", ""),
+                    "so_pdf": so_pdf,
+                })
+                items = p.get("line_items") or []
+                rec["line_item_count"] = len(items)
+                if li_store is not None:
+                    line_items.apply_ai_cache(items, li_store)
+                    line_items.record_job(li_store, job, items,
+                                          co_number=rec.get("co_number"), so_pdf=so_pdf)
+
+        runs = _run_docs(docs)
+        dr_count = 0
+        if runs:
+            rec["has_drive_run"] = True
+            dr_count = len(runs)
+            for href, doc in runs:
+                got = await _download_async(context, page.url, href, DRIVE_RUN_DIR / job / _run_filename(job, doc))
+                if got and not dr_pdf:
+                    dr_pdf = got
+            rec["drive_run_pdf"] = dr_pdf or ""
+        if folder:
+            hits = _run_files_in_folder(Path(folder))
+            if hits:
+                if not rec.get("has_drive_run"):
+                    rec["has_drive_run"] = True
+                    dr_pdf = _best_run_path(hits)
+                    rec["drive_run_pdf"] = dr_pdf
+                dr_count += len(hits)
+        if dr_count:
+            rec["drive_run_count"] = dr_count
+        if dr_pdf:
+            _attach_quote_run_parse(rec, dr_pdf)
+
+        if not so:
+            rec["status"] = "no-SO"
+        elif so_pdf and (not runs or dr_pdf):
+            rec["status"] = "ok"
+        else:
+            rec["status"] = "error"
+    except Exception as e:  # noqa: BLE001
+        log.warning("  %s: error (%s)", job, e)
+        rec["status"] = "error"
+    finally:
+        await _close_modal_async(page)
+    return rec
+
+
+async def _backfill_worker(worker_id: int, context, queue: asyncio.Queue,
+                           records: Dict[str, Dict[str, Any]],
+                           dwg: Dict[str, Dict[str, Any]],
+                           li_store: Dict[str, Any],
+                           state: Dict[str, int],
+                           total: int, delay: float) -> None:
+    try:
+        page = await _open_backfill_page(context)
+    except Exception as e:  # noqa: BLE001
+        log.warning("Backfill worker %d could not open CBC Insider (%s); sitting out.", worker_id, e)
+        return
+    try:
+        while True:
+            try:
+                job = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            try:
+                records[job] = await process_one_async(
+                    page, context, job, dwg.get(job, {}).get("folder", ""), li_store=li_store)
+            except Exception as e:  # noqa: BLE001
+                log.warning("Backfill error for %s: %s", job, e)
+                records[job] = {
+                    "job": job,
+                    "status": "error",
+                    "scanned_at": datetime.now().isoformat(timespec="seconds"),
+                }
+            finally:
+                state["processed"] += 1
+                processed = state["processed"]
+                log.info("  backfill %d/%d  (%s -> %s)",
+                         processed, total, job, records[job].get("status"))
+                if processed % 25 == 0:
+                    save_progress(records)
+                    line_items.save_store(li_store)
+                if delay:
+                    await asyncio.sleep(delay)
+                queue.task_done()
+    finally:
+        with contextlib.suppress(Exception):
+            await page.close()
+
+
+async def _run_parallel_backfill(jobs: List[str], records: Dict[str, Dict[str, Any]],
+                                 dwg: Dict[str, Dict[str, Any]],
+                                 li_store: Dict[str, Any],
+                                 parallel: int, delay: float) -> tuple[int, int]:
+    if not jobs:
+        return 0, 0
+    from playwright.async_api import async_playwright
+
+    rc = 0
+    state = {"processed": 0}
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(storage_state=str(STORAGE_STATE_PATH), accept_downloads=True)
+        try:
+            # Preflight once so a bad selector/login fails before the worker pool
+            # burns time against every job.
+            page = await _open_backfill_page(context)
+            try:
+                if await find_search_box_async(page) is None:
+                    log.error("Could not find the 'search order' box on %s. Set CBC_SEARCH_SELECTOR in .env "
+                              "to its CSS selector (run `python discover_documents.py --probe %s` to print it), "
+                              "then re-run.", CBC_QUEUE_URL or CBC_URL, jobs[0] if jobs else "<job#>")
+                    return 0, 1
+            finally:
+                await page.close()
+
+            queue: asyncio.Queue = asyncio.Queue()
+            for job in jobs:
+                queue.put_nowait(job)
+            n = min(max(1, parallel), len(jobs))
+            log.info("Backfill fetch: %d job(s), %d parallel...", len(jobs), n)
+            results = await asyncio.gather(
+                *[asyncio.create_task(_backfill_worker(i + 1, context, queue, records, dwg,
+                                                       li_store, state, len(jobs), delay))
+                  for i in range(n)],
+                return_exceptions=True,
+            )
+            for err in results:
+                if isinstance(err, Exception):
+                    log.warning("Backfill worker failed: %s", err)
+            if state["processed"] < len(jobs):
+                rc = 1
+                log.warning("%d job(s) were not processed because every worker stopped early.",
+                            len(jobs) - state["processed"])
+        finally:
+            with contextlib.suppress(Exception):
+                await context.close()
+            with contextlib.suppress(Exception):
+                await browser.close()
+    return state["processed"], rc
 
 
 # --------------------------------------------------------------------------- #
@@ -318,10 +654,13 @@ def save_progress(records: Dict[str, Dict[str, Any]]) -> None:
     tmp.replace(PROGRESS_PATH)  # atomic — a crash mid-write never corrupts the store
 
 
-def _is_done(rec: Dict[str, Any]) -> bool:
+def _is_done(rec: Dict[str, Any], retry_not_found: bool = False) -> bool:
     """A job is 'done' (skip on resume) once we have a real answer for it.
-    'error' is NOT done — those get retried on the next run."""
-    return bool(rec) and rec.get("status") in ("ok", "no-SO", "not-found")
+    'error' is NOT done — those get retried on the next run. `not-found`
+    is skipped by default so a full scan can keep moving, but can be retried
+    explicitly after selector/session changes."""
+    statuses = ("ok", "no-SO") if retry_not_found else ("ok", "no-SO", "not-found")
+    return bool(rec) and rec.get("status") in statuses
 
 
 # --------------------------------------------------------------------------- #
@@ -418,12 +757,25 @@ def _resolve_jobs(args: argparse.Namespace) -> List[str]:
         return jobs_from_list(Path(args.list))
     if args.range:
         return jobs_from_range(args.range[0], args.range[1])
+    if args.from_dwg_progress:
+        return list(autocad_scan.load_progress().keys())
     return jobs_from_folders(Path(args.root), args.min_job, args.max_job)
+
+
+def _job_num_key(job: str) -> tuple[int, str]:
+    return (int(job), job) if str(job).isdigit() else (-1, str(job))
+
+
+def _inside_job_caps(job: str, min_job: int = 0, max_job: int = 0) -> bool:
+    if not str(job).isdigit():
+        return False
+    n = int(job)
+    return n >= min_job and (not max_job or n <= max_job)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    ap = argparse.ArgumentParser(description="Backfill old orders from cbcinsider, one at a time.")
+    ap = argparse.ArgumentParser(description="Backfill old orders from cbcinsider search.")
     ap.add_argument("jobs", nargs="*", help="Explicit job numbers (default: all AutoCAD folders).")
     ap.add_argument("--list", help="File of job numbers, one per line.")
     ap.add_argument("--range", nargs=2, type=int, metavar=("FIRST", "LAST"), help="Numeric job range.")
@@ -431,9 +783,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--out", default=str(WORKBOOK_PATH), help="Master workbook path.")
     ap.add_argument("--delay", type=float, default=1.0, help="Seconds to pause between orders.")
     ap.add_argument("--limit", type=int, default=0, help="Stop after N orders this run (0 = no limit).")
+    ap.add_argument("--parallel", type=int, default=SO_CONCURRENCY,
+                    help=f"How many CBC Insider searches to run at once (default SO_CONCURRENCY={SO_CONCURRENCY}).")
     ap.add_argument("--min-job", type=int, default=autocad_scan.DEFAULT_MIN_JOB,
                     help=f"On a folder sweep, skip job numbers below this (default {autocad_scan.DEFAULT_MIN_JOB}).")
     ap.add_argument("--max-job", type=int, default=0, help="Skip job numbers above this (0 = no cap).")
+    ap.add_argument("--force", action="store_true",
+                    help="Reprocess selected jobs even if saved progress says they are done.")
+    ap.add_argument("--newest-first", action="store_true",
+                    help="Process higher job numbers first instead of the folder enumeration order.")
+    ap.add_argument("--retry-not-found", action="store_true",
+                    help="Retry jobs previously saved as not-found instead of skipping them.")
+    ap.add_argument("--from-dwg-progress", action="store_true",
+                    help="Use the saved AutoCAD scan progress job list instead of walking the root folder.")
     ap.add_argument("--rescan", action="store_true", help="Ignore saved progress.")
     args = ap.parse_args(sys.argv[1:] if argv is None else argv)
 
@@ -442,6 +804,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     targets = _resolve_jobs(args)
+    if args.from_dwg_progress:
+        targets = [j for j in targets if _inside_job_caps(j, args.min_job, args.max_job)]
+    if args.newest_first:
+        targets = sorted(targets, key=_job_num_key, reverse=True)
     log.info("Backfill target set: %d job(s).", len(targets))
     records = {} if args.rescan else load_progress()
     li_store = line_items.load_store()  # shared lookup store; saved with progress
@@ -449,45 +815,22 @@ def main(argv: Optional[List[str]] = None) -> int:
     if dwg:
         log.info("Merging AutoCAD DWG scan for %d job(s).", len(dwg))
 
-    from playwright.sync_api import sync_playwright
-    processed = 0
     rc = 0
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(storage_state=str(STORAGE_STATE_PATH), accept_downloads=True)
-        page = context.new_page()
-        page.goto(CBC_QUEUE_URL or CBC_URL, wait_until="domcontentloaded", timeout=60000)
-        if "login" in page.url.lower() or page.locator('input[type="password"]').count() > 0:
-            browser.close()
-            log.error("Landed on login — session expired. Re-run `python login.py`.")
-            return 1
-        page.wait_for_selector(CONTAINER_SELECTOR, timeout=45000)
+    pending: List[str] = []
+    for job in targets:
+        if args.limit and len(pending) >= args.limit:
+            break
+        if not args.rescan and not args.force and _is_done(records.get(job, {}),
+                                                           retry_not_found=args.retry_not_found):
+            continue
+        pending.append(job)
 
-        # Preflight: the backfill drives the queue page's "search order" box.
-        # If we can't find it, don't grind through the whole list — tell the
-        # operator how to pin it and stop (the DWG merge still writes output).
-        if find_search_box(page) is None:
-            log.error("Could not find the 'search order' box on %s. Set CBC_SEARCH_SELECTOR in .env "
-                      "to its CSS selector (run `python discover_documents.py --probe %s` to print it), "
-                      "then re-run.", CBC_QUEUE_URL or CBC_URL, targets[0] if targets else "<job#>")
-            rc = 1  # fail loudly so a scripted/scheduled run notices (workbook still written below)
-        else:
-            for job in targets:
-                if args.limit and processed >= args.limit:
-                    break
-                if not args.rescan and _is_done(records.get(job, {})):
-                    continue
-                records[job] = process_one(page, context, job, dwg.get(job, {}).get("folder", ""),
-                                           li_store=li_store)
-                processed += 1
-                log.info("  %d  %s -> %s", processed, job, records[job].get("status"))
-                if processed % 25 == 0:
-                    save_progress(records)
-                    line_items.save_store(li_store)
-                if args.delay:
-                    time.sleep(args.delay)
-
-        browser.close()
+    processed = 0
+    if pending:
+        processed, rc = asyncio.run(_run_parallel_backfill(
+            pending, records, dwg, li_store, args.parallel, args.delay))
+    else:
+        log.info("No pending jobs to backfill.")
 
     save_progress(records)
     line_items.save_store(li_store)
@@ -503,7 +846,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     log.info("Done: processed %d this run; store has %d job(s).", processed, len(records))
     log.info("  status breakdown: %s", ", ".join(f"{k}={v}" for k, v in sorted(by_status.items())))
     if by_status.get("not-found"):
-        log.info("  %d job(s) not found via search — if that seems high, the search box may need "
+        log.info("  %d job(s) not found via search - if that seems high, the search box may need "
                  "CBC_SEARCH_SELECTOR / CBC_SEARCH_BUTTON set (see `discover_documents.py --probe`).",
                  by_status["not-found"])
     log.info("  Wrote %s", out)

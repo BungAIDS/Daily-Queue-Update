@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from playwright.sync_api import sync_playwright
 
-from config import CBC_URL, STORAGE_STATE_PATH
+from config import CBC_URL, CBC_QUEUE_URL, STORAGE_STATE_PATH
 
 
 def main() -> None:
@@ -22,7 +22,7 @@ def main() -> None:
         browser = p.chromium.launch(headless=False)  # visible window so you can log in
         context = browser.new_context()
         page = context.new_page()
-        page.goto(CBC_URL, wait_until="domcontentloaded")
+        page.goto(CBC_QUEUE_URL or CBC_URL, wait_until="domcontentloaded")
 
         print("\n" + "=" * 70)
         print("A browser window has opened.")

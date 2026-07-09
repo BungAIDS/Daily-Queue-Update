@@ -613,6 +613,9 @@ Grind through a backlog of historical orders one at a time (run it all day):
 python backfill_orders.py                  # all real AutoCAD job folders
 python backfill_orders.py --list jobs.txt  # or a file of job numbers
 python backfill_orders.py --range 420000 421000
+python backfill_orders.py --limit 100 --parallel 8
+python backfill_orders.py --limit 500 --parallel 8 --newest-first --from-dwg-progress --max-job 430000
+python backfill_orders.py 421314 421388 --force --parallel 2  # recheck known jobs
 ```
 
 A folder sweep only considers job numbers at or above `--min-job` (default
@@ -623,7 +626,13 @@ to `autocad_scan.py`.
 
 It downloads + parses each order's Sales Order and drive run, merges the DWG
 scan, and writes `backlog/backlog.xlsx`. It's resumable (kill and re-run any
-time).
+time). The fetch runs multiple CBC Insider searches at once; `--parallel`
+defaults to `SO_CONCURRENCY` (8), and `--delay` pauses between jobs per worker.
+Use `--newest-first` to work recent jobs backward. Saved `not-found` jobs are
+skipped by default so a long scan can keep moving; add `--retry-not-found` after
+fixing a selector/session issue or when you want to recheck misses. If the
+AutoCAD DWG scan has already run, `--from-dwg-progress` uses that saved job list
+and avoids rewalking the network folder tree for every batch.
 
 Old orders are opened through the queue page's **"search order" / "find order"**
 box — the backfill types each job number in and opens the surfaced order. The

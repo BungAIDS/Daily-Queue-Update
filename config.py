@@ -5,8 +5,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 CBC_URL = os.environ.get("CBC_URL", "https://cbcinsider.com")
-# Optional: go straight to the queue page instead of clicking through from the landing page.
-CBC_QUEUE_URL = os.environ.get("CBC_QUEUE_URL", "")
+# Go straight to the queue page instead of clicking through from the landing page.
+# Override in .env if CBC changes this route.
+CBC_QUEUE_URL = (os.environ.get("CBC_QUEUE_URL")
+                 or "https://www.cbcinsider.com/intranet/offsyte/dispatch.aspx").strip()
 # Optional: the Work Center your queue is filtered to (e.g. "ENGGL"). If set,
 # the scraper refuses to run when the page is showing a different Work Center,
 # so you never silently diff the wrong queue.
