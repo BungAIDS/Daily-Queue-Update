@@ -118,7 +118,7 @@ def parse_drive_run_pdf(path: str | Path) -> Dict[str, Any]:
                 for k, v in _kv_from_tables(page.extract_tables()).items():
                     fields.setdefault(k, v)
         res["fields"] = fields
-        res["raw_lines"] = all_lines[:40]
+        res["raw_lines"] = all_lines          # full doc; `text` mirrors it (no truncation)
         res["text"] = "\n".join(all_lines)
         res["summary"] = _summarize(fields)
     except Exception as e:  # noqa: BLE001 - never let a bad pdf fail the run

@@ -48,13 +48,17 @@ def test_run_rows_splits_core_and_other():
     assert "Size" in CORE_FIELDS               # sanity
 
 
-def test_run_rows_one_row_per_run_sorted():
+def test_run_rows_sorted_and_deduped():
     records = {
         "b": {"job": "421473", "type": "GL", "folder": "f", "runs": [
+            # Two genuinely distinct runs (different fans) -> two rows, kept.
             {"file": "quote run.txt", "path": "p1", "template": "cbc_qt_run_text",
-             "summary": "", "status": "OK", "fields": {"Size": "37"}},
-            {"file": "history/quote run.txt", "path": "p2", "template": "cbc_qt_run_text",
-             "summary": "", "status": "OK", "fields": {"Size": "37"}},
+             "summary": "", "status": "OK", "fields": {"Size": "37", "Design": "16A"}},
+            {"file": "quote run 2.txt", "path": "p2", "template": "cbc_qt_run_text",
+             "summary": "", "status": "OK", "fields": {"Size": "40", "Design": "64"}},
+            # A format-duplicate of the first (.pdf, same spec) -> collapses away.
+            {"file": "quote run.pdf", "path": "p1b", "template": "pdf",
+             "summary": "", "status": "OK", "fields": {"Size": "37", "Design": "16A"}},
         ]},
         "a": {"job": "420990", "type": "GL", "folder": "f", "runs": [
             {"file": "qt run.txt", "path": "p3", "template": "cbc_qt_run_text",
@@ -62,7 +66,9 @@ def test_run_rows_one_row_per_run_sorted():
         ]},
     }
     rows = run_rows(records)
-    assert [r["job"] for r in rows] == ["420990", "421473", "421473"]  # sorted by job
+    assert [r["job"] for r in rows] == ["420990", "421473", "421473"]   # sorted; dupe collapsed
+    files = {r["file"] for r in rows if r["job"] == "421473"}
+    assert files == {"quote run.txt", "quote run 2.txt"}               # both distinct kept
 
 
 def test_scan_one_finds_runs_recursively(tmp: Path):
@@ -113,6 +119,46 @@ def test_scan_one_flags_damper(tmp: Path):
     flags = {r["file"]: r["damper"] for r in rec["runs"]}
     assert flags["420848 qt run.txt"] is False
     assert flags["420848 damper quote run.txt"] is True
+
+
+def test_reparse_stored_applies_new_patterns_offline():
+    from quote_run_scan import reparse_stored
+    cb_text = ("CHICAGO BLOWER CORP.\n SN#401221\n"
+               " SIZE  4014,DESIGN 6195 ,ARR 4S ,100.0 PCT,DISCH UB ,ROT CW\n"
+               " WHEEL WEIGHT  267 LB, THRUST  190 LB, WR2  387 LB-FT2\n"
+               " BASE , 405T  FR MOTOR    579   4722\n")
+    records = {
+        # A text run parsed by an OLD parser (fields sparse) — raw_lines stored.
+        "401221": {"job": "401221", "runs": [{
+            "path": "Z:\\j\\401221 qt run.txt", "template": "cbc_qt_run_text",
+            "fields": {"Size": "4014"}, "summary": "", "status": "OK",
+            "raw_lines": cb_text.splitlines(),
+        }]},
+        # A vision run: model fields kept, pattern hits merged over them.
+        "406244": {"job": "406244", "runs": [{
+            "path": "Z:\\j\\406244 qt run.pdf", "template": "pdf_vision",
+            "fields": {"Size": "22", "Oddball": "kept"}, "summary": "", "status": "OK",
+            "vision": {"model": "m", "transcript": cb_text},
+        }]},
+        # A non-CB document: untouched.
+        "400111": {"job": "400111", "runs": [{
+            "path": "Z:\\j\\notes.txt", "template": "generic_text",
+            "fields": {"Coating": "epoxy"}, "summary": "", "status": "OK",
+            "raw_lines": ["Coating: epoxy"],
+        }]},
+    }
+    changed = reparse_stored(records)
+    assert changed == 2
+    txt = records["401221"]["runs"][0]
+    assert txt["fields"]["Wheel Weight Lb"] == "267"      # new pattern applied
+    assert txt["fields"]["Motor Frame"] == "405T"
+    assert txt["fields"]["Serial"] == "401221"
+    vis = records["406244"]["runs"][0]
+    assert vis["fields"]["Oddball"] == "kept"             # model's extras survive
+    assert vis["fields"]["Motor Frame"] == "405T"         # pattern fills the gap
+    assert vis["fields"]["Size"] == "22"                  # model wins overlaps (it saw the image)
+    assert vis["template"] == "pdf_vision"                # provenance kept
+    assert records["400111"]["runs"][0]["fields"] == {"Coating": "epoxy"}
 
 
 def main() -> int:

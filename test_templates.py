@@ -21,8 +21,71 @@ from pathlib import Path
 from templates import (
     QuoteRunContext, _design_num, _rtf_to_text, match_template, parse_quote_run,
     kv_from_lines, kv_from_rows, summarize, _parse_chicago_blower,
+    select_primary_run_text,
     D64WheelConstruction, ChicagoBlowerQtRun, QtRunText,
 )
+
+
+# A real dual-arrangement document (job 413224): the SAME fan quoted as an
+# arrangement-4 (motor-mounted, no bearings) and an arrangement-8 (on bearings),
+# two printouts in one file. Per DG the arr-4 is the built unit.
+REAL_DUAL_4S_8S = """\
+---------------------------------------
+CONFIDENTIAL
+               MON APR  1 12:56:15 CST 2024
+               CHICAGO BLOWER CORP.
+ SN#413224
+ SIZE 3612,DESIGN 5500 ,ARR 4S ,100.0 PCT,DISCH UB ,ROT CW
+ EFFECTIVE WHEEL DIA. 37 1/4
+   14400 CFM, 16.80 SP, 50.1 BHP, 1770 RPM, 70 DEG F, DENSITY 0.0739
+ WHEEL WEIGHT  190 LB, THRUST  120 LB, WR2  240 LB-FT2
+ BASE , 326T  FR MOTOR                                     440    3800
+---------------------------------------
+               MON APR  1 12:56:15 CST 2024
+               CHICAGO BLOWER CORP.
+ SN#413224
+ SIZE 3612,DESIGN 5500 ,ARR 8S ,100.0 PCT,DISCH UB ,ROT CW
+ EFFECTIVE WHEEL DIA. 37 1/4
+   14400 CFM, 16.80 SP, 50.1 BHP, 1770 RPM, 70 DEG F, DENSITY 0.0739
+ ROTOR WR2  55 LB-FT2, ROTOR MAX RPM 1800, MTL. 1045 STEEL
+ SHAFT DIA  2 3/16, BRG CENTERS 20, CRITICAL SPEED  4200 RPM
+    SIDE    STATIC  DYN. THRUST  L10 HR   P/C
+ DRIVE-FIXED   301     15      0  400000 0.0224
+---------------------------------------
+               MON APR  1 12:56:15 CST 2024
+               CHICAGO BLOWER CORP.
+ SN#413224
+ SIZE 3612,DESIGN 5500 ,ARR 8S ,100.0 PCT,DISCH UB ,ROT CW
+      AXIAL VIEW                               IN.          MM
+  N   HSG WIDTH OS                            22  3/4       578
+"""
+
+
+def test_select_primary_run_prefers_arr4():
+    sel = select_primary_run_text(REAL_DUAL_4S_8S)
+    assert "ARR 4S" in sel
+    assert "ARR 8S" not in sel                    # the whole 8S run is dropped
+    # And the 8S run's bearing/rotor section must NOT leak into the kept text.
+    assert "ROTOR WR2" not in sel and "DRIVE-FIXED" not in sel and "SHAFT DIA" not in sel
+    # A single-arrangement document is returned unchanged.
+    assert select_primary_run_text(REAL_CBC_QT_RUN) == REAL_CBC_QT_RUN
+
+
+def test_dual_arr4_wins_and_arr8_fills_gaps():
+    # Per DG: the arr-4 is authoritative for what it provides; anything the
+    # arr-8 section adds that the arr-4 didn't have is KEPT (never overwritten).
+    f = _parse_chicago_blower(REAL_DUAL_4S_8S)
+    assert f["Arrangement"] == "4S"               # 4S wins the shared spec
+    assert f["Wheel Weight Lb"] == "190"          # the arr-4's own block
+    assert f["Motor Frame"] == "326T"
+    assert f["Drive"] == "Motor mounted"
+    # The arr-8's extra sections (absent from the motor-mounted arr-4) are kept.
+    assert f["Shaft Dia"] == "2 3/16"
+    assert f["Brg Centers"] == "20"
+    assert f["Critical Speed RPM"] == "4200"
+    assert f["Rotor WR2"] == "55"
+    assert f["Bearing L10 Hr"] == "400000"
+    assert f["Housing Width (N)"] == "22 3/4"
 
 
 # A real Chicago Blower "Qt Run" text (job 421579, captured 2026-06-15). The
@@ -235,6 +298,92 @@ def test_chicago_blower_space_delimited_and_liner():
     assert "Sideplate Gauge" not in f and "Backplate Gauge" not in f
     assert f["Class"] == "4"
     assert f["Drive"] == "Belt"
+    # Hub with no cast part number: bore/OD still captured from the HUB BORE line.
+    assert f["Hub Bore"] == "2 11/16"
+    assert f["Hub OD"] == "7.00"
+    assert "Hub" not in f                       # no "HUB 19-5-.." part number here
+    assert f["Sheave PD"] == "9.1"
+
+
+# A run with a FABRICATED hub (no cast part number) plus the half-coupling
+# shaft block, an inlet/damper box, a reinforced inlet cone, and a shaft safety
+# guard — the accessory/construction lines DG flagged as "read right over".
+# Every line is a real corpus shape (jobs 401012, 400567, the box/cone/guard
+# clusters). The hub has NO "HUB 19-5-.." part number: its data lives in the
+# HUB TUBE/FLANGES/CENTERS rows and the HUB BORE/OD line.
+REAL_CBC_FAB_HUB = """\
+               WED JUL 27 14:02:23 CST 2021
+               CHICAGO BLOWER CORP.
+ SN#419700
+ SIZE   27 DESIGN 16A LS   ARR 9S  100.0 PCT DISCH UB  ROT CW
+ EFFECTIVE WHEEL DIA.  22 5/8
+   9000 CFM, 10.00 SP,  20.0 BHP, 1500 RPM, 70 DEG F, DENSITY 0.0739
+ WHEEL         THICK.(GA)    MATERIAL        WR2 WEIGHT
+  BLADES          1/4     ASTM A240 304L SS   10    30
+  HUB TUBE        1/2     ASTM A240 304L SS    0     7
+  HUB FLANGES     3/8     ASTM A240 304L SS    0     1
+  HUB CENTERS  SK-9-17    ASTM A240 304L SS    0     3
+  HUB BORE 2  3/16, HUB OD   5.00                           39
+ BOX B X C:      73       IN. X   15  1/2  IN.
+ REINFORCED INLET CONE INCL. PER SK-19-72
+ SHAFT SAFETY GUARD                                          8    1965
+ NOM SHAFT DIA AT FAN SHAFT HALF COUPLING = 1.6875
+ MAX SHAFT DIAMETER AT FAN SHAFT HALF COUPLING = 1.6855
+ MIN SHAFT DIAMETER AT FAN SHAFT HALF COUPLING = 1.6845
+ KEYWAY DIMENSIONS FOR HALF COUPLING = 0.3750 X  0.1875
+ SHAFT DIA  2  3/16, BRG CENTERS 14 7/8, CRITICAL SPEED  4257 RPM
+"""
+
+
+def test_fabricated_hub_and_accessory_fields():
+    f = _parse_chicago_blower(REAL_CBC_FAB_HUB)
+    # Fabricated hub: construction rows (gauge + material), no part number.
+    assert "Hub" not in f
+    assert f["Hub Tube Gauge"] == "1/2"
+    assert f["Hub Tube Material"] == "ASTM A240 304L SS"
+    assert f["Hub Flanges Gauge"] == "3/8"
+    assert f["Hub Flanges Material"] == "ASTM A240 304L SS"
+    assert f["Hub Centers Material"] == "ASTM A240 304L SS"
+    assert f["Hub Bore"] == "2 3/16"           # runs of whitespace collapsed
+    assert f["Hub OD"] == "5.00"
+    # Half-coupling shaft geometry + keyway.
+    assert f["Coupling Nom Shaft Dia"] == "1.6875"
+    assert f["Coupling Max Shaft Dia"] == "1.6855"
+    assert f["Coupling Min Shaft Dia"] == "1.6845"
+    assert f["Coupling Keyway"] == "0.3750 X 0.1875"
+    # Inlet/damper box, inlet cone, safety-guard presence.
+    assert f["Box B"] == "73"
+    assert f["Box C"] == "15 1/2"
+    assert f["Inlet Cone"] == "SK-19-72"
+    assert f["Safety Guard"] == "Yes"
+
+
+def test_hub_part_number_plural_and_sheave_specified_pd():
+    # "HUBS 19-5-21" (plural) is still a hub part number; "SPECIFIED PD" is the
+    # customer-override sheave PD, read the same as "ASSUMED PD".
+    txt = ("CHICAGO BLOWER CORP.\n SN#409095\n"
+           " SIZE 40 DESIGN 16A LS   ARR 9H  100.0 PCT DISCH UB  ROT CW\n"
+           " HUBS       19-5-21      CAST IRON           41   228\n"
+           " BELT DRIVEN.  FAN SHEAVE   SPECIFIED PD  12.2 IN, 5000 FPM   13\n")
+    f = _parse_chicago_blower(txt)
+    assert f["Hub"] == "19-5-21"
+    assert f["Sheave PD"] == "12.2"
+
+
+def test_coverage_tags_and_missed_data():
+    from templates import coverage_tags, missed_data_lines
+    # A fully-captured run carries no coverage tags.
+    assert coverage_tags(REAL_CBC_FAB_HUB, _parse_chicago_blower(REAL_CBC_FAB_HUB)) == []
+    # A run whose hub data we DIDN'T structure gets tagged (the 419700-style
+    # fab-hub run above is captured; simulate a miss by parsing empty fields).
+    txt = " HUB SPECIAL   BORE 4  3/16 FAB'D STEEL   44   181\n FAN SHEAVE SEE DETAIL\n"
+    tags = coverage_tags(txt, {"Size": "27"})   # size only, nothing hub/sheave
+    assert "hub" in tags and "sheave" in tags
+    # "STRESS RATIO AT HUB 0.34" must NOT be read as a hub (a ratio, not a hub).
+    assert coverage_tags(" STRESS RATIO AT HUB 0.34, AT BEARING 0.40\n", {"Size": "1"}) == []
+    # missed_data_lines surfaces the actual uncaptured data line for review.
+    missed = missed_data_lines(txt, {"Size": "27"})
+    assert any("HUB SPECIAL" in m for m in missed)
 
 
 def test_chicago_blower_wheel_material_fallback():
@@ -367,6 +516,103 @@ def test_chicago_blower_shaft_bearing_and_outline_fields():
     outline = [k for k in f if k.endswith(")")]
     assert len(outline) == 16
     assert not any("Center Distance" in k for k in f)
+
+
+# A real Arr-4S run (job 401221): the motor-mounted family (94+ runs — the
+# largest) whose back half has NO shaft/bearing section. Instead: the wheel
+# weight/thrust/WR2 line, housing-to-CG dims, motor base/frame, housing
+# construction, and quote totals — the sections the parser used to miss 100%.
+REAL_CBC_QT_RUN_401221 = """\
+---------------------------------------
+CONFIDENTIAL
+               MON JAN 10 10:13:52 CST 2022
+               CHICAGO BLOWER CORP.
+ 401221
+ SIZE  4014,DESIGN 6195 ,ARR 4S ,100.0 PCT,DISCH UB ,ROT CW
+ EFFECTIVE WHEEL DIA.  38  1/4
+   30240 CFM, 14.00 SP,  82.8 BHP, 1770 RPM,  70 DEG F, DENSITY 0.0750
+ MAX HP  100.0, MAX RPM 1770, MAX TEMP   70 F, AMBIENT TEMP  70 F
+ TIP SPEED 19491 FPM, EQ. TS  20516 RE SK-9-105         WEIGHT   PRICE
+ WHEEL         THICK.(GA)    MATERIAL        WR2 WEIGHT
+  BLADES          3/16    ASTM A6  XF-100    134    60
+  SIDEPL,SPUN  0.135 (10) ASTM A1011-HSLAS    88    41
+  BACKPLATE       1/4     ASTM A572 X-TEN    159   104
+  HUB 19-5-16   BORE 2  7/8  CAST IRON         7    62     267    9916
+    MAX RPM, WHEEL ONLY  2346.  10 BLADES.       RES  3110 CPM
+    ***NON STD WHEEL MATERIALS, CHECK FOR CORRECT WELD WIRE***
+  HOUSING TO WHEEL CG   5.33, HOUSING TO HUB INLET FACE  6.38 IN.
+  STH  2.50
+  WHEEL WEIGHT  267 LB, THRUST  190 LB, WR2  387 LB-FT2
+ RUN TEST AT FACTORY
+ OUTLET N X A:   27  3/4  IN. X   45 13/16 IN.
+ BASE , 405T  FR MOTOR                                     579    4722
+ MOTOR MOUNTING INCLUDED
+ MOTOR WEIGHT, PRICE NOT INCL.                            1575
+ STIFFENERS SK-9-236 HI  PRESSURE, 22 IN. CENTERS
+ FLANGED INLET  INCLUDED
+ HOUSING  1/4  C.Q. HRS                                   1352   17437
+                                  GOOD FOR 60 DAYS        3773   32851
+ NOTES
+     ONLY ITEMIZED OR STANDARD ACCESSORIES INCLUDED IN PRICE
+     FAN OUTLET AREA   8.828 FT2
+     SHAFT SEAL NOT INCLUDED
+ 401221
+    2 '6195'   63 'UB  '   64 'CW  '  112 '405T'  113 'TEFC'
+"""
+
+
+def test_chicago_blower_arr4_motor_mounted_sections():
+    f = _parse_chicago_blower(REAL_CBC_QT_RUN_401221)
+    assert f["Arrangement"] == "4S"
+    # The arr-4 wheel dynamics / weight block.
+    assert f["Wheel Weight Lb"] == "267"
+    assert f["Wheel Thrust Lb"] == "190"
+    assert f["Wheel WR2"] == "387"
+    assert f["Max RPM Wheel Only"] == "2346"     # no trailing dot
+    assert f["Blades"] == "10"
+    assert f["Wheel Resonance CPM"] == "3110"
+    assert f["Housing to Wheel CG"] == "5.33"
+    assert f["Housing to Hub Inlet Face"] == "6.38"
+    # Motor / base block.
+    assert f["Motor Frame"] == "405T"
+    assert f["Motor Enclosure"] == "TEFC"
+    assert f["Motor Weight Lb"] == "1575"
+    assert f["Drive"] == "Motor mounted"
+    # Housing / accessories / totals.
+    assert f["Housing Construction"] == "1/4 C.Q. HRS"
+    assert f["Stiffeners"] == "SK-9-236 HI PRESSURE, 22 IN. CENTERS"
+    assert f["Fan Outlet Area FT2"] == "8.828"
+    assert f["Flanged Inlet"] == "Included"
+    assert f["Shaft Seal"] == "Not included"
+    assert f["Total Weight Lb"] == "3773"
+    assert f["Total Price"] == "32851"
+    # And no shaft/bearing section on this arrangement.
+    assert "Shaft Dia" not in f and "Bearing L10 Hr" not in f
+
+
+def test_chicago_blower_rotor_and_bearing_loads_variants():
+    # DRIVE-FIXED (not -FLOAT), negative static load, and the wider row layout.
+    txt = ("CHICAGO BLOWER CORP.\n SN#400567\n"
+           " SIZE  1908,DESIGN 1904 ,ARR 8S , 90.0 PCT,DISCH UB ,ROT CW\n"
+           " ROTOR WR2  28 LB-FT2, ROTOR MAX RPM 3600, MTL. A240 304 SS\n"
+           " STRESS RATIO AT HUB 0.08, AT BEARING 0.21\n"
+           "    SIDE    STATIC  DYN. THRUST  L10 HR   P/C\n"
+           " DRIVE-FIXED    -51     15      0  400000 0.0037\n"
+           " OTHER-FLOAT   301      3     71   47882 0.0494\n"
+           " SPLIT HOUSING AND BOX  3/8  C.Q. HRS  6591  75987\n")
+    f = _parse_chicago_blower(txt)
+    assert f["Rotor WR2"] == "28"
+    assert f["Rotor Max RPM"] == "3600"
+    assert f["Rotor Material"] == "A240 304 SS"
+    assert f["Stress Ratio at Hub"] == "0.08"
+    assert f["Stress Ratio at Bearing"] == "0.21"
+    assert f["Drive Brg Mount"] == "FIXED"
+    assert f["Drive Brg Static Lb"] == "-51"     # negative loads happen
+    assert f["Other Brg Mount"] == "FLOAT"
+    assert f["Other Brg Static Lb"] == "301"
+    assert f["Brg Thrust Lb"] == "71"
+    assert f["Bearing L10 Hr"] == "400000"       # anchored before the P/C decimal
+    assert f["Housing Construction"] == "3/8 C.Q. HRS"   # arr-7 SPLIT... variant
 
 
 def test_chicago_blower_matches_and_parses_end_to_end(tmp: Path):

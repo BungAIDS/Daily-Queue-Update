@@ -440,6 +440,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Gather the recipients + files from the order (auto-refreshing a stale SO).
     import transmittal_data as td
     data = td.gather(order)
+    # Dump every decision (box + why, 3D STEP, table, attachments, warnings) so
+    # the launcher's per-run log — surfaced in the published debug report —
+    # always shows what this run was built from.
+    td.print_summary(data)
     if not data.emails:
         print("! No recipient emails found for this order — nothing to pre-fill. "
               "Check the Sales Order's Additional Features / Notes block.")

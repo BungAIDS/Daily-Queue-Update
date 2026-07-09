@@ -223,7 +223,15 @@ def _get_excel():
 def _find_workbook(app, path: Path):
     """The already-open workbook matching `path`, or open it. Co-authored files
     live in OneDrive/SharePoint, so FullName may be a URL — match on file name
-    first, full path second."""
+    first, full path second.
+
+    The open is strictly NON-INTERACTIVE. A locked file (a stale co-authoring
+    lock, OneDrive mid-sync, an exclusive holder) would otherwise pop Excel's
+    modal 'File in Use' dialog, which blocks this open AND every later COM call
+    until a human dismisses it — with nobody at the desk that dead-ends the rest
+    of the day's writes (see 2026-07-01, 16:42 onward). With DisplayAlerts off,
+    Notify:=False makes a locked open FAIL instead; the caller's retry/skip path
+    logs it and simply reopens on a later poll once the lock clears."""
     name = path.name
     target = os.path.normcase(str(path))
     for w in app.Workbooks:
@@ -232,7 +240,31 @@ def _find_workbook(app, path: Path):
                 return w
         except Exception:  # noqa: BLE001
             continue
-    return app.Workbooks.Open(str(path))
+    try:
+        app.DisplayAlerts = False       # a locked file must fail, not show a modal
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        # UpdateLinks=0 and IgnoreReadOnlyRecommended silence the other
+        # open-time prompts; Notify=False turns 'in use' into an error.
+        wb = app.Workbooks.Open(str(path), UpdateLinks=0,
+                                IgnoreReadOnlyRecommended=True, Notify=False)
+    finally:
+        try:
+            app.DisplayAlerts = True
+        except Exception:  # noqa: BLE001
+            pass
+    if getattr(wb, "ReadOnly", False):
+        # A read-only handle would swallow our writes silently — and the caller
+        # would then commit row signatures for rows that never reached the sheet.
+        # Fail the cycle instead; a later poll retries for a read/write open.
+        try:
+            wb.Close(SaveChanges=False)
+        except Exception:  # noqa: BLE001
+            pass
+        raise RuntimeError(f"{name} opened READ-ONLY (locked by another user/sync?); "
+                           "skipping this cycle rather than writing to a dead copy")
+    return wb
 
 
 def _get_or_make_sheet(wb, name: str):

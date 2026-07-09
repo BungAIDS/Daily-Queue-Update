@@ -56,10 +56,19 @@ PO_HEADER_RE = re.compile(r"Order\s*#.*Customer\s*P\.?\s*O\.?\s*#", re.IGNORECAS
 ADDL_FEATURES_RE = re.compile(r"additional\s+features", re.IGNORECASE)
 FAN_DRAWINGS_RE = re.compile(r"^\s*fan\s+drawings?\s*:", re.IGNORECASE)
 EMAIL_PRINTS_RE = re.compile(r"e-?mail\s+prints?\s+to", re.IGNORECASE)
-STEP_RE = re.compile(r"3d\s+step", re.IGNORECASE)
+# "3D STEP" with hyphen/spacing variants ("3-D STEP", "3D-STEP", "3DSTEP"); \s
+# also matches a newline so the phrase survives being split across two
+# reconstructed lines when it's searched in joined text (see has_step).
+STEP_RE = re.compile(r"\b3\s*-?\s*d[\s\-_]*step\b", re.IGNORECASE)
 # "STATUS: APPROVED - RELEASED FOR PRODUCTION" (spacing/punct vary on real SOs).
-RELEASED_RE = re.compile(r"released\s+for\s+production", re.IGNORECASE)
+# \b keeps "UNRELEASED" from matching; "fabrication" is the transmittal box's
+# own wording and appears on some SOs.
+RELEASED_RE = re.compile(r"\breleased\s+for\s+(?:production|fabrication)", re.IGNORECASE)
 APPROVED_STATUS_RE = re.compile(r"status\s*:?\s*approved", re.IGNORECASE)
+# Words that negate or condition a release/approved mention earlier on the SAME
+# line: "will NOT be released for production", "held UNTIL released for
+# production", "PRIOR TO release...". Checked against the text before the match.
+NEGATION_RE = re.compile(r"\b(?:not|never|until|unless|prior\s+to|before|pending)\b", re.IGNORECASE)
 # A page footer like "v1.8.1.5 -2-" that closes the Notes block.
 PAGE_FOOTER_RE = re.compile(r"^\s*v\d+(\.\d+)+\s", re.IGNORECASE)
 
@@ -100,6 +109,7 @@ class TransmittalData:
     emails: List[str] = field(default_factory=list)
     box: str = "approval"               # "sales" | "approval" | "record"
     released: bool = False              # True => "record only, released for fab"
+    box_evidence: str = ""              # the SO line / flag the box choice came from
     design_no: str = ""
     design_desc: str = ""
     fan_checklist: Dict[str, str] = field(default_factory=dict)
@@ -218,21 +228,45 @@ def parse_design(lines: List[str]) -> tuple[str, str]:
     return "", ""
 
 
-def parse_approval(lines: List[str], flags: str = "") -> tuple[str, bool]:
-    """Which transmittal box to check, and whether the order is released.
+def _release_signal(ln: str) -> Optional[bool]:
+    """One line's released-for-production signal: True for a clean positive
+    ('STATUS: APPROVED', '... RELEASED FOR PRODUCTION'), False when the mention
+    is negated/conditioned earlier on the line ('will NOT be released for
+    production until ...'), None when the line says nothing about release."""
+    m = RELEASED_RE.search(ln) or APPROVED_STATUS_RE.search(ln)
+    if not m:
+        return None
+    return not NEGATION_RE.search(ln[: m.start()])
 
-    Returns ('record', True) when the SO is APPROVED / RELEASED FOR PRODUCTION
-    (or the board `flags` say so), else ('approval', False). The 'sales purposes
-    only' box is never auto-selected."""
-    text = "\n".join(lines)
-    flags = flags or ""
-    released = bool(
-        RELEASED_RE.search(text)
-        or (APPROVED_STATUS_RE.search(text) and "approv" in text.lower())
-        or RELEASED_RE.search(flags)
-        or APPROVED_STATUS_RE.search(flags)
-    )
-    return ("record", True) if released else ("approval", False)
+
+def parse_approval_evidence(lines: List[str], flags: str = "") -> tuple[str, bool, str]:
+    """Which transmittal box to check, whether the order is released, and the SO
+    line (or board flag) the decision came from.
+
+    A clean 'STATUS: APPROVED / RELEASED FOR PRODUCTION' line (or the board
+    `flags` saying so) means ('record', True) — negated mentions like
+    'will not be released for production until approval' never count, so an
+    unapproved order's boilerplate can't tick the released box. Everything else
+    is ('approval', False); the 'sales purposes only' box is never auto-selected.
+    Signals are evaluated per line, so a stray 'STATUS' at one line's end can't
+    pair with an 'APPROVED' opening the next."""
+    candidates = list(lines) + ([flags] if flags else [])
+    negated = ""
+    for ln in candidates:
+        sig = _release_signal(ln)
+        if sig:
+            return "record", True, ln.strip()
+        if sig is False and not negated:
+            negated = ln.strip()
+    if negated:
+        return "approval", False, f"release mention is negated: {negated}"
+    return "approval", False, "no APPROVED / RELEASED FOR PRODUCTION status found"
+
+
+def parse_approval(lines: List[str], flags: str = "") -> tuple[str, bool]:
+    """(box, released) — see parse_approval_evidence for the rules."""
+    box, released, _ = parse_approval_evidence(lines, flags)
+    return box, released
 
 
 def parse_fan_drawings(lines: List[str]) -> Dict[str, str]:
@@ -269,8 +303,23 @@ def _mailed(mark: str) -> bool:
 
 
 def has_step(lines: List[str]) -> bool:
-    """True if a '... 3D STEP Drawings' line item is on the order."""
-    return any(STEP_RE.search(ln) for ln in lines)
+    """True if a '... 3D STEP Drawings' line item is on the order. Searched in
+    the joined text so the phrase still matches when the PDF reconstruction
+    splits '3D' and 'STEP' onto separate lines, and tolerant of hyphen/spacing
+    variants ('3-D STEP', '3D-STEP')."""
+    return bool(STEP_RE.search("\n".join(lines)))
+
+
+def apply_board_approval(d: "TransmittalData", board_unapproved_flag: Optional[bool]) -> None:
+    """Let today's board state veto a stale/misread SO: when the queue board
+    shows the order UNAPPROVED, the 'record only / released for fabrication'
+    box must never be ticked, whatever the SO text seemed to say."""
+    if board_unapproved_flag and d.released:
+        d.warn("The queue board shows this order UNAPPROVED today, but the SO text "
+               f"read as released ({d.box_evidence}) — checking 'approval only' "
+               "instead. Verify the order's status before sending.")
+        d.box, d.released = "approval", False
+        d.box_evidence = f"board flag: UNAPPROVED today (overrode SO text: {d.box_evidence})"
 
 
 def build_drawing_rows(
@@ -324,17 +373,20 @@ def build_transmittal_data(
     flags: str = "",
     imi_number: str = "",
     suffix: str = CW_SUFFIX,
+    force_step: bool = False,
 ) -> TransmittalData:
     """The pure core: SO text lines (+ a few board-known fields) -> TransmittalData.
-    No file or network I/O, so this is what the tests exercise."""
+    No file or network I/O, so this is what the tests exercise. `force_step`
+    adds the 3D STEP row even when the SO text doesn't show it (e.g. the daily
+    run's line-item store has it tagged)."""
     d = TransmittalData(order=str(order))
     d.customer = customer or parse_customer(lines)
     d.po = parse_po(lines)
     d.emails = parse_emails(lines)
     d.design_no, d.design_desc = parse_design(lines)
-    d.box, d.released = parse_approval(lines, flags)
+    d.box, d.released, d.box_evidence = parse_approval_evidence(lines, flags)
     d.fan_checklist = parse_fan_drawings(lines)
-    d.include_step = has_step(lines)
+    d.include_step = has_step(lines) or bool(force_step)
     d.imi_number = imi_number
     d.drawing_rows = build_drawing_rows(
         order=d.order, design_no=d.design_no, design_desc=d.design_desc,
@@ -429,6 +481,41 @@ def so_last_verified(order: str, ref: Optional[date] = None) -> Optional[str]:
     return va or None
 
 
+def board_unapproved(order: str, ref: Optional[date] = None) -> Optional[bool]:
+    """Today's board 'unapproved' flag for this order, from the watcher's
+    per-day live state file. None when the order isn't in today's state (or the
+    stored job dict doesn't carry the flag) — only a definite True/False from
+    the board itself is returned. Reads the JSON directly, like so_last_verified,
+    so this stays decoupled from the watcher's (browser) imports."""
+    ref = ref or date.today()
+    path = SNAPSHOT_DIR / f"live_state_{ref.isoformat()}.json"
+    if not path.exists():
+        return None
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    entry = state.get(str(order)) if isinstance(state, dict) else None
+    job = (entry or {}).get("job") if isinstance(entry, dict) else None
+    if not isinstance(job, dict) or "unapproved" not in job:
+        return None
+    return bool(job.get("unapproved"))
+
+
+def step_tagged_in_store(order: str) -> bool:
+    """True when the daily run's line-item store has the '3D STEP DRAWINGS' tag
+    for this order — a cross-check that catches a STEP mention the SO-text scan
+    missed (or a stale archived PDF)."""
+    try:
+        import line_items  # import-light (pure logic + a JSON read)
+        entry = (line_items.load_store().get("jobs") or {}).get(str(order)) or {}
+        return any("3D STEP" in t
+                   for it in entry.get("items") or []
+                   for t in it.get("tags") or [])
+    except Exception:  # noqa: BLE001 - the store is a bonus signal only
+        return False
+
+
 def so_read_today(order: str, ref: Optional[date] = None) -> bool:
     """True if the watcher read this order's SO today (per the recorded
     verified_at). The transmittal should be built from a SO confirmed current
@@ -464,18 +551,26 @@ def find_so_pdf(job: str) -> Optional[Path]:
 
 def find_attachments(folder: Optional[Path], order: str, imi_number: str = "") -> List[Path]:
     """Candidate files to attach from the AutoCAD folder: the order's drawings
-    (DWG/PDF/STEP for any suffix) and the O&M manual PDF. The engineer confirms
-    this list in preview mode before anything is attached."""
+    (DWG/PDF/STEP for any suffix) and the O&M manual PDF. STEP exports are also
+    matched loosely — any .stp/.step carrying the order number in its name, in
+    the folder or one subfolder down (they're often named '<order> 3D STEP.stp'
+    or parked in a STEP/3D subfolder rather than '<order>-NN.stp'). The engineer
+    confirms this list in preview mode before anything is attached."""
     if not folder or not folder.exists():
         return []
     out: List[Path] = []
     exts = {".dwg", ".pdf", ".step", ".stp"}
+    step_exts = {".step", ".stp"}
     for f in sorted(folder.glob("*")):
         if not f.is_file():
             continue
         if re.match(rf"{re.escape(str(order))}-\d+", f.stem, re.IGNORECASE) and f.suffix.lower() in exts:
             out.append(f)
         elif imi_number and f.stem.lower() == imi_number.lower() and f.suffix.lower() == ".pdf":
+            out.append(f)
+    for f in sorted(list(folder.glob("*")) + list(folder.glob("*/*"))):
+        if (f.is_file() and f.suffix.lower() in step_exts
+                and str(order) in f.stem and f not in out):
             out.append(f)
     return out
 
@@ -526,11 +621,23 @@ def gather(order: str, customer: str = "", flags: str = "",
             suffix = CCW_SUFFIX
 
     lines = load_so_lines(so_pdf) if so_pdf else []
+    step_store = step_tagged_in_store(order)
     d = build_transmittal_data(lines, order, customer=customer, flags=flags,
-                               imi_number=imi, suffix=suffix)
+                               imi_number=imi, suffix=suffix, force_step=step_store)
+    if step_store and not has_step(lines):
+        d.warn("3D STEP wasn't found in the archived SO text, but the daily run's "
+               "line-item store has it tagged for this order — added the STEP row "
+               "(verify against the current SO).")
+
+    # Today's board state beats a stale/misread SO for the approval box.
+    apply_board_approval(d, board_unapproved(order))
+
     d.so_pdf = str(so_pdf) if so_pdf else None
     d.folder = str(folder) if folder else None
     d.attachments = [str(p) for p in find_attachments(folder, order, imi)]
+    if d.include_step and not any(a.lower().endswith((".stp", ".step")) for a in d.attachments):
+        d.warn("3D STEP is on the order but no .stp/.step file was found in the "
+               "AutoCAD folder — export/attach the STEP file manually.")
 
     # Re-check freshness: after a successful refresh this is now today's SO.
     d.so_verified_at = so_last_verified(order)
@@ -552,12 +659,16 @@ def gather(order: str, customer: str = "", flags: str = "",
 # --------------------------------------------------------------------------- #
 # CLI / back-test                                                              #
 # --------------------------------------------------------------------------- #
-def _print(d: TransmittalData) -> None:
+def print_summary(d: TransmittalData) -> None:
+    """Dump every decision the transmittal will be built from — also called by
+    fill_transmittal_insider so the launcher's per-run log captures it."""
     print(f"\n=== Transmittal data for order {d.order} ===")
     print(f"  Customer : {d.customer}")
     print(f"  P.O. #   : {d.po}")
     print(f"  Emails   : {'; '.join(d.emails) or '(none)'}")
     print(f"  Box      : {d.box}  (released={d.released})")
+    print(f"  Because  : {d.box_evidence or '(no status evidence recorded)'}")
+    print(f"  3D STEP  : {'yes' if d.include_step else 'no'}")
     print(f"  Design   : {d.design_no} {d.design_desc}")
     print(f"  IMI #    : {d.imi_number or '(not found)'}")
     print(f"  Checklist: {d.fan_checklist or '(none)'}")
@@ -596,7 +707,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     refresh = not (args.backtest or args.no_refresh)
     for order in args.orders:
         d = gather(order, customer=args.customer, refresh_stale=refresh)
-        _print(d)
+        print_summary(d)
     return 0
 
 

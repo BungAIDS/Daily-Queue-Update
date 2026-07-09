@@ -4,7 +4,7 @@ For every order on the dispatch board this:
   - opens the order's detail modal (the slow ~30s NotesPanel load),
   - reads the CBC_SalesOrder revision  ->  CO# = rev - 1  (CO#1 = rev 2),
   - downloads the latest Sales Order pdf into
-        SALES_ORDER_DIR/<job>/<job> - Sales Order CO#N.pdf
+        SALES_ORDER_DIR/<job>/<job> - Sales Order CO<n>.pdf
     (skipping any revision already on disk), and
   - reports each job's CO# plus total timing.
 
@@ -53,8 +53,10 @@ def _parse_doc(href: str) -> dict:
 
 
 def _so_filename(job: str, rev: int | None) -> str:
+    # Mirrors sales_orders._so_filename: no '#' in the name — Excel hyperlinks
+    # treat everything after '#' as an anchor, dead-linking the Job # cell.
     if rev and rev > 1:
-        return f"{job} - Sales Order CO#{rev - 1}.pdf"
+        return f"{job} - Sales Order CO{rev - 1}.pdf"
     return f"{job} - Sales Order (original).pdf"
 
 

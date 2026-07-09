@@ -75,6 +75,36 @@ def test_merge_quote_runs():
             p.unlink()
 
 
+def test_merge_quote_runs_ranks_revisions_and_keeps_history():
+    p = master_sync._QUOTE_RUNS
+    existed = p.exists()
+    backup = p.read_text() if existed else None
+    try:
+        # Alphabetically the 2021 base run comes first; CO#1 must lead anyway.
+        _write(p, {"400567": {"job": "400567", "type": "GL", "folder": "Z:\\x", "runs": [
+            {"file": "QT RUN 8-11-21.pdf", "path": "Z:\\x\\QT RUN 8-11-21.pdf",
+             "template": "pdf_vision", "summary": "old", "status": "OK",
+             "fields": {"Size": "20", "RPM": "1770"}, "mtime": 1_600_000_000},
+            {"file": "Qt Run CO#1.txt", "path": "Z:\\x\\Qt Run CO#1.txt",
+             "template": "cbc_qt_run_text", "summary": "new", "status": "OK",
+             "fields": {"Size": "20", "RPM": "1850"}, "mtime": 1_650_000_000},
+        ]}})
+        m = {"orders": {}}
+        assert master_sync.merge_quote_runs(m) == 1
+        job = m["orders"]["400567"]["job"]
+        assert job["drive_run"]["RPM"] == "1850"              # CO#1 leads, not the 2021 run
+        assert job["drive_run_pdf"].endswith("CO#1.txt")
+        assert job["drive_run_count"] == 2
+        hist = job["drive_runs"]                              # full history kept, ranked
+        assert [h["file"] for h in hist] == ["Qt Run CO#1.txt", "QT RUN 8-11-21.pdf"]
+        assert hist[1]["fields"]["RPM"] == "1770"             # superseded values queryable
+    finally:
+        if backup is not None:
+            p.write_text(backup)
+        elif p.exists():
+            p.unlink()
+
+
 def main() -> int:
     passed = 0
     for name, fn in sorted(globals().items()):

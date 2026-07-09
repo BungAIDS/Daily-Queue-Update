@@ -259,7 +259,10 @@ DEFAULT_RULES: Dict[str, Any] = {
                     r"welded\s+balance\s+weights?"],
         "TESTING": [r"witness", r"\btest"],
         "SPARE PARTS": [r"\bspare\b", r"^(?:npo\s+)?(?:repair|replacement)\b"],
-        "3D STEP DRAWINGS": [r"3d\s+(step\s+)?(file\s+)?drawings?"],
+        "3D STEP DRAWINGS": [
+            r"3\s*-?\s*d(?:[\s\-_]*step)?(?:[\s\-_]*file)?[\s\-_]*drawings?",
+            r"3\s*-?\s*d[\s\-_]*step",
+        ],
     },
 }
 
