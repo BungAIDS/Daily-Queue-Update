@@ -350,7 +350,14 @@ def base_actions() -> list[LauncherAction]:
             "Backfill Historical Orders",
             "Long-running resumable browser job for old orders. Downloads/parses Sales Orders and quote runs, then writes backlog.xlsx.",
             "backfill_orders.py",
-            options=(JOB_LIST, LIST_FILE, RANGE, ROOT_FOLDER, OUT_FILE, option("delay", "Delay seconds", "Pause between orders. Default is the script's built-in value.", arg="--delay"), LIMIT, MIN_JOB, MAX_JOB, RESCAN),
+            options=(
+                JOB_LIST, LIST_FILE, RANGE, ROOT_FOLDER, OUT_FILE,
+                option("delay", "Delay seconds", "Pause between orders. Default is the script's built-in value.", arg="--delay"),
+                LIMIT, MIN_JOB, MAX_JOB, RESCAN,
+                option("retry_not_found", "Retry not-found jobs", "Recheck jobs previously saved as not-found (e.g. after a session died mid-run) instead of skipping them.", kind="check", arg="--retry-not-found"),
+                option("passes", "Retry passes", "Retry incomplete jobs this many times within the run. Blank = 2.", arg="--passes"),
+                option("search_timeout", "Search timeout (s)", "Seconds to wait for the order search per job. Blank = 40; raise it if real orders start coming back not-found.", arg="--search-timeout"),
+            ),
             long_running=True,
         ),
         LauncherAction(

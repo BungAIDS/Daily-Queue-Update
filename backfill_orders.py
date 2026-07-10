@@ -1010,8 +1010,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                          f"(default {DEFAULT_PUBLISH_EVERY}; 0 disables publishing).")
     ap.add_argument("--passes", type=int, default=2,
                     help="Retry not-found/no-SO/error jobs within this run (default 2).")
-    ap.add_argument("--search-timeout", type=float, default=75.0,
-                    help="Seconds to wait for search results/detail to surface per job (default 75).")
+    ap.add_argument("--search-timeout", type=float, default=40.0,
+                    help="Seconds to wait for search results/detail to surface per job "
+                         "(default 40 — a real hit surfaces in 10-20s, and a miss burns "
+                         "the FULL wait twice, so this dominates a miss-heavy sweep's cost).")
     ap.add_argument("--doc-timeout", type=float, default=120.0,
                     help="Seconds to wait for document links after opening detail (default 120).")
     ap.add_argument("--min-job", type=int, default=DEFAULT_CBC_SEARCH_MIN_JOB,
