@@ -3,6 +3,22 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-07-10 — Tab order enforced; Line Items tab retired
+
+DG's layout: Changes | Live Queue | Order History | Similar Orders | Similar
+Data, with the old Line Items tab gone (superseded by the Similar tabs +
+`find_orders --xlsx`).
+
+- `SHEET_ORDER` (live_excel) is now that order and actually ENFORCED:
+  `_ensure_tab_order` snaps the managed tabs to the front of the tab bar each
+  cycle (no-op when already right; restores the active sheet since Sheet.Move
+  can steal focus). User-added tabs ride behind, untouched. A coworker
+  dragging tabs around gets snapped back — by design.
+- `_drop_obsolete_sheets` deletes the "Line Items" tab on sight
+  (OBSOLETE_SHEETS): `line_items_sheet` had NO callers — the tab was already
+  orphaned/stale from an older build — so the builder + LINE_ITEM_HEADERS +
+  its two tests were removed with it. Data is regenerable from the stores.
+
 ## 2026-07-10 — Live Queue 'Similar' column: click -> that order's lookalikes
 
 Asked: "click something in a Live Queue column that jumps to the new tab and

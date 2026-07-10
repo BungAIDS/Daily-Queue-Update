@@ -356,9 +356,12 @@ resumes without re-enriching or re-announcing what it already saw.
 
 1. **Make the workbook.** Create an Excel file in OneDrive/SharePoint (so it can
    be co-authored), share it with your coworkers, and put its **local synced
-   path** in `LIVE_WORKBOOK_PATH` in `.env`. The watcher manages the **Live
-   Queue / Changes / History / Line Items / Similar Orders** tabs (plus a hidden
-   Similar Data sheet); any other tabs you add are left untouched. For the 5 AM email link, also set `LIVE_WORKBOOK_LINK` to the
+   path** in `LIVE_WORKBOOK_PATH` in `.env`. The watcher manages five tabs,
+   kept in this order at the front of the tab bar: **Changes / Live Queue /
+   Order History / Similar Orders / Similar Data**. Any other tabs you add are
+   left untouched (a leftover "Line Items" tab from an older build is removed
+   automatically — its data lives in the stores and `find_orders --xlsx`
+   writes a richer inventory on demand). For the 5 AM email link, also set `LIVE_WORKBOOK_LINK` to the
    workbook's **Share → Copy link** URL.
 2. **Teams alerts (optional).** Put a Teams webhook URL in `TEAMS_WEBHOOK_URL` and
    everyone in that channel gets a desktop + phone notification per new order,

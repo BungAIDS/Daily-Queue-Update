@@ -346,42 +346,6 @@ def test_history_sheet():
     assert sh.grid[1][0].value == "420000"
 
 
-def test_line_items_sheet_search_rows():
-    store = {"jobs": {"421000": {
-        "customer": "ACME CORP", "co_number": 1, "so_pdf": "Z:\\SO\\421000.pdf",
-        "items": [
-            {"raw": "SS SHAFT SLEEVE", "norm": "STAINLESS STEEL SHAFT SLEEVE",
-             "tags": ["SHAFT SEAL"], "details": ["VENDOR X"], "qty": "1",
-             "price": "$5", "section": "ACCESSORIES"},
-            {"raw": "TEFLON SEAL", "norm": "TEFLON SEAL", "tags": ["SHAFT SEAL"],
-             "details": [], "qty": "1", "price": "$3", "section": ""},
-        ]}}}
-    sh = ls.line_items_sheet(store, order_nums=["421000"])
-    assert sh.grid[0] == sh.grid[0]  # header present
-    assert sh.grid[0][5].value == "Normalized"          # the searchable column
-    # Two item rows for the one order.
-    body = [r for r in sh.grid[1:] if r and r[0].value == "421000"]
-    assert len(body) == 2
-    assert body[0][5].value == "STAINLESS STEEL SHAFT SLEEVE"
-    assert sh.grid[1][10].font == F_LINK                 # SO PDF link
-    assert sh.autofilter_a1 is not None
-
-
-def test_line_items_whole_backlog_default():
-    store = {"jobs": {
-        "421000": {"customer": "A", "co_number": 0, "so_pdf": "",
-                   "items": [{"raw": "X", "norm": "X", "tags": []}]},
-        "419000": {"customer": "B", "co_number": 0, "so_pdf": "",
-                   "items": [{"raw": "Y", "norm": "Y", "tags": []},
-                             {"raw": "Z", "norm": "Z", "tags": []}]},
-    }}
-    # No order_nums -> every stored order (whole backlog), not just the board.
-    sh = ls.line_items_sheet(store)
-    jobs_in_rows = {r[0].value for r in sh.grid[1:] if r}
-    assert jobs_in_rows == {"421000", "419000"}
-    assert sum(1 for r in sh.grid[1:] if r) == 3        # 1 + 2 items
-
-
 def test_live_queue_records_no_dwg_and_new_today_fill():
     j = _job("421000", end_date="12/31/2026", dwg_extras={"51": "x", "35": "x"},
              _carried_over=False, _first_seen="2026-06-16T09:14:00")
