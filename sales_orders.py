@@ -979,6 +979,29 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2,
     except OSError as e:  # never let the lookup store sink the daily run
         log.warning("Could not save the line-items store (%s)", e)
 
+    # Similar-order suggester: for each enriched order, shortlist the backlog
+    # orders that share its rare SO features AND already have custom drawings
+    # on file. Rides the stores already in hand (li_store + the DWG scan), one
+    # index for the whole batch; lands on the job dict -> master -> the live
+    # workbook's "DWG Reuse" column and the new-order notification.
+    try:
+        import find_orders
+        ridx = find_orders.build_index(li_store, dwg=autocad_scan.load_progress())
+        n_sugg = 0
+        for jn, j in by_job.items():
+            sugg = find_orders.reuse_suggestions(ridx, j.get("line_items") or [],
+                                                 exclude_job=jn)
+            j["dwg_reuse"] = sugg
+            j["dwg_reuse_label"] = find_orders.reuse_label(sugg)
+            j["dwg_reuse_note"] = find_orders.reuse_note(sugg)
+            if sugg:
+                n_sugg += 1
+        if n_sugg:
+            log.info("DWG reuse: %d order(s) matched backlog jobs with custom "
+                     "drawings for the same rare features.", n_sugg)
+    except Exception as e:  # noqa: BLE001 - a suggestion is a nicety, never fatal
+        log.warning("Similar-order suggestions skipped (%s)", e)
+
     log.info("Sales orders: %d jobs have a SO, %d at a change order, %d still missing a SO.",
              n_dl, n_co, len(by_job) - n_dl)
     log.info("Quote/drive runs: %d job(s) have one (highly custom; %d found in the "

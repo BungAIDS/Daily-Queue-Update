@@ -3,6 +3,87 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-07-10 — Live Queue 'Similar' column: click -> that order's lookalikes
+
+Asked: "click something in a Live Queue column that jumps to the new tab and
+searches automatically — or does that need a macro?" Setting the picker cell
+from a click DOES need VBA (rejected: .xlsm kills the no-macro/co-author
+design). Macro-free equivalent shipped instead:
+
+- Similar Data is now a VISIBLE grouped tab (grey band + bold order # on each
+  group's first row, folder cells hyperlinked; Queue Order value still repeats
+  every row because the picker tab's FILTER matches on it — do not blank it).
+- New trailing Live Queue column **"Similar"** (between Last Out and #):
+  lookalike count, internally hyperlinked (`#'Similar Data'!A<row>`) to that
+  order's group — `live_sheets.similar_anchor`. watch stamps
+  `_sim_count`/`_sim_anchor` on each on-board job BEFORE rows are planned.
+  Anchors self-heal: row_sig includes the link, so when a group's row number
+  shifts, the affected Live Queue rows re-plan on the same cycle.
+- `live_excel._style_row`: links starting with `#` become internal hyperlinks
+  (Address="", SubAddress=...). render_sheet now also RE-shows a sheet whose
+  model isn't hidden (ws.Visible set both ways) so earlier hidden-build sheets
+  resurface.
+- LIVE_QUEUE_LAST_OUT_COL is now len-2 (new LIVE_QUEUE_SIMILAR_COL = len-1);
+  removed_block untouched (its own header list, empty trailing).
+
+## 2026-07-10 — Similar Orders tab: pick an order, see its lookalikes
+
+Interactive tab in the live workbook (user asked for "select an order at the
+top → it generates a list"):
+
+- **Similar Orders** (visible): B1 = yellow picker cell with a data-validation
+  dropdown of the on-board orders (typing any order # also allowed, ShowError
+  off) + ONE `=IFERROR(FILTER('Similar Data'!...))` spill formula. Instant,
+  no macros, works for every co-author. `&""` on both sides of the compare
+  coerces numeric/text job cells so typed vs dropdown vs stored types all match.
+- **Similar Data** (hidden, `Sheet.hidden`): flat (queue order × top-8 similar)
+  table + the dropdown's source list in column I (every board order, even ones
+  with no matches). Watcher computes rows in `watch._similar_orders_rows` —
+  cached on (board ids, line-items store mtime, DWG scan mtime), ~1.3s to
+  recompute for a 20-order board, skipped entirely when nothing changed.
+- Renderer (`live_excel`): `Sheet.hidden` (ws.Visible=0) + `Sheet.picker`
+  (`_apply_picker`: search-box styling, validation list, comment) + an explicit
+  `.Formula` assignment pass for "="-prefixed cell values (locale-immune EN-US
+  separators). The picker cell's typed value is read before `Cells.Clear` and
+  restored after, and the visible tab's model is layout-only so its fingerprint
+  almost never changes → repaints (which would blank the pick) are rare.
+  `update_master_workbook` grew `extra_sheets` — Changes + extras now share the
+  same fingerprint-cached repaint loop.
+- Spill gotcha handled: rows below the formula aren't in the model, so nothing
+  blocks the spill (COM writes of "" produce truly blank cells).
+- Tests: layout + formula-range cases in test_live_sheets (34 now).
+
+## 2026-07-10 — Similar-order suggester wired into the live queue ("DWG Reuse")
+
+The `--like` ranking now runs automatically for every enriched order (new
+arrival on the watch / change-order re-fetch / daily run):
+
+- `find_orders`: `similar_jobs` split into `build_index` (one pass over the
+  store: tag/line sets + rarity counts) + `similar_to_items` (score any items
+  against it — works for orders NOT in the store, i.e. brand-new ones).
+  `reuse_suggestions` = thresholded custom-DWG-only shortlist trimmed for
+  storage on the job dict; `reuse_label`/`reuse_note` render it. Measured on
+  the real corpus (6K orders / 75K lines): 0.09s index once per batch +
+  ~16ms/order.
+- `sales_orders.enrich_with_sales_orders`: after the line-items store is
+  updated, builds one index and stamps `dwg_reuse` (list) +
+  `dwg_reuse_label`/`dwg_reuse_note` (strings) on each job dict — flows into
+  live_master via the normal upsert. Best-effort try/except; NOT in
+  live_master._TRACKED so it can't spam the change log.
+- New **"DWG Reuse"** column in `excel_writer.COLUMNS` — placed AFTER CO#
+  because the Changes tab aligns Folder/Quote Run/CO# in fixed columns across
+  its tables (test_changes_today_columns_align_across_sections). Cell = top
+  candidate + suffixes (`421100 (-07,-51) +2`), hyperlinked to its CAD folder,
+  full shortlist w/ shared SO lines as the hover comment (excel_writer +
+  live_sheets both).
+- `notify._order_facts`: new-order toast/Teams card gets a "DWG Reuse" fact.
+- Config: `REUSE_MIN_SCORE` (default 0.5 — on this corpus that separates
+  "same fan" from common-feature noise; 99 disables) and `REUSE_TOP` (3).
+- Known noise source: address/routing boilerplate ("PO BOX ...", "ROUTE TO
+  ...") is stored as line items and occasionally boosts same-customer matches.
+  Mostly harmless (same customer IS a reuse signal); the proper fix is a
+  line_items skip rule, someday.
+
 ## 2026-07-09 — DWG-aware search + `--like` similarity ranking (find_orders)
 
 Goal: surface the backfilled SO data WITHOUT widening the live queue workbook

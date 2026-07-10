@@ -97,6 +97,10 @@ def _order_facts(j: Dict[str, Any]) -> List[tuple]:
         flags.append("QUOTE RUN")
     if flags:
         facts.append(("Flags", ", ".join(flags)))
+    if j.get("dwg_reuse_label"):
+        # Backlog order(s) that already have custom DWGs for this order's rare
+        # SO features — the heads-up that drawings may not need redrawing.
+        facts.append(("DWG Reuse", j["dwg_reuse_label"]))
     return facts
 
 

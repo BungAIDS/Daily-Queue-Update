@@ -62,6 +62,47 @@ def test_dwg_label():
     assert fo._dwg_label(None) == ""
 
 
+def test_similar_to_items_matches_unstored_order():
+    # A brand-new order (not in the store) still gets ranked by its items —
+    # the watcher path: enrich parses the SO, then asks for reuse candidates.
+    items = [{"raw": "TEFLON SHAFT SEAL", "norm": "TEFLON SHAFT SEAL", "tags": ["SHAFT SEAL"]}]
+    idx = fo.build_index(_store())
+    res = fo.similar_to_items(idx, items, exclude_job="999999", top=0)
+    assert [r["job"] for r in res][:2] == ["421001", "421000"]  # both carry the line
+    assert res[0]["shared_lines"] == ["TEFLON SHAFT SEAL"]
+
+
+def test_reuse_suggestions_threshold_and_trim():
+    dwg = {"421001": {"extras": {"07": "DWG"}, "folder": "Z:\\JOBS\\421001"},
+           "421002": {"extras": {"12": "PDF"}, "folder": "Z:\\JOBS\\421002"}}
+    idx = fo.build_index(_store(), dwg=dwg)
+    items = _store()["jobs"]["421000"]["items"]
+    sugg = fo.reuse_suggestions(idx, items, exclude_job="421000", min_score=0.5, top=3)
+    # 421001 shares the rare identical line (scores well above 0.5);
+    # 421002 only shares ubiquitous MOTOR (1.0 with 3 carriers -> 1/3 + 2/3 = 1.0)...
+    jobs = [r["job"] for r in sugg]
+    assert jobs[0] == "421001"
+    assert sugg[0]["suffixes"] == ["07"] and sugg[0]["folder"] == "Z:\\JOBS\\421001"
+    assert sugg[0]["lines"] and sugg[0]["score"] >= 0.5
+    # ...and a high threshold silences everything.
+    assert fo.reuse_suggestions(idx, items, exclude_job="421000", min_score=99) == []
+
+
+def test_reuse_label_and_note():
+    sugg = [{"job": "421001", "customer": "BRAVO", "score": 1.5, "suffixes": ["07", "51"],
+             "dwg": "-07 (DWG), -51 (PDF)", "folder": "Z:\\JOBS\\421001",
+             "lines": ["TEFLON SHAFT SEAL"], "tags": ["SHAFT SEAL"]},
+            {"job": "421002", "customer": "", "score": 0.6, "suffixes": ["12"],
+             "dwg": "-12 (PDF)", "folder": "", "lines": [], "tags": ["MOTOR"]}]
+    assert fo.reuse_label(sugg) == "421001 (-07,-51) +1"
+    assert fo.reuse_label(sugg[:1]) == "421001 (-07,-51)"
+    assert fo.reuse_label([]) == ""
+    note = fo.reuse_note(sugg)
+    assert "421001  BRAVO — score 1.50" in note
+    assert "= TEFLON SHAFT SEAL" in note and "Z:\\JOBS\\421001" in note
+    assert fo.reuse_note([]) == ""
+
+
 def test_attach_dwg_annotates_hits():
     hits = [{"job": "421000"}, {"job": "421001"}, {"job": "421002"}]
     dwg = {"421000": {"extras": {"07": "DWG"}, "folder": "Z:\\JOBS\\421000"},

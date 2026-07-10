@@ -72,7 +72,10 @@ COLUMNS = [
     ("Job #", "job"),
     ("Folder", "folder"),
     ("Quote Run", "drive_run"),
+    # DWG Reuse sits AFTER CO#: the Changes tab keeps Folder/Quote Run/CO#
+    # aligned in the same columns across its tables (see live_sheets._job_table).
     ("CO#", "co"),
+    ("DWG Reuse", "dwg_reuse_label"),
     ("Oper", "oper"),
     ("Design", "design"),
     ("Customer", "customer"),
@@ -476,6 +479,19 @@ def _write_job_row(ws, row: int, j: Dict[str, Any], co_changed: bool = False) ->
             ws.cell(row=row, column=col, value=_flags_str(j))
         elif key == "engineers":
             ws.cell(row=row, column=col, value=engineers.cell_text(j))
+        elif key == "dwg_reuse_label":
+            # Backlog order(s) with custom DWGs for this order's rare features —
+            # linked to the top candidate's CAD folder, full shortlist on hover.
+            cell = ws.cell(row=row, column=col, value=j.get("dwg_reuse_label", ""))
+            sugg = j.get("dwg_reuse") or []
+            if cell.value and sugg:
+                if j.get("dwg_reuse_note"):
+                    cell.comment = Comment(j["dwg_reuse_note"], "Queue")
+                folder = (sugg[0].get("folder") or "").strip()
+                if folder:
+                    cell.hyperlink = folder
+                    cell.font = LINK_FONT
+                    linked_cols.add(col)
         else:
             ws.cell(row=row, column=col, value=j.get(key, ""))
 

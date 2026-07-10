@@ -8,7 +8,8 @@ Excel application means edits flow through Excel itself, which syncs them to
 OneDrive/SharePoint so coworkers see them live (cursors and all).
 
 What it writes: one worksheet per `live_sheets.Sheet` model (Live Queue, Changes,
-History, Line Items). The *content* lives in live_sheets.py (pure, tested); this
+History, Line Items, Similar Orders + its hidden Similar Data sheet). The
+*content* lives in live_sheets.py (pure, tested); this
 module is the generic renderer — bulk-write the values, then map each cell's
 named fill/font to real Excel colors, add hyperlinks, freeze panes, and
 AutoFilter. The named styles mirror excel_writer so the live master and the daily
@@ -34,6 +35,7 @@ from live_sheets import Sheet
 log = logging.getLogger(__name__)
 
 _XL_UNDERLINE_SINGLE = 2  # xlUnderlineStyleSingle
+_XL_VALIDATE_LIST = 3     # xlValidateList (the picker cell's dropdown)
 _XL_EXPRESSION = 2        # xlExpression (conditional formatting)
 _XL_EQUAL = 3             # xlEqual — a real Operator value (ignored for xlExpression)
 _XL_LIST_SEPARATOR = 5    # Application.International index for the list separator
@@ -186,7 +188,8 @@ def _refresh_volatile(wb, sheet: Sheet) -> None:
 
 
 def _fingerprint(sheet: Sheet) -> int:
-    parts = [sheet.name, sheet.freeze or "", sheet.autofilter_a1 or ""]
+    parts = [sheet.name, sheet.freeze or "", sheet.autofilter_a1 or "",
+             str(sheet.hidden), str(sheet.picker)]
     for row in sheet.grid:
         for cell in row:
             # Volatile cells (e.g. the 'Last updated' stamp) change every cycle;
@@ -333,7 +336,14 @@ def _style_row(ws, r: int, cells: List) -> None:
     for i, cell in enumerate(cells, start=1):
         if cell.link:
             try:
-                ws.Hyperlinks.Add(Anchor=ws.Cells(r, i), Address=str(cell.link))
+                link = str(cell.link)
+                if link.startswith("#"):
+                    # Internal link — jump to a sheet/cell in this workbook (e.g.
+                    # Live Queue 'Similar' -> that order's group on Similar Data).
+                    ws.Hyperlinks.Add(Anchor=ws.Cells(r, i), Address="",
+                                      SubAddress=link[1:])
+                else:
+                    ws.Hyperlinks.Add(Anchor=ws.Cells(r, i), Address=link)
                 _apply_font(ws.Cells(r, i), cell.font)  # keep our link style
             except Exception:  # noqa: BLE001 - a bad path shouldn't stop the row
                 pass
@@ -378,6 +388,10 @@ def render_sheet(app, wb, sheet: Sheet) -> None:
     freeze, AutoFilter, autofit."""
     ws = _get_or_make_sheet(wb, sheet.name)
     nrows, ncols = sheet.nrows, sheet.ncols
+    kept_pick = None
+    if sheet.picker:  # what the user picked/typed must survive the repaint
+        with contextlib.suppress(Exception):
+            kept_pick = ws.Range(sheet.picker["cell"]).Value
     try:
         if ws.AutoFilterMode:
             ws.AutoFilterMode = False
@@ -397,6 +411,18 @@ def render_sheet(app, wb, sheet: Sheet) -> None:
     for r, row in enumerate(sheet.grid, start=1):
         if row:
             _style_row(ws, r, row)
+
+    # Formula cells ("=...") are re-assigned via .Formula: the bulk .Value write
+    # usually parses them, but .Formula is deterministic and always takes EN-US
+    # argument separators regardless of the machine's locale.
+    for r, row in enumerate(sheet.grid, start=1):
+        for c, cell in enumerate(row, start=1):
+            if isinstance(cell.value, str) and cell.value.startswith("="):
+                with contextlib.suppress(Exception):
+                    ws.Cells(r, c).Formula = cell.value
+
+    if sheet.picker:
+        _apply_picker(ws, sheet.picker, kept_pick)
 
     # Merge any cell that spans columns (e.g. the Changes 'Job #' header over its
     # blank spacer). The covered cells stay in the grid as positional spacers, so
@@ -450,6 +476,36 @@ def render_sheet(app, wb, sheet: Sheet) -> None:
             _FROZEN.add(sheet.name)
         except Exception:  # noqa: BLE001
             pass
+
+    # Honor the model's visibility both ways, so a sheet that was hidden in an
+    # earlier build resurfaces when its model stops being hidden.
+    with contextlib.suppress(Exception):
+        ws.Visible = 0 if sheet.hidden else -1  # xlSheetHidden / xlSheetVisible
+
+
+def _apply_picker(ws, picker: Dict[str, str], kept_pick: Any = None) -> None:
+    """The Similar Orders-style input cell: restore what the user had picked
+    before the repaint, style it like the search box, and (re)attach its
+    dropdown list. Typing values not on the list stays allowed (any order #)."""
+    try:
+        box = ws.Range(picker["cell"])
+        if kept_pick not in (None, ""):
+            box.Value = kept_pick
+        box.Interior.Color = _SEARCH_BOX_FILL
+        box.Font.Bold = True
+        box.HorizontalAlignment = _XL_CENTER
+        _box_border(box, _SEARCH_RED)
+        if picker.get("comment") and box.Comment is None:
+            box.AddComment(picker["comment"])
+        v = box.Validation
+        with contextlib.suppress(Exception):
+            v.Delete()
+        v.Add(Type=_XL_VALIDATE_LIST, AlertStyle=1, Operator=1,
+              Formula1=picker["source"])
+        v.ShowError = False       # free typing allowed — not just the list
+        v.InCellDropdown = True
+    except Exception as e:  # noqa: BLE001 - the dropdown is a nicety
+        log.debug("picker setup failed on %s (%s)", picker.get("cell"), e)
 
 
 # --------------------------------------------------------------------------- #
@@ -1092,19 +1148,21 @@ def _run_excel_guarded(label: str, func, default, *args, **kwargs):
 
 def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any],
                            oh_payload: Dict[str, Any],
-                           changes_sheet: Sheet | None = None) -> set:
+                           changes_sheet: Sheet | None = None,
+                           extra_sheets: List[Sheet] | None = None) -> set:
     """Watchdog wrapper: render the master workbook on a bounded worker thread so
     a busy/modal Excel can never hang the watcher. On timeout it returns an empty
     set, so those tabs simply re-render next poll (see _update_master_workbook_impl)."""
     return _run_excel_guarded(
         "Live workbook update", _update_master_workbook_impl, set(),
-        workbook_path, lq_payload, oh_payload, changes_sheet,
+        workbook_path, lq_payload, oh_payload, changes_sheet, extra_sheets,
     )
 
 
 def _update_master_workbook_impl(workbook_path: str | Path, lq_payload: Dict[str, Any],
                            oh_payload: Dict[str, Any],
-                           changes_sheet: Sheet | None = None) -> set:
+                           changes_sheet: Sheet | None = None,
+                           extra_sheets: List[Sheet] | None = None) -> set:
     """Render the master workbook: an incremental upsert for Live Queue, the
     matrix log for Order History, and a full repaint for the Changes snapshot
     (only when changed). Best-effort — any COM error is logged and swallowed.
@@ -1175,20 +1233,24 @@ def _update_master_workbook_impl(workbook_path: str | Path, lq_payload: Dict[str
                 touched.append(f"{oh_payload['name']}(+{n})")
         except Exception as e:  # noqa: BLE001
             log.warning("Order History update failed (%s)", e)
-        try:
-            if changes_sheet is not None:
-                fp = _fingerprint(changes_sheet)
-                if _RENDER_CACHE.get(changes_sheet.name) != fp:
-                    render_sheet(app, wb, changes_sheet)
-                    _RENDER_CACHE[changes_sheet.name] = fp
-                    touched.append(changes_sheet.name)
+        # Full-repaint tabs (Changes + any extras, e.g. Similar Data/Orders):
+        # skipped entirely when unchanged — a repaint would reset a viewer's
+        # filter/scroll (and wipe the Similar Orders picker mid-use).
+        repaints = ([changes_sheet] if changes_sheet is not None else [])
+        repaints += list(extra_sheets or [])
+        for model in repaints:
+            try:
+                fp = _fingerprint(model)
+                if _RENDER_CACHE.get(model.name) != fp:
+                    render_sheet(app, wb, model)
+                    _RENDER_CACHE[model.name] = fp
+                    touched.append(model.name)
                 else:
-                    # Content unchanged — don't repaint (that would reset a viewer's
-                    # filter/scroll). Just refresh the 'Last updated' stamp in place so
-                    # the tab still reads as live. AutoSave carries it; no forced Save.
-                    _refresh_volatile(wb, changes_sheet)
-        except Exception as e:  # noqa: BLE001
-            log.warning("Changes update failed (%s)", e)
+                    # Content unchanged — just refresh any 'Last updated' stamp in
+                    # place so the tab still reads as live. AutoSave carries it.
+                    _refresh_volatile(wb, model)
+            except Exception as e:  # noqa: BLE001
+                log.warning("%s update failed (%s)", model.name, e)
 
     if touched:
         try:

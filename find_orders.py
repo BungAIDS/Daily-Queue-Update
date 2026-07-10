@@ -43,7 +43,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from config import BACKLOG_DIR
+from config import BACKLOG_DIR, REUSE_MIN_SCORE, REUSE_TOP
 import autocad_scan
 import line_items as li
 
@@ -79,48 +79,56 @@ def _job_num(job: str) -> int:
     return int(job) if str(job).isdigit() else -1
 
 
-def similar_jobs(store: Dict[str, Any], job: str,
-                 dwg: Dict[str, Dict[str, Any]] | None = None,
-                 top: int = 15, require_dwg: bool = False) -> Optional[List[Dict[str, Any]]]:
-    """Rank every other order by how much of `job`'s Sales Order it shares.
+def _item_tags(items: List[Dict[str, Any]] | None) -> set:
+    return {t for it in items or [] for t in it.get("tags") or []}
+
+
+def _item_norms(items: List[Dict[str, Any]] | None) -> set:
+    return {it.get("norm", "") for it in items or []} - {""}
+
+
+def build_index(store: Dict[str, Any],
+                dwg: Dict[str, Dict[str, Any]] | None = None) -> Dict[str, Any]:
+    """One pass over the store: per-job tag/line sets plus how many jobs carry
+    each tag/line (the rarity weights). Build once, then score many orders
+    against it — the watcher calls this once per poll, not once per order."""
+    job_tags: Dict[str, set] = {}
+    job_norms: Dict[str, set] = {}
+    tag_df: Dict[str, int] = {}
+    norm_df: Dict[str, int] = {}
+    jobs = store.get("jobs") or {}
+    for j, rec in jobs.items():
+        items = rec.get("items") or []
+        job_tags[j], job_norms[j] = _item_tags(items), _item_norms(items)
+        for t in job_tags[j]:
+            tag_df[t] = tag_df.get(t, 0) + 1
+        for n in job_norms[j]:
+            norm_df[n] = norm_df.get(n, 0) + 1
+    return {"jobs": jobs, "job_tags": job_tags, "job_norms": job_norms,
+            "tag_df": tag_df, "norm_df": norm_df, "dwg": dwg or {}}
+
+
+def similar_to_items(index: Dict[str, Any], items: List[Dict[str, Any]] | None,
+                     exclude_job: str = "", top: int = 15,
+                     require_dwg: bool = False) -> List[Dict[str, Any]]:
+    """Rank the indexed orders by how much of `items` (one order's SO) they share.
 
     Rarity-weighted overlap: each shared canonical tag scores 1/(#jobs carrying
     that tag) and each IDENTICAL normalized line scores 2/(#jobs with that line)
     — so "TEFLON SHAFT SEAL" on three jobs binds them far more strongly than a
     MOTOR tag every fan has. With `require_dwg` only jobs whose AutoCAD scan
-    found custom drawings are kept: the DWG-reuse shortlist for a new order.
-    Returns None when `job` has no stored line items."""
-    jobs = store.get("jobs") or {}
-    job = str(job)
-    target = jobs.get(job)
-    if not target or not target.get("items"):
-        return None
-
-    def _tags(rec: Dict[str, Any]) -> set:
-        return {t for it in rec.get("items") or [] for t in it.get("tags") or []}
-
-    def _norms(rec: Dict[str, Any]) -> set:
-        return {it.get("norm", "") for it in rec.get("items") or []} - {""}
-
-    tag_df: Dict[str, int] = {}
-    norm_df: Dict[str, int] = {}
-    for rec in jobs.values():
-        for t in _tags(rec):
-            tag_df[t] = tag_df.get(t, 0) + 1
-        for n in _norms(rec):
-            norm_df[n] = norm_df.get(n, 0) + 1
-
-    t_tags, t_norms = _tags(target), _norms(target)
-    dwg = dwg or {}
+    found custom drawings are kept: the DWG-reuse shortlist for a new order."""
+    t_tags, t_norms = _item_tags(items), _item_norms(items)
+    tag_df, norm_df, dwg = index["tag_df"], index["norm_df"], index["dwg"]
     out: List[Dict[str, Any]] = []
-    for j, rec in jobs.items():
-        if j == job:
+    for j, rec in index["jobs"].items():
+        if j == str(exclude_job):
             continue
         extras = (dwg.get(j) or {}).get("extras") or {}
         if require_dwg and not extras:
             continue
-        shared_tags = t_tags & _tags(rec)
-        shared_lines = t_norms & _norms(rec)
+        shared_tags = t_tags & index["job_tags"][j]
+        shared_lines = t_norms & index["job_norms"][j]
         if not shared_tags and not shared_lines:
             continue
         score = (sum(1.0 / tag_df[t] for t in shared_tags)
@@ -135,6 +143,67 @@ def similar_jobs(store: Dict[str, Any], job: str,
         })
     out.sort(key=lambda r: (-r["score"], -_job_num(r["job"])))
     return out[:top] if top and top > 0 else out
+
+
+def similar_jobs(store: Dict[str, Any], job: str,
+                 dwg: Dict[str, Dict[str, Any]] | None = None,
+                 top: int = 15, require_dwg: bool = False) -> Optional[List[Dict[str, Any]]]:
+    """`similar_to_items` for an order already in the store (the --like CLI).
+    Returns None when `job` has no stored line items."""
+    job = str(job)
+    target = (store.get("jobs") or {}).get(job)
+    if not target or not target.get("items"):
+        return None
+    return similar_to_items(build_index(store, dwg), target["items"],
+                            exclude_job=job, top=top, require_dwg=require_dwg)
+
+
+# --- the live suggester: compact reuse shortlist carried on each job dict --- #
+def reuse_suggestions(index: Dict[str, Any], items: List[Dict[str, Any]] | None,
+                      exclude_job: str = "", min_score: float | None = None,
+                      top: int | None = None) -> List[Dict[str, Any]]:
+    """The DWG-reuse shortlist for one order, trimmed for storage on its job
+    dict (live_master carries every job wholesale, so keep it lean): only
+    custom-DWG jobs scoring >= min_score, essentials-only fields."""
+    if min_score is None:
+        min_score = REUSE_MIN_SCORE
+    if top is None:
+        top = REUSE_TOP
+    res = similar_to_items(index, items, exclude_job=exclude_job,
+                           top=top, require_dwg=True)
+    return [{
+        "job": r["job"], "customer": r["customer"], "score": round(r["score"], 2),
+        "suffixes": list(r["dwg_extras"]), "dwg": _dwg_label(r["dwg_extras"]),
+        "folder": r["dwg_folder"], "lines": r["shared_lines"][:3],
+        "tags": r["shared_tags"][:6],
+    } for r in res if r["score"] >= min_score]
+
+
+def reuse_label(sugg: List[Dict[str, Any]] | None) -> str:
+    """The one-cell column form: top candidate + its custom suffixes, e.g.
+    '421100 (-07,-51) +2' — details live in the hover note / notification."""
+    if not sugg:
+        return ""
+    r0 = sugg[0]
+    sufs = ",".join(f"-{s}" for s in r0.get("suffixes") or [])
+    more = f" +{len(sugg) - 1}" if len(sugg) > 1 else ""
+    return f"{r0['job']} ({sufs}){more}"
+
+
+def reuse_note(sugg: List[Dict[str, Any]] | None) -> str:
+    """The hover-comment form: every candidate with its drawings, the SO lines
+    it shares with this order, and its CAD folder."""
+    lines: List[str] = []
+    for r in sugg or []:
+        cust = f"  {r['customer']}" if r.get("customer") else ""
+        lines.append(f"{r['job']}{cust} — score {r['score']:.2f}")
+        if r.get("dwg"):
+            lines.append(f"  custom DWGs: {r['dwg']}")
+        for n in r.get("lines") or []:
+            lines.append(f"  = {n}")
+        if r.get("folder"):
+            lines.append(f"  {r['folder']}")
+    return "\n".join(lines)
 
 
 def _print_similar(job: str, target: Dict[str, Any], results: List[Dict[str, Any]],
