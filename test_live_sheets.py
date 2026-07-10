@@ -609,6 +609,22 @@ def test_similar_orders_sheets_layout():
     assert "$A$2:$A$3" in f and "$B$1" in f
 
 
+def test_row_sig_ignores_volatile_value_and_live_queue_pos_is_volatile():
+    a = [ls.Cell("x"), ls.Cell(3, center=True, volatile=True)]
+    b = [ls.Cell("x"), ls.Cell(9, center=True, volatile=True)]
+    c = [ls.Cell("y"), ls.Cell(3, center=True, volatile=True)]
+    assert ls.row_sig(a) == ls.row_sig(b)     # volatile value ignored...
+    assert ls.row_sig(a) != ls.row_sig(c)     # ...but real content still counts
+    # The Live Queue '#' cell is volatile, so board-position jitter alone can
+    # never force a full row rewrite.
+    j = {"job": "421000", "_cbc_pos": 5}
+    _, cells = ls.live_queue_records([j], TODAY)[0]
+    assert cells[ls.LIVE_QUEUE_CBC_COL - 1].volatile
+    j2 = {"job": "421000", "_cbc_pos": 17}
+    _, cells2 = ls.live_queue_records([j2], TODAY)[0]
+    assert ls.row_sig(cells) == ls.row_sig(cells2)
+
+
 def test_similar_orders_sheet_empty_has_note_not_formula():
     tab = ls.similar_orders_sheet(0, 0)
     assert tab.picker is None

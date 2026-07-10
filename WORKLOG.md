@@ -3,6 +3,30 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-07-10 — Fix: workbook unusable during renders (phantom row rewrites)
+
+DG: "the update takes so long the sheet is almost unusable for the whole 2-min
+cycle." watch.log quantified it: 66 on board, new/returning/removed all 0,
+field changes logged only 14x ALL DAY — yet Live Queue rewrote 5-15 rows every
+poll and renders ran 30-40s+. Cause: the '#' board-position column. cbcinsider
+reorders tied rows between scrapes, the jitter changed those rows' signatures,
+and each one got a full slow rewrite (bulk values + style clear + per-cell
+hyperlinks/comments — the expensive COM path).
+
+- `row_sig` now masks VOLATILE cells' values (style still hashed) and the Live
+  Queue's '#' cell is volatile — jitter can't force a row rewrite. NOTE: sig
+  format changed → one full repaint on the first cycle after updating (the
+  watcher resets lq_sigs on start anyway).
+- `apply_upserts` gained `positions` ({job: pos} from the board scrape): the
+  whole '#' column is refreshed in ONE bulk Range write, and only when the
+  vector actually moved (`_POS_LAST`); sort/AutoFilter re-extend ride the same
+  condition. Structural-CF gating unchanged.
+- Considered and rejected: build the workbook offline and swap the file in —
+  openpyxl-style replacement kicks every co-author out (the documented reason
+  this module drives desktop Excel via COM). Staging-sheet swaps would reset
+  filters/scroll and break internal links every cycle. Root-causing the render
+  cost was the right lever: a normal cycle now touches ~0-4 rows.
+
 ## 2026-07-10 — Fix: Similar Orders tab went blank (repaint race + churn)
 
 Field report: "enter 421507 → nothing pops up" while Changes' DWG Reuse showed

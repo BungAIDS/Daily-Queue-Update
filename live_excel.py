@@ -121,6 +121,11 @@ _HEADER_DONE: set = set()
 # when the live data row count shifts or the block's content changes.
 _BELOW_LAST: Dict[str, Any] = {}
 
+# Last board-position vector written per sheet (see apply_upserts `positions`):
+# the '#' column is volatile in the row signatures, so it's refreshed in ONE
+# bulk write — and only when the positions actually moved.
+_POS_LAST: Dict[str, Any] = {}
+
 _XL_UP = -4162           # xlUp
 _XL_NONE = -4142         # xlColorIndexNone
 _XL_AUTO = -4105         # xlColorIndexAutomatic
@@ -823,7 +828,8 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
                   key_col: int, allow_delete: bool, freeze: str | None = None,
                   sort_col: int | None = None, text_cols: List[int] | None = None,
                   below: Dict[str, Any] | None = None, header_row: int = 1,
-                  search: bool = False) -> int:
+                  search: bool = False,
+                  positions: Dict[str, Any] | None = None) -> int:
     """Apply append/update/delete ops to a keyed sheet. Returns rows touched.
     When `sort_col` is set, the data is re-sorted ascending by that column after
     any change (Live Queue: the '#' board-position column, to match cbcinsider).
@@ -887,10 +893,31 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
         keymap[k] = last_row              # so a duplicate key within this batch can't re-add
         _write_row(ws, last_row, cells, ncols)
 
+    # Refresh the volatile '#' board-position column in ONE bulk write (the row
+    # signatures exclude it — see live_sheets.row_sig): position jitter used to
+    # rewrite 5-15 whole rows per poll through slow per-cell COM styling for
+    # rows whose data hadn't changed. Only when the vector actually moved.
+    pos_moved = False
+    if positions is not None and sort_col and last_row >= first_data_row:
+        pos_norm = {_norm_key(k): v for k, v in positions.items()}
+        pos_moved = _POS_LAST.get(name) != pos_norm
+        if pos_moved or deletes or appends:
+            try:
+                col = [[""] for _ in range(last_row - first_data_row + 1)]
+                for k, r in keymap.items():
+                    i = r - first_data_row
+                    if 0 <= i < len(col):
+                        col[i] = [pos_norm.get(_norm_key(k), "")]
+                ws.Range(ws.Cells(first_data_row, sort_col),
+                         ws.Cells(last_row, sort_col)).Value = col
+                _POS_LAST[name] = pos_norm
+            except Exception:  # noqa: BLE001 - stale positions fix themselves next poll
+                pos_moved = False
+
     # Keep the tab sorted (Live Queue by the '#' board-position column) and
     # re-extend AutoFilter. Sort the DATA ROWS ONLY (below the header) so the
     # header never moves; blanks fall to the bottom under ascending order.
-    touched = bool(deletes or updates or appends)
+    touched = bool(deletes or updates or appends) or pos_moved
     # A STRUCTURAL change (rows added/removed) is the only thing that requires the
     # search conditional format to be re-laid; an in-place value update doesn't
     # shift any row. Re-applying CF every poll (on plain updates) is what lets
@@ -1271,7 +1298,8 @@ def _update_master_workbook_impl(workbook_path: str | Path, lq_payload: Dict[str
                               lq_payload["key_col"], lq_payload["allow_delete"], lq_payload.get("freeze"),
                               sort_col=lq_payload.get("sort_col"), text_cols=lq_payload.get("text_cols"),
                               below=lq_payload.get("below"), header_row=lq_payload.get("header_row", 1),
-                              search=lq_payload.get("search", False))
+                              search=lq_payload.get("search", False),
+                              positions=lq_payload.get("positions"))
             ok.add(lq_payload["name"])
             if n:
                 touched.append(f"{lq_payload['name']}(+{n})")
