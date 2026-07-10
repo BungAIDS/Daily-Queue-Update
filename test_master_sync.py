@@ -41,13 +41,22 @@ def test_merge_backfill():
     existed = p.exists()
     backup = p.read_text() if existed else None
     try:
-        _write(p, {"421000": {"job": "421000", "status": "ok", "scanned_at": "t",
-                              "so_size": "27", "so_arrangement": "9", "co_number": 2}})
+        _write(p, {
+            "421000": {"job": "421000", "status": "ok", "scanned_at": "t",
+                       "backfill_scan_version": "serial-verified-v1",
+                       "backfill_attempts": 2,
+                       "so_size": "27", "so_arrangement": "9", "co_number": 2},
+            "421999": {"job": "421999", "status": "needs-retry-wrong-SO-quarantined",
+                       "so_pdf": "wrong.pdf", "so_size": "WRONG"},
+        })
         m = {"orders": {}}
         assert master_sync.merge_backfill(m) == 1
         job = m["orders"]["421000"]["job"]
         assert job["so_size"] == "27" and job["co_number"] == 2
         assert "status" not in job and "scanned_at" not in job   # metadata skipped
+        assert "backfill_scan_version" not in job
+        assert "backfill_attempts" not in job
+        assert "421999" not in m["orders"]
     finally:
         if backup is not None:
             p.write_text(backup)

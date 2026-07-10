@@ -61,6 +61,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Tuple
 
 from config import BACKLOG_DIR, LINE_ITEM_RULES, LINE_ITEMS_STORE
+from process_lock import data_file_lock
 
 log = logging.getLogger(__name__)
 
@@ -3529,8 +3530,12 @@ def store_path() -> Path:
     return LINE_ITEMS_STORE if LINE_ITEMS_STORE else BACKLOG_DIR / "line_items.json"
 
 
-def load_store(path: Path | None = None) -> Dict[str, Any]:
-    p = path or store_path()
+def backfill_store_path() -> Path:
+    """Backfill-owned overlay, isolated from an already-running old watcher."""
+    return BACKLOG_DIR / "backfill_line_items.json"
+
+
+def _load_store_file(p: Path) -> Dict[str, Any]:
     if p.exists():
         try:
             store = json.loads(p.read_text(encoding="utf-8"))
@@ -3540,6 +3545,29 @@ def load_store(path: Path | None = None) -> Dict[str, Any]:
         except (json.JSONDecodeError, OSError) as e:
             log.warning("Could not read line-items store %s (%s); starting fresh", p, e)
     return {"jobs": {}, "ai_tags": {}}
+
+
+def load_store(path: Path | None = None) -> Dict[str, Any]:
+    """Load one explicit store, or the normal store plus the backfill overlay."""
+    if path is not None:
+        return _load_store_file(path)
+
+    store = _load_store_file(store_path())
+    overlay_path = backfill_store_path()
+    if overlay_path == store_path() or not overlay_path.exists():
+        return store
+    overlay = _load_store_file(overlay_path)
+    jobs = store.setdefault("jobs", {})
+    for job, record in (overlay.get("jobs") or {}).items():
+        current = jobs.get(job) or {}
+        # The freshest parse wins. A tie favors the main store, which lets a
+        # later normal save/renormalization absorb and supersede the overlay.
+        if not current or str(record.get("scanned_at") or "") > str(current.get("scanned_at") or ""):
+            jobs[job] = record
+    ai_tags = store.setdefault("ai_tags", {})
+    for norm, tags in (overlay.get("ai_tags") or {}).items():
+        ai_tags.setdefault(norm, tags)
+    return store
 
 
 def save_store(store: Dict[str, Any], path: Path | None = None) -> None:
@@ -3635,6 +3663,41 @@ def record_job(store: Dict[str, Any], job: str, items: List[Dict[str, Any]],
         "scanned_at": datetime.now().isoformat(timespec="seconds"),
         "items": items,
     }
+
+
+def record_jobs_atomic(records: Iterable[Dict[str, Any]], path: Path | None = None) -> int:
+    """Merge parsed jobs into the latest on-disk store under one process lock.
+
+    Callers may have spent minutes gathering an order, so they must not save a
+    store snapshot loaded before another process (notably ``watch.py``) updated
+    it. Loading inside this lock makes each batch additive and prevents lost
+    watcher or backfill rows.
+    """
+    rows = list(records)
+    if not rows:
+        return 0
+    destination = path or store_path()
+    recorded = 0
+    with data_file_lock(destination, label="line-items data update"):
+        store = load_store(destination)
+        cache_store = load_store() if destination == backfill_store_path() else store
+        for row in rows:
+            job = str(row.get("job") or "").strip()
+            if not job:
+                continue
+            items = row.get("items") or []
+            apply_ai_cache(items, cache_store)
+            record_job(
+                store,
+                job,
+                items,
+                customer=str(row.get("customer") or ""),
+                co_number=row.get("co_number"),
+                so_pdf=str(row.get("so_pdf") or ""),
+            )
+            recorded += 1
+        save_store(store, destination)
+    return recorded
 
 
 # --------------------------------------------------------------------------- #

@@ -17,8 +17,8 @@ consolidate everything on demand:
     python master_sync.py autocad    # just one source
 
 Reads each store straight off disk (by path) so there's no heavy import coupling.
-Concurrency note: this does a load-merge-save of live_master.json, so prefer
-running the big backlog syncs when the watcher isn't also writing the master.
+The master load/merge/save is process-locked, so scans can finish while the live
+watcher remains running without either process overwriting the other's updates.
 """
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ from typing import Any, Callable, Dict, List
 
 import live_master
 from config import BACKLOG_DIR, DATA_PUSH_BRANCH, DATA_PUSH_ON_CHANGE
+from process_lock import data_file_lock
 
 log = logging.getLogger("master-sync")
 
@@ -125,9 +126,15 @@ def merge_line_items(master: Dict[str, Any]) -> int:
 
 def merge_backfill(master: Dict[str, Any]) -> int:
     recs = _read_json(_BACKFILL) or {}
-    skip = {"job", "status", "scanned_at", "line_item_count"}
+    skip = {
+        "job", "status", "scanned_at", "line_item_count",
+        "backfill_scan_version", "backfill_attempts",
+    }
     n = 0
     for job, rec in recs.items():
+        status = str(rec.get("status") or "")
+        if status != "ok" and not (status == "error" and rec.get("so_validation") == "MATCH"):
+            continue
         fields = {k: v for k, v in rec.items() if k not in skip}
         if fields and live_master.merge_order(master, job, fields):
             n += 1
@@ -147,16 +154,19 @@ def run(*sources: str) -> Dict[str, int]:
     """Load the master, merge the given sources (all by default), save it back.
     Best-effort and self-contained so a helper can call it in a try/except."""
     chosen = [s for s in (sources or ALL) if s in _MERGERS]
-    master = live_master.load_master()
     counts: Dict[str, int] = {}
-    for s in chosen:
-        try:
-            counts[s] = _MERGERS[s](master)
-        except Exception as e:  # noqa: BLE001 - one bad source shouldn't sink the rest
-            log.warning("master sync from %s failed (%s)", s, e)
-            counts[s] = 0
-    if any(counts.values()):
-        live_master.save_master(master)
+    with data_file_lock(live_master.MASTER_PATH, label="live master data update"):
+        master = live_master.load_master()
+        for s in chosen:
+            try:
+                counts[s] = _MERGERS[s](master)
+            except Exception as e:  # noqa: BLE001 - one bad source shouldn't sink the rest
+                log.warning("master sync from %s failed (%s)", s, e)
+                counts[s] = 0
+        changed = any(counts.values())
+        if changed:
+            live_master._save_master_unlocked(master)
+    if changed:
         _publish_data_if_enabled()   # keep the remote snapshot in step with changes
     return counts
 

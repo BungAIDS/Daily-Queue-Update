@@ -649,9 +649,9 @@ Grind through a backlog of historical orders one at a time (run it all day):
 python backfill_orders.py                  # all real AutoCAD job folders
 python backfill_orders.py --list jobs.txt  # or a file of job numbers
 python backfill_orders.py --range 420000 421000
-python backfill_orders.py --limit 100 --parallel 8
-python backfill_orders.py --limit 500 --parallel 8 --newest-first --from-dwg-progress --min-job 401000 --max-job 430000 --delay 0
-python backfill_orders.py 421314 421388 --force --parallel 2  # recheck known jobs
+python backfill_orders.py --limit 100
+python backfill_orders.py --limit 500 --newest-first --from-dwg-progress --min-job 401000 --max-job 430000 --delay 0
+python backfill_orders.py 421314 421388 --force  # recheck known jobs
 ```
 
 A folder sweep only considers job numbers at or above `--min-job` (default
@@ -661,14 +661,19 @@ e.g. `--min-job 403000` (and `--max-job` to cap the top). The same flags apply
 to `autocad_scan.py`.
 
 It downloads + parses each order's Sales Order and drive run, merges the DWG
-scan, and writes `backlog/backlog.xlsx`. It's resumable (kill and re-run any
-time). The fetch runs multiple CBC Insider searches at once; `--parallel`
-defaults to `SO_CONCURRENCY` (8), and `--delay` pauses between jobs per worker.
-Use `--newest-first` to work recent jobs backward. Saved `not-found` jobs are
-skipped by default so a long scan can keep moving; add `--retry-not-found` after
-fixing a selector/session issue or when you want to recheck misses. If the
-AutoCAD DWG scan has already run, `--from-dwg-progress` uses that saved job list
-and avoids rewalking the network folder tree for every batch.
+scan, and writes `backlog/backlog.xlsx`. The historical lookup is deliberately
+serial: one browser page and one order at a time. Every completed order is saved
+immediately, so stop it and run plain `python backfill_orders.py` again to resume.
+It can run beside `watch.py`; the two processes take turns using CBC Sales Order
+access and process-lock their shared data writes. Backfilled line items are also
+checkpointed in `backfill_line_items.json`, an overlay the normal line-item store
+merges automatically, so even a watcher already running old code cannot erase
+them. `--delay` pauses between orders, and `--newest-first` works recent jobs backward. Misses
+from the old parallel scanner automatically get two serial attempts; misses produced
+twice by the current serial scanner are checkpointed and skipped on restart unless
+`--retry-not-found` is supplied. If the AutoCAD DWG scan has already run,
+`--from-dwg-progress` uses that saved job list and avoids rewalking the network
+folder tree for every batch.
 
 The old `400xxx` and lower orders may live behind a different CBC Insider lookup
 path; use `--min-job 401000` for the normal search-box backfill until that path

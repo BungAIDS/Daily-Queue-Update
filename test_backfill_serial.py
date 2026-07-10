@@ -1,0 +1,223 @@
+"""Focused regression tests for serial, resumable backlog operation."""
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+import subprocess
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+import backfill_orders
+import line_items
+import live_master
+import process_lock
+import sales_orders
+
+
+def test_resume_trusts_only_current_serial_misses():
+    version = backfill_orders.BACKFILL_SCAN_VERSION
+    assert backfill_orders._is_done({"status": "ok"})
+    assert not backfill_orders._is_done({"status": "error"})
+    assert not backfill_orders._is_done({"status": "needs-retry-wrong-SO-quarantined"})
+    assert not backfill_orders._is_done({"status": "not-found"})
+    assert not backfill_orders._is_done({"status": "no-SO"})
+    assert not backfill_orders._is_done({
+        "status": "not-found", "backfill_scan_version": version,
+        "backfill_attempts": 1})
+    assert backfill_orders._is_done({
+        "status": "not-found", "backfill_scan_version": version,
+        "backfill_attempts": 2})
+    assert backfill_orders._is_done({
+        "status": "no-SO", "backfill_scan_version": version,
+        "backfill_attempts": 2})
+    assert not backfill_orders._is_done(
+        {"status": "not-found", "backfill_scan_version": version,
+         "backfill_attempts": 2},
+        retry_not_found=True,
+    )
+
+
+def test_serial_pass_has_one_order_in_flight_and_saves_each_job():
+    active = 0
+    max_active = 0
+    order = []
+    saves = []
+    page = SimpleNamespace(close=AsyncMock())
+
+    async def process(_page, _context, job, _folder, **_kwargs):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        order.append(job)
+        await asyncio.sleep(0)
+        active -= 1
+        return {
+            "job": job,
+            "status": "ok",
+            "scanned_at": "now",
+            "backfill_scan_version": backfill_orders.BACKFILL_SCAN_VERSION,
+        }
+
+    records = {}
+    state = {"processed": 0}
+    with (
+        patch("backfill_orders._open_backfill_page", new=AsyncMock(return_value=page)),
+        patch("backfill_orders.process_one_async", new=process),
+        patch("backfill_orders.cbc_fetch_lock", side_effect=lambda: contextlib.nullcontext()),
+        patch("backfill_orders.save_progress", side_effect=lambda value: saves.append(dict(value))),
+    ):
+        completed = asyncio.run(backfill_orders._run_serial_pass(
+            object(), ["401001", "401002", "401003"], records, {}, 0, 1, 1, 1, state))
+
+    assert completed == 3
+    assert state["processed"] == 3
+    assert order == ["401001", "401002", "401003"]
+    assert max_active == 1
+    assert len(saves) == 3
+    assert set(saves[-1]) == set(order)
+    page.close.assert_awaited_once()
+
+
+def test_atomic_line_item_update_preserves_existing_jobs(tmp: Path):
+    path = tmp / "line_items.json"
+    line_items.save_store({
+        "jobs": {"401000": {"items": [{"raw": "old"}], "customer": "Existing"}},
+        "ai_tags": {},
+    }, path)
+
+    items = [{"raw": "Outlet Damper L 1.00", "norm": "OUTLET DAMPER", "tags": ["DAMPER"]}]
+    assert line_items.record_jobs_atomic([{
+        "job": "401001", "items": items, "customer": "New", "co_number": 2,
+        "so_pdf": "401001.pdf",
+    }], path) == 1
+
+    stored = line_items.load_store(path)
+    assert set(stored["jobs"]) == {"401000", "401001"}
+    assert stored["jobs"]["401000"]["customer"] == "Existing"
+    assert stored["jobs"]["401001"]["co_number"] == 2
+
+
+def test_backfill_overlay_survives_and_merges_with_main_store(tmp: Path):
+    base = tmp / "line_items.json"
+    overlay = tmp / "backfill_line_items.json"
+    line_items.save_store({
+        "jobs": {
+            "401000": {"scanned_at": "2026-01-01", "items": [{"raw": "base only"}]},
+            "401001": {"scanned_at": "2026-01-01", "items": [{"raw": "stale"}]},
+        },
+        "ai_tags": {},
+    }, base)
+    line_items.save_store({
+        "jobs": {
+            "401001": {"scanned_at": "2026-02-01", "items": [{"raw": "fresh"}]},
+            "401002": {"scanned_at": "2026-02-01", "items": [{"raw": "overlay only"}]},
+        },
+        "ai_tags": {},
+    }, overlay)
+
+    with (
+        patch("line_items.store_path", return_value=base),
+        patch("line_items.backfill_store_path", return_value=overlay),
+    ):
+        merged = line_items.load_store()
+
+    assert set(merged["jobs"]) == {"401000", "401001", "401002"}
+    assert merged["jobs"]["401001"]["items"][0]["raw"] == "fresh"
+
+
+def test_watcher_fetch_uses_the_shared_cbc_lock():
+    events = []
+
+    @contextlib.contextmanager
+    def lock():
+        events.append("enter")
+        try:
+            yield
+        finally:
+            events.append("exit")
+
+    async def run():
+        with (
+            patch("sales_orders.cbc_fetch_lock", side_effect=lock),
+            patch("sales_orders._afetch_all_unlocked", new=AsyncMock(return_value={"401001": {}})),
+        ):
+            return await sales_orders._afetch_all(["401001"])
+
+    assert asyncio.run(run()) == {"401001": {}}
+    assert events == ["enter", "exit"]
+
+
+def test_live_master_save_preserves_external_backfill_rows(tmp: Path):
+    path = tmp / "live_master.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    external = {
+        "orders": {
+            "401000": {"added": "old", "on_queue": False, "job": {"job": "401000"}},
+            "401001": {"added": "old", "left": "stale departure", "on_queue": True,
+                       "job": {"job": "401001", "so_pdf": "verified.pdf"}},
+        }
+    }
+    path.write_text(json.dumps(external), encoding="utf-8")
+    watcher = {
+        "orders": {
+            "401001": {"added": "old", "left": None, "on_queue": True,
+                       "job": {"job": "401001", "status_note": "live"}},
+        }
+    }
+
+    with (
+        patch.object(live_master, "MASTER_PATH", path),
+        patch("live_master.data_file_lock", side_effect=lambda *_a, **_k: contextlib.nullcontext()),
+    ):
+        live_master.save_master(watcher)
+
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert set(saved["orders"]) == {"401000", "401001"}
+    assert saved["orders"]["401001"]["job"]["status_note"] == "live"
+    assert saved["orders"]["401001"]["job"]["so_pdf"] == "verified.pdf"
+    assert saved["orders"]["401001"]["left"] is None
+    assert "401000" in watcher["orders"]
+
+
+def test_kernel_lock_excludes_a_second_process(tmp: Path):
+    lock_path = tmp / "shared.lock"
+    child = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from process_lock import exclusive_file_lock\n"
+        "try:\n"
+        "    with exclusive_file_lock(Path(sys.argv[1]), label='test', timeout=0.2, poll=0.02):\n"
+        "        pass\n"
+        "except TimeoutError:\n"
+        "    raise SystemExit(3)\n"
+    )
+    with process_lock.exclusive_file_lock(lock_path, label="parent test lock"):
+        result = subprocess.run(
+            [sys.executable, "-c", child, str(lock_path)],
+            cwd=Path(__file__).parent,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    assert result.returncode == 3, (result.stdout, result.stderr)
+
+
+def main() -> int:
+    passed = 0
+    tmp = Path.cwd() / ".tmp_backfill_serial_tests"
+    tmp.mkdir(exist_ok=True)
+    for name, function in sorted(globals().items()):
+        if not name.startswith("test_") or not callable(function):
+            continue
+        function(tmp / name) if "tmp" in function.__code__.co_varnames else function()
+        print(f"  ok  {name}")
+        passed += 1
+    print(f"\n{passed} tests passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
