@@ -558,6 +558,17 @@ so each line is kept three ways:
 The daily report's **Full Queue / History tabs gain a "Features" column** with
 each job's tags, and the AI briefing weaves notable features into its summary.
 
+**The similar-order suggester runs live on the same store.** Whenever an order
+is enriched (a new arrival on the watch, a change order, the daily run), it is
+scored against the whole backlog and any order that shares its *rare* SO
+features AND already has custom AutoCAD drawings lands in a **"DWG Reuse"**
+column (both the daily report and the live workbook): the cell shows the top
+candidate + its custom suffixes (e.g. `421100 (-07,-51) +2`), links to that
+job's CAD folder, and hovering lists every candidate with the exact shared SO
+lines. New-order Teams/toast notifications carry the same line. Tune with
+`REUSE_MIN_SCORE` (default 0.5; raise if too chatty, `99` disables) and
+`REUSE_TOP` (default 3) in `.env`.
+
 **Build the store from what's already archived** (no login, no browser — it
 reads the PDFs under `SALES_ORDER_DIR`), then search:
 

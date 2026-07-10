@@ -3,6 +3,37 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-07-10 — Similar-order suggester wired into the live queue ("DWG Reuse")
+
+The `--like` ranking now runs automatically for every enriched order (new
+arrival on the watch / change-order re-fetch / daily run):
+
+- `find_orders`: `similar_jobs` split into `build_index` (one pass over the
+  store: tag/line sets + rarity counts) + `similar_to_items` (score any items
+  against it — works for orders NOT in the store, i.e. brand-new ones).
+  `reuse_suggestions` = thresholded custom-DWG-only shortlist trimmed for
+  storage on the job dict; `reuse_label`/`reuse_note` render it. Measured on
+  the real corpus (6K orders / 75K lines): 0.09s index once per batch +
+  ~16ms/order.
+- `sales_orders.enrich_with_sales_orders`: after the line-items store is
+  updated, builds one index and stamps `dwg_reuse` (list) +
+  `dwg_reuse_label`/`dwg_reuse_note` (strings) on each job dict — flows into
+  live_master via the normal upsert. Best-effort try/except; NOT in
+  live_master._TRACKED so it can't spam the change log.
+- New **"DWG Reuse"** column in `excel_writer.COLUMNS` — placed AFTER CO#
+  because the Changes tab aligns Folder/Quote Run/CO# in fixed columns across
+  its tables (test_changes_today_columns_align_across_sections). Cell = top
+  candidate + suffixes (`421100 (-07,-51) +2`), hyperlinked to its CAD folder,
+  full shortlist w/ shared SO lines as the hover comment (excel_writer +
+  live_sheets both).
+- `notify._order_facts`: new-order toast/Teams card gets a "DWG Reuse" fact.
+- Config: `REUSE_MIN_SCORE` (default 0.5 — on this corpus that separates
+  "same fan" from common-feature noise; 99 disables) and `REUSE_TOP` (3).
+- Known noise source: address/routing boilerplate ("PO BOX ...", "ROUTE TO
+  ...") is stored as line items and occasionally boosts same-customer matches.
+  Mostly harmless (same customer IS a reuse signal); the proper fix is a
+  line_items skip rule, someday.
+
 ## 2026-07-09 — DWG-aware search + `--like` similarity ranking (find_orders)
 
 Goal: surface the backfilled SO data WITHOUT widening the live queue workbook

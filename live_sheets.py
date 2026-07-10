@@ -239,6 +239,18 @@ def _job_value_cells(j: Dict[str, Any], columns: Optional[List] = None,
             c = Cell(_flags_str(j))
         elif key == "engineers":
             c = Cell(engineers.cell_text(j))
+        elif key == "dwg_reuse_label":
+            # Backlog order(s) with custom DWGs for this order's rare features —
+            # linked to the top candidate's CAD folder, full shortlist on hover.
+            c = Cell(j.get("dwg_reuse_label", ""))
+            sugg = j.get("dwg_reuse") or []
+            if c.value and sugg:
+                if j.get("dwg_reuse_note"):
+                    c.comment = j["dwg_reuse_note"]
+                folder = (sugg[0].get("folder") or "").strip()
+                if folder:
+                    c.link, c.font = folder, F_LINK
+                    linked_idx.add(idx)
         else:
             c = Cell(j.get(key, ""))
         cells.append(c)
