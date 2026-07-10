@@ -281,11 +281,17 @@ def _changes_sheet(master: dict, lq_jobs: list, new_today: set, today: date,
     """Today's activity log: new orders today, change orders (CO#), the
     field-modification log, and orders removed today. `now` stamps a 'last
     updated' line at the top so users can see the tab is live."""
-    new_today_jobs = [j for j in lq_jobs if str(j.get("job") or "") in new_today]
+    # STABLE ordering (newest job first), NOT board order: lq_jobs follows the
+    # board position, which jitters between scrapes — feeding that order into
+    # the tables changed the tab's fingerprint every poll and full-repainted
+    # this (big) tab each cycle, freezing Excel for the whole render.
+    new_today_jobs = sorted((j for j in lq_jobs if str(j.get("job") or "") in new_today),
+                            key=lambda j: _sim_sort_key(str(j.get("job") or "")), reverse=True)
     events = change_log.load(today)
-    removed_today = [e.get("job", {}) for e in master.get("orders", {}).values()
-                     if e.get("seen_on_queue") and not e.get("on_queue")
-                     and str(e.get("left") or "")[:10] == today.isoformat()]
+    removed_today = sorted((e.get("job", {}) for e in master.get("orders", {}).values()
+                            if e.get("seen_on_queue") and not e.get("on_queue")
+                            and str(e.get("left") or "")[:10] == today.isoformat()),
+                           key=lambda j: _sim_sort_key(str(j.get("job") or "")), reverse=True)
     updated_at = live_sheets.fmt_datetime(now)
     # job# -> its latest job dict, for the change-order table's Design / Arrangement
     # / change-description columns.
