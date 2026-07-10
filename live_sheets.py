@@ -780,8 +780,15 @@ def row_sig(cells: List[Cell]) -> str:
     """A stable string signature of a row's content+style, so the renderer can
     tell whether a row actually changed and skip writing it if not. Returned as a
     hex digest (not a tuple) so it survives a JSON round-trip in the master store
-    — change detection has to work across watcher restarts."""
-    payload = [[c.value, c.fill, c.font, c.link, c.number_format, c.center] for c in cells]
+    — change detection has to work across watcher restarts.
+
+    Volatile cells contribute their STYLE but not their value: the Live Queue's
+    '#' board position jitters on most scrapes (the site reorders ties), and
+    hashing it made 5-15 full row rewrites per poll for rows whose data hadn't
+    changed — most of the render cost. The renderer refreshes those columns in
+    one bulk write instead (apply_upserts `positions`)."""
+    payload = [["\x00VOLATILE" if c.volatile else c.value,
+                c.fill, c.font, c.link, c.number_format, c.center] for c in cells]
     return hashlib.md5(json.dumps(payload, default=str, sort_keys=True).encode()).hexdigest()
 
 
@@ -856,8 +863,10 @@ def live_queue_records(jobs: List[Dict[str, Any]], today: date,
         if sim.value and j.get("_sim_anchor"):
             sim.link, sim.font = j["_sim_anchor"], F_LINK
         # "#" = the cbcinsider board position (the sort key for board order).
+        # Volatile: position jitter must not force a full row rewrite — the
+        # renderer bulk-refreshes this column each cycle instead.
         pos = j.get("_cbc_pos")
-        cbc = Cell(pos if isinstance(pos, int) else "", center=True)
+        cbc = Cell(pos if isinstance(pos, int) else "", center=True, volatile=True)
         cells = _board_row_cells(j, today, jn in co_changed_ids, jn in new_ids, ref,
                                  leading=added, trailing=[last_out, sim, cbc])
         out.append((jn, cells))

@@ -355,7 +355,6 @@ def base_actions() -> list[LauncherAction]:
                 option("delay", "Delay seconds", "Pause between orders. Default is the script's built-in value.", arg="--delay"),
                 LIMIT, MIN_JOB, MAX_JOB, RESCAN,
                 option("retry_not_found", "Retry not-found jobs", "Recheck jobs previously saved as not-found (e.g. after a session died mid-run) instead of skipping them.", kind="check", arg="--retry-not-found"),
-                option("parallel", "Parallel workers", "How many searches run at once. Blank = the SO_CONCURRENCY default.", arg="--parallel"),
                 option("passes", "Retry passes", "Retry incomplete jobs this many times within the run. Blank = 2.", arg="--passes"),
             ),
             long_running=True,
