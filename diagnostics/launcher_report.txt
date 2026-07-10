@@ -1,6 +1,6 @@
 # Launcher debug report
-generated: 2026-07-06T15:32:29
-code version: branch claude/quirky-hypatia-7pwmqp @ commit cd77390132
+generated: 2026-07-10T06:59:28
+code version: branch claude/master-sync-currency-qj95j1 @ commit e70b42f0ab
 os.name: nt   platform: win32
 python (launcher): C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\pythonw.exe
 python (for scripts): C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe
@@ -8,88 +8,63 @@ python (for scripts): C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe
 ## Process scan (external-status detection)
 method used: powershell-cim
 error: none
-python process lines seen: 5
+python process lines seen: 3
 detected running outside launcher: ['watch']
 
 ### python process command lines (up to 40)
-  pid=16232 C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\pythonw.exe "C:\CBC INSIDER GL QUEUE CHECKER\launcher.py"
-  pid=101064 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
-  pid=146896 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
-  pid=148296 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" fill_transmittal_insider.py 421395 --initials LDL
-  pid=155980 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" fill_transmittal_insider.py 421395 --initials LDL
+  pid=182904 C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\pythonw.exe "C:\CBC INSIDER GL QUEUE CHECKER\launcher.py"
+  pid=183484 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
+  pid=54472 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
 
 ## Launcher-started processes
-  email_drawings: pid=148296 alive=True started=2026-07-06 15:24:12
-      cmd: "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" fill_transmittal_insider.py 421395 --initials LDL
+  (none)
 
 ## Last exit codes
-  data_push: 0
-  quote_run_scan: 0
-  watch: 0
+  backfill_orders: 0
+  find_orders: 0
+
+## Last Email Drawings run (tail of its per-run log)
+  [20260706_163651_email_drawings.log]
+  $ "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" fill_transmittal_insider.py 421395 --initials LDL
+  
+  Ticked the 'record' box: 	For record only, certified � and released for fabrication.
+  Wrote transmittal: Z:\AUTOCAD\CURRENT\JOBS\GENERAL LINE\421\421395\TRANSMITTAL\AUTO-GENERATED\421395 DWG TRANSMITTAL-02.doc
+  Loading with saved session: https://www.cbcinsider.com/intranet/engineering/transmittal.aspx
+  Attached 5 file(s) via the Attach File button.
+  
+  === Transmittal data for order 421395 ===
+    Customer : ASPHALT CUTBACKS, INC. Later - Will Advise
+    P.O. #   : 6970
+    Emails   : kathy.bizoukas@asphaltcutbacks.com; elleng@airprocesssystems.com
+    Box      : record  (released=True)
+    Because  : Splits: # 339 (Air Process Systems & Conveyors % Released for fabrication
+    3D STEP  : yes
+    Design   : 39 SQI Stainless Steel SW 304L Airstream
+    IMI #    : IMI-GL 2021
+    Checklist: {'fan_drawings': 'Both', 'om': 'X', 'motor_prints': 'X', 'motor_data': 'X', 'buyout_prints': 'X', 'other': ''}
+    Drawing table:
+       [E��] 421395-02      DESIGN 39 SQI Stainless Steel SW 304L Airstream FAN ASSEMBLY (AUTOCAD/PDF)
+       [E��] IMI-GL 2021    FAN OPERATING AND MAINTENANCE MANUAL
+       [E��] 421395-02      3D STEP DRAWING
+       [���] (blank)        MOTOR DOCUMENTS TO FOLLOW
+    Attachments (4):
+       - Z:\AUTOCAD\CURRENT\JOBS\GENERAL LINE\421\421395\421395-02.dwg
+       - Z:\AUTOCAD\CURRENT\JOBS\GENERAL LINE\421\421395\421395-02.pdf
+       - Z:\AUTOCAD\CURRENT\JOBS\GENERAL LINE\421\421395\IMI-GL 2021.pdf
+       - Z:\AUTOCAD\CURRENT\JOBS\GENERAL LINE\421\421395\3D STEP\421395-02.step
+    SO today : yes  (last verified: 2026-07-06T15:50:42)
+    SO PDF   : Z:\DAG\SALES ORDERS FOR DAILY QUEUE\421395\421395 - Sales Order CO2.pdf
+    Folder   : Z:\AUTOCAD\CURRENT\JOBS\GENERAL LINE\421\421395
+  
+  *** Motor print not attached: This order has Motor Prints checked on the Sales Order, but automatic motor-print attachment isn't supported yet. Attach the motor print manually before sending if it's needed. ***
+  
+  Filled transmittal: Z:\AUTOCAD\CURRENT\JOBS\GENERAL LINE\421\421395\TRANSMITTAL\AUTO-GENERATED\421395 DWG TRANSMITTAL-02.doc
+    ! Existing transmittal in the folder (left as-is): 421395 DWG TRANSMITTAL-01.doc
+  
+  Pre-filled the Email Drawings form for order 421395 (2 recipient(s), 5 file(s)).
+  SEND is disabled � review the form and submit it yourself if it's correct.
 
 ## Tail of launcher_debug.log (last 120 lines)
-  2026-06-30 14:40:17 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:42:18 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:42:33 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:42:50 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:43:05 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:44:18 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:45:21 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:46:42 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:47:46 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:49:06 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:50:10 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:50:27 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:51:14 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:52:19 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:53:06 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:54:35 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:55:38 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:55:55 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 14:56:10 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 14:56:27 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 15:07:39 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 15:08:12 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 15:08:27 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 15:08:43 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 15:09:15 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 15:10:20 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 15:10:35 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 15:10:52 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 15:16:27 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 15:17:00 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 15:18:03 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 15:18:36 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 15:19:43 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 15:19:51 relaunching launcher; closing this instance
-  2026-06-30 15:19:52 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/gui-git-pull-dropdown-y86ajl@fe4c508f)
-  2026-06-30 15:19:53 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-06-30 15:20:01 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 15:20:15 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 15:20:33 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 15:21:20 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 15:21:41 publishing debug report to branch debug/launcher
-  2026-06-30 15:21:41 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 15:21:44 publish ok: pushed c26dbc431e to origin/debug/launcher
-  2026-06-30 15:24:46 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 15:31:03 status scan: method=powershell-cim error=none python_lines=4 detected=none
-  2026-06-30 15:31:34 status scan: method=wmic error=none python_lines=4 detected=none
-  2026-06-30 15:33:02 status scan: method=wmic error=none python_lines=4 detected=['watch']
-  2026-06-30 15:33:10 status scan: method=wmic error=none python_lines=2 detected=none
-  2026-06-30 15:34:23 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-06-30 15:34:38 status scan: method=wmic error=none python_lines=2 detected=none
-  2026-06-30 15:35:03 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-06-30 15:37:10 status scan: method=wmic error=none python_lines=2 detected=none
-  2026-06-30 15:37:35 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-06-30 15:41:04 status scan: method=wmic error=none python_lines=2 detected=none
-  2026-06-30 15:42:01 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-06-30 15:42:22 relaunching launcher; closing this instance
-  2026-07-01 06:54:35 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/gui-git-pull-dropdown-y86ajl@84667ac2)
-  2026-07-01 06:54:51 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-07-01 06:54:54 relaunching launcher; closing this instance
-  2026-07-01 06:55:41 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/gui-git-pull-dropdown-y86ajl@0f279459)
-  2026-07-01 06:55:50 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-07-01 06:55:55 close: publishing debug report to debug/launcher
   2026-07-01 06:56:07 close publish ok: pushed d45d858e10 to origin/debug/launcher
   2026-07-01 07:53:47 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/gui-git-pull-dropdown-y86ajl@fa9de93b)
   2026-07-01 07:53:56 status scan: method=powershell-cim error=none python_lines=2 detected=none
@@ -148,4 +123,66 @@ detected running outside launcher: ['watch']
   2026-07-04 19:24:39 status scan: method=wmic error=none python_lines=1 detected=none
   2026-07-06 05:00:05 status scan: method=wmic error=none python_lines=3 detected=['watch']
   2026-07-06 07:53:08 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-06 15:32:29 publishing debug report to branch debug/launcher
+  2026-07-06 15:32:32 publish ok: pushed 234cf48059 to origin/debug/launcher
+  2026-07-06 16:36:31 relaunching launcher; closing this instance
+  2026-07-06 16:36:41 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@b5456843)
+  2026-07-06 16:36:51 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-06 16:36:51 pending restart: restarted=['Prepare Email Drawings Form', 'Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-07 05:00:03 status scan: method=powershell-cim error=none python_lines=5 detected=['watch']
+  2026-07-07 07:13:07 status scan: method=wmic error=none python_lines=5 detected=['watch']
+  2026-07-07 07:17:53 status scan: method=powershell-cim error=none python_lines=5 detected=['watch']
+  2026-07-07 10:59:14 close: publishing debug report to debug/launcher
+  2026-07-07 10:59:40 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@b5456843)
+  2026-07-07 10:59:54 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-07-07 20:36:44 status scan: method=none error=powershell-cim: TimeoutExpired: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' timed out after 8 seconds python_lines=0 detected=none
+  2026-07-07 20:37:01 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-07-07 20:44:31 status scan: method=none error=powershell-cim: TimeoutExpired: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' timed out after 8 seconds python_lines=0 detected=none
+  2026-07-07 20:44:46 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-07-08 05:00:15 status scan: method=powershell-cim error=none python_lines=4 detected=['watch']
+  2026-07-08 10:42:08 relaunching launcher; closing this instance
+  2026-07-08 10:42:18 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/quirky-hypatia-7pwmqp@7b0fd438)
+  2026-07-08 10:42:28 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-08 10:42:28 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-09 05:00:09 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-09 05:22:41 status scan: method=none error=powershell-cim: TimeoutExpired: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' timed out after 8 seconds python_lines=0 detected=none
+  2026-07-09 05:23:00 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-09 07:39:22 status scan: method=powershell-cim error=none python_lines=7 detected=['line_items_scan', 'watch']
+  2026-07-09 07:39:38 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-09 07:56:11 status scan: method=powershell-cim error=none python_lines=7 detected=['login', 'watch']
+  2026-07-09 07:59:55 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-09 08:00:11 status scan: method=powershell-cim error=none python_lines=7 detected=['backfill_orders', 'watch']
+  2026-07-09 08:02:35 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-09 08:03:07 status scan: method=powershell-cim error=none python_lines=7 detected=['backfill_orders', 'watch']
+  2026-07-09 08:03:39 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-09 08:04:43 status scan: method=powershell-cim error=none python_lines=7 detected=['backfill_orders', 'watch']
+  2026-07-09 08:05:47 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-09 08:06:19 status scan: method=powershell-cim error=none python_lines=6 detected=['backfill_orders', 'watch']
+  2026-07-09 08:16:12 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-09 08:18:04 status scan: method=powershell-cim error=none python_lines=7 detected=['backfill_orders', 'watch']
+  2026-07-09 08:31:57 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-09 12:45:29 status scan: method=powershell-cim error=none python_lines=7 detected=['backfill_orders', 'watch']
+  2026-07-09 12:46:49 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-09 12:49:13 status scan: method=powershell-cim error=none python_lines=7 detected=['backfill_orders', 'watch']
+  2026-07-09 12:50:17 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-09 13:21:00 status scan: method=powershell-cim error=none python_lines=7 detected=['backfill_orders', 'watch']
+  2026-07-09 14:44:46 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-09 14:47:43 status scan: method=powershell-cim error=none python_lines=7 detected=['backfill_orders', 'watch']
+  2026-07-09 14:48:15 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-09 15:04:26 status scan: method=wmic error=none python_lines=3 detected=['watch']
+  2026-07-09 15:05:20 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-09 15:26:27 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-09 15:26:28 relaunching launcher; closing this instance
+  2026-07-09 15:26:38 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@b092ae6f)
+  2026-07-09 15:26:49 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-09 15:26:49 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-09 16:48:15 relaunching launcher; closing this instance
+  2026-07-09 16:48:26 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/master-sync-currency-qj95j1@e70b42f0)
+  2026-07-09 16:48:37 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-09 16:48:37 pending restart: restarted=['Backfill Historical Orders'] skipped=[] failed=[]
+  2026-07-10 05:00:09 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-10 06:27:49 status scan: method=wmic error=none python_lines=3 detected=['watch']
+  2026-07-10 06:43:08 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-10 06:43:18 status scan: method=wmic error=none python_lines=3 detected=['watch']
+  2026-07-10 06:44:12 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
 
