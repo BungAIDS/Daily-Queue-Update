@@ -11,7 +11,7 @@ order is checkpointed immediately, so stop it any time and plain
 beside watch.py; the two processes coordinate CBC access and shared data writes.
 
 Job source (pick one; default is the AutoCAD folders):
-    python backfill_orders.py                     # every job folder under AUTOCAD_JOBS_DIR
+    python backfill_orders.py                     # supported job folders (401000+)
     python backfill_orders.py 421314 421388       # explicit job numbers
     python backfill_orders.py --list jobs.txt     # one job number per line
     python backfill_orders.py --range 420000 421000
@@ -79,6 +79,9 @@ WORKBOOK_PATH = BACKLOG_DIR / "backlog.xlsx"
 RETRYABLE_STATUSES = {"error", "not-found", "no-SO"}
 BACKFILL_SCAN_VERSION = "serial-verified-v1"
 REQUIRED_MISS_ATTEMPTS = 2
+# CBC's normal Search Order box handles the 401xxx+ population. The earlier
+# 400xxx orders need the separate legacy lookup path, which is not implemented.
+DEFAULT_CBC_SEARCH_MIN_JOB = 401000
 
 
 def _attempt_count(rec: Dict[str, Any]) -> int:
@@ -91,7 +94,8 @@ def _attempt_count(rec: Dict[str, Any]) -> int:
 # --------------------------------------------------------------------------- #
 # Job sources                                                                 #
 # --------------------------------------------------------------------------- #
-def jobs_from_folders(root: Path, min_job: int = autocad_scan.DEFAULT_MIN_JOB, max_job: int = 0) -> List[str]:
+def jobs_from_folders(root: Path, min_job: int = DEFAULT_CBC_SEARCH_MIN_JOB,
+                      max_job: int = 0) -> List[str]:
     """Every real job number under AUTOCAD_JOBS_DIR — same list the DWG scan walks.
     Folders below min_job (year/template/archive dirs) are skipped."""
     return [job for job, _type, _path in autocad_scan.iter_job_folders(root, min_job, max_job)]
@@ -965,7 +969,7 @@ def _inside_job_caps(job: str, min_job: int = 0, max_job: int = 0) -> bool:
 def main(argv: Optional[List[str]] = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     ap = argparse.ArgumentParser(description="Backfill old orders from cbcinsider search.")
-    ap.add_argument("jobs", nargs="*", help="Explicit job numbers (default: all AutoCAD folders).")
+    ap.add_argument("jobs", nargs="*", help="Explicit job numbers (default: supported 401000+ AutoCAD folders).")
     ap.add_argument("--list", help="File of job numbers, one per line.")
     ap.add_argument("--range", nargs=2, type=int, metavar=("FIRST", "LAST"), help="Numeric job range.")
     ap.add_argument("--root", default=str(AUTOCAD_JOBS_DIR), help="AutoCAD jobs root for folder enumeration.")
@@ -978,8 +982,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="Seconds to wait for search results/detail to surface per job (default 75).")
     ap.add_argument("--doc-timeout", type=float, default=120.0,
                     help="Seconds to wait for document links after opening detail (default 120).")
-    ap.add_argument("--min-job", type=int, default=autocad_scan.DEFAULT_MIN_JOB,
-                    help=f"On a folder sweep, skip job numbers below this (default {autocad_scan.DEFAULT_MIN_JOB}).")
+    ap.add_argument("--min-job", type=int, default=DEFAULT_CBC_SEARCH_MIN_JOB,
+                    help=f"On a folder sweep, skip job numbers below this (default {DEFAULT_CBC_SEARCH_MIN_JOB}; "
+                         "older orders need the legacy CBC lookup).")
     ap.add_argument("--max-job", type=int, default=0, help="Skip job numbers above this (0 = no cap).")
     ap.add_argument("--force", action="store_true",
                     help="Reprocess selected jobs even if saved progress says they are done.")

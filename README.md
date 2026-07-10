@@ -610,7 +610,7 @@ won't match any built-in rule at first. Three levers, in order:
 Grind through a backlog of historical orders one at a time (run it all day):
 
 ```bash
-python backfill_orders.py                  # all real AutoCAD job folders
+python backfill_orders.py                  # supported AutoCAD jobs (401000+)
 python backfill_orders.py --list jobs.txt  # or a file of job numbers
 python backfill_orders.py --range 420000 421000
 python backfill_orders.py --limit 100
@@ -619,10 +619,11 @@ python backfill_orders.py 421314 421388 --force  # recheck known jobs
 ```
 
 A folder sweep only considers job numbers at or above `--min-job` (default
-`400000`), so non-job folders (year/template/archive dirs with small or
-non-numeric names) are skipped. Raise it once you know your exact lowest job,
-e.g. `--min-job 403000` (and `--max-job` to cap the top). The same flags apply
-to `autocad_scan.py`.
+`401000` for this scanner), so it does not waste the normal CBC Search Order
+path on the older `400xxx` population that needs the unimplemented legacy
+lookup. Raise it to narrow a run further, e.g. `--min-job 403000` (and
+`--max-job` to cap the top). `autocad_scan.py` keeps its own filesystem-scan
+minimum because it does not depend on CBC's lookup path.
 
 It downloads + parses each order's Sales Order and drive run, merges the DWG
 scan, and writes `backlog/backlog.xlsx`. The historical lookup is deliberately
@@ -639,9 +640,9 @@ twice by the current serial scanner are checkpointed and skipped on restart unle
 `--from-dwg-progress` uses that saved job list and avoids rewalking the network
 folder tree for every batch.
 
-The old `400xxx` and lower orders may live behind a different CBC Insider lookup
-path; use `--min-job 401000` for the normal search-box backfill until that path
-is added. The scanner retries incomplete rows (`not-found`, `no-SO`, `error`) in
+The old `400xxx` and lower orders live behind a different CBC Insider lookup
+path and are skipped by the plain command until that path is added. The scanner
+retries incomplete rows (`not-found`, `no-SO`, `error`) in
 the same run by default (`--passes 2`) and waits longer for document links than
 the live watcher because the backlog batches are unattended.
 
