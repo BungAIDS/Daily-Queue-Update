@@ -61,6 +61,13 @@ from sales_orders import (
 from scraper import CONTAINER_SELECTOR
 import autocad_scan
 import line_items
+from sales_order_validation import (
+    accept_existing,
+    failed_acceptance,
+    finalize_candidate,
+    modal_text_matches_job,
+    staging_path,
+)
 
 log = logging.getLogger("backfill")
 
@@ -105,12 +112,7 @@ def _board_args(page) -> Dict[str, str]:
 
 def _open_via_loaddetail(page, job: str, args_js: str, doc_timeout_ms: int = 120000) -> bool:
     page.evaluate(_trigger_js(args_js))
-    try:
-        page.locator("#modalDetail a[href*='downloaddoc.aspx']").first.wait_for(
-            state="attached", timeout=doc_timeout_ms)
-        return True
-    except Exception:  # noqa: BLE001
-        return False
+    return _wait_for_matching_modal(page, job, doc_timeout_ms)
 
 
 def _open_matching_card(page, job: str, doc_timeout_ms: int = 120000) -> bool:
@@ -126,9 +128,7 @@ def _open_matching_card(page, job: str, doc_timeout_ms: int = 120000) -> bool:
             continue
         try:
             c.evaluate("(el) => el.click()")
-            page.locator("#modalDetail a[href*='downloaddoc.aspx']").first.wait_for(
-                state="attached", timeout=doc_timeout_ms)
-            return True
+            return _wait_for_matching_modal(page, job, doc_timeout_ms)
         except Exception:  # noqa: BLE001
             return False
     return False
@@ -156,11 +156,22 @@ def find_search_box(page):
     return best
 
 
-def _modal_has_docs(page) -> bool:
+def _modal_has_docs(page, job: str) -> bool:
     try:
-        return page.locator("#modalDetail a[href*='downloaddoc.aspx']").count() > 0
+        if page.locator("#modalDetail a[href*='downloaddoc.aspx']").count() <= 0:
+            return False
+        return modal_text_matches_job(page.locator("#modalDetail").inner_text(), job)
     except Exception:  # noqa: BLE001
         return False
+
+
+def _wait_for_matching_modal(page, job: str, timeout_ms: int) -> bool:
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        if _modal_has_docs(page, job):
+            return True
+        page.wait_for_timeout(250)
+    return False
 
 
 def open_order_detail(page, job: str, search_timeout_s: float = 75.0,
@@ -195,7 +206,7 @@ def open_order_detail(page, job: str, search_timeout_s: float = 75.0,
         page.wait_for_timeout(500)
         if _open_matching_card(page, job, doc_timeout_ms):
             return True
-        if _modal_has_docs(page):
+        if _modal_has_docs(page, job):
             return True
     return False
 
@@ -229,6 +240,34 @@ def _download(context, page_url: str, href: str, dest: Path) -> Optional[str]:
     except Exception as e:  # noqa: BLE001
         log.warning("  download failed for %s: %s", dest.name, e)
         return None
+
+
+def _download_sales_order(context, page_url: str, href: str, destination: Path, job: str):
+    existing = accept_existing(destination, job)
+    if existing and existing.path:
+        return existing
+    if existing:
+        log.warning(
+            "  %s: rejected existing Sales Order internal=%s status=%s -> %s",
+            job,
+            existing.validation.internal_order or "?",
+            existing.validation.status,
+            existing.quarantine_path,
+        )
+    staged = staging_path(destination, job)
+    downloaded = _download(context, page_url, href, staged)
+    if not downloaded:
+        return failed_acceptance(job, f"download failed for {destination.name}")
+    accepted = finalize_candidate(downloaded, destination, job)
+    if not accepted.path:
+        log.warning(
+            "  %s: rejected downloaded Sales Order internal=%s status=%s -> %s",
+            job,
+            accepted.validation.internal_order or "?",
+            accepted.validation.status,
+            accepted.quarantine_path,
+        )
+    return accepted
 
 
 def _close_modal(page) -> None:
@@ -283,9 +322,20 @@ def process_one(page, context, job: str, folder: str = "",
         so = _latest_of_type(docs, SO_TYPE)
         if so:
             href, doc = so
-            rec["co_number"] = (doc["rev"] - 1) if doc["rev"] and doc["rev"] > 1 else 0
-            so_pdf = _download(context, page.url, href, SALES_ORDER_DIR / job / _so_filename(job, doc["rev"]))
+            accepted = _download_sales_order(
+                context,
+                page.url,
+                href,
+                SALES_ORDER_DIR / job / _so_filename(job, doc["rev"]),
+                job,
+            )
+            so_pdf = accepted.path
+            rec["so_validation"] = accepted.validation.status
+            rec["so_internal_order"] = accepted.validation.internal_order
+            rec["so_validation_method"] = accepted.validation.method
+            rec["so_quarantine"] = accepted.quarantine_path
             if so_pdf:
+                rec["co_number"] = (doc["rev"] - 1) if doc["rev"] and doc["rev"] > 1 else 0
                 p = parse_sales_order_pdf(so_pdf)
                 rec.update({
                     "so_design_desc": p.get("design_desc", ""), "so_size": p.get("size", ""),
@@ -304,7 +354,7 @@ def process_one(page, context, job: str, folder: str = "",
                     line_items.record_job(li_store, job, items,
                                           co_number=rec.get("co_number"), so_pdf=so_pdf)
 
-        runs = _run_docs(docs)
+        runs = _run_docs(docs) if not so or so_pdf else []
         dr_count = 0
         if runs:
             rec["has_drive_run"] = True
@@ -383,12 +433,7 @@ async def _board_args_async(page) -> Dict[str, str]:
 async def _open_via_loaddetail_async(page, job: str, args_js: str,
                                      doc_timeout_ms: int = 120000) -> bool:
     await page.evaluate(_trigger_js(args_js))
-    try:
-        await page.locator("#modalDetail a[href*='downloaddoc.aspx']").first.wait_for(
-            state="attached", timeout=doc_timeout_ms)
-        return True
-    except Exception:  # noqa: BLE001
-        return False
+    return await _wait_for_matching_modal_async(page, job, doc_timeout_ms)
 
 
 async def _open_matching_card_async(page, job: str, doc_timeout_ms: int = 120000) -> bool:
@@ -398,9 +443,7 @@ async def _open_matching_card_async(page, job: str, doc_timeout_ms: int = 120000
             continue
         try:
             await c.evaluate("(el) => el.click()")
-            await page.locator("#modalDetail a[href*='downloaddoc.aspx']").first.wait_for(
-                state="attached", timeout=doc_timeout_ms)
-            return True
+            return await _wait_for_matching_modal_async(page, job, doc_timeout_ms)
         except Exception:  # noqa: BLE001
             return False
     return False
@@ -424,11 +467,22 @@ async def find_search_box_async(page):
     return best
 
 
-async def _modal_has_docs_async(page) -> bool:
+async def _modal_has_docs_async(page, job: str) -> bool:
     try:
-        return await page.locator("#modalDetail a[href*='downloaddoc.aspx']").count() > 0
+        if await page.locator("#modalDetail a[href*='downloaddoc.aspx']").count() <= 0:
+            return False
+        return modal_text_matches_job(await page.locator("#modalDetail").inner_text(), job)
     except Exception:  # noqa: BLE001
         return False
+
+
+async def _wait_for_matching_modal_async(page, job: str, timeout_ms: int) -> bool:
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        if await _modal_has_docs_async(page, job):
+            return True
+        await page.wait_for_timeout(250)
+    return False
 
 
 async def open_order_detail_async(page, job: str, search_timeout_s: float = 75.0,
@@ -455,7 +509,7 @@ async def open_order_detail_async(page, job: str, search_timeout_s: float = 75.0
         await page.wait_for_timeout(500)
         if await _open_matching_card_async(page, job, doc_timeout_ms):
             return True
-        if await _modal_has_docs_async(page):
+        if await _modal_has_docs_async(page, job):
             return True
     return False
 
@@ -493,6 +547,36 @@ async def _download_async(context, page_url: str, href: str, dest: Path) -> Opti
     return None
 
 
+async def _download_sales_order_async(
+    context, page_url: str, href: str, destination: Path, job: str
+):
+    existing = accept_existing(destination, job)
+    if existing and existing.path:
+        return existing
+    if existing:
+        log.warning(
+            "  %s: rejected existing Sales Order internal=%s status=%s -> %s",
+            job,
+            existing.validation.internal_order or "?",
+            existing.validation.status,
+            existing.quarantine_path,
+        )
+    staged = staging_path(destination, job)
+    downloaded = await _download_async(context, page_url, href, staged)
+    if not downloaded:
+        return failed_acceptance(job, f"download failed for {destination.name}")
+    accepted = finalize_candidate(downloaded, destination, job)
+    if not accepted.path:
+        log.warning(
+            "  %s: rejected downloaded Sales Order internal=%s status=%s -> %s",
+            job,
+            accepted.validation.internal_order or "?",
+            accepted.validation.status,
+            accepted.quarantine_path,
+        )
+    return accepted
+
+
 async def _close_modal_async(page) -> None:
     try:
         await page.evaluate("() => window.jQuery && jQuery('#modalDetail').modal('hide')")
@@ -516,9 +600,20 @@ async def process_one_async(page, context, job: str, folder: str = "",
         so = _latest_of_type(docs, SO_TYPE)
         if so:
             href, doc = so
-            rec["co_number"] = (doc["rev"] - 1) if doc["rev"] and doc["rev"] > 1 else 0
-            so_pdf = await _download_async(context, page.url, href, SALES_ORDER_DIR / job / _so_filename(job, doc["rev"]))
+            accepted = await _download_sales_order_async(
+                context,
+                page.url,
+                href,
+                SALES_ORDER_DIR / job / _so_filename(job, doc["rev"]),
+                job,
+            )
+            so_pdf = accepted.path
+            rec["so_validation"] = accepted.validation.status
+            rec["so_internal_order"] = accepted.validation.internal_order
+            rec["so_validation_method"] = accepted.validation.method
+            rec["so_quarantine"] = accepted.quarantine_path
             if so_pdf:
+                rec["co_number"] = (doc["rev"] - 1) if doc["rev"] and doc["rev"] > 1 else 0
                 p = parse_sales_order_pdf(so_pdf)
                 rec.update({
                     "so_design_desc": p.get("design_desc", ""), "so_size": p.get("size", ""),
@@ -537,7 +632,7 @@ async def process_one_async(page, context, job: str, folder: str = "",
                     line_items.record_job(li_store, job, items,
                                           co_number=rec.get("co_number"), so_pdf=so_pdf)
 
-        runs = _run_docs(docs)
+        runs = _run_docs(docs) if not so or so_pdf else []
         dr_count = 0
         if runs:
             rec["has_drive_run"] = True
