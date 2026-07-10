@@ -29,6 +29,7 @@ Pure dict/JSON logic (no Excel), so it's unit-tested directly (test_live_master)
 """
 from __future__ import annotations
 
+import copy
 import json
 import logging
 from datetime import datetime
@@ -36,6 +37,7 @@ from typing import Any, Dict, List, Tuple
 
 import engineers
 from config import SNAPSHOT_DIR
+from process_lock import data_file_lock
 
 log = logging.getLogger(__name__)
 
@@ -54,10 +56,45 @@ def load_master() -> Dict[str, Any]:
     return {"orders": {}}
 
 
-def save_master(master: Dict[str, Any]) -> None:
+def _save_master_unlocked(master: Dict[str, Any]) -> None:
+    MASTER_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = MASTER_PATH.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(master, indent=2, default=str), encoding="utf-8")
     tmp.replace(MASTER_PATH)
+
+
+def _merge_external_before_save(master: Dict[str, Any], external: Dict[str, Any]) -> None:
+    """Preserve orders/fields another helper saved after ``master`` was loaded."""
+    for key, value in external.items():
+        if key != "orders" and key not in master:
+            master[key] = copy.deepcopy(value)
+
+    current_orders = master.setdefault("orders", {})
+    for job, external_entry in (external.get("orders") or {}).items():
+        if job not in current_orders:
+            current_orders[job] = copy.deepcopy(external_entry)
+            continue
+        current_entry = current_orders[job]
+        for key, value in external_entry.items():
+            if key != "job" and key not in current_entry:
+                current_entry[key] = copy.deepcopy(value)
+
+        current_job = current_entry.setdefault("job", {})
+        external_job = external_entry.get("job") or {}
+        for key, value in external_job.items():
+            if key not in current_job:
+                current_job[key] = copy.deepcopy(value)
+        # A helper may have found a newer change order (or restored a missing SO)
+        # while the watcher held an older in-memory copy. Reuse the normal
+        # enrichment regression guard without reviving stale board fields.
+        current_entry["job"] = _keep_better_enrichment(external_job, current_job)
+
+
+def save_master(master: Dict[str, Any]) -> None:
+    """Merge concurrent helper updates, then atomically save the live master."""
+    with data_file_lock(MASTER_PATH, label="live master data update"):
+        _merge_external_before_save(master, load_master())
+        _save_master_unlocked(master)
 
 
 def _jobnum(j: Dict[str, Any]) -> str:

@@ -52,6 +52,7 @@ from templates import parse_quote_run
 from scraper import CONTAINER_SELECTOR
 import autocad_scan
 import line_items
+from process_lock import cbc_fetch_lock
 from sales_order_validation import (
     accept_existing,
     failed_acceptance,
@@ -795,7 +796,7 @@ async def _worker(context, url, queue, results, total):
         await page.close()
 
 
-async def _afetch_all(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
+async def _afetch_all_unlocked(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
     if not STORAGE_STATE_PATH.exists():
         raise RuntimeError(f"No saved session at {STORAGE_STATE_PATH}. Run `python login.py`.")
     url = CBC_QUEUE_URL or CBC_URL
@@ -816,6 +817,12 @@ async def _afetch_all(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
         with contextlib.suppress(Exception):
             await browser.close()
     return results
+
+
+async def _afetch_all(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Fetch a watcher batch without overlapping the historical search flow."""
+    with cbc_fetch_lock():
+        return await _afetch_all_unlocked(job_numbers)
 
 
 # --------------------------------------------------------------------------- #
@@ -877,12 +884,8 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2,
         if p < max_passes:
             log.info("  %d job(s) still incomplete; retrying those.", len(todo))
 
-    # One line-items store shared across the loop: AI-cached tags are applied
-    # to each job's items, and every parsed order is recorded for lookup
-    # (find_orders.py). load_store never raises — a bad store starts fresh.
-    li_store = line_items.load_store()
-
     n_co = n_dl = n_dr = n_dr_folder = n_items = 0
+    line_item_updates: List[Dict[str, Any]] = []
     for jn, j in by_job.items():
         r = so_results.get(jn, {})
         rev = r.get("rev")
@@ -920,10 +923,14 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2,
         # Line items: tag (rules + AI cache), surface on the job for the report
         # and snapshot, and record in the lookup store.
         items = parsed.get("line_items") or []
-        line_items.apply_ai_cache(items, li_store)
         if pdf:
-            line_items.record_job(li_store, jn, items, customer=j.get("customer", ""),
-                                  co_number=j["co_number"], so_pdf=pdf)
+            line_item_updates.append({
+                "job": jn,
+                "items": items,
+                "customer": j.get("customer", ""),
+                "co_number": j["co_number"],
+                "so_pdf": pdf,
+            })
             n_items += len(items)
         j["line_items"] = items
         j["line_item_tags"] = line_items.tags_label(items)
@@ -973,7 +980,11 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2,
             n_dr += 1
 
     try:
-        line_items.save_store(li_store)
+        line_items.record_jobs_atomic(line_item_updates)
+        # record_jobs_atomic applies any AI cache entries to these same item
+        # lists, so refresh the labels after the transaction.
+        for update in line_item_updates:
+            by_job[update["job"]]["line_item_tags"] = line_items.tags_label(update["items"])
         log.info("Line items: %d captured across %d parsed order(s) -> %s",
                  n_items, n_dl, line_items.store_path())
     except OSError as e:  # never let the lookup store sink the daily run

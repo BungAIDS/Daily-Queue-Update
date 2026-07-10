@@ -5,9 +5,10 @@ backlog of historical jobs, opens each one's detail, downloads + parses its
 Sales Order and (if present) construction/drive run, merges in the AutoCAD DWG
 scan, and writes a master backlog workbook.
 
-It searches orders one-by-one per worker, with a bounded worker pool
-(`--parallel`, default SO_CONCURRENCY=8). It writes progress throughout the run —
-kill it any time and re-run to pick up where it left off.
+It searches exactly one order at a time in one browser page. Every completed
+order is checkpointed immediately, so stop it any time and plain
+`python backfill_orders.py` resumes from the next unfinished order. It can run
+beside watch.py; the two processes coordinate CBC access and shared data writes.
 
 Job source (pick one; default is the AutoCAD folders):
     python backfill_orders.py                     # every job folder under AUTOCAD_JOBS_DIR
@@ -15,8 +16,8 @@ Job source (pick one; default is the AutoCAD folders):
     python backfill_orders.py --list jobs.txt     # one job number per line
     python backfill_orders.py --range 420000 421000
 Options:
-    --limit N     stop after N jobs this run        --parallel N workers (default 8)
-    --delay S     seconds between jobs/worker       --out PATH   workbook path
+    --limit N     stop after N jobs this run        --delay S     seconds between jobs
+    --out PATH    workbook path
     --force       reprocess selected jobs           --rescan     ignore saved progress
     --newest-first process high job numbers first   --retry-not-found recheck misses
     --from-dwg-progress use saved AutoCAD scan job list instead of walking Z:
@@ -24,6 +25,7 @@ Options:
 
 Outputs (under BACKLOG_DIR):
     backfill_progress.json   resumable per-job store (source of truth)
+    backfill_line_items.json watcher-safe line-item overlay
     backlog.xlsx             master sheet: SO/drive-run fields + DWG suffix matrix
 
 Old orders are opened through the queue page's "search order" / "find order"
@@ -51,7 +53,7 @@ from urllib.parse import urljoin
 from config import (
     CBC_URL, CBC_QUEUE_URL, STORAGE_STATE_PATH,
     SALES_ORDER_DIR, DRIVE_RUN_DIR, BACKLOG_DIR, AUTOCAD_JOBS_DIR,
-    CBC_SEARCH_SELECTOR, CBC_SEARCH_BUTTON, SO_CONCURRENCY,
+    CBC_SEARCH_SELECTOR, CBC_SEARCH_BUTTON,
 )
 from templates import parse_quote_run
 from sales_orders import (
@@ -61,6 +63,7 @@ from sales_orders import (
 from scraper import CONTAINER_SELECTOR
 import autocad_scan
 import line_items
+from process_lock import cbc_fetch_lock
 from sales_order_validation import (
     accept_existing,
     failed_acceptance,
@@ -74,6 +77,15 @@ log = logging.getLogger("backfill")
 PROGRESS_PATH = BACKLOG_DIR / "backfill_progress.json"
 WORKBOOK_PATH = BACKLOG_DIR / "backlog.xlsx"
 RETRYABLE_STATUSES = {"error", "not-found", "no-SO"}
+BACKFILL_SCAN_VERSION = "serial-verified-v1"
+REQUIRED_MISS_ATTEMPTS = 2
+
+
+def _attempt_count(rec: Dict[str, Any]) -> int:
+    try:
+        return max(0, int(rec.get("backfill_attempts") or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 # --------------------------------------------------------------------------- #
@@ -397,7 +409,7 @@ def process_one(page, context, job: str, folder: str = "",
 
 
 # --------------------------------------------------------------------------- #
-# Async browser helpers (parallel backfill)                                    #
+# Async browser helpers (serial backfill)                                      #
 # --------------------------------------------------------------------------- #
 async def _open_backfill_page(context):
     page = await context.new_page()
@@ -586,10 +598,14 @@ async def _close_modal_async(page) -> None:
 
 
 async def process_one_async(page, context, job: str, folder: str = "",
-                            li_store: Dict[str, Any] | None = None,
                             search_timeout_s: float = 75.0,
                             doc_timeout_ms: int = 120000) -> Dict[str, Any]:
-    rec: Dict[str, Any] = {"job": job, "status": "", "scanned_at": datetime.now().isoformat(timespec="seconds")}
+    rec: Dict[str, Any] = {
+        "job": job,
+        "status": "",
+        "scanned_at": datetime.now().isoformat(timespec="seconds"),
+        "backfill_scan_version": BACKFILL_SCAN_VERSION,
+    }
     try:
         if not await open_order_detail_async(page, job, search_timeout_s, doc_timeout_ms):
             rec["status"] = "not-found"
@@ -627,10 +643,9 @@ async def process_one_async(page, context, job: str, folder: str = "",
                 })
                 items = p.get("line_items") or []
                 rec["line_item_count"] = len(items)
-                if li_store is not None:
-                    line_items.apply_ai_cache(items, li_store)
-                    line_items.record_job(li_store, job, items,
-                                          co_number=rec.get("co_number"), so_pdf=so_pdf)
+                # Kept private until the serial runner commits this job to the
+                # latest shared line-items store under its cross-process lock.
+                rec["_line_items"] = items
 
         runs = _run_docs(docs) if not so or so_pdf else []
         dr_count = 0
@@ -669,104 +684,119 @@ async def process_one_async(page, context, job: str, folder: str = "",
     return rec
 
 
-async def _backfill_worker(worker_id: int, context, queue: asyncio.Queue,
+def _commit_line_items(job: str, rec: Dict[str, Any]) -> None:
+    items = rec.pop("_line_items", None)
+    if items is None:
+        return
+    line_items.record_jobs_atomic([{
+        "job": job,
+        "items": items,
+        "co_number": rec.get("co_number"),
+        "so_pdf": rec.get("so_pdf", ""),
+    }], line_items.backfill_store_path())
+
+
+async def _run_serial_pass(context, jobs: List[str],
                            records: Dict[str, Dict[str, Any]],
                            dwg: Dict[str, Dict[str, Any]],
-                           li_store: Dict[str, Any],
-                           state: Dict[str, int],
-                           total: int, delay: float, pass_no: int,
+                           delay: float, pass_no: int,
                            search_timeout_s: float,
-                           doc_timeout_ms: int) -> None:
+                           doc_timeout_ms: int,
+                           run_state: Dict[str, int]) -> int:
+    """Process one pass in strict sequence and checkpoint every completed job."""
+    page = await _open_backfill_page(context)
+    completed = 0
     try:
-        page = await _open_backfill_page(context)
-    except Exception as e:  # noqa: BLE001
-        log.warning("Backfill worker %d could not open CBC Insider (%s); sitting out.", worker_id, e)
-        return
-    try:
-        while True:
+        for index, job in enumerate(jobs, start=1):
+            rec: Dict[str, Any] | None = None
+            previous = records.get(job) or {}
+            previous_attempts = (
+                _attempt_count(previous)
+                if previous.get("backfill_scan_version") == BACKFILL_SCAN_VERSION else 0
+            )
             try:
-                job = queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-            try:
-                records[job] = await process_one_async(
-                    page, context, job, dwg.get(job, {}).get("folder", ""), li_store=li_store,
-                    search_timeout_s=search_timeout_s, doc_timeout_ms=doc_timeout_ms)
+                # watch.py may continue polling. It gets the same lock for its
+                # short Sales Order batch, so CBC searches never overlap.
+                with cbc_fetch_lock():
+                    rec = await process_one_async(
+                        page,
+                        context,
+                        job,
+                        dwg.get(job, {}).get("folder", ""),
+                        search_timeout_s=search_timeout_s,
+                        doc_timeout_ms=doc_timeout_ms,
+                    )
+                _commit_line_items(job, rec)
             except Exception as e:  # noqa: BLE001
                 log.warning("Backfill error for %s: %s", job, e)
-                records[job] = {
+                rec = rec or {
                     "job": job,
-                    "status": "error",
                     "scanned_at": datetime.now().isoformat(timespec="seconds"),
+                    "backfill_scan_version": BACKFILL_SCAN_VERSION,
                 }
-            finally:
-                state["processed"] += 1
-                processed = state["processed"]
-                log.info("  pass %d backfill %d/%d  (%s -> %s)",
-                         pass_no, processed, total, job, records[job].get("status"))
-                if processed % 25 == 0:
-                    save_progress(records)
-                    line_items.save_store(li_store)
-                if delay:
-                    await asyncio.sleep(delay)
-                queue.task_done()
+                rec.pop("_line_items", None)
+                rec["status"] = "error"
+
+            rec["backfill_attempts"] = previous_attempts + 1
+            records[job] = rec
+            # This is intentionally every job: Ctrl+C or a reboot loses at most
+            # the order currently in flight, never a batch of finished orders.
+            save_progress(records)
+            completed += 1
+            run_state["processed"] = run_state.get("processed", 0) + 1
+            log.info("  pass %d backfill %d/%d  (%s -> %s)",
+                     pass_no, index, len(jobs), job, rec.get("status"))
+            if delay:
+                await asyncio.sleep(delay)
     finally:
         with contextlib.suppress(Exception):
             await page.close()
+    return completed
 
 
-async def _run_parallel_backfill(jobs: List[str], records: Dict[str, Dict[str, Any]],
-                                 dwg: Dict[str, Dict[str, Any]],
-                                 li_store: Dict[str, Any],
-                                 parallel: int, delay: float, passes: int,
-                                 search_timeout_s: float,
-                                 doc_timeout_ms: int) -> tuple[int, int]:
+async def _run_backfill(jobs: List[str], records: Dict[str, Dict[str, Any]],
+                        dwg: Dict[str, Dict[str, Any]],
+                        delay: float, passes: int,
+                        search_timeout_s: float,
+                        doc_timeout_ms: int,
+                        run_state: Dict[str, int] | None = None) -> tuple[int, int]:
     if not jobs:
         return 0, 0
     from playwright.async_api import async_playwright
 
+    state = run_state if run_state is not None else {"processed": 0}
     rc = 0
     processed_total = 0
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(storage_state=str(STORAGE_STATE_PATH), accept_downloads=True)
         try:
-            # Preflight once so a bad selector/login fails before the worker pool
-            # burns time against every job.
-            page = await _open_backfill_page(context)
-            try:
-                if await find_search_box_async(page) is None:
-                    log.error("Could not find the 'search order' box on %s. Set CBC_SEARCH_SELECTOR in .env "
-                              "to its CSS selector (run `python discover_documents.py --probe %s` to print it), "
-                              "then re-run.", CBC_QUEUE_URL or CBC_URL, jobs[0] if jobs else "<job#>")
-                    return 0, 1
-            finally:
-                await page.close()
+            # Preflight once so a bad selector/login fails before touching the
+            # backlog. Coordinate this page access with the live watcher too.
+            with cbc_fetch_lock():
+                page = await _open_backfill_page(context)
+                try:
+                    if await find_search_box_async(page) is None:
+                        log.error("Could not find the 'search order' box on %s. Set CBC_SEARCH_SELECTOR in .env "
+                                  "to its CSS selector (run `python discover_documents.py --probe %s` to print it), "
+                                  "then re-run.", CBC_QUEUE_URL or CBC_URL, jobs[0] if jobs else "<job#>")
+                        return 0, 1
+                finally:
+                    await page.close()
 
             todo = list(jobs)
             for pass_no in range(1, max(1, passes) + 1):
-                queue: asyncio.Queue = asyncio.Queue()
-                for job in todo:
-                    queue.put_nowait(job)
-                state = {"processed": 0}
-                n = min(max(1, parallel), len(todo))
-                log.info("Backfill fetch pass %d/%d: %d job(s), %d parallel...",
-                         pass_no, max(1, passes), len(todo), n)
-                results = await asyncio.gather(
-                    *[asyncio.create_task(_backfill_worker(
-                        i + 1, context, queue, records, dwg, li_store, state,
-                        len(todo), delay, pass_no, search_timeout_s, doc_timeout_ms))
-                      for i in range(n)],
-                    return_exceptions=True,
-                )
-                processed_total += state["processed"]
-                for err in results:
-                    if isinstance(err, Exception):
-                        log.warning("Backfill worker failed: %s", err)
-                if state["processed"] < len(todo):
+                log.info("Backfill fetch pass %d/%d: %d job(s), one order at a time...",
+                         pass_no, max(1, passes), len(todo))
+                try:
+                    processed = await _run_serial_pass(
+                        context, todo, records, dwg, delay, pass_no,
+                        search_timeout_s, doc_timeout_ms, state)
+                except Exception as e:  # noqa: BLE001
                     rc = 1
-                    log.warning("%d job(s) were not processed because every worker stopped early.",
-                                len(todo) - state["processed"])
+                    log.warning("Serial backfill pass stopped early: %s", e)
+                    break
+                processed_total += processed
                 if pass_no >= max(1, passes):
                     break
                 retry = [job for job in todo
@@ -805,12 +835,21 @@ def save_progress(records: Dict[str, Dict[str, Any]]) -> None:
 
 
 def _is_done(rec: Dict[str, Any], retry_not_found: bool = False) -> bool:
-    """A job is 'done' (skip on resume) once we have a real answer for it.
-    'error' is NOT done — those get retried on the next run. `not-found`
-    is skipped by default so a full scan can keep moving, but can be retried
-    explicitly after selector/session changes."""
-    statuses = ("ok", "no-SO") if retry_not_found else ("ok", "no-SO", "not-found")
-    return bool(rec) and rec.get("status") in statuses
+    """Skip trusted answers and misses made by this serial scanner version.
+
+    The old parallel run's ``not-found``/``no-SO`` rows are deliberately not
+    trusted. New serial misses need two completed attempts before a restart
+    skips them, so interrupting between retry passes still resumes correctly.
+    """
+    if not rec:
+        return False
+    if rec.get("status") == "ok":
+        return True
+    if rec.get("status") in {"not-found", "no-SO"}:
+        return (not retry_not_found
+                and rec.get("backfill_scan_version") == BACKFILL_SCAN_VERSION
+                and _attempt_count(rec) >= REQUIRED_MISS_ATTEMPTS)
+    return False
 
 
 # --------------------------------------------------------------------------- #
@@ -933,8 +972,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--out", default=str(WORKBOOK_PATH), help="Master workbook path.")
     ap.add_argument("--delay", type=float, default=1.0, help="Seconds to pause between orders.")
     ap.add_argument("--limit", type=int, default=0, help="Stop after N orders this run (0 = no limit).")
-    ap.add_argument("--parallel", type=int, default=SO_CONCURRENCY,
-                    help=f"How many CBC Insider searches to run at once (default SO_CONCURRENCY={SO_CONCURRENCY}).")
     ap.add_argument("--passes", type=int, default=2,
                     help="Retry not-found/no-SO/error jobs within this run (default 2).")
     ap.add_argument("--search-timeout", type=float, default=75.0,
@@ -949,7 +986,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--newest-first", action="store_true",
                     help="Process higher job numbers first instead of the folder enumeration order.")
     ap.add_argument("--retry-not-found", action="store_true",
-                    help="Retry jobs previously saved as not-found instead of skipping them.")
+                    help="Force another check of misses already made by the current serial scanner.")
     ap.add_argument("--from-dwg-progress", action="store_true",
                     help="Use the saved AutoCAD scan progress job list instead of walking the root folder.")
     ap.add_argument("--rescan", action="store_true", help="Ignore saved progress.")
@@ -966,7 +1003,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         targets = sorted(targets, key=_job_num_key, reverse=True)
     log.info("Backfill target set: %d job(s).", len(targets))
     records = {} if args.rescan else load_progress()
-    li_store = line_items.load_store()  # shared lookup store; saved with progress
     dwg = autocad_scan.load_progress()  # read-only merge of the DWG scan, if it's been run
     if dwg:
         log.info("Merging AutoCAD DWG scan for %d job(s).", len(dwg))
@@ -981,28 +1017,44 @@ def main(argv: Optional[List[str]] = None) -> int:
             continue
         pending.append(job)
 
+    trusted_done = sum(
+        1 for job in targets
+        if not args.rescan and not args.force
+        and _is_done(records.get(job, {}), retry_not_found=args.retry_not_found)
+    )
+    log.info("Resume checkpoint: %d trusted complete; %d pending this run%s.",
+             trusted_done, len(pending), f" (limit {args.limit})" if args.limit else "")
+
     processed = 0
+    interrupted = False
+    run_state = {"processed": 0}
     if pending:
-        processed, rc = asyncio.run(_run_parallel_backfill(
-            pending, records, dwg, li_store, args.parallel, args.delay,
-            args.passes, args.search_timeout, int(args.doc_timeout * 1000)))
+        try:
+            processed, rc = asyncio.run(_run_backfill(
+                pending, records, dwg, args.delay, args.passes,
+                args.search_timeout, int(args.doc_timeout * 1000), run_state))
+        except KeyboardInterrupt:
+            interrupted = True
+            processed = run_state["processed"]
+            rc = 130
+            log.info("Backfill stopped. Every completed order is saved; run the same command to resume.")
     else:
         log.info("No pending jobs to backfill.")
 
     save_progress(records)
-    line_items.save_store(li_store)
-    try:   # fold the backfilled SO spec + drive runs + line items into the one master store
-        import master_sync
-        master_sync.run("backfill", "line_items")
-    except Exception as e:  # noqa: BLE001
-        log.warning("Could not sync backfill to the live master (%s)", e)
     out: Path | None = None
-    try:
-        out = write_workbook(records, dwg, Path(args.out))
-    except PermissionError as e:
-        rc = 1
-        log.warning("Could not write %s (%s). Close the workbook and rerun to refresh it; "
-                    "progress JSON and line-item stores were already saved.", args.out, e)
+    if not interrupted:
+        try:   # fold SO specs + runs + line items into the cross-process-safe master
+            import master_sync
+            master_sync.run("backfill", "line_items")
+        except Exception as e:  # noqa: BLE001
+            log.warning("Could not sync backfill to the live master (%s)", e)
+        try:
+            out = write_workbook(records, dwg, Path(args.out))
+        except PermissionError as e:
+            rc = 1
+            log.warning("Could not write %s (%s). Close the workbook and rerun to refresh it; "
+                        "progress JSON and line-item stores were already saved.", args.out, e)
     by_status: Dict[str, int] = {}
     for r in records.values():
         by_status[r.get("status", "?")] = by_status.get(r.get("status", "?"), 0) + 1

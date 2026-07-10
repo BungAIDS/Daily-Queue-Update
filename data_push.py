@@ -54,6 +54,7 @@ def data_files() -> List[Path]:
         SNAPSHOT_DIR / "live_master.json",           # the master store (richest)
         BACKLOG_DIR / "quote_run_scan_progress.json",  # every parsed quote run
         line_items,                                  # line-item store
+        BACKLOG_DIR / "backfill_line_items.json",   # watcher-safe backfill overlay
         BACKLOG_DIR / "backfill_progress.json",
         BACKLOG_DIR / "autocad_scan_progress.json",
         BACKLOG_DIR / "quote_runs.xlsx",             # the human sheets
