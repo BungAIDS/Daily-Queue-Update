@@ -669,7 +669,11 @@ It can run beside `watch.py`; the two processes take turns using CBC Sales Order
 access and process-lock their shared data writes. Backfilled line items are also
 checkpointed in `backfill_line_items.json`, an overlay the normal line-item store
 merges automatically, so even a watcher already running old code cannot erase
-them. `--delay` pauses between orders, and `--newest-first` works recent jobs backward. Misses
+them. Local JSON is saved after every job; the current stores are also published
+to the configured Git `order-data` branch every 25 completed attempts and once
+when the script exits. Change the cadence with `--publish-every N`, or use `0` to
+disable Git publishing. `--delay` pauses between orders, and `--newest-first`
+works recent jobs backward. Misses
 from the old parallel scanner automatically get two serial attempts; misses produced
 twice by the current serial scanner are checkpointed and skipped on restart unless
 `--retry-not-found` is supplied. If the AutoCAD DWG scan has already run,

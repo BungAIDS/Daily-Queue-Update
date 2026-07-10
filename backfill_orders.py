@@ -22,6 +22,7 @@ Options:
     --newest-first process high job numbers first   --retry-not-found recheck misses
     --from-dwg-progress use saved AutoCAD scan job list instead of walking Z:
     --passes N    retry incomplete jobs this many times in the same run
+    --publish-every N publish order-data to Git every N attempts (default 25)
 
 Outputs (under BACKLOG_DIR):
     backfill_progress.json   resumable per-job store (source of truth)
@@ -82,6 +83,7 @@ REQUIRED_MISS_ATTEMPTS = 2
 # CBC's normal Search Order box handles the 401xxx+ population. The earlier
 # 400xxx orders need the separate legacy lookup path, which is not implemented.
 DEFAULT_CBC_SEARCH_MIN_JOB = 401000
+DEFAULT_PUBLISH_EVERY = 25
 
 
 def _attempt_count(rec: Dict[str, Any]) -> int:
@@ -700,6 +702,27 @@ def _commit_line_items(job: str, rec: Dict[str, Any]) -> None:
     }], line_items.backfill_store_path())
 
 
+def _publish_checkpoint() -> bool:
+    """Sync current stores and publish them to the configured order-data branch."""
+    try:
+        import master_sync
+
+        # Publish once below even when DATA_PUSH_ON_CHANGE is enabled, so a
+        # checkpoint containing only new miss/attempt metadata is not skipped.
+        master_sync.run("backfill", "line_items", publish=False)
+    except Exception as e:  # noqa: BLE001 - publishing never stops the scan
+        log.warning("Could not sync the backfill checkpoint to the live master (%s)", e)
+    try:
+        import data_push
+
+        if data_push.push_data():
+            log.info("Published the current backfill checkpoint to the order-data branch.")
+            return True
+    except Exception as e:  # noqa: BLE001 - publishing never stops the scan
+        log.warning("Could not publish the backfill checkpoint (%s)", e)
+    return False
+
+
 async def _run_serial_pass(context, jobs: List[str],
                            records: Dict[str, Dict[str, Any]],
                            dwg: Dict[str, Dict[str, Any]],
@@ -750,6 +773,12 @@ async def _run_serial_pass(context, jobs: List[str],
             run_state["processed"] = run_state.get("processed", 0) + 1
             log.info("  pass %d backfill %d/%d  (%s -> %s)",
                      pass_no, index, len(jobs), job, rec.get("status"))
+            publish_every = max(0, int(run_state.get("publish_every", 0)))
+            if publish_every and run_state["processed"] % publish_every == 0:
+                log.info("Publishing checkpoint after %d completed attempt(s)...",
+                         run_state["processed"])
+                if _publish_checkpoint():
+                    run_state["last_published"] = run_state["processed"]
             if delay:
                 await asyncio.sleep(delay)
     finally:
@@ -976,6 +1005,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--out", default=str(WORKBOOK_PATH), help="Master workbook path.")
     ap.add_argument("--delay", type=float, default=1.0, help="Seconds to pause between orders.")
     ap.add_argument("--limit", type=int, default=0, help="Stop after N orders this run (0 = no limit).")
+    ap.add_argument("--publish-every", type=int, default=DEFAULT_PUBLISH_EVERY,
+                    help=f"Publish a Git order-data checkpoint every N completed attempts "
+                         f"(default {DEFAULT_PUBLISH_EVERY}; 0 disables publishing).")
     ap.add_argument("--passes", type=int, default=2,
                     help="Retry not-found/no-SO/error jobs within this run (default 2).")
     ap.add_argument("--search-timeout", type=float, default=75.0,
@@ -1032,7 +1064,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     processed = 0
     interrupted = False
-    run_state = {"processed": 0}
+    run_state = {"processed": 0, "publish_every": max(0, args.publish_every)}
     if pending:
         try:
             processed, rc = asyncio.run(_run_backfill(
@@ -1049,17 +1081,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     save_progress(records)
     out: Path | None = None
     if not interrupted:
-        try:   # fold SO specs + runs + line items into the cross-process-safe master
-            import master_sync
-            master_sync.run("backfill", "line_items")
-        except Exception as e:  # noqa: BLE001
-            log.warning("Could not sync backfill to the live master (%s)", e)
         try:
             out = write_workbook(records, dwg, Path(args.out))
         except PermissionError as e:
             rc = 1
             log.warning("Could not write %s (%s). Close the workbook and rerun to refresh it; "
                         "progress JSON and line-item stores were already saved.", args.out, e)
+    if (args.publish_every > 0
+            and run_state.get("last_published") != run_state["processed"]):
+        _publish_checkpoint()
     by_status: Dict[str, int] = {}
     for r in records.values():
         by_status[r.get("status", "?")] = by_status.get(r.get("status", "?"), 0) + 1

@@ -150,7 +150,7 @@ _MERGERS: Dict[str, Callable[[Dict[str, Any]], int]] = {
 ALL = list(_MERGERS)
 
 
-def run(*sources: str) -> Dict[str, int]:
+def run(*sources: str, publish: bool = True) -> Dict[str, int]:
     """Load the master, merge the given sources (all by default), save it back.
     Best-effort and self-contained so a helper can call it in a try/except."""
     chosen = [s for s in (sources or ALL) if s in _MERGERS]
@@ -166,7 +166,7 @@ def run(*sources: str) -> Dict[str, int]:
         changed = any(counts.values())
         if changed:
             live_master._save_master_unlocked(master)
-    if changed:
+    if changed and publish:
         _publish_data_if_enabled()   # keep the remote snapshot in step with changes
     return counts
 
