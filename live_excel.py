@@ -1295,6 +1295,13 @@ def _update_master_workbook_impl(workbook_path: str | Path, lq_payload: Dict[str
             try:
                 fp = _fingerprint(model)
                 if _RENDER_CACHE.get(model.name) != fp:
+                    # Drop the cached fingerprint BEFORE painting: a repaint that
+                    # dies after Cells.Clear (Excel busy — someone mid-edit) has
+                    # already wiped the sheet, and a stale cache entry would make
+                    # every later cycle skip the rewrite, leaving the tab blank
+                    # until the model happens to change. Popping first guarantees
+                    # a failed paint is retried next poll.
+                    _RENDER_CACHE.pop(model.name, None)
                     render_sheet(app, wb, model)
                     _RENDER_CACHE[model.name] = fp
                     touched.append(model.name)
@@ -1341,6 +1348,7 @@ def update_workbook(sheets: List[Sheet], workbook_path: str | Path) -> bool:
                 fp = _fingerprint(sheet)
                 if _RENDER_CACHE.get(sheet.name) == fp:
                     continue  # unchanged — leave it alone so filters/scroll persist
+                _RENDER_CACHE.pop(sheet.name, None)   # failed paint must retry next pass
                 render_sheet(app, wb, sheet)
                 _RENDER_CACHE[sheet.name] = fp
                 rendered.append(sheet.name)
