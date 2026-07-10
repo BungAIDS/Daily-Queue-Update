@@ -713,13 +713,6 @@ def similar_orders_sheet(n_rows: int, n_queue: int) -> Sheet:
 
 
 # --------------------------------------------------------------------------- #
-# Line Items (one row per order x normalized item; filter to find orders)     #
-# --------------------------------------------------------------------------- #
-LINE_ITEM_HEADERS = ["Job #", "Customer", "CO#", "Tags", "Item (as printed)",
-                     "Normalized", "Details", "Qty", "Price", "Section", "SO PDF"]
-
-
-# --------------------------------------------------------------------------- #
 # Incremental "master log" tabs (Live Queue + Order History)                   #
 #                                                                             #
 # These are upserted row-by-row (keyed on the order number) instead of being   #
@@ -989,40 +982,3 @@ def plan_upsert(desired: List, existing_sigs: Dict[str, tuple],
     return ops
 
 
-def line_items_sheet(
-    store: Dict[str, Any],
-    order_nums: Optional[List[str]] = None,
-    name: str = "Line Items",
-) -> Sheet:
-    """One row per (order, normalized line item) so you can AutoFilter the
-    'Normalized' column by an item name and have the matching orders populate.
-    Covers every stored order by default (the whole backlog, so the search spans
-    all history); pass `order_nums` to restrict it (e.g. just the board). Mirrors
-    find_orders.write_xlsx's Line Items sheet."""
-    jobs_store = (store or {}).get("jobs", {})
-    keys = [k for k in (order_nums if order_nums is not None else jobs_store)
-            if k in jobs_store]
-
-    sh = Sheet(name)
-    sh.row(_header_cells(LINE_ITEM_HEADERS))
-    n_rows = 0
-    for jn in keys:
-        rec = jobs_store.get(jn) or {}
-        co = f"CO#{rec['co_number']}" if rec.get("co_number") else ""
-        for it in rec.get("items") or []:
-            so = rec.get("so_pdf") or ""
-            link_cell = Cell("Open", link=so, font=F_LINK) if so else Cell("")
-            sh.row([
-                Cell(jn), Cell(rec.get("customer", "")), Cell(co),
-                Cell(", ".join(it.get("tags") or [])),
-                Cell(it.get("raw", "")), Cell(it.get("norm", "")),
-                Cell(" ; ".join(it.get("details") or [])),
-                Cell(it.get("qty", "")), Cell(it.get("price", "")),
-                Cell(it.get("section", "")), link_cell,
-            ])
-            n_rows += 1
-    if n_rows == 0:
-        sh.row([Cell("(no line items captured yet for the current orders)")])
-    else:
-        sh.autofilter_a1 = _a1(n_rows + 1, len(LINE_ITEM_HEADERS))
-    return sh

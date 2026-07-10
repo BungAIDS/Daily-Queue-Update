@@ -7,9 +7,9 @@ co-authored workbook without kicking everyone out / conflicting. Driving the rea
 Excel application means edits flow through Excel itself, which syncs them to
 OneDrive/SharePoint so coworkers see them live (cursors and all).
 
-What it writes: one worksheet per `live_sheets.Sheet` model (Live Queue, Changes,
-History, Line Items, Similar Orders + its hidden Similar Data sheet). The
-*content* lives in live_sheets.py (pure, tested); this
+What it writes: one worksheet per `live_sheets.Sheet` model, kept in SHEET_ORDER
+on the tab bar (Changes, Live Queue, Order History, Similar Orders, Similar
+Data). The *content* lives in live_sheets.py (pure, tested); this
 module is the generic renderer — bulk-write the values, then map each cell's
 named fill/font to real Excel colors, add hyperlinks, freeze panes, and
 AutoFilter. The named styles mirror excel_writer so the live master and the daily
@@ -83,7 +83,15 @@ _FONT = {
 
 # "History" is a RESERVED worksheet name in Excel (shared-workbook change
 # tracking), so the archived-orders tab is "Order History".
-SHEET_ORDER = ["Live Queue", "Changes", "Order History", "Line Items"]
+# The managed tabs are kept in THIS order at the front of the tab bar (any
+# user-added tabs follow); _ensure_tab_order snaps them back each cycle.
+SHEET_ORDER = ["Changes", "Live Queue", "Order History",
+               "Similar Orders", "Similar Data"]
+
+# Bot-generated tabs an older build managed; deleted on sight. Their data lives
+# in the stores ("Line Items" is superseded by the Similar tabs + find_orders'
+# richer Excel inventory), so nothing is lost.
+OBSOLETE_SHEETS = ["Line Items"]
 
 # Last-rendered fingerprint per sheet, so a tab is only repainted when its
 # content actually changed — otherwise a coworker's active filter/scroll on that
@@ -481,6 +489,51 @@ def render_sheet(app, wb, sheet: Sheet) -> None:
     # earlier build resurfaces when its model stops being hidden.
     with contextlib.suppress(Exception):
         ws.Visible = 0 if sheet.hidden else -1  # xlSheetHidden / xlSheetVisible
+
+
+def _ensure_tab_order(app, wb) -> None:
+    """Keep the managed tabs in SHEET_ORDER at the front of the tab bar. A
+    Sheet.Move can steal focus in some Excel builds, so nothing moves when the
+    order is already right, and the active sheet is restored afterwards."""
+    try:
+        names = [wb.Worksheets(i + 1).Name for i in range(wb.Worksheets.Count)]
+        want = [n for n in SHEET_ORDER if n in names]
+        if names[:len(want)] == want:
+            return
+        active = None
+        with contextlib.suppress(Exception):
+            if app.ActiveWorkbook.Name == wb.Name:
+                active = app.ActiveSheet.Name
+        for i, n in enumerate(want):
+            if wb.Worksheets(i + 1).Name != n:
+                wb.Worksheets(n).Move(Before=wb.Worksheets(i + 1))
+        if active:
+            with contextlib.suppress(Exception):
+                wb.Worksheets(active).Activate()
+        log.info("Tab order restored: %s", ", ".join(want))
+    except Exception as e:  # noqa: BLE001 - cosmetic; never worth failing a render
+        log.debug("tab reorder skipped (%s)", e)
+
+
+def _drop_obsolete_sheets(wb) -> None:
+    """Delete bot-generated tabs an older build managed (OBSOLETE_SHEETS).
+    Regenerable store data only — never touches user-added tabs."""
+    for name in OBSOLETE_SHEETS:
+        try:
+            ws = next((s for s in wb.Worksheets if s.Name == name), None)
+            if ws is None or wb.Worksheets.Count <= 1:
+                continue
+            app = wb.Application
+            prev = app.DisplayAlerts
+            app.DisplayAlerts = False   # suppress the 'permanently delete?' prompt
+            try:
+                ws.Delete()
+            finally:
+                app.DisplayAlerts = prev
+            log.info("Removed obsolete tab %r (its data lives in the stores; the "
+                     "Similar tabs / find_orders --xlsx supersede it).", name)
+        except Exception as e:  # noqa: BLE001
+            log.debug("obsolete tab %r not removed (%s)", name, e)
 
 
 def _apply_picker(ws, picker: Dict[str, str], kept_pick: Any = None) -> None:
@@ -1251,6 +1304,11 @@ def _update_master_workbook_impl(workbook_path: str | Path, lq_payload: Dict[str
                     _refresh_volatile(wb, model)
             except Exception as e:  # noqa: BLE001
                 log.warning("%s update failed (%s)", model.name, e)
+
+        # Housekeeping: retire tabs an older build managed, then snap the
+        # managed tabs back into SHEET_ORDER (both no-ops when already right).
+        _drop_obsolete_sheets(wb)
+        _ensure_tab_order(app, wb)
 
     if touched:
         try:
