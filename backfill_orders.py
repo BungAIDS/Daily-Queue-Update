@@ -640,8 +640,9 @@ async def process_one_async(page, context, job: str, folder: str = "",
             return rec
         # Brief settle so the documents section finishes rendering — links can
         # appear progressively, and harvesting mid-render could miss the
-        # latest CO revision.
-        await page.wait_for_timeout(400)
+        # latest CO revision. Best-effort: never worth failing the job over.
+        with contextlib.suppress(Exception):
+            await page.wait_for_timeout(400)
         docs = await _collect_docs_async(page)
 
         so_pdf = dr_pdf = None
