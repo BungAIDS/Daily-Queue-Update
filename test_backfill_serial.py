@@ -52,6 +52,7 @@ def test_serial_pass_has_one_order_in_flight_and_saves_each_job():
     max_active = 0
     order = []
     saves = []
+    publishes = []
     page = SimpleNamespace(close=AsyncMock())
 
     async def process(_page, _context, job, _folder, **_kwargs):
@@ -69,12 +70,14 @@ def test_serial_pass_has_one_order_in_flight_and_saves_each_job():
         }
 
     records = {}
-    state = {"processed": 0}
+    state = {"processed": 0, "publish_every": 2}
     with (
         patch("backfill_orders._open_backfill_page", new=AsyncMock(return_value=page)),
         patch("backfill_orders.process_one_async", new=process),
         patch("backfill_orders.cbc_fetch_lock", side_effect=lambda: contextlib.nullcontext()),
         patch("backfill_orders.save_progress", side_effect=lambda value: saves.append(dict(value))),
+        patch("backfill_orders._publish_checkpoint",
+              side_effect=lambda: publishes.append(state["processed"]) or True),
     ):
         completed = asyncio.run(backfill_orders._run_serial_pass(
             object(), ["401001", "401002", "401003"], records, {}, 0, 1, 1, 1, state))
@@ -84,6 +87,8 @@ def test_serial_pass_has_one_order_in_flight_and_saves_each_job():
     assert order == ["401001", "401002", "401003"]
     assert max_active == 1
     assert len(saves) == 3
+    assert publishes == [2]
+    assert state["last_published"] == 2
     assert set(saves[-1]) == set(order)
     page.close.assert_awaited_once()
 
