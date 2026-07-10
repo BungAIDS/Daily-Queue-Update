@@ -40,10 +40,11 @@ from typing import List, Optional, Tuple
 
 from config import SALES_ORDER_DIR
 import line_items as li
+from sales_order_validation import normalize_order, validate_sales_order_pdf
 
 log = logging.getLogger("line-items-scan")
 
-CO_IN_NAME = re.compile(r"CO#(\d+)", re.I)
+CO_IN_NAME = re.compile(r"CO#?(\d+)", re.I)
 
 # How --dump marks each line of the PDF (kind -> short prefix).
 _DUMP_MARKS = {
@@ -58,8 +59,21 @@ def _latest_so_pdf(folder: Path) -> Optional[Tuple[Path, int]]:
     in the file name ('... CO#2.pdf' beats '... (original).pdf'), mtime as the
     tiebreak. Returns (pdf, co_number) or None."""
     best = None
+    expected_job = normalize_order(folder.name)
     try:
         for p in folder.glob("*.pdf"):
+            if "sales order" not in p.name.lower():
+                continue
+            validation = validate_sales_order_pdf(p, expected_job)
+            if not validation.matched:
+                log.warning(
+                    "Skipping unverified Sales Order %s (expected %s, internal %s, status %s)",
+                    p,
+                    expected_job,
+                    validation.internal_order or "?",
+                    validation.status,
+                )
+                continue
             m = CO_IN_NAME.search(p.name)
             co = int(m.group(1)) if m else 0
             key = (co, p.stat().st_mtime)
@@ -92,8 +106,21 @@ def _resolve(args_jobs: List[str]) -> List[Tuple[str, Path, int]]:
         p = Path(a)
         if p.is_file():
             m = CO_IN_NAME.search(p.name)
-            jm = re.match(r"(\d{4,})", p.parent.name) or re.match(r"(\d{4,})", p.name)
-            out.append((jm.group(1) if jm else p.stem, p, int(m.group(1)) if m else 0))
+            jm = re.match(r"(\d{4,}[A-Za-z]?)", p.parent.name) or re.match(
+                r"(\d{4,}[A-Za-z]?)", p.name
+            )
+            job = normalize_order(jm.group(1) if jm else p.stem)
+            validation = validate_sales_order_pdf(p, job)
+            if validation.matched:
+                out.append((job, p, int(m.group(1)) if m else 0))
+            else:
+                log.warning(
+                    "Skipping unverified Sales Order %s (expected %s, internal %s, status %s)",
+                    p,
+                    job,
+                    validation.internal_order or "?",
+                    validation.status,
+                )
             continue
         folder = SALES_ORDER_DIR / a
         hit = _latest_so_pdf(folder) if folder.is_dir() else None

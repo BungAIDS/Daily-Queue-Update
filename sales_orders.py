@@ -52,6 +52,13 @@ from templates import parse_quote_run
 from scraper import CONTAINER_SELECTOR
 import autocad_scan
 import line_items
+from process_lock import cbc_fetch_lock
+from sales_order_validation import (
+    accept_existing,
+    failed_acceptance,
+    finalize_candidate,
+    staging_path,
+)
 
 log = logging.getLogger(__name__)
 
@@ -291,13 +298,26 @@ def refresh_autocad_folders(jobs: List[Dict[str, Any]]) -> int:
 _CO_IN_SO_NAME = re.compile(r"CO#?(\d+)", re.I)
 
 
-def _latest_so_in_folder(folder: Path):
+def _latest_so_in_folder(folder: Path, expected_job: str):
     """The newest Sales Order revision on disk in a job's folder: the highest CO#
     in the file name ('… CO2.pdf' beats '… (original).pdf'), mtime as a
     tiebreak. Returns (path, co_number) or None."""
     best = None
     try:
         for p in folder.glob("*.pdf"):
+            if "sales order" not in p.name.lower():
+                continue
+            accepted = accept_existing(p, expected_job)
+            if not accepted or not accepted.path:
+                if accepted:
+                    log.warning(
+                        "Quarantined unverified Sales Order for %s: internal=%s status=%s -> %s",
+                        expected_job,
+                        accepted.validation.internal_order or "?",
+                        accepted.validation.status,
+                        accepted.quarantine_path,
+                    )
+                continue
             m = _CO_IN_SO_NAME.search(p.name)
             co = int(m.group(1)) if m else 0
             key = (co, p.stat().st_mtime)
@@ -323,9 +343,19 @@ def refresh_sales_orders(jobs: List[Dict[str, Any]]) -> int:
             continue
         cur = (j.get("so_pdf") or "").strip()
         if cur and Path(cur).exists():
-            continue                      # link still resolves — leave it alone
+            accepted = accept_existing(cur, jn)
+            if accepted and accepted.path:
+                continue                  # link still resolves and its printed Order# matches
+            if accepted:
+                log.warning(
+                    "Quarantined stored Sales Order link for %s: internal=%s status=%s -> %s",
+                    jn,
+                    accepted.validation.internal_order or "?",
+                    accepted.validation.status,
+                    accepted.quarantine_path,
+                )
         folder = Path(cur).parent if cur else (SALES_ORDER_DIR / jn)
-        hit = _latest_so_in_folder(folder)
+        hit = _latest_so_in_folder(folder, jn)
         if not hit:
             continue
         path, co = hit
@@ -601,6 +631,37 @@ async def _download(context, page_url: str, href: str, dest: Path) -> str | None
     return None
 
 
+async def _download_sales_order(
+    context, page_url: str, href: str, destination: Path, expected_job: str
+):
+    existing = accept_existing(destination, expected_job)
+    if existing and existing.path:
+        return existing
+    if existing:
+        log.warning(
+            "Rejected existing Sales Order for %s: internal=%s status=%s -> %s",
+            expected_job,
+            existing.validation.internal_order or "?",
+            existing.validation.status,
+            existing.quarantine_path,
+        )
+
+    staged = staging_path(destination, expected_job)
+    downloaded = await _download(context, page_url, href, staged)
+    if not downloaded:
+        return failed_acceptance(expected_job, f"download failed for {destination.name}")
+    accepted = finalize_candidate(downloaded, destination, expected_job)
+    if not accepted.path:
+        log.warning(
+            "Rejected downloaded Sales Order for %s: internal=%s status=%s -> %s",
+            expected_job,
+            accepted.validation.internal_order or "?",
+            accepted.validation.status,
+            accepted.quarantine_path,
+        )
+    return accepted
+
+
 def _trigger_js(args_js: str) -> str:
     return f"""() => {{
         if (window.jQuery) {{
@@ -662,8 +723,18 @@ async def _process_job(page, context, job: str, args_js: str) -> Dict[str, Any]:
     if so:
         href, doc = so
         res["rev"] = doc["rev"]
-        res["pdf_path"] = await _download(
-            context, page.url, href, SALES_ORDER_DIR / job / _so_filename(job, doc["rev"]))
+        accepted = await _download_sales_order(
+            context,
+            page.url,
+            href,
+            SALES_ORDER_DIR / job / _so_filename(job, doc["rev"]),
+            job,
+        )
+        res["pdf_path"] = accepted.path
+        res["so_validation"] = accepted.validation.status
+        res["so_internal_order"] = accepted.validation.internal_order
+        res["so_validation_method"] = accepted.validation.method
+        res["so_quarantine"] = accepted.quarantine_path
     else:
         # The docs DID load and there's just no Sales Order among them (e.g.
         # HDX). Terminal — don't burn another 90s wait on it in the retry pass.
@@ -672,7 +743,7 @@ async def _process_job(page, context, job: str, args_js: str) -> Dict[str, Any]:
     # Construction / quote run — only the highly-custom orders have one. More
     # than one file can match (a qt-run txt and a D64 wheel-construction xlsx,
     # say); archive them all, and link the best as the primary.
-    runs = _run_docs(docs)
+    runs = _run_docs(docs) if not so or res.get("pdf_path") else []
     if runs:
         res["dr_rev"] = runs[0][1]["rev"]
         res["dr_count"] = len(runs)
@@ -725,7 +796,7 @@ async def _worker(context, url, queue, results, total):
         await page.close()
 
 
-async def _afetch_all(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
+async def _afetch_all_unlocked(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
     if not STORAGE_STATE_PATH.exists():
         raise RuntimeError(f"No saved session at {STORAGE_STATE_PATH}. Run `python login.py`.")
     url = CBC_QUEUE_URL or CBC_URL
@@ -746,6 +817,12 @@ async def _afetch_all(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
         with contextlib.suppress(Exception):
             await browser.close()
     return results
+
+
+async def _afetch_all(job_numbers: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Fetch a watcher batch without overlapping the historical search flow."""
+    with cbc_fetch_lock():
+        return await _afetch_all_unlocked(job_numbers)
 
 
 # --------------------------------------------------------------------------- #
@@ -807,21 +884,21 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2,
         if p < max_passes:
             log.info("  %d job(s) still incomplete; retrying those.", len(todo))
 
-    # One line-items store shared across the loop: AI-cached tags are applied
-    # to each job's items, and every parsed order is recorded for lookup
-    # (find_orders.py). load_store never raises — a bad store starts fresh.
-    li_store = line_items.load_store()
-
     n_co = n_dl = n_dr = n_dr_folder = n_items = 0
+    line_item_updates: List[Dict[str, Any]] = []
     for jn, j in by_job.items():
         r = so_results.get(jn, {})
         rev = r.get("rev")
-        j["co_number"] = (rev - 1) if rev and rev > 1 else 0
+        pdf = r.get("pdf_path")
+        j["co_number"] = (rev - 1) if pdf and rev and rev > 1 else 0
         if j["co_number"]:
             n_co += 1
 
-        pdf = r.get("pdf_path")
         parsed = parse_sales_order_pdf(pdf) if pdf else {}
+        j["so_validation"] = r.get("so_validation", "")
+        j["so_internal_order"] = r.get("so_internal_order", "")
+        j["so_validation_method"] = r.get("so_validation_method", "")
+        j["so_quarantine"] = r.get("so_quarantine", "")
         j["co_history"] = parsed.get("co_history", [])
         j["so_design_desc"] = parsed.get("design_desc", "")
         j["so_size"] = parsed.get("size", "")
@@ -846,10 +923,14 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2,
         # Line items: tag (rules + AI cache), surface on the job for the report
         # and snapshot, and record in the lookup store.
         items = parsed.get("line_items") or []
-        line_items.apply_ai_cache(items, li_store)
         if pdf:
-            line_items.record_job(li_store, jn, items, customer=j.get("customer", ""),
-                                  co_number=j["co_number"], so_pdf=pdf)
+            line_item_updates.append({
+                "job": jn,
+                "items": items,
+                "customer": j.get("customer", ""),
+                "co_number": j["co_number"],
+                "so_pdf": pdf,
+            })
             n_items += len(items)
         j["line_items"] = items
         j["line_item_tags"] = line_items.tags_label(items)
@@ -899,7 +980,11 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2,
             n_dr += 1
 
     try:
-        line_items.save_store(li_store)
+        line_items.record_jobs_atomic(line_item_updates)
+        # record_jobs_atomic applies any AI cache entries to these same item
+        # lists, so refresh the labels after the transaction.
+        for update in line_item_updates:
+            by_job[update["job"]]["line_item_tags"] = line_items.tags_label(update["items"])
         log.info("Line items: %d captured across %d parsed order(s) -> %s",
                  n_items, n_dl, line_items.store_path())
     except OSError as e:  # never let the lookup store sink the daily run

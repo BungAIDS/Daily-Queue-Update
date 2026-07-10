@@ -112,6 +112,19 @@ def _publish_data() -> None:
         log.debug("data publish skipped (%s)", e)
 
 
+def _merge_backlog_sources() -> None:
+    """Absorb durable backfill stores before loading the watcher's master copy."""
+    try:
+        import master_sync
+
+        counts = master_sync.run("backfill", "line_items")
+        changed = sum(counts.values())
+        if changed:
+            log.info("Merged %d backlog update(s) into the live master at startup.", changed)
+    except Exception as e:  # noqa: BLE001 - startup repair must not stop the watch
+        log.warning("Could not merge backlog stores at watcher startup (%s)", e)
+
+
 def _window_today(today: date) -> "tuple[datetime, datetime]":
     start = datetime.combine(today, dtime(*WATCH_START))
     end = datetime.combine(today, dtime(*WATCH_END))
@@ -689,6 +702,7 @@ def run_watch(ignore_window: bool = False) -> int:
             return 0
 
     state = live_state.load_state(today)
+    _merge_backlog_sources()
     master = live_master.load_master()
     tagged = engineers.backfill(master)   # tag historical orders by engineer (roster edits too)
     if tagged:
@@ -776,6 +790,7 @@ def main() -> int:
         validate_runtime_config()
         today = date.today()
         state = live_state.load_state(today)
+        _merge_backlog_sources()
         master = live_master.load_master()
         _force_rebuild(master)
         first = not state
