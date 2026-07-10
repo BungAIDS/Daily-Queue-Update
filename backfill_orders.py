@@ -638,6 +638,19 @@ async def process_one_async(page, context, job: str, folder: str = "",
         if not await open_order_detail_async(page, job, search_timeout_s, doc_timeout_ms):
             rec["status"] = "not-found"
             return rec
+        # Pre-arm the server before the first fetch: downloads resolve against
+        # the site's session-side "current order", which on EVERY observed job
+        # after a session's first still pointed at the previously opened order —
+        # each first fetch was a guaranteed wrong-SO quarantine. Closing and
+        # re-opening this order's detail (cheap card re-click; full search as
+        # fallback) re-points the server for the price of one modal load.
+        await _close_modal_async(page)
+        rearmed = False
+        with contextlib.suppress(Exception):
+            rearmed = await _open_matching_card_async(page, job, doc_timeout_ms)
+        if not rearmed:
+            with contextlib.suppress(Exception):
+                await open_order_detail_async(page, job, search_timeout_s, doc_timeout_ms)
         # Brief settle so the documents section finishes rendering — links can
         # appear progressively, and harvesting mid-render could miss the
         # latest CO revision. Best-effort: never worth failing the job over.
