@@ -1,6 +1,6 @@
 # Launcher debug report
-generated: 2026-07-10T06:59:28
-code version: branch claude/master-sync-currency-qj95j1 @ commit e70b42f0ab
+generated: 2026-07-10T12:23:40
+code version: branch claude/master-sync-currency-qj95j1 @ commit bc18fae051
 os.name: nt   platform: win32
 python (launcher): C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\pythonw.exe
 python (for scripts): C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe
@@ -8,20 +8,17 @@ python (for scripts): C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe
 ## Process scan (external-status detection)
 method used: powershell-cim
 error: none
-python process lines seen: 3
-detected running outside launcher: ['watch']
+python process lines seen: 1
+detected running outside launcher: none
 
 ### python process command lines (up to 40)
-  pid=182904 C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\pythonw.exe "C:\CBC INSIDER GL QUEUE CHECKER\launcher.py"
-  pid=183484 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
-  pid=54472 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
+  pid=65632 C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\pythonw.exe "C:\CBC INSIDER GL QUEUE CHECKER\launcher.py"
 
 ## Launcher-started processes
   (none)
 
 ## Last exit codes
-  backfill_orders: 0
-  find_orders: 0
+  (none yet)
 
 ## Last Email Drawings run (tail of its per-run log)
   [20260706_163651_email_drawings.log]
@@ -65,32 +62,6 @@ detected running outside launcher: ['watch']
   SEND is disabled � review the form and submit it yourself if it's correct.
 
 ## Tail of launcher_debug.log (last 120 lines)
-  2026-07-01 06:56:07 close publish ok: pushed d45d858e10 to origin/debug/launcher
-  2026-07-01 07:53:47 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/gui-git-pull-dropdown-y86ajl@fa9de93b)
-  2026-07-01 07:53:56 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-07-01 07:54:59 status scan: method=wmic error=none python_lines=2 detected=none
-  2026-07-01 07:55:16 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-07-01 07:56:51 status scan: method=wmic error=none python_lines=2 detected=none
-  2026-07-01 07:57:08 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-07-01 07:57:23 status scan: method=wmic error=none python_lines=2 detected=none
-  2026-07-01 07:57:40 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-07-01 07:57:55 status scan: method=wmic error=none python_lines=2 detected=none
-  2026-07-01 07:58:12 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-07-01 07:58:22 close: publishing debug report to debug/launcher
-  2026-07-01 08:06:07 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/gui-git-pull-dropdown-y86ajl@fa9de93b)
-  2026-07-01 08:06:19 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-07-01 08:06:23 relaunching launcher; closing this instance
-  2026-07-01 08:06:33 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/gui-git-pull-dropdown-y86ajl@dcf326d0)
-  2026-07-01 08:06:42 status scan: method=powershell-cim error=none python_lines=1 detected=none
-  2026-07-01 08:06:54 close: publishing debug report to debug/launcher
-  2026-07-01 08:07:17 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/gui-git-pull-dropdown-y86ajl@dcf326d0)
-  2026-07-01 08:07:35 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-07-01 08:10:25 single-instance: me=82060 parent=105212 method=powershell-cim error=None matched=[(28928, '"C:\\Users\\dgroth\\AppData\\Local\\Microsoft\\WindowsApps\\pythonw.exe" launcher.py'), (17180, '"C:\\Users\\dgroth\\AppData\\Local\\Microsoft\\WindowsApps\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\pythonw.exe"  launcher.py')]
-  2026-07-01 08:10:38 single-instance: warning shown for pid=28928 cmd='"C:\\Users\\dgroth\\AppData\\Local\\Microsoft\\WindowsApps\\pythonw.exe" launcher.py'
-  2026-07-01 10:47:33 relaunching launcher; closing this instance
-  2026-07-01 15:27:02 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@63ad3757)
-  2026-07-01 15:27:11 status scan: method=powershell-cim error=none python_lines=4 detected=['watch']
-  2026-07-01 15:27:38 close: publishing debug report to debug/launcher
   2026-07-01 15:28:09 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@63ad3757)
   2026-07-01 15:28:18 status scan: method=powershell-cim error=none python_lines=2 detected=none
   2026-07-02 05:00:05 status scan: method=powershell-cim error=none python_lines=6 detected=['watch']
@@ -185,4 +156,30 @@ detected running outside launcher: ['watch']
   2026-07-10 06:43:08 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
   2026-07-10 06:43:18 status scan: method=wmic error=none python_lines=3 detected=['watch']
   2026-07-10 06:44:12 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-10 06:59:28 publishing debug report to branch debug/launcher
+  2026-07-10 06:59:31 publish ok: pushed d880202fff to origin/debug/launcher
+  2026-07-10 07:45:48 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-10 08:43:11 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-10 08:47:03 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-10 08:47:04 relaunching launcher; closing this instance
+  2026-07-10 08:47:14 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/master-sync-currency-qj95j1@391ac559)
+  2026-07-10 08:47:24 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-10 08:47:24 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-10 10:10:57 status scan: method=none error=powershell-cim: TimeoutExpired: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' timed out after 8 seconds python_lines=0 detected=none
+  2026-07-10 10:11:17 status scan: method=powershell-cim error=none python_lines=3 detected=none
+  2026-07-10 10:18:06 relaunching launcher; closing this instance
+  2026-07-10 10:18:16 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/master-sync-currency-qj95j1@8b8d0a3d)
+  2026-07-10 10:18:26 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-10 10:18:26 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-10 10:36:37 relaunching launcher; closing this instance
+  2026-07-10 10:36:46 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/master-sync-currency-qj95j1@a9d96797)
+  2026-07-10 10:36:56 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-10 10:36:56 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-10 10:50:36 relaunching launcher; closing this instance
+  2026-07-10 10:50:46 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@da45aa9e)
+  2026-07-10 10:50:56 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-10 10:50:56 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-10 10:52:35 status scan: method=none error=powershell-cim: TimeoutExpired: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' timed out after 8 seconds python_lines=0 detected=none
+  2026-07-10 10:52:52 status scan: method=powershell-cim error=none python_lines=3 detected=none
+  2026-07-10 12:23:31 close: publishing debug report to debug/launcher
 
