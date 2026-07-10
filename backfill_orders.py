@@ -648,14 +648,41 @@ async def process_one_async(page, context, job: str, folder: str = "",
         so_pdf = dr_pdf = None
         so = _latest_of_type(docs, SO_TYPE)
         if so:
-            href, doc = so
-            accepted = await _download_sales_order_async(
-                context,
-                page.url,
-                href,
-                SALES_ORDER_DIR / job / _so_filename(job, doc["rev"]),
-                job,
-            )
+            # The site serves documents from its session-side "current order",
+            # which can lag the modal: the first fetch after switching orders
+            # can return the PREVIOUS order's SO (stripping stale modal links
+            # didn't cure it — the wrong doc comes from the SERVER). Validation
+            # catches it before anything is saved, so on a MISMATCH re-open the
+            # detail (a fresh loadDetail re-points the server) and retry.
+            accepted = None
+            doc: Dict[str, Any] = {}
+            for so_attempt in (1, 2, 3):
+                href, doc = so
+                accepted = await _download_sales_order_async(
+                    context,
+                    page.url,
+                    href,
+                    SALES_ORDER_DIR / job / _so_filename(job, doc["rev"]),
+                    job,
+                )
+                if accepted.path or accepted.validation.status != "MISMATCH":
+                    break
+                log.warning("  %s: attempt %d fetched another order's SO (href=%s) — "
+                            "re-opening the detail and retrying.", job, so_attempt, href)
+                await _close_modal_async(page)
+                await asyncio.sleep(2.0)
+                reopened = False
+                with contextlib.suppress(Exception):
+                    reopened = await open_order_detail_async(
+                        page, job, search_timeout_s, doc_timeout_ms)
+                if not reopened:
+                    break
+                with contextlib.suppress(Exception):
+                    await page.wait_for_timeout(1200)   # let the server re-point too
+                docs = await _collect_docs_async(page)
+                so = _latest_of_type(docs, SO_TYPE)
+                if not so:
+                    break
             so_pdf = accepted.path
             rec["so_validation"] = accepted.validation.status
             rec["so_internal_order"] = accepted.validation.internal_order
