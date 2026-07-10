@@ -425,14 +425,20 @@ def render_sheet(app, wb, sheet: Sheet) -> None:
         if row:
             _style_row(ws, r, row)
 
-    # Formula cells ("=...") are re-assigned via .Formula: the bulk .Value write
-    # usually parses them, but .Formula is deterministic and always takes EN-US
-    # argument separators regardless of the machine's locale.
+    # Formula cells ("=...") are re-assigned via .Formula2 — the dynamic-array
+    # property. Writing through .Value or legacy .Formula makes Excel insert an
+    # implicit-intersection '@', which collapses a spilling formula (the Similar
+    # Orders FILTER) to just its top-left value: one lone job number, five empty
+    # columns. Formula2 keeps spill semantics; EN-US separators either way.
     for r, row in enumerate(sheet.grid, start=1):
         for c, cell in enumerate(row, start=1):
             if isinstance(cell.value, str) and cell.value.startswith("="):
-                with contextlib.suppress(Exception):
-                    ws.Cells(r, c).Formula = cell.value
+                target = ws.Cells(r, c)
+                try:
+                    target.Formula2 = cell.value
+                except Exception:  # noqa: BLE001 - pre-dynamic-array Excel
+                    with contextlib.suppress(Exception):
+                        target.Formula = cell.value
 
     if sheet.picker:
         _apply_picker(ws, sheet.picker, kept_pick)
