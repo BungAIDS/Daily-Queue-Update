@@ -83,6 +83,10 @@ class Sheet:
     grid: List[List[Cell]] = field(default_factory=list)
     freeze: Optional[str] = "B2"
     autofilter_a1: Optional[str] = None   # e.g. "A1:AB57"; None = no filter
+    hidden: bool = False                  # data-only sheet, hidden from the tab bar
+    picker: Optional[Dict[str, str]] = None  # input cell w/ dropdown: {cell, source,
+                                             # comment} — styled + validated by the
+                                             # renderer; its typed value survives repaints
 
     # -- builders the sheet functions below use to assemble the grid --
     def row(self, cells: List[Cell]) -> None:
@@ -618,6 +622,72 @@ def history_sheet(history: Dict[str, Any], name: str = "Order History") -> Sheet
         sh.row(_job_value_cells(snap, co_changed=False)
                + [Cell(e.get("last_seen", ""))] + _dwg_row_cells(snap, suffixes))
     sh.autofilter_a1 = _a1(len(entries) + 1, len(headers) + len(suffixes))
+    return sh
+
+
+# --------------------------------------------------------------------------- #
+# Similar Orders: pick a queue order at the top -> its ranked lookalikes       #
+# appear instantly (an Excel FILTER spill over the hidden Similar Data sheet,  #
+# so no macros and no waiting for the next poll). The watcher refreshes the    #
+# data sheet; the visible tab's model is layout-only, so a repaint (which      #
+# would wipe the picked value) only happens when the layout itself changes —   #
+# and the renderer preserves the picker cell's value even then.               #
+# --------------------------------------------------------------------------- #
+SIMILAR_ORDERS_TAB = "Similar Orders"
+SIMILAR_DATA_TAB = "Similar Data"
+SIMILAR_HEADERS = ["Similar Order", "Customer", "Score", "Custom DWGs",
+                   "Shared Sales-Order items", "CAD Folder"]
+SIMILAR_PICKER_CELL = "B1"
+_SIM_PICKER_COL = 9   # column I on the data sheet: the dropdown's source list
+
+
+def similar_data_sheet(rows: List[Dict[str, Any]], queue_orders: List[str]) -> Sheet:
+    """The hidden flat table behind the Similar Orders tab: one row per
+    (queue order, similar order) pair — grouped by queue order, best score
+    first — plus every on-board order in column I as the picker's dropdown
+    list (so an order with no matches is still pickable)."""
+    sh = Sheet(SIMILAR_DATA_TAB, freeze=None, hidden=True)
+    sh.row(_header_cells(["Queue Order"] + SIMILAR_HEADERS)
+           + [Cell(""), _header_cells(["Queue Orders"])[0]])
+    for i in range(max(len(rows), len(queue_orders))):
+        r = rows[i] if i < len(rows) else None
+        vals = ([Cell(r["job"]), Cell(r["similar"]), Cell(r.get("customer", "")),
+                 Cell(r.get("score", "")), Cell(r.get("dwg", "")),
+                 Cell(r.get("shared", "")), Cell(r.get("folder", ""))]
+                if r else [Cell("")] * 7)
+        picker = Cell(queue_orders[i]) if i < len(queue_orders) else Cell("")
+        sh.row(vals + [Cell(""), picker])
+    return sh
+
+
+def similar_orders_sheet(n_rows: int, n_queue: int) -> Sheet:
+    """The visible picker tab: yellow input cell in B1 (dropdown of the queue's
+    orders; typing any order # also works) and one FILTER formula that spills
+    that order's ranked lookalikes from the Similar Data sheet."""
+    sh = Sheet(SIMILAR_ORDERS_TAB, freeze="A4")
+    if n_queue:
+        sh.picker = {
+            "cell": SIMILAR_PICKER_CELL,
+            "source": f"='{SIMILAR_DATA_TAB}'!$I$2:$I${n_queue + 1}",
+            "comment": ("Pick a queue order from the dropdown (or type any order "
+                        "#) and press Enter — its most similar past orders appear "
+                        "below, best match first. Clear the cell to clear the list."),
+        }
+    sh.row([Cell("Order:", font=F_SECTION), Cell(""),
+            Cell("← pick a queue order (or type any order #) — its most similar "
+                 "past orders appear below, best match first",
+                 font=F_NOTE, overflow=True)])
+    sh.blank()
+    sh.row(_header_cells(SIMILAR_HEADERS))
+    if n_rows:
+        last = n_rows + 1
+        d = SIMILAR_DATA_TAB
+        sh.row([Cell(f"=IFERROR(FILTER('{d}'!$B$2:$G${last},"
+                     f"('{d}'!$A$2:$A${last}&\"\")=($B$1&\"\"),"
+                     f"\"no matches for that order # yet\"),\"\")")])
+    else:
+        sh.row([Cell("No similar-order data yet — each order gets its list as "
+                     "it is enriched.", font=F_NOTE, overflow=True)])
     return sh
 
 

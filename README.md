@@ -357,8 +357,8 @@ resumes without re-enriching or re-announcing what it already saw.
 1. **Make the workbook.** Create an Excel file in OneDrive/SharePoint (so it can
    be co-authored), share it with your coworkers, and put its **local synced
    path** in `LIVE_WORKBOOK_PATH` in `.env`. The watcher manages the **Live
-   Queue / Changes / History / Line Items** tabs; any other tabs you add are
-   left untouched. For the 5 AM email link, also set `LIVE_WORKBOOK_LINK` to the
+   Queue / Changes / History / Line Items / Similar Orders** tabs (plus a hidden
+   Similar Data sheet); any other tabs you add are left untouched. For the 5 AM email link, also set `LIVE_WORKBOOK_LINK` to the
    workbook's **Share → Copy link** URL.
 2. **Teams alerts (optional).** Put a Teams webhook URL in `TEAMS_WEBHOOK_URL` and
    everyone in that channel gets a desktop + phone notification per new order,
@@ -568,6 +568,13 @@ job's CAD folder, and hovering lists every candidate with the exact shared SO
 lines. New-order Teams/toast notifications carry the same line. Tune with
 `REUSE_MIN_SCORE` (default 0.5; raise if too chatty, `99` disables) and
 `REUSE_TOP` (default 3) in `.env`.
+
+The live workbook also gets a **Similar Orders tab**: pick any queue order in
+the yellow dropdown at the top (or type an order #) and its ranked lookalikes
+appear instantly — score, custom DWGs, the exact shared Sales-Order lines, and
+the CAD folder path. It's a plain Excel `FILTER` spill over a hidden data sheet
+the watcher refreshes whenever the board or the stores change, so it works for
+every coworker in the co-authored workbook with no macros.
 
 **Build the store from what's already archived** (no login, no browser — it
 reads the PDFs under `SALES_ORDER_DIR`), then search:

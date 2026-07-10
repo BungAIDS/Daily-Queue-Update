@@ -613,6 +613,36 @@ def test_plan_upsert_append_update_delete():
     assert not any(o[0] == "delete" for o in ops2)
 
 
+def test_similar_orders_sheets_layout():
+    rows = [{"job": "421900", "similar": "420150", "customer": "UBP", "score": 1.95,
+             "dwg": "-95 (PDF)", "shared": "THREADED PLUG", "folder": "Z:\\J\\420150"},
+            {"job": "421900", "similar": "419704", "customer": "", "score": 0.99,
+             "dwg": "—", "shared": "PO BOX", "folder": ""}]
+    data = ls.similar_data_sheet(rows, ["421900", "421901", "421902"])
+    assert data.name == ls.SIMILAR_DATA_TAB and data.hidden and data.freeze is None
+    hdr = [c.value for c in data.grid[0]]
+    assert hdr[0] == "Queue Order" and hdr[1] == "Similar Order" and hdr[8] == "Queue Orders"
+    assert data.grid[1][0].value == "421900" and data.grid[1][1].value == "420150"
+    # The picker list carries EVERY queue order, past the end of the data rows.
+    assert [r[8].value for r in data.grid[1:]] == ["421900", "421901", "421902"]
+    assert data.grid[3][0].value == ""     # padding row for the longer picker list
+
+    tab = ls.similar_orders_sheet(len(rows), 3)
+    assert tab.name == ls.SIMILAR_ORDERS_TAB and not tab.hidden
+    assert tab.picker["cell"] == ls.SIMILAR_PICKER_CELL
+    assert tab.picker["source"] == "='Similar Data'!$I$2:$I$4"
+    assert [c.value for c in tab.grid[2]] == ls.SIMILAR_HEADERS
+    f = tab.grid[3][0].value
+    assert f.startswith("=IFERROR(FILTER('Similar Data'!$B$2:$G$3")
+    assert "$A$2:$A$3" in f and "$B$1" in f
+
+
+def test_similar_orders_sheet_empty_has_note_not_formula():
+    tab = ls.similar_orders_sheet(0, 0)
+    assert tab.picker is None
+    assert "No similar-order data yet" in tab.grid[3][0].value
+
+
 def main() -> int:
     passed = 0
     for name, fn in sorted(globals().items()):

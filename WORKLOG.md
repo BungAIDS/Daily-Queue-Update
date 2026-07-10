@@ -3,6 +3,33 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-07-10 — Similar Orders tab: pick an order, see its lookalikes
+
+Interactive tab in the live workbook (user asked for "select an order at the
+top → it generates a list"):
+
+- **Similar Orders** (visible): B1 = yellow picker cell with a data-validation
+  dropdown of the on-board orders (typing any order # also allowed, ShowError
+  off) + ONE `=IFERROR(FILTER('Similar Data'!...))` spill formula. Instant,
+  no macros, works for every co-author. `&""` on both sides of the compare
+  coerces numeric/text job cells so typed vs dropdown vs stored types all match.
+- **Similar Data** (hidden, `Sheet.hidden`): flat (queue order × top-8 similar)
+  table + the dropdown's source list in column I (every board order, even ones
+  with no matches). Watcher computes rows in `watch._similar_orders_rows` —
+  cached on (board ids, line-items store mtime, DWG scan mtime), ~1.3s to
+  recompute for a 20-order board, skipped entirely when nothing changed.
+- Renderer (`live_excel`): `Sheet.hidden` (ws.Visible=0) + `Sheet.picker`
+  (`_apply_picker`: search-box styling, validation list, comment) + an explicit
+  `.Formula` assignment pass for "="-prefixed cell values (locale-immune EN-US
+  separators). The picker cell's typed value is read before `Cells.Clear` and
+  restored after, and the visible tab's model is layout-only so its fingerprint
+  almost never changes → repaints (which would blank the pick) are rare.
+  `update_master_workbook` grew `extra_sheets` — Changes + extras now share the
+  same fingerprint-cached repaint loop.
+- Spill gotcha handled: rows below the formula aren't in the model, so nothing
+  blocks the spill (COM writes of "" produce truly blank cells).
+- Tests: layout + formula-range cases in test_live_sheets (34 now).
+
 ## 2026-07-10 — Similar-order suggester wired into the live queue ("DWG Reuse")
 
 The `--like` ranking now runs automatically for every enriched order (new
