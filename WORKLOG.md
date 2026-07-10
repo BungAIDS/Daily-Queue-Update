@@ -3,6 +3,26 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-07-10 — Fix: Similar Orders tab went blank (repaint race + churn)
+
+Field report: "enter 421507 → nothing pops up" while Changes' DWG Reuse showed
+419623. watch.log (debug-logs) showed the mechanism at 10:13:26: both Similar
+sheets' repaints died with OLE 0x800ac472 (Excel rejects COM writes while the
+USER is mid-edit — they were typing in the picker). The repaint had already run
+`Cells.Clear()`, wiping the FILTER formula — and `_RENDER_CACHE` still held the
+last SUCCESSFUL fingerprint, so as long as the model didn't change, every later
+cycle skipped the rewrite → blank tab until the model changed or a restart.
+
+- Fix 1 (the bug): pop the sheet's `_RENDER_CACHE` entry BEFORE `render_sheet`
+  and re-set it only after success — a failed paint now always retries next
+  poll. Applied to both the repaint loop and the legacy `update_workbook`.
+- Fix 2 (the amplifier): Similar Data was repainting nearly EVERY cycle
+  because rows + the column-I dropdown followed live board-position order,
+  which reshuffles per poll. Rows/queue list now sort by job number
+  (`_sim_sort_key`), so the sheet repaints only on real content changes and
+  the Live Queue 'Similar' anchors stop shifting every cycle. Every needless
+  repaint was another window for the user-editing race.
+
 ## 2026-07-10 — Tab order enforced; Line Items tab retired
 
 DG's layout: Changes | Live Queue | Order History | Similar Orders | Similar

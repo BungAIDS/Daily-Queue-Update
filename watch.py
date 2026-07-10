@@ -313,11 +313,18 @@ def _new_today_ids(lq_jobs: list, today: date) -> set:
 _SIM_CACHE: dict = {"key": None, "rows": []}
 
 
+def _sim_sort_key(job: str) -> tuple:
+    return (0, int(job), job) if job.isdigit() else (1, 0, job)
+
+
 def _similar_orders_rows(lq_jobs: list) -> list:
     """One row per (on-board order, similar past order) for the Similar Orders
     tab: each order's top lookalikes from the whole backlog, best score first,
-    with custom DWGs and the shared SO lines spelled out. Best-effort: any
-    failure returns the last good rows."""
+    with custom DWGs and the shared SO lines spelled out. Groups are ordered by
+    JOB NUMBER, not board position — board order reshuffles every poll, and
+    following it would repaint the Similar Data tab (and shift every Live Queue
+    'Similar' anchor) each cycle for nothing. Best-effort: any failure returns
+    the last good rows."""
     import autocad_scan
     import find_orders
 
@@ -335,7 +342,7 @@ def _similar_orders_rows(lq_jobs: list) -> list:
         idx = find_orders.build_index(line_items.load_store(),
                                       dwg=autocad_scan.load_progress())
         rows = []
-        for j in lq_jobs:
+        for j in sorted(lq_jobs, key=lambda x: _sim_sort_key(str(x.get("job") or ""))):
             jn = str(j.get("job") or "")
             for r in find_orders.similar_to_items(idx, j.get("line_items") or [],
                                                   exclude_job=jn, top=8):
@@ -442,7 +449,10 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
 
     # Similar Orders: the picker tab + the grouped data tab it filters over
     # (sim_rows computed above, before the Live Queue rows were planned).
-    queue_ids = [str(j.get("job")) for j in lq_jobs if j.get("job")]
+    # Same stable job-number order as the rows, so the sheet doesn't repaint
+    # every time the board position order reshuffles.
+    queue_ids = sorted((str(j.get("job")) for j in lq_jobs if j.get("job")),
+                       key=_sim_sort_key)
     extra_sheets = [live_sheets.similar_data_sheet(sim_rows, queue_ids),
                     live_sheets.similar_orders_sheet(len(sim_rows), len(queue_ids))]
 
