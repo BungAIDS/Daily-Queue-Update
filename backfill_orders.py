@@ -200,6 +200,7 @@ def open_order_detail(page, job: str, search_timeout_s: float = 75.0,
     CBC_SEARCH_BUTTON click), then waits for either the board to re-render with
     the order (and opens it via loadDetail) or the detail modal to populate
     directly. Returns True once the documents are present, else False."""
+    _close_modal(page)   # never let a previous order's stale links be harvested
     box = find_search_box(page)
     if box is None:
         return False
@@ -289,8 +290,16 @@ def _download_sales_order(context, page_url: str, href: str, destination: Path, 
 
 
 def _close_modal(page) -> None:
+    """Hide the detail modal AND strip its download links (see
+    _close_modal_async: stale links + a reused modal made every job harvest
+    the PREVIOUS order's documents)."""
     try:
-        page.evaluate("() => window.jQuery && jQuery('#modalDetail').modal('hide')")
+        page.evaluate(
+            "() => {"
+            " if (window.jQuery) jQuery('#modalDetail').modal('hide');"
+            " document.querySelectorAll(\"#modalDetail a[href*='downloaddoc.aspx' i]\")"
+            "  .forEach(a => a.remove());"
+            "}")
         page.wait_for_timeout(250)
     except Exception:  # noqa: BLE001
         pass
@@ -505,6 +514,9 @@ async def _wait_for_matching_modal_async(page, job: str, timeout_ms: int) -> boo
 
 async def open_order_detail_async(page, job: str, search_timeout_s: float = 75.0,
                                   doc_timeout_ms: int = 120000) -> bool:
+    # Clear any lingering modal content FIRST (a prior job that errored before
+    # its finally, or a reused page) so this job can never see stale links.
+    await _close_modal_async(page)
     box = await find_search_box_async(page)
     if box is None:
         return False
@@ -596,8 +608,18 @@ async def _download_sales_order_async(
 
 
 async def _close_modal_async(page) -> None:
+    """Hide the detail modal AND strip its download links. The site reuses
+    #modalDetail: the next order's header lands before its documents section
+    refreshes, so leaving the old links in the DOM let the next job pass the
+    text-match while harvesting THIS order's documents — every job downloaded
+    the previous job's Sales Order (caught by validation as a MISMATCH chain)."""
     try:
-        await page.evaluate("() => window.jQuery && jQuery('#modalDetail').modal('hide')")
+        await page.evaluate(
+            "() => {"
+            " if (window.jQuery) jQuery('#modalDetail').modal('hide');"
+            " document.querySelectorAll(\"#modalDetail a[href*='downloaddoc.aspx' i]\")"
+            "  .forEach(a => a.remove());"
+            "}")
         await page.wait_for_timeout(250)
     except Exception:  # noqa: BLE001
         pass
@@ -616,6 +638,10 @@ async def process_one_async(page, context, job: str, folder: str = "",
         if not await open_order_detail_async(page, job, search_timeout_s, doc_timeout_ms):
             rec["status"] = "not-found"
             return rec
+        # Brief settle so the documents section finishes rendering — links can
+        # appear progressively, and harvesting mid-render could miss the
+        # latest CO revision.
+        await page.wait_for_timeout(400)
         docs = await _collect_docs_async(page)
 
         so_pdf = dr_pdf = None
