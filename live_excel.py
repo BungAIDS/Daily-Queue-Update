@@ -202,7 +202,8 @@ def _refresh_volatile(wb, sheet: Sheet) -> None:
 
 def _fingerprint(sheet: Sheet) -> int:
     parts = [sheet.name, sheet.freeze or "", sheet.autofilter_a1 or "",
-             str(sheet.hidden), str(sheet.picker)]
+             str(sheet.hidden), str(sheet.picker),
+             str(sorted((sheet.names or {}).items()))]
     for row in sheet.grid:
         for cell in row:
             # Volatile cells (e.g. the 'Last updated' stamp) change every cycle;
@@ -442,6 +443,14 @@ def render_sheet(app, wb, sheet: Sheet) -> None:
 
     if sheet.picker:
         _apply_picker(ws, sheet.picker, kept_pick)
+
+    # (Re)point this sheet's workbook defined names — the stable targets the
+    # Live Queue 'Similar' links jump to. Add with the same name redefines, so
+    # a group that moved just gets its name re-aimed; departed orders' stale
+    # names are harmless (their queue rows are gone).
+    for nm, ref in (sheet.names or {}).items():
+        with contextlib.suppress(Exception):
+            wb.Names.Add(Name=nm, RefersTo="=" + ref)
 
     # Merge any cell that spans columns (e.g. the Changes 'Job #' header over its
     # blank spacer). The covered cells stay in the grid as positional spacers, so

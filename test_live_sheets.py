@@ -595,9 +595,12 @@ def test_similar_orders_sheets_layout():
     # The picker list carries EVERY queue order, past the end of the data rows.
     assert [r[8].value for r in data.grid[1:]] == ["421900", "421901", "421902"]
     assert data.grid[3][0].value == ""     # padding row for the longer picker list
-    # The Live Queue's 'Similar' cell deep-links to the group's first data row.
-    assert ls.similar_anchor(rows, "421900") == "#'Similar Data'!A2"
+    # The Live Queue's 'Similar' cell deep-links via a STABLE defined name (so
+    # other groups shifting can never rewrite its row); the data sheet model
+    # carries the name -> group-start-cell mapping the renderer (re)points.
+    assert ls.similar_anchor(rows, "421900") == "#SIM_421900"
     assert ls.similar_anchor(rows, "421901") == ""
+    assert data.names == {"SIM_421900": "'Similar Data'!$A$2"}
 
     tab = ls.similar_orders_sheet(len(rows), 3)
     assert tab.name == ls.SIMILAR_ORDERS_TAB and not tab.hidden
