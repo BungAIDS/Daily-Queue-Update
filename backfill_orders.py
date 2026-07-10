@@ -753,7 +753,9 @@ def _publish_checkpoint() -> bool:
 # Consecutive not-founds that trigger the dead-session probe: when the saved
 # CBC session dies mid-run, EVERY search comes back empty — the overnight run
 # recorded ~7K bogus misses that way. On a streak this long, re-search a job
-# that is KNOWN to resolve; if even that misses, stop instead of grinding on.
+# that is KNOWN to resolve. LOG-ONLY by request: the run keeps going either
+# way (misses are retried on the next run); the log just gains a clear marker
+# of when the session died so nobody has to guess on Monday.
 DEAD_SESSION_STREAK = 15
 
 
@@ -828,11 +830,13 @@ async def _run_serial_pass(context, jobs: List[str],
                 if _publish_checkpoint():
                     run_state["last_published"] = run_state["processed"]
 
-            # Dead-session circuit breaker: a long miss streak is either a
+            # Dead-session detector (log-only): a long miss streak is either a
             # genuinely thin stretch of the backlog or a dead login — a probe
-            # of a known-resolvable order tells them apart.
+            # of a known-resolvable order tells them apart. Either way the run
+            # CONTINUES; misses recorded meanwhile are retried on the next run.
             miss_streak = miss_streak + 1 if rec.get("status") == "not-found" else 0
             if miss_streak >= DEAD_SESSION_STREAK:
+                miss_streak = 0
                 probe = _probe_job(records)
                 found = False
                 if probe:
@@ -843,18 +847,17 @@ async def _run_serial_pass(context, jobs: List[str],
                         await _close_modal_async(page)
                 if found:
                     log.info("  %d consecutive misses, but known order %s still "
-                             "resolves — thin stretch, carrying on.", miss_streak, probe)
-                    miss_streak = 0
-                else:
-                    run_state["dead_session"] = True
+                             "resolves — thin stretch, carrying on.",
+                             DEAD_SESSION_STREAK, probe)
+                elif not run_state.get("dead_session_warned"):
+                    run_state["dead_session_warned"] = True
                     log.error(
                         "%d consecutive not-founds and known-good order %s ALSO "
-                        "failed to resolve — the CBC session looks dead (this is "
-                        "what filled the overnight run with bogus misses). "
-                        "Stopping this run; everything completed so far is saved. "
-                        "Run `python login.py`, then start the backfill again.",
-                        miss_streak, probe or "<none on record>")
-                    break
+                        "failed to resolve — the CBC session may be dead from "
+                        "here on. Continuing anyway (by request); these misses "
+                        "are retried on the next run. `python login.py` + a "
+                        "restart gets it fetching again sooner.",
+                        DEAD_SESSION_STREAK, probe or "<none on record>")
 
             if delay:
                 await asyncio.sleep(delay)
@@ -907,9 +910,6 @@ async def _run_backfill(jobs: List[str], records: Dict[str, Dict[str, Any]],
                     log.warning("Serial backfill pass stopped early: %s", e)
                     break
                 processed_total += processed
-                if state.get("dead_session"):
-                    rc = 1   # no point retrying misses against a dead login
-                    break
                 if pass_no >= max(1, passes):
                     break
                 retry = [job for job in todo

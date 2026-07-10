@@ -141,14 +141,14 @@ def test_backfill_overlay_survives_and_merges_with_main_store(tmp: Path):
     assert merged["jobs"]["401001"]["items"][0]["raw"] == "fresh"
 
 
-def test_dead_session_breaker_stops_after_failed_probe():
+def test_dead_session_probe_failure_warns_but_never_stops():
     page = SimpleNamespace(close=AsyncMock())
 
     async def all_misses(_page, _context, job, _folder, **_kwargs):
         return {"job": job, "status": "not-found", "scanned_at": "now",
                 "backfill_scan_version": backfill_orders.BACKFILL_SCAN_VERSION}
 
-    jobs = [str(401100 + i) for i in range(backfill_orders.DEAD_SESSION_STREAK + 10)]
+    jobs = [str(401100 + i) for i in range(backfill_orders.DEAD_SESSION_STREAK * 2 + 3)]
     records = {"401001": {"status": "ok",
                           "backfill_scan_version": backfill_orders.BACKFILL_SCAN_VERSION}}
     state = {"processed": 0, "publish_every": 0}
@@ -169,9 +169,9 @@ def test_dead_session_breaker_stops_after_failed_probe():
         completed = asyncio.run(backfill_orders._run_serial_pass(
             object(), jobs, records, {}, 0, 1, 1, 1, state))
 
-    assert probes == ["401001"]                 # probed the known-good order once
-    assert state.get("dead_session") is True
-    assert completed == backfill_orders.DEAD_SESSION_STREAK   # stopped at the streak
+    assert completed == len(jobs)               # LOG-ONLY: the run never stops
+    assert state.get("dead_session_warned") is True
+    assert probes == ["401001", "401001"]       # one probe per streak window
 
 
 def test_dead_session_probe_success_resets_and_continues():
