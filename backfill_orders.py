@@ -750,6 +750,26 @@ def _publish_checkpoint() -> bool:
     return False
 
 
+# Consecutive not-founds that trigger the dead-session probe: when the saved
+# CBC session dies mid-run, EVERY search comes back empty — the overnight run
+# recorded ~7K bogus misses that way. On a streak this long, re-search a job
+# that is KNOWN to resolve; if even that misses, stop instead of grinding on.
+DEAD_SESSION_STREAK = 15
+
+
+def _probe_job(records: Dict[str, Dict[str, Any]]) -> str:
+    """A job number whose search is known to resolve — a serial-verified 'ok'
+    first, any previously-ok record otherwise ('' when none exist yet)."""
+    fallback = ""
+    for j, r in records.items():
+        if r.get("status") != "ok":
+            continue
+        if r.get("backfill_scan_version"):
+            return j
+        fallback = fallback or j
+    return fallback
+
+
 async def _run_serial_pass(context, jobs: List[str],
                            records: Dict[str, Dict[str, Any]],
                            dwg: Dict[str, Dict[str, Any]],
@@ -760,6 +780,7 @@ async def _run_serial_pass(context, jobs: List[str],
     """Process one pass in strict sequence and checkpoint every completed job."""
     page = await _open_backfill_page(context)
     completed = 0
+    miss_streak = 0
     try:
         for index, job in enumerate(jobs, start=1):
             rec: Dict[str, Any] | None = None
@@ -806,6 +827,35 @@ async def _run_serial_pass(context, jobs: List[str],
                          run_state["processed"])
                 if _publish_checkpoint():
                     run_state["last_published"] = run_state["processed"]
+
+            # Dead-session circuit breaker: a long miss streak is either a
+            # genuinely thin stretch of the backlog or a dead login — a probe
+            # of a known-resolvable order tells them apart.
+            miss_streak = miss_streak + 1 if rec.get("status") == "not-found" else 0
+            if miss_streak >= DEAD_SESSION_STREAK:
+                probe = _probe_job(records)
+                found = False
+                if probe:
+                    with contextlib.suppress(Exception):
+                        with cbc_fetch_lock():
+                            found = await open_order_detail_async(
+                                page, probe, search_timeout_s, doc_timeout_ms)
+                        await _close_modal_async(page)
+                if found:
+                    log.info("  %d consecutive misses, but known order %s still "
+                             "resolves — thin stretch, carrying on.", miss_streak, probe)
+                    miss_streak = 0
+                else:
+                    run_state["dead_session"] = True
+                    log.error(
+                        "%d consecutive not-founds and known-good order %s ALSO "
+                        "failed to resolve — the CBC session looks dead (this is "
+                        "what filled the overnight run with bogus misses). "
+                        "Stopping this run; everything completed so far is saved. "
+                        "Run `python login.py`, then start the backfill again.",
+                        miss_streak, probe or "<none on record>")
+                    break
+
             if delay:
                 await asyncio.sleep(delay)
     finally:
@@ -857,6 +907,9 @@ async def _run_backfill(jobs: List[str], records: Dict[str, Dict[str, Any]],
                     log.warning("Serial backfill pass stopped early: %s", e)
                     break
                 processed_total += processed
+                if state.get("dead_session"):
+                    rc = 1   # no point retrying misses against a dead login
+                    break
                 if pass_no >= max(1, passes):
                     break
                 retry = [job for job in todo

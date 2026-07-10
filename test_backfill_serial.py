@@ -140,6 +140,66 @@ def test_backfill_overlay_survives_and_merges_with_main_store(tmp: Path):
     assert merged["jobs"]["401001"]["items"][0]["raw"] == "fresh"
 
 
+def test_dead_session_breaker_stops_after_failed_probe():
+    page = SimpleNamespace(close=AsyncMock())
+
+    async def all_misses(_page, _context, job, _folder, **_kwargs):
+        return {"job": job, "status": "not-found", "scanned_at": "now",
+                "backfill_scan_version": backfill_orders.BACKFILL_SCAN_VERSION}
+
+    jobs = [str(401100 + i) for i in range(backfill_orders.DEAD_SESSION_STREAK + 10)]
+    records = {"401001": {"status": "ok",
+                          "backfill_scan_version": backfill_orders.BACKFILL_SCAN_VERSION}}
+    state = {"processed": 0, "publish_every": 0}
+    probes = []
+
+    async def probe_fails(_page, job, *_a, **_k):
+        probes.append(job)
+        return False
+
+    with (
+        patch("backfill_orders._open_backfill_page", new=AsyncMock(return_value=page)),
+        patch("backfill_orders.process_one_async", new=all_misses),
+        patch("backfill_orders.open_order_detail_async", new=probe_fails),
+        patch("backfill_orders._close_modal_async", new=AsyncMock()),
+        patch("backfill_orders.cbc_fetch_lock", side_effect=lambda: contextlib.nullcontext()),
+        patch("backfill_orders.save_progress", side_effect=lambda _v: None),
+    ):
+        completed = asyncio.run(backfill_orders._run_serial_pass(
+            object(), jobs, records, {}, 0, 1, 1, 1, state))
+
+    assert probes == ["401001"]                 # probed the known-good order once
+    assert state.get("dead_session") is True
+    assert completed == backfill_orders.DEAD_SESSION_STREAK   # stopped at the streak
+
+
+def test_dead_session_probe_success_resets_and_continues():
+    page = SimpleNamespace(close=AsyncMock())
+
+    async def all_misses(_page, _context, job, _folder, **_kwargs):
+        return {"job": job, "status": "not-found", "scanned_at": "now",
+                "backfill_scan_version": backfill_orders.BACKFILL_SCAN_VERSION}
+
+    jobs = [str(401100 + i) for i in range(backfill_orders.DEAD_SESSION_STREAK + 3)]
+    records = {"401001": {"status": "ok",
+                          "backfill_scan_version": backfill_orders.BACKFILL_SCAN_VERSION}}
+    state = {"processed": 0, "publish_every": 0}
+
+    with (
+        patch("backfill_orders._open_backfill_page", new=AsyncMock(return_value=page)),
+        patch("backfill_orders.process_one_async", new=all_misses),
+        patch("backfill_orders.open_order_detail_async", new=AsyncMock(return_value=True)),
+        patch("backfill_orders._close_modal_async", new=AsyncMock()),
+        patch("backfill_orders.cbc_fetch_lock", side_effect=lambda: contextlib.nullcontext()),
+        patch("backfill_orders.save_progress", side_effect=lambda _v: None),
+    ):
+        completed = asyncio.run(backfill_orders._run_serial_pass(
+            object(), jobs, records, {}, 0, 1, 1, 1, state))
+
+    assert completed == len(jobs)               # thin stretch: the pass finishes
+    assert not state.get("dead_session")
+
+
 def test_watcher_fetch_uses_the_shared_cbc_lock():
     events = []
 
