@@ -642,22 +642,43 @@ _SIM_PICKER_COL = 9   # column I on the data sheet: the dropdown's source list
 
 
 def similar_data_sheet(rows: List[Dict[str, Any]], queue_orders: List[str]) -> Sheet:
-    """The hidden flat table behind the Similar Orders tab: one row per
-    (queue order, similar order) pair — grouped by queue order, best score
-    first — plus every on-board order in column I as the picker's dropdown
-    list (so an order with no matches is still pickable)."""
-    sh = Sheet(SIMILAR_DATA_TAB, freeze=None, hidden=True)
+    """The flat table behind the Similar Orders tab: one row per (queue order,
+    similar order) pair — grouped by queue order, best score first, each group's
+    first row shaded so the Live Queue's 'Similar' column can deep-link straight
+    to it. Column I carries every on-board order as the picker's dropdown list
+    (so an order with no matches is still pickable). The Queue Order value
+    repeats on every row on purpose: the picker tab's FILTER matches on it."""
+    sh = Sheet(SIMILAR_DATA_TAB, freeze="A2")
     sh.row(_header_cells(["Queue Order"] + SIMILAR_HEADERS)
            + [Cell(""), _header_cells(["Queue Orders"])[0]])
+    prev = None
     for i in range(max(len(rows), len(queue_orders))):
         r = rows[i] if i < len(rows) else None
-        vals = ([Cell(r["job"]), Cell(r["similar"]), Cell(r.get("customer", "")),
-                 Cell(r.get("score", "")), Cell(r.get("dwg", "")),
-                 Cell(r.get("shared", "")), Cell(r.get("folder", ""))]
-                if r else [Cell("")] * 7)
+        if r:
+            first = r["job"] != prev
+            prev = r["job"]
+            fill = FILL_NEW if first else None   # grey band starts each group
+            folder = (r.get("folder") or "").strip()
+            vals = [Cell(r["job"], fill=fill, font=F_SECTION if first else None),
+                    Cell(r["similar"], fill=fill), Cell(r.get("customer", ""), fill=fill),
+                    Cell(r.get("score", ""), fill=fill), Cell(r.get("dwg", ""), fill=fill),
+                    Cell(r.get("shared", ""), fill=fill, overflow=True),
+                    Cell(folder, fill=fill, link=folder or None,
+                         font=F_LINK if folder else None)]
+        else:
+            vals = [Cell("")] * 7
         picker = Cell(queue_orders[i]) if i < len(queue_orders) else Cell("")
         sh.row(vals + [Cell(""), picker])
     return sh
+
+
+def similar_anchor(rows: List[Dict[str, Any]], job: str) -> str:
+    """The '#'-style internal link to `job`'s first row on the Similar Data
+    sheet ('' when it has no rows) — what the Live Queue 'Similar' cell opens."""
+    for i, r in enumerate(rows):
+        if r["job"] == str(job):
+            return f"#'{SIMILAR_DATA_TAB}'!A{i + 2}"   # +2: 1-based below the header
+    return ""
 
 
 def similar_orders_sheet(n_rows: int, n_queue: int) -> Sheet:
@@ -714,9 +735,10 @@ LINE_ITEM_HEADERS = ["Job #", "Customer", "CO#", "Tags", "Item (as printed)",
 # "Last Out" (most recent prior departure) sits just before the trailing "#"
 # board-position column, so adding it doesn't shift Job #/End Date (still after the
 # single leading "Added").
-LIVE_QUEUE_HEADERS = ["Added"] + [_abbrev_header(h) for h in QUEUE_HEADERS] + ["Last Out", "#"]
+LIVE_QUEUE_HEADERS = ["Added"] + [_abbrev_header(h) for h in QUEUE_HEADERS] + ["Last Out", "Similar", "#"]
 LIVE_QUEUE_CBC_COL = len(LIVE_QUEUE_HEADERS)                   # the trailing "#" board-position col (sort key)
-LIVE_QUEUE_LAST_OUT_COL = len(LIVE_QUEUE_HEADERS) - 1         # the "Last Out" col (AM/PM-or-date text)
+LIVE_QUEUE_SIMILAR_COL = len(LIVE_QUEUE_HEADERS) - 1          # "Similar" (count -> deep link to Similar Data)
+LIVE_QUEUE_LAST_OUT_COL = len(LIVE_QUEUE_HEADERS) - 2         # the "Last Out" col (AM/PM-or-date text)
 LIVE_QUEUE_KEY_COL = 2 + QUEUE_HEADERS.index("Job #")          # 1-based col of Job # (Added is col 1)
 LIVE_QUEUE_END_DATE_COL = 2 + QUEUE_HEADERS.index("End Date")  # 1-based col of End Date
 # The 'Removed since this morning' block lines its data columns up under the board
@@ -835,11 +857,16 @@ def live_queue_records(jobs: List[Dict[str, Any]], today: date,
         jn = str(j.get("job") or "")
         added = Cell(added_label(j, ref=ref), number_format="@")
         last_out = Cell(last_out_label(j, ref=ref), number_format="@")   # most recent prior departure
+        # "Similar" = how many lookalike past orders this one has; clicking jumps
+        # to its group on the Similar Data tab (watch stamps _sim_count/_sim_anchor).
+        sim = Cell(j.get("_sim_count") or "", center=True)
+        if sim.value and j.get("_sim_anchor"):
+            sim.link, sim.font = j["_sim_anchor"], F_LINK
         # "#" = the cbcinsider board position (the sort key for board order).
         pos = j.get("_cbc_pos")
         cbc = Cell(pos if isinstance(pos, int) else "", center=True)
         cells = _board_row_cells(j, today, jn in co_changed_ids, jn in new_ids, ref,
-                                 leading=added, trailing=[last_out, cbc])
+                                 leading=added, trailing=[last_out, sim, cbc])
         out.append((jn, cells))
     return out
 

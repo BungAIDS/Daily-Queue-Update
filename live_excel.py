@@ -336,7 +336,14 @@ def _style_row(ws, r: int, cells: List) -> None:
     for i, cell in enumerate(cells, start=1):
         if cell.link:
             try:
-                ws.Hyperlinks.Add(Anchor=ws.Cells(r, i), Address=str(cell.link))
+                link = str(cell.link)
+                if link.startswith("#"):
+                    # Internal link — jump to a sheet/cell in this workbook (e.g.
+                    # Live Queue 'Similar' -> that order's group on Similar Data).
+                    ws.Hyperlinks.Add(Anchor=ws.Cells(r, i), Address="",
+                                      SubAddress=link[1:])
+                else:
+                    ws.Hyperlinks.Add(Anchor=ws.Cells(r, i), Address=link)
                 _apply_font(ws.Cells(r, i), cell.font)  # keep our link style
             except Exception:  # noqa: BLE001 - a bad path shouldn't stop the row
                 pass
@@ -470,9 +477,10 @@ def render_sheet(app, wb, sheet: Sheet) -> None:
         except Exception:  # noqa: BLE001
             pass
 
-    if sheet.hidden:  # data-only sheet: keep it off the tab bar (writes still land)
-        with contextlib.suppress(Exception):
-            ws.Visible = 0  # xlSheetHidden
+    # Honor the model's visibility both ways, so a sheet that was hidden in an
+    # earlier build resurfaces when its model stops being hidden.
+    with contextlib.suppress(Exception):
+        ws.Visible = 0 if sheet.hidden else -1  # xlSheetHidden / xlSheetVisible
 
 
 def _apply_picker(ws, picker: Dict[str, str], kept_pick: Any = None) -> None:

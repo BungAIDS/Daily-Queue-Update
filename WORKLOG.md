@@ -3,6 +3,29 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-07-10 — Live Queue 'Similar' column: click -> that order's lookalikes
+
+Asked: "click something in a Live Queue column that jumps to the new tab and
+searches automatically — or does that need a macro?" Setting the picker cell
+from a click DOES need VBA (rejected: .xlsm kills the no-macro/co-author
+design). Macro-free equivalent shipped instead:
+
+- Similar Data is now a VISIBLE grouped tab (grey band + bold order # on each
+  group's first row, folder cells hyperlinked; Queue Order value still repeats
+  every row because the picker tab's FILTER matches on it — do not blank it).
+- New trailing Live Queue column **"Similar"** (between Last Out and #):
+  lookalike count, internally hyperlinked (`#'Similar Data'!A<row>`) to that
+  order's group — `live_sheets.similar_anchor`. watch stamps
+  `_sim_count`/`_sim_anchor` on each on-board job BEFORE rows are planned.
+  Anchors self-heal: row_sig includes the link, so when a group's row number
+  shifts, the affected Live Queue rows re-plan on the same cycle.
+- `live_excel._style_row`: links starting with `#` become internal hyperlinks
+  (Address="", SubAddress=...). render_sheet now also RE-shows a sheet whose
+  model isn't hidden (ws.Visible set both ways) so earlier hidden-build sheets
+  resurface.
+- LIVE_QUEUE_LAST_OUT_COL is now len-2 (new LIVE_QUEUE_SIMILAR_COL = len-1);
+  removed_block untouched (its own header list, empty trailing).
+
 ## 2026-07-10 — Similar Orders tab: pick an order, see its lookalikes
 
 Interactive tab in the live workbook (user asked for "select an order at the

@@ -572,9 +572,13 @@ lines. New-order Teams/toast notifications carry the same line. Tune with
 The live workbook also gets a **Similar Orders tab**: pick any queue order in
 the yellow dropdown at the top (or type an order #) and its ranked lookalikes
 appear instantly — score, custom DWGs, the exact shared Sales-Order lines, and
-the CAD folder path. It's a plain Excel `FILTER` spill over a hidden data sheet
-the watcher refreshes whenever the board or the stores change, so it works for
-every coworker in the co-authored workbook with no macros.
+the CAD folder. It's a plain Excel `FILTER` spill over the **Similar Data tab**
+(every on-board order's lookalikes, grouped) that the watcher refreshes
+whenever the board or the stores change — no macros, works for every coworker
+in the co-authored workbook. The Live Queue itself gains a slim **"Similar"
+column**: the count of lookalikes, and clicking it jumps straight to that
+order's group on Similar Data (an internal hyperlink — the closest Excel gets
+to "click-and-search" without VBA).
 
 **Build the store from what's already archived** (no login, no browser — it
 reads the PDFs under `SALES_ORDER_DIR`), then search:

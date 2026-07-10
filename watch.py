@@ -379,6 +379,16 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
     shade_ids = {str(j.get("job")) for j in lq_jobs
                  if live_sheets.added_date(j) in recent_days}
 
+    # Similar-order data first: each on-board order gets its lookalike count and
+    # the deep link to its group on the Similar Data tab ('Similar' column), so
+    # the Live Queue rows are planned with the click-through already in place.
+    sim_rows = _similar_orders_rows(lq_jobs)
+    for j in lq_jobs:
+        jn = str(j.get("job") or "")
+        anchor = live_sheets.similar_anchor(sim_rows, jn)
+        j["_sim_anchor"] = anchor
+        j["_sim_count"] = sum(1 for r in sim_rows if r["job"] == jn) if anchor else 0
+
     lq_sigs = master.setdefault("lq_sigs", {})
     lq_ops, lq_commit = _plan(live_sheets.live_queue_records(lq_jobs, today, new_ids=shade_ids,
                                                              co_changed_ids=co_changed, ref=now),
@@ -430,9 +440,8 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
     oh_payload = {"name": "Order History", "spec": spec, "ops": oh_ops, "rebuild": rebuild,
                   "key_col": live_sheets.ORDER_HISTORY_KEY_COL, "freeze": "B2"}  # pin Job # only
 
-    # Similar Orders: the picker tab + its hidden data sheet (pick an order at
-    # the top -> its ranked lookalikes appear via an Excel FILTER spill).
-    sim_rows = _similar_orders_rows(lq_jobs)
+    # Similar Orders: the picker tab + the grouped data tab it filters over
+    # (sim_rows computed above, before the Live Queue rows were planned).
     queue_ids = [str(j.get("job")) for j in lq_jobs if j.get("job")]
     extra_sheets = [live_sheets.similar_data_sheet(sim_rows, queue_ids),
                     live_sheets.similar_orders_sheet(len(sim_rows), len(queue_ids))]
