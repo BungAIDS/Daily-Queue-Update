@@ -18,6 +18,13 @@ import process_lock
 import sales_orders
 
 
+def test_default_search_population_starts_at_401000():
+    minimum = backfill_orders.DEFAULT_CBC_SEARCH_MIN_JOB
+    assert minimum == 401000
+    assert not backfill_orders._inside_job_caps("400999", minimum)
+    assert backfill_orders._inside_job_caps("401000", minimum)
+
+
 def test_resume_trusts_only_current_serial_misses():
     version = backfill_orders.BACKFILL_SCAN_VERSION
     assert backfill_orders._is_done({"status": "ok"})
