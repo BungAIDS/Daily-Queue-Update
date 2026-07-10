@@ -166,9 +166,7 @@ def test_async_backfill_rejection_cannot_save_co_or_so_data():
 
 def main() -> int:
     passed = 0
-    temp_parent = Path.home() / "Documents" / "Codex" / ".tmp_so_tests"
-    temp_parent.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=temp_parent, ignore_cleanup_errors=True) as directory:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
         temp_root = Path(directory)
         for name, function in sorted(globals().items()):
             if not name.startswith("test_") or not callable(function):
