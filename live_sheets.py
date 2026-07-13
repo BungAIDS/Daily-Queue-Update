@@ -83,6 +83,13 @@ class Sheet:
     grid: List[List[Cell]] = field(default_factory=list)
     freeze: Optional[str] = "B2"
     autofilter_a1: Optional[str] = None   # e.g. "A1:AB57"; None = no filter
+    hidden: bool = False                  # data-only sheet, hidden from the tab bar
+    picker: Optional[Dict[str, str]] = None  # input cell w/ dropdown: {cell, source,
+                                             # comment} — styled + validated by the
+                                             # renderer; its typed value survives repaints
+    names: Optional[Dict[str, str]] = None   # workbook defined names to (re)point at this
+                                             # sheet, {name: "'Tab'!$A$5"} — stable link
+                                             # targets that survive rows shifting
 
     # -- builders the sheet functions below use to assemble the grid --
     def row(self, cells: List[Cell]) -> None:
@@ -239,6 +246,18 @@ def _job_value_cells(j: Dict[str, Any], columns: Optional[List] = None,
             c = Cell(_flags_str(j))
         elif key == "engineers":
             c = Cell(engineers.cell_text(j))
+        elif key == "dwg_reuse_label":
+            # Backlog order(s) with custom DWGs for this order's rare features —
+            # linked to the top candidate's CAD folder, full shortlist on hover.
+            c = Cell(j.get("dwg_reuse_label", ""))
+            sugg = j.get("dwg_reuse") or []
+            if c.value and sugg:
+                if j.get("dwg_reuse_note"):
+                    c.comment = j["dwg_reuse_note"]
+                folder = (sugg[0].get("folder") or "").strip()
+                if folder:
+                    c.link, c.font = folder, F_LINK
+                    linked_idx.add(idx)
         else:
             c = Cell(j.get(key, ""))
         cells.append(c)
@@ -610,10 +629,101 @@ def history_sheet(history: Dict[str, Any], name: str = "Order History") -> Sheet
 
 
 # --------------------------------------------------------------------------- #
-# Line Items (one row per order x normalized item; filter to find orders)     #
+# Similar Orders: pick a queue order at the top -> its ranked lookalikes       #
+# appear instantly (an Excel FILTER spill over the hidden Similar Data sheet,  #
+# so no macros and no waiting for the next poll). The watcher refreshes the    #
+# data sheet; the visible tab's model is layout-only, so a repaint (which      #
+# would wipe the picked value) only happens when the layout itself changes —   #
+# and the renderer preserves the picker cell's value even then.               #
 # --------------------------------------------------------------------------- #
-LINE_ITEM_HEADERS = ["Job #", "Customer", "CO#", "Tags", "Item (as printed)",
-                     "Normalized", "Details", "Qty", "Price", "Section", "SO PDF"]
+SIMILAR_ORDERS_TAB = "Similar Orders"
+SIMILAR_DATA_TAB = "Similar Data"
+SIMILAR_HEADERS = ["Similar Order", "Customer", "Score", "Custom DWGs",
+                   "Shared Sales-Order items", "CAD Folder"]
+SIMILAR_PICKER_CELL = "B1"
+_SIM_PICKER_COL = 9   # column I on the data sheet: the dropdown's source list
+
+
+def _sim_name(job: str) -> str:
+    """The workbook defined name for a job's group on Similar Data. Stable, so
+    the Live Queue 'Similar' links never change when rows shift — one order
+    joining/leaving the board used to rewrite ~every row below it just to
+    re-point row-number anchors."""
+    return "SIM_" + re.sub(r"[^0-9A-Za-z_]", "_", str(job))
+
+
+def similar_data_sheet(rows: List[Dict[str, Any]], queue_orders: List[str]) -> Sheet:
+    """The flat table behind the Similar Orders tab: one row per (queue order,
+    similar order) pair — grouped by queue order, best score first, each group's
+    first row shaded so the Live Queue's 'Similar' column can deep-link straight
+    to it. Column I carries every on-board order as the picker's dropdown list
+    (so an order with no matches is still pickable). The Queue Order value
+    repeats on every row on purpose: the picker tab's FILTER matches on it."""
+    sh = Sheet(SIMILAR_DATA_TAB, freeze="A2")
+    sh.names = {}
+    sh.row(_header_cells(["Queue Order"] + SIMILAR_HEADERS)
+           + [Cell(""), _header_cells(["Queue Orders"])[0]])
+    prev = None
+    for i in range(max(len(rows), len(queue_orders))):
+        r = rows[i] if i < len(rows) else None
+        if r:
+            first = r["job"] != prev
+            prev = r["job"]
+            if first:  # stable deep-link target for this order's group
+                sh.names[_sim_name(r["job"])] = f"'{SIMILAR_DATA_TAB}'!$A${i + 2}"
+            fill = FILL_NEW if first else None   # grey band starts each group
+            folder = (r.get("folder") or "").strip()
+            vals = [Cell(r["job"], fill=fill, font=F_SECTION if first else None),
+                    Cell(r["similar"], fill=fill), Cell(r.get("customer", ""), fill=fill),
+                    Cell(r.get("score", ""), fill=fill), Cell(r.get("dwg", ""), fill=fill),
+                    Cell(r.get("shared", ""), fill=fill, overflow=True),
+                    Cell(folder, fill=fill, link=folder or None,
+                         font=F_LINK if folder else None)]
+        else:
+            vals = [Cell("")] * 7
+        picker = Cell(queue_orders[i]) if i < len(queue_orders) else Cell("")
+        sh.row(vals + [Cell(""), picker])
+    return sh
+
+
+def similar_anchor(rows: List[Dict[str, Any]], job: str) -> str:
+    """The internal link the Live Queue 'Similar' cell opens ('' when the job
+    has no rows): a defined name pointing at the job's group on Similar Data
+    (see `_sim_name`), so the link — and therefore the row's signature — never
+    changes when other groups grow/shrink and shift the row numbers."""
+    job = str(job)
+    return f"#{_sim_name(job)}" if any(r["job"] == job for r in rows) else ""
+
+
+def similar_orders_sheet(n_rows: int, n_queue: int) -> Sheet:
+    """The visible picker tab: yellow input cell in B1 (dropdown of the queue's
+    orders; typing any order # also works) and one FILTER formula that spills
+    that order's ranked lookalikes from the Similar Data sheet."""
+    sh = Sheet(SIMILAR_ORDERS_TAB, freeze="A4")
+    if n_queue:
+        sh.picker = {
+            "cell": SIMILAR_PICKER_CELL,
+            "source": f"='{SIMILAR_DATA_TAB}'!$I$2:$I${n_queue + 1}",
+            "comment": ("Pick a queue order from the dropdown (or type any order "
+                        "#) and press Enter — its most similar past orders appear "
+                        "below, best match first. Clear the cell to clear the list."),
+        }
+    sh.row([Cell("Order:", font=F_SECTION), Cell(""),
+            Cell("← pick a queue order (or type any order #) — its most similar "
+                 "past orders appear below, best match first",
+                 font=F_NOTE, overflow=True)])
+    sh.blank()
+    sh.row(_header_cells(SIMILAR_HEADERS))
+    if n_rows:
+        last = n_rows + 1
+        d = SIMILAR_DATA_TAB
+        sh.row([Cell(f"=IFERROR(FILTER('{d}'!$B$2:$G${last},"
+                     f"('{d}'!$A$2:$A${last}&\"\")=($B$1&\"\"),"
+                     f"\"no matches for that order # yet\"),\"\")")])
+    else:
+        sh.row([Cell("No similar-order data yet — each order gets its list as "
+                     "it is enriched.", font=F_NOTE, overflow=True)])
+    return sh
 
 
 # --------------------------------------------------------------------------- #
@@ -632,9 +742,10 @@ LINE_ITEM_HEADERS = ["Job #", "Customer", "CO#", "Tags", "Item (as printed)",
 # "Last Out" (most recent prior departure) sits just before the trailing "#"
 # board-position column, so adding it doesn't shift Job #/End Date (still after the
 # single leading "Added").
-LIVE_QUEUE_HEADERS = ["Added"] + [_abbrev_header(h) for h in QUEUE_HEADERS] + ["Last Out", "#"]
+LIVE_QUEUE_HEADERS = ["Added"] + [_abbrev_header(h) for h in QUEUE_HEADERS] + ["Last Out", "Similar", "#"]
 LIVE_QUEUE_CBC_COL = len(LIVE_QUEUE_HEADERS)                   # the trailing "#" board-position col (sort key)
-LIVE_QUEUE_LAST_OUT_COL = len(LIVE_QUEUE_HEADERS) - 1         # the "Last Out" col (AM/PM-or-date text)
+LIVE_QUEUE_SIMILAR_COL = len(LIVE_QUEUE_HEADERS) - 1          # "Similar" (count -> deep link to Similar Data)
+LIVE_QUEUE_LAST_OUT_COL = len(LIVE_QUEUE_HEADERS) - 2         # the "Last Out" col (AM/PM-or-date text)
 LIVE_QUEUE_KEY_COL = 2 + QUEUE_HEADERS.index("Job #")          # 1-based col of Job # (Added is col 1)
 LIVE_QUEUE_END_DATE_COL = 2 + QUEUE_HEADERS.index("End Date")  # 1-based col of End Date
 # The 'Removed since this morning' block lines its data columns up under the board
@@ -683,8 +794,15 @@ def row_sig(cells: List[Cell]) -> str:
     """A stable string signature of a row's content+style, so the renderer can
     tell whether a row actually changed and skip writing it if not. Returned as a
     hex digest (not a tuple) so it survives a JSON round-trip in the master store
-    — change detection has to work across watcher restarts."""
-    payload = [[c.value, c.fill, c.font, c.link, c.number_format, c.center] for c in cells]
+    — change detection has to work across watcher restarts.
+
+    Volatile cells contribute their STYLE but not their value: the Live Queue's
+    '#' board position jitters on most scrapes (the site reorders ties), and
+    hashing it made 5-15 full row rewrites per poll for rows whose data hadn't
+    changed — most of the render cost. The renderer refreshes those columns in
+    one bulk write instead (apply_upserts `positions`)."""
+    payload = [["\x00VOLATILE" if c.volatile else c.value,
+                c.fill, c.font, c.link, c.number_format, c.center] for c in cells]
     return hashlib.md5(json.dumps(payload, default=str, sort_keys=True).encode()).hexdigest()
 
 
@@ -753,11 +871,18 @@ def live_queue_records(jobs: List[Dict[str, Any]], today: date,
         jn = str(j.get("job") or "")
         added = Cell(added_label(j, ref=ref), number_format="@")
         last_out = Cell(last_out_label(j, ref=ref), number_format="@")   # most recent prior departure
+        # "Similar" = how many lookalike past orders this one has; clicking jumps
+        # to its group on the Similar Data tab (watch stamps _sim_count/_sim_anchor).
+        sim = Cell(j.get("_sim_count") or "", center=True)
+        if sim.value and j.get("_sim_anchor"):
+            sim.link, sim.font = j["_sim_anchor"], F_LINK
         # "#" = the cbcinsider board position (the sort key for board order).
+        # Volatile: position jitter must not force a full row rewrite — the
+        # renderer bulk-refreshes this column each cycle instead.
         pos = j.get("_cbc_pos")
-        cbc = Cell(pos if isinstance(pos, int) else "", center=True)
+        cbc = Cell(pos if isinstance(pos, int) else "", center=True, volatile=True)
         cells = _board_row_cells(j, today, jn in co_changed_ids, jn in new_ids, ref,
-                                 leading=added, trailing=[last_out, cbc])
+                                 leading=added, trailing=[last_out, sim, cbc])
         out.append((jn, cells))
     return out
 
@@ -880,40 +1005,3 @@ def plan_upsert(desired: List, existing_sigs: Dict[str, tuple],
     return ops
 
 
-def line_items_sheet(
-    store: Dict[str, Any],
-    order_nums: Optional[List[str]] = None,
-    name: str = "Line Items",
-) -> Sheet:
-    """One row per (order, normalized line item) so you can AutoFilter the
-    'Normalized' column by an item name and have the matching orders populate.
-    Covers every stored order by default (the whole backlog, so the search spans
-    all history); pass `order_nums` to restrict it (e.g. just the board). Mirrors
-    find_orders.write_xlsx's Line Items sheet."""
-    jobs_store = (store or {}).get("jobs", {})
-    keys = [k for k in (order_nums if order_nums is not None else jobs_store)
-            if k in jobs_store]
-
-    sh = Sheet(name)
-    sh.row(_header_cells(LINE_ITEM_HEADERS))
-    n_rows = 0
-    for jn in keys:
-        rec = jobs_store.get(jn) or {}
-        co = f"CO#{rec['co_number']}" if rec.get("co_number") else ""
-        for it in rec.get("items") or []:
-            so = rec.get("so_pdf") or ""
-            link_cell = Cell("Open", link=so, font=F_LINK) if so else Cell("")
-            sh.row([
-                Cell(jn), Cell(rec.get("customer", "")), Cell(co),
-                Cell(", ".join(it.get("tags") or [])),
-                Cell(it.get("raw", "")), Cell(it.get("norm", "")),
-                Cell(" ; ".join(it.get("details") or [])),
-                Cell(it.get("qty", "")), Cell(it.get("price", "")),
-                Cell(it.get("section", "")), link_cell,
-            ])
-            n_rows += 1
-    if n_rows == 0:
-        sh.row([Cell("(no line items captured yet for the current orders)")])
-    else:
-        sh.autofilter_a1 = _a1(n_rows + 1, len(LINE_ITEM_HEADERS))
-    return sh

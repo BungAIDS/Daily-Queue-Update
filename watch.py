@@ -281,11 +281,17 @@ def _changes_sheet(master: dict, lq_jobs: list, new_today: set, today: date,
     """Today's activity log: new orders today, change orders (CO#), the
     field-modification log, and orders removed today. `now` stamps a 'last
     updated' line at the top so users can see the tab is live."""
-    new_today_jobs = [j for j in lq_jobs if str(j.get("job") or "") in new_today]
+    # STABLE ordering (newest job first), NOT board order: lq_jobs follows the
+    # board position, which jitters between scrapes — feeding that order into
+    # the tables changed the tab's fingerprint every poll and full-repainted
+    # this (big) tab each cycle, freezing Excel for the whole render.
+    new_today_jobs = sorted((j for j in lq_jobs if str(j.get("job") or "") in new_today),
+                            key=lambda j: _sim_sort_key(str(j.get("job") or "")), reverse=True)
     events = change_log.load(today)
-    removed_today = [e.get("job", {}) for e in master.get("orders", {}).values()
-                     if e.get("seen_on_queue") and not e.get("on_queue")
-                     and str(e.get("left") or "")[:10] == today.isoformat()]
+    removed_today = sorted((e.get("job", {}) for e in master.get("orders", {}).values()
+                            if e.get("seen_on_queue") and not e.get("on_queue")
+                            and str(e.get("left") or "")[:10] == today.isoformat()),
+                           key=lambda j: _sim_sort_key(str(j.get("job") or "")), reverse=True)
     updated_at = live_sheets.fmt_datetime(now)
     # job# -> its latest job dict, for the change-order table's Design / Arrangement
     # / change-description columns.
@@ -320,6 +326,58 @@ def _new_today_ids(lq_jobs: list, today: date) -> set:
     return ids & board_ids
 
 
+# Similar-order rows are recomputed only when the board or the stores actually
+# change — the index build over the whole line-items store is ~1s, too much to
+# repeat every poll for identical output.
+_SIM_CACHE: dict = {"key": None, "rows": []}
+
+
+def _sim_sort_key(job: str) -> tuple:
+    return (0, int(job), job) if job.isdigit() else (1, 0, job)
+
+
+def _similar_orders_rows(lq_jobs: list) -> list:
+    """One row per (on-board order, similar past order) for the Similar Orders
+    tab: each order's top lookalikes from the whole backlog, best score first,
+    with custom DWGs and the shared SO lines spelled out. Groups are ordered by
+    JOB NUMBER, not board position — board order reshuffles every poll, and
+    following it would repaint the Similar Data tab (and shift every Live Queue
+    'Similar' anchor) each cycle for nothing. Best-effort: any failure returns
+    the last good rows."""
+    import autocad_scan
+    import find_orders
+
+    def _mtime(p) -> int:
+        try:
+            return p.stat().st_mtime_ns
+        except OSError:
+            return 0
+
+    key = (tuple(sorted(str(j.get("job") or "") for j in lq_jobs)),
+           _mtime(line_items.store_path()), _mtime(autocad_scan.PROGRESS_PATH))
+    if _SIM_CACHE["key"] == key:
+        return _SIM_CACHE["rows"]
+    try:
+        idx = find_orders.build_index(line_items.load_store(),
+                                      dwg=autocad_scan.load_progress())
+        rows = []
+        for j in sorted(lq_jobs, key=lambda x: _sim_sort_key(str(x.get("job") or ""))):
+            jn = str(j.get("job") or "")
+            for r in find_orders.similar_to_items(idx, j.get("line_items") or [],
+                                                  exclude_job=jn, top=8):
+                rows.append({
+                    "job": jn, "similar": r["job"], "customer": r["customer"],
+                    "score": round(r["score"], 2),
+                    "dwg": find_orders._dwg_label(r["dwg_extras"]) or "—",
+                    "shared": "; ".join(r["shared_lines"][:3] or r["shared_tags"][:4]),
+                    "folder": r["dwg_folder"],
+                })
+        _SIM_CACHE.update(key=key, rows=rows)
+    except Exception as e:  # noqa: BLE001 - the tab is a nicety, never sink a poll
+        log.warning("Similar Orders rows not refreshed (%s)", e)
+    return _SIM_CACHE["rows"]
+
+
 def _render_master(master: dict, now: datetime, board_order: list | None = None) -> None:
     """Build Live Queue (incremental upsert) + Order History (matrix log) +
     the Changes snapshot from the master log + line-items store, and push them in.
@@ -347,6 +405,16 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
     shade_ids = {str(j.get("job")) for j in lq_jobs
                  if live_sheets.added_date(j) in recent_days}
 
+    # Similar-order data first: each on-board order gets its lookalike count and
+    # the deep link to its group on the Similar Data tab ('Similar' column), so
+    # the Live Queue rows are planned with the click-through already in place.
+    sim_rows = _similar_orders_rows(lq_jobs)
+    for j in lq_jobs:
+        jn = str(j.get("job") or "")
+        anchor = live_sheets.similar_anchor(sim_rows, jn)
+        j["_sim_anchor"] = anchor
+        j["_sim_count"] = sum(1 for r in sim_rows if r["job"] == jn) if anchor else 0
+
     lq_sigs = master.setdefault("lq_sigs", {})
     lq_ops, lq_commit = _plan(live_sheets.live_queue_records(lq_jobs, today, new_ids=shade_ids,
                                                              co_changed_ids=co_changed, ref=now),
@@ -356,6 +424,7 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
                   "sort_col": live_sheets.LIVE_QUEUE_CBC_COL,
                   "text_cols": [1, live_sheets.LIVE_QUEUE_LAST_OUT_COL],  # Added + Last Out -> AM/PM text
                   "header_row": 2, "search": True,   # search bar on row 1, headers on row 2
+                  "positions": pos,  # '#' column refreshed in one bulk write (volatile in row sigs)
                   "freeze": "C3"}   # keep the search bar + header + Added/Job # columns visible
 
     # "Removed since this morning" block below the Live Queue. Pass it EVERY cycle
@@ -398,8 +467,18 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
     oh_payload = {"name": "Order History", "spec": spec, "ops": oh_ops, "rebuild": rebuild,
                   "key_col": live_sheets.ORDER_HISTORY_KEY_COL, "freeze": "B2"}  # pin Job # only
 
+    # Similar Orders: the picker tab + the grouped data tab it filters over
+    # (sim_rows computed above, before the Live Queue rows were planned).
+    # Same stable job-number order as the rows, so the sheet doesn't repaint
+    # every time the board position order reshuffles.
+    queue_ids = sorted((str(j.get("job")) for j in lq_jobs if j.get("job")),
+                       key=_sim_sort_key)
+    extra_sheets = [live_sheets.similar_data_sheet(sim_rows, queue_ids),
+                    live_sheets.similar_orders_sheet(len(sim_rows), len(queue_ids))]
+
     rendered = update_master_workbook(LIVE_WORKBOOK_PATH, lq_payload, oh_payload,
-                                      changes_sheet=_changes_sheet(master, lq_jobs, new_today, today, now))
+                                      changes_sheet=_changes_sheet(master, lq_jobs, new_today, today, now),
+                                      extra_sheets=extra_sheets)
     # Commit each tab's row signatures only if its write actually landed. A tab
     # whose write failed (Excel busy / OLE error) is left out of `rendered`, so its
     # ops are re-planned and re-drawn next poll instead of being lost.

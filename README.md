@@ -356,9 +356,12 @@ resumes without re-enriching or re-announcing what it already saw.
 
 1. **Make the workbook.** Create an Excel file in OneDrive/SharePoint (so it can
    be co-authored), share it with your coworkers, and put its **local synced
-   path** in `LIVE_WORKBOOK_PATH` in `.env`. The watcher manages the **Live
-   Queue / Changes / History / Line Items** tabs; any other tabs you add are
-   left untouched. For the 5 AM email link, also set `LIVE_WORKBOOK_LINK` to the
+   path** in `LIVE_WORKBOOK_PATH` in `.env`. The watcher manages five tabs,
+   kept in this order at the front of the tab bar: **Changes / Live Queue /
+   Order History / Similar Orders / Similar Data**. Any other tabs you add are
+   left untouched (a leftover "Line Items" tab from an older build is removed
+   automatically — its data lives in the stores and `find_orders --xlsx`
+   writes a richer inventory on demand). For the 5 AM email link, also set `LIVE_WORKBOOK_LINK` to the
    workbook's **Share → Copy link** URL.
 2. **Teams alerts (optional).** Put a Teams webhook URL in `TEAMS_WEBHOOK_URL` and
    everyone in that channel gets a desktop + phone notification per new order,
@@ -558,6 +561,28 @@ so each line is kept three ways:
 The daily report's **Full Queue / History tabs gain a "Features" column** with
 each job's tags, and the AI briefing weaves notable features into its summary.
 
+**The similar-order suggester runs live on the same store.** Whenever an order
+is enriched (a new arrival on the watch, a change order, the daily run), it is
+scored against the whole backlog and any order that shares its *rare* SO
+features AND already has custom AutoCAD drawings lands in a **"DWG Reuse"**
+column (both the daily report and the live workbook): the cell shows the top
+candidate + its custom suffixes (e.g. `421100 (-07,-51) +2`), links to that
+job's CAD folder, and hovering lists every candidate with the exact shared SO
+lines. New-order Teams/toast notifications carry the same line. Tune with
+`REUSE_MIN_SCORE` (default 0.5; raise if too chatty, `99` disables) and
+`REUSE_TOP` (default 3) in `.env`.
+
+The live workbook also gets a **Similar Orders tab**: pick any queue order in
+the yellow dropdown at the top (or type an order #) and its ranked lookalikes
+appear instantly — score, custom DWGs, the exact shared Sales-Order lines, and
+the CAD folder. It's a plain Excel `FILTER` spill over the **Similar Data tab**
+(every on-board order's lookalikes, grouped) that the watcher refreshes
+whenever the board or the stores change — no macros, works for every coworker
+in the co-authored workbook. The Live Queue itself gains a slim **"Similar"
+column**: the count of lookalikes, and clicking it jumps straight to that
+order's group on Similar Data (an internal hyperlink — the closest Excel gets
+to "click-and-search" without VBA).
+
 **Build the store from what's already archived** (no login, no browser — it
 reads the PDFs under `SALES_ORDER_DIR`), then search:
 
@@ -567,16 +592,27 @@ python find_orders.py shaft seal       # orders whose SO matches BOTH terms
 python find_orders.py --any teflon viton
 python find_orders.py --tag "SHAFT SEAL"     # by canonical tag
 python find_orders.py cermic felt --fuzzy    # typo-tolerant
+python find_orders.py shaft seal --dwg # ...only jobs with custom AutoCAD DWGs
+python find_orders.py --like 421314    # rank the backlog by similarity to a job
+python find_orders.py --like 421314 --dwg    # DWG-reuse shortlist for that job
 python find_orders.py --job 421314     # what's stored for one job
 python find_orders.py --list-tags      # the live tag vocabulary + counts
 python find_orders.py --xlsx           # full inventory workbook (AutoFilter) —
                                        # filter line items straight in Excel
 ```
 
+Every result also shows the job's **custom AutoCAD drawings** (from the DWG
+scan store) and its CAD folder, so a feature search doubles as "who already
+drew this?". `--like` ranks every other order by how much of the given job's
+Sales Order it shares — rare shared features score highest and identical
+normalized lines count double — and `--like ... --dwg` is the reuse shortlist:
+similar jobs that already have custom drawings on file.
+
 `--xlsx` writes two tabs: **Line Items** (one row per item) and a **Feature
 Matrix** — one row per order, one column per feature tag, **green ✓** when the
 order has that feature and **red** when it doesn't, exactly like the AutoCAD
-DWG matrix. Searching first (`python find_orders.py shaft seal --xlsx`) limits
+DWG matrix, plus each order's custom-DWG list linked to its CAD folder.
+Searching first (`python find_orders.py shaft seal --xlsx`) limits
 the matrix to the matching orders, but each row still shows that order's full
 feature profile.
 

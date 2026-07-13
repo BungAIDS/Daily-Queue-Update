@@ -346,42 +346,6 @@ def test_history_sheet():
     assert sh.grid[1][0].value == "420000"
 
 
-def test_line_items_sheet_search_rows():
-    store = {"jobs": {"421000": {
-        "customer": "ACME CORP", "co_number": 1, "so_pdf": "Z:\\SO\\421000.pdf",
-        "items": [
-            {"raw": "SS SHAFT SLEEVE", "norm": "STAINLESS STEEL SHAFT SLEEVE",
-             "tags": ["SHAFT SEAL"], "details": ["VENDOR X"], "qty": "1",
-             "price": "$5", "section": "ACCESSORIES"},
-            {"raw": "TEFLON SEAL", "norm": "TEFLON SEAL", "tags": ["SHAFT SEAL"],
-             "details": [], "qty": "1", "price": "$3", "section": ""},
-        ]}}}
-    sh = ls.line_items_sheet(store, order_nums=["421000"])
-    assert sh.grid[0] == sh.grid[0]  # header present
-    assert sh.grid[0][5].value == "Normalized"          # the searchable column
-    # Two item rows for the one order.
-    body = [r for r in sh.grid[1:] if r and r[0].value == "421000"]
-    assert len(body) == 2
-    assert body[0][5].value == "STAINLESS STEEL SHAFT SLEEVE"
-    assert sh.grid[1][10].font == F_LINK                 # SO PDF link
-    assert sh.autofilter_a1 is not None
-
-
-def test_line_items_whole_backlog_default():
-    store = {"jobs": {
-        "421000": {"customer": "A", "co_number": 0, "so_pdf": "",
-                   "items": [{"raw": "X", "norm": "X", "tags": []}]},
-        "419000": {"customer": "B", "co_number": 0, "so_pdf": "",
-                   "items": [{"raw": "Y", "norm": "Y", "tags": []},
-                             {"raw": "Z", "norm": "Z", "tags": []}]},
-    }}
-    # No order_nums -> every stored order (whole backlog), not just the board.
-    sh = ls.line_items_sheet(store)
-    jobs_in_rows = {r[0].value for r in sh.grid[1:] if r}
-    assert jobs_in_rows == {"421000", "419000"}
-    assert sum(1 for r in sh.grid[1:] if r) == 3        # 1 + 2 items
-
-
 def test_live_queue_records_no_dwg_and_new_today_fill():
     j = _job("421000", end_date="12/31/2026", dwg_extras={"51": "x", "35": "x"},
              _carried_over=False, _first_seen="2026-06-16T09:14:00")
@@ -611,6 +575,63 @@ def test_plan_upsert_append_update_delete():
     # Without allow_delete, 400 is left alone.
     ops2 = ls.plan_upsert(desired, existing, allow_delete=False)
     assert not any(o[0] == "delete" for o in ops2)
+
+
+def test_similar_orders_sheets_layout():
+    rows = [{"job": "421900", "similar": "420150", "customer": "UBP", "score": 1.95,
+             "dwg": "-95 (PDF)", "shared": "THREADED PLUG", "folder": "Z:\\J\\420150"},
+            {"job": "421900", "similar": "419704", "customer": "", "score": 0.99,
+             "dwg": "—", "shared": "PO BOX", "folder": ""}]
+    data = ls.similar_data_sheet(rows, ["421900", "421901", "421902"])
+    assert data.name == ls.SIMILAR_DATA_TAB and not data.hidden and data.freeze == "A2"
+    hdr = [c.value for c in data.grid[0]]
+    assert hdr[0] == "Queue Order" and hdr[1] == "Similar Order" and hdr[8] == "Queue Orders"
+    assert data.grid[1][0].value == "421900" and data.grid[1][1].value == "420150"
+    # Group start styled (grey band + bold order #); later group rows plain, but
+    # the Queue Order VALUE still repeats — the picker tab's FILTER matches on it.
+    assert data.grid[1][0].fill == ls.FILL_NEW and data.grid[1][0].font == ls.F_SECTION
+    assert data.grid[2][0].fill is None and data.grid[2][0].value == "421900"
+    assert data.grid[1][6].link == "Z:\\J\\420150"    # folder cell click-through
+    # The picker list carries EVERY queue order, past the end of the data rows.
+    assert [r[8].value for r in data.grid[1:]] == ["421900", "421901", "421902"]
+    assert data.grid[3][0].value == ""     # padding row for the longer picker list
+    # The Live Queue's 'Similar' cell deep-links via a STABLE defined name (so
+    # other groups shifting can never rewrite its row); the data sheet model
+    # carries the name -> group-start-cell mapping the renderer (re)points.
+    assert ls.similar_anchor(rows, "421900") == "#SIM_421900"
+    assert ls.similar_anchor(rows, "421901") == ""
+    assert data.names == {"SIM_421900": "'Similar Data'!$A$2"}
+
+    tab = ls.similar_orders_sheet(len(rows), 3)
+    assert tab.name == ls.SIMILAR_ORDERS_TAB and not tab.hidden
+    assert tab.picker["cell"] == ls.SIMILAR_PICKER_CELL
+    assert tab.picker["source"] == "='Similar Data'!$I$2:$I$4"
+    assert [c.value for c in tab.grid[2]] == ls.SIMILAR_HEADERS
+    f = tab.grid[3][0].value
+    assert f.startswith("=IFERROR(FILTER('Similar Data'!$B$2:$G$3")
+    assert "$A$2:$A$3" in f and "$B$1" in f
+
+
+def test_row_sig_ignores_volatile_value_and_live_queue_pos_is_volatile():
+    a = [ls.Cell("x"), ls.Cell(3, center=True, volatile=True)]
+    b = [ls.Cell("x"), ls.Cell(9, center=True, volatile=True)]
+    c = [ls.Cell("y"), ls.Cell(3, center=True, volatile=True)]
+    assert ls.row_sig(a) == ls.row_sig(b)     # volatile value ignored...
+    assert ls.row_sig(a) != ls.row_sig(c)     # ...but real content still counts
+    # The Live Queue '#' cell is volatile, so board-position jitter alone can
+    # never force a full row rewrite.
+    j = {"job": "421000", "_cbc_pos": 5}
+    _, cells = ls.live_queue_records([j], TODAY)[0]
+    assert cells[ls.LIVE_QUEUE_CBC_COL - 1].volatile
+    j2 = {"job": "421000", "_cbc_pos": 17}
+    _, cells2 = ls.live_queue_records([j2], TODAY)[0]
+    assert ls.row_sig(cells) == ls.row_sig(cells2)
+
+
+def test_similar_orders_sheet_empty_has_note_not_formula():
+    tab = ls.similar_orders_sheet(0, 0)
+    assert tab.picker is None
+    assert "No similar-order data yet" in tab.grid[3][0].value
 
 
 def main() -> int:

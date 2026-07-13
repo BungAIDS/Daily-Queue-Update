@@ -182,6 +182,24 @@ LINE_ITEMS_STORE = _expand_path(_li_store_raw) if _li_store_raw else None
 # skip patterns, tag patterns) with site-specific wording — see line_items.py.
 LINE_ITEM_RULES = (os.environ.get("LINE_ITEM_RULES") or "").strip()
 
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float((os.environ.get(name) or "").strip() or default)
+    except ValueError:
+        return default
+
+
+# Similar-order suggester (find_orders.similar_to_items, wired into enrichment):
+# each enriched order gets a shortlist of backlog orders that share its rare SO
+# features AND already have custom DWGs on file ("DWG Reuse" column + hover note
+# + new-order notification). Score = rarity-weighted overlap; on the ~6K-order
+# corpus >= 0.5 means "genuinely the same fan" while common-feature noise sits
+# well below it. Raise/lower REUSE_MIN_SCORE in .env if it's too chatty/quiet;
+# REUSE_MIN_SCORE=99 effectively turns the suggester off.
+REUSE_MIN_SCORE = _env_float("REUSE_MIN_SCORE", 0.5)
+REUSE_TOP = int(_env_float("REUSE_TOP", 3))
+
 # Email is sent through your local Outlook desktop app — no password needed.
 # These are just the destination addresses (an address alone isn't sensitive).
 EMAIL_TO = os.environ.get("EMAIL_TO", "")

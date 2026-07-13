@@ -7,8 +7,9 @@ co-authored workbook without kicking everyone out / conflicting. Driving the rea
 Excel application means edits flow through Excel itself, which syncs them to
 OneDrive/SharePoint so coworkers see them live (cursors and all).
 
-What it writes: one worksheet per `live_sheets.Sheet` model (Live Queue, Changes,
-History, Line Items). The *content* lives in live_sheets.py (pure, tested); this
+What it writes: one worksheet per `live_sheets.Sheet` model, kept in SHEET_ORDER
+on the tab bar (Changes, Live Queue, Order History, Similar Orders, Similar
+Data). The *content* lives in live_sheets.py (pure, tested); this
 module is the generic renderer — bulk-write the values, then map each cell's
 named fill/font to real Excel colors, add hyperlinks, freeze panes, and
 AutoFilter. The named styles mirror excel_writer so the live master and the daily
@@ -34,6 +35,7 @@ from live_sheets import Sheet
 log = logging.getLogger(__name__)
 
 _XL_UNDERLINE_SINGLE = 2  # xlUnderlineStyleSingle
+_XL_VALIDATE_LIST = 3     # xlValidateList (the picker cell's dropdown)
 _XL_EXPRESSION = 2        # xlExpression (conditional formatting)
 _XL_EQUAL = 3             # xlEqual — a real Operator value (ignored for xlExpression)
 _XL_LIST_SEPARATOR = 5    # Application.International index for the list separator
@@ -81,7 +83,15 @@ _FONT = {
 
 # "History" is a RESERVED worksheet name in Excel (shared-workbook change
 # tracking), so the archived-orders tab is "Order History".
-SHEET_ORDER = ["Live Queue", "Changes", "Order History", "Line Items"]
+# The managed tabs are kept in THIS order at the front of the tab bar (any
+# user-added tabs follow); _ensure_tab_order snaps them back each cycle.
+SHEET_ORDER = ["Changes", "Live Queue", "Order History",
+               "Similar Orders", "Similar Data"]
+
+# Bot-generated tabs an older build managed; deleted on sight. Their data lives
+# in the stores ("Line Items" is superseded by the Similar tabs + find_orders'
+# richer Excel inventory), so nothing is lost.
+OBSOLETE_SHEETS = ["Line Items"]
 
 # Last-rendered fingerprint per sheet, so a tab is only repainted when its
 # content actually changed — otherwise a coworker's active filter/scroll on that
@@ -110,6 +120,11 @@ _HEADER_DONE: set = set()
 # Last-rendered 'below' block per sheet, so it's only re-drawn (and repositioned)
 # when the live data row count shifts or the block's content changes.
 _BELOW_LAST: Dict[str, Any] = {}
+
+# Last board-position vector written per sheet (see apply_upserts `positions`):
+# the '#' column is volatile in the row signatures, so it's refreshed in ONE
+# bulk write — and only when the positions actually moved.
+_POS_LAST: Dict[str, Any] = {}
 
 _XL_UP = -4162           # xlUp
 _XL_NONE = -4142         # xlColorIndexNone
@@ -186,7 +201,9 @@ def _refresh_volatile(wb, sheet: Sheet) -> None:
 
 
 def _fingerprint(sheet: Sheet) -> int:
-    parts = [sheet.name, sheet.freeze or "", sheet.autofilter_a1 or ""]
+    parts = [sheet.name, sheet.freeze or "", sheet.autofilter_a1 or "",
+             str(sheet.hidden), str(sheet.picker),
+             str(sorted((sheet.names or {}).items()))]
     for row in sheet.grid:
         for cell in row:
             # Volatile cells (e.g. the 'Last updated' stamp) change every cycle;
@@ -333,7 +350,14 @@ def _style_row(ws, r: int, cells: List) -> None:
     for i, cell in enumerate(cells, start=1):
         if cell.link:
             try:
-                ws.Hyperlinks.Add(Anchor=ws.Cells(r, i), Address=str(cell.link))
+                link = str(cell.link)
+                if link.startswith("#"):
+                    # Internal link — jump to a sheet/cell in this workbook (e.g.
+                    # Live Queue 'Similar' -> that order's group on Similar Data).
+                    ws.Hyperlinks.Add(Anchor=ws.Cells(r, i), Address="",
+                                      SubAddress=link[1:])
+                else:
+                    ws.Hyperlinks.Add(Anchor=ws.Cells(r, i), Address=link)
                 _apply_font(ws.Cells(r, i), cell.font)  # keep our link style
             except Exception:  # noqa: BLE001 - a bad path shouldn't stop the row
                 pass
@@ -378,6 +402,10 @@ def render_sheet(app, wb, sheet: Sheet) -> None:
     freeze, AutoFilter, autofit."""
     ws = _get_or_make_sheet(wb, sheet.name)
     nrows, ncols = sheet.nrows, sheet.ncols
+    kept_pick = None
+    if sheet.picker:  # what the user picked/typed must survive the repaint
+        with contextlib.suppress(Exception):
+            kept_pick = ws.Range(sheet.picker["cell"]).Value
     try:
         if ws.AutoFilterMode:
             ws.AutoFilterMode = False
@@ -397,6 +425,32 @@ def render_sheet(app, wb, sheet: Sheet) -> None:
     for r, row in enumerate(sheet.grid, start=1):
         if row:
             _style_row(ws, r, row)
+
+    # Formula cells ("=...") are re-assigned via .Formula2 — the dynamic-array
+    # property. Writing through .Value or legacy .Formula makes Excel insert an
+    # implicit-intersection '@', which collapses a spilling formula (the Similar
+    # Orders FILTER) to just its top-left value: one lone job number, five empty
+    # columns. Formula2 keeps spill semantics; EN-US separators either way.
+    for r, row in enumerate(sheet.grid, start=1):
+        for c, cell in enumerate(row, start=1):
+            if isinstance(cell.value, str) and cell.value.startswith("="):
+                target = ws.Cells(r, c)
+                try:
+                    target.Formula2 = cell.value
+                except Exception:  # noqa: BLE001 - pre-dynamic-array Excel
+                    with contextlib.suppress(Exception):
+                        target.Formula = cell.value
+
+    if sheet.picker:
+        _apply_picker(ws, sheet.picker, kept_pick)
+
+    # (Re)point this sheet's workbook defined names — the stable targets the
+    # Live Queue 'Similar' links jump to. Add with the same name redefines, so
+    # a group that moved just gets its name re-aimed; departed orders' stale
+    # names are harmless (their queue rows are gone).
+    for nm, ref in (sheet.names or {}).items():
+        with contextlib.suppress(Exception):
+            wb.Names.Add(Name=nm, RefersTo="=" + ref)
 
     # Merge any cell that spans columns (e.g. the Changes 'Job #' header over its
     # blank spacer). The covered cells stay in the grid as positional spacers, so
@@ -450,6 +504,81 @@ def render_sheet(app, wb, sheet: Sheet) -> None:
             _FROZEN.add(sheet.name)
         except Exception:  # noqa: BLE001
             pass
+
+    # Honor the model's visibility both ways, so a sheet that was hidden in an
+    # earlier build resurfaces when its model stops being hidden.
+    with contextlib.suppress(Exception):
+        ws.Visible = 0 if sheet.hidden else -1  # xlSheetHidden / xlSheetVisible
+
+
+def _ensure_tab_order(app, wb) -> None:
+    """Keep the managed tabs in SHEET_ORDER at the front of the tab bar. A
+    Sheet.Move can steal focus in some Excel builds, so nothing moves when the
+    order is already right, and the active sheet is restored afterwards."""
+    try:
+        names = [wb.Worksheets(i + 1).Name for i in range(wb.Worksheets.Count)]
+        want = [n for n in SHEET_ORDER if n in names]
+        if names[:len(want)] == want:
+            return
+        active = None
+        with contextlib.suppress(Exception):
+            if app.ActiveWorkbook.Name == wb.Name:
+                active = app.ActiveSheet.Name
+        for i, n in enumerate(want):
+            if wb.Worksheets(i + 1).Name != n:
+                wb.Worksheets(n).Move(Before=wb.Worksheets(i + 1))
+        if active:
+            with contextlib.suppress(Exception):
+                wb.Worksheets(active).Activate()
+        log.info("Tab order restored: %s", ", ".join(want))
+    except Exception as e:  # noqa: BLE001 - cosmetic; never worth failing a render
+        log.debug("tab reorder skipped (%s)", e)
+
+
+def _drop_obsolete_sheets(wb) -> None:
+    """Delete bot-generated tabs an older build managed (OBSOLETE_SHEETS).
+    Regenerable store data only — never touches user-added tabs."""
+    for name in OBSOLETE_SHEETS:
+        try:
+            ws = next((s for s in wb.Worksheets if s.Name == name), None)
+            if ws is None or wb.Worksheets.Count <= 1:
+                continue
+            app = wb.Application
+            prev = app.DisplayAlerts
+            app.DisplayAlerts = False   # suppress the 'permanently delete?' prompt
+            try:
+                ws.Delete()
+            finally:
+                app.DisplayAlerts = prev
+            log.info("Removed obsolete tab %r (its data lives in the stores; the "
+                     "Similar tabs / find_orders --xlsx supersede it).", name)
+        except Exception as e:  # noqa: BLE001
+            log.debug("obsolete tab %r not removed (%s)", name, e)
+
+
+def _apply_picker(ws, picker: Dict[str, str], kept_pick: Any = None) -> None:
+    """The Similar Orders-style input cell: restore what the user had picked
+    before the repaint, style it like the search box, and (re)attach its
+    dropdown list. Typing values not on the list stays allowed (any order #)."""
+    try:
+        box = ws.Range(picker["cell"])
+        if kept_pick not in (None, ""):
+            box.Value = kept_pick
+        box.Interior.Color = _SEARCH_BOX_FILL
+        box.Font.Bold = True
+        box.HorizontalAlignment = _XL_CENTER
+        _box_border(box, _SEARCH_RED)
+        if picker.get("comment") and box.Comment is None:
+            box.AddComment(picker["comment"])
+        v = box.Validation
+        with contextlib.suppress(Exception):
+            v.Delete()
+        v.Add(Type=_XL_VALIDATE_LIST, AlertStyle=1, Operator=1,
+              Formula1=picker["source"])
+        v.ShowError = False       # free typing allowed — not just the list
+        v.InCellDropdown = True
+    except Exception as e:  # noqa: BLE001 - the dropdown is a nicety
+        log.debug("picker setup failed on %s (%s)", picker.get("cell"), e)
 
 
 # --------------------------------------------------------------------------- #
@@ -714,7 +843,8 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
                   key_col: int, allow_delete: bool, freeze: str | None = None,
                   sort_col: int | None = None, text_cols: List[int] | None = None,
                   below: Dict[str, Any] | None = None, header_row: int = 1,
-                  search: bool = False) -> int:
+                  search: bool = False,
+                  positions: Dict[str, Any] | None = None) -> int:
     """Apply append/update/delete ops to a keyed sheet. Returns rows touched.
     When `sort_col` is set, the data is re-sorted ascending by that column after
     any change (Live Queue: the '#' board-position column, to match cbcinsider).
@@ -778,10 +908,31 @@ def apply_upserts(app, wb, name: str, headers: List[str], ops: List,
         keymap[k] = last_row              # so a duplicate key within this batch can't re-add
         _write_row(ws, last_row, cells, ncols)
 
+    # Refresh the volatile '#' board-position column in ONE bulk write (the row
+    # signatures exclude it — see live_sheets.row_sig): position jitter used to
+    # rewrite 5-15 whole rows per poll through slow per-cell COM styling for
+    # rows whose data hadn't changed. Only when the vector actually moved.
+    pos_moved = False
+    if positions is not None and sort_col and last_row >= first_data_row:
+        pos_norm = {_norm_key(k): v for k, v in positions.items()}
+        pos_moved = _POS_LAST.get(name) != pos_norm
+        if pos_moved or deletes or appends:
+            try:
+                col = [[""] for _ in range(last_row - first_data_row + 1)]
+                for k, r in keymap.items():
+                    i = r - first_data_row
+                    if 0 <= i < len(col):
+                        col[i] = [pos_norm.get(_norm_key(k), "")]
+                ws.Range(ws.Cells(first_data_row, sort_col),
+                         ws.Cells(last_row, sort_col)).Value = col
+                _POS_LAST[name] = pos_norm
+            except Exception:  # noqa: BLE001 - stale positions fix themselves next poll
+                pos_moved = False
+
     # Keep the tab sorted (Live Queue by the '#' board-position column) and
     # re-extend AutoFilter. Sort the DATA ROWS ONLY (below the header) so the
     # header never moves; blanks fall to the bottom under ascending order.
-    touched = bool(deletes or updates or appends)
+    touched = bool(deletes or updates or appends) or pos_moved
     # A STRUCTURAL change (rows added/removed) is the only thing that requires the
     # search conditional format to be re-laid; an in-place value update doesn't
     # shift any row. Re-applying CF every poll (on plain updates) is what lets
@@ -1092,19 +1243,21 @@ def _run_excel_guarded(label: str, func, default, *args, **kwargs):
 
 def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any],
                            oh_payload: Dict[str, Any],
-                           changes_sheet: Sheet | None = None) -> set:
+                           changes_sheet: Sheet | None = None,
+                           extra_sheets: List[Sheet] | None = None) -> set:
     """Watchdog wrapper: render the master workbook on a bounded worker thread so
     a busy/modal Excel can never hang the watcher. On timeout it returns an empty
     set, so those tabs simply re-render next poll (see _update_master_workbook_impl)."""
     return _run_excel_guarded(
         "Live workbook update", _update_master_workbook_impl, set(),
-        workbook_path, lq_payload, oh_payload, changes_sheet,
+        workbook_path, lq_payload, oh_payload, changes_sheet, extra_sheets,
     )
 
 
 def _update_master_workbook_impl(workbook_path: str | Path, lq_payload: Dict[str, Any],
                            oh_payload: Dict[str, Any],
-                           changes_sheet: Sheet | None = None) -> set:
+                           changes_sheet: Sheet | None = None,
+                           extra_sheets: List[Sheet] | None = None) -> set:
     """Render the master workbook: an incremental upsert for Live Queue, the
     matrix log for Order History, and a full repaint for the Changes snapshot
     (only when changed). Best-effort — any COM error is logged and swallowed.
@@ -1160,7 +1313,8 @@ def _update_master_workbook_impl(workbook_path: str | Path, lq_payload: Dict[str
                               lq_payload["key_col"], lq_payload["allow_delete"], lq_payload.get("freeze"),
                               sort_col=lq_payload.get("sort_col"), text_cols=lq_payload.get("text_cols"),
                               below=lq_payload.get("below"), header_row=lq_payload.get("header_row", 1),
-                              search=lq_payload.get("search", False))
+                              search=lq_payload.get("search", False),
+                              positions=lq_payload.get("positions"))
             ok.add(lq_payload["name"])
             if n:
                 touched.append(f"{lq_payload['name']}(+{n})")
@@ -1175,20 +1329,36 @@ def _update_master_workbook_impl(workbook_path: str | Path, lq_payload: Dict[str
                 touched.append(f"{oh_payload['name']}(+{n})")
         except Exception as e:  # noqa: BLE001
             log.warning("Order History update failed (%s)", e)
-        try:
-            if changes_sheet is not None:
-                fp = _fingerprint(changes_sheet)
-                if _RENDER_CACHE.get(changes_sheet.name) != fp:
-                    render_sheet(app, wb, changes_sheet)
-                    _RENDER_CACHE[changes_sheet.name] = fp
-                    touched.append(changes_sheet.name)
+        # Full-repaint tabs (Changes + any extras, e.g. Similar Data/Orders):
+        # skipped entirely when unchanged — a repaint would reset a viewer's
+        # filter/scroll (and wipe the Similar Orders picker mid-use).
+        repaints = ([changes_sheet] if changes_sheet is not None else [])
+        repaints += list(extra_sheets or [])
+        for model in repaints:
+            try:
+                fp = _fingerprint(model)
+                if _RENDER_CACHE.get(model.name) != fp:
+                    # Drop the cached fingerprint BEFORE painting: a repaint that
+                    # dies after Cells.Clear (Excel busy — someone mid-edit) has
+                    # already wiped the sheet, and a stale cache entry would make
+                    # every later cycle skip the rewrite, leaving the tab blank
+                    # until the model happens to change. Popping first guarantees
+                    # a failed paint is retried next poll.
+                    _RENDER_CACHE.pop(model.name, None)
+                    render_sheet(app, wb, model)
+                    _RENDER_CACHE[model.name] = fp
+                    touched.append(model.name)
                 else:
-                    # Content unchanged — don't repaint (that would reset a viewer's
-                    # filter/scroll). Just refresh the 'Last updated' stamp in place so
-                    # the tab still reads as live. AutoSave carries it; no forced Save.
-                    _refresh_volatile(wb, changes_sheet)
-        except Exception as e:  # noqa: BLE001
-            log.warning("Changes update failed (%s)", e)
+                    # Content unchanged — just refresh any 'Last updated' stamp in
+                    # place so the tab still reads as live. AutoSave carries it.
+                    _refresh_volatile(wb, model)
+            except Exception as e:  # noqa: BLE001
+                log.warning("%s update failed (%s)", model.name, e)
+
+        # Housekeeping: retire tabs an older build managed, then snap the
+        # managed tabs back into SHEET_ORDER (both no-ops when already right).
+        _drop_obsolete_sheets(wb)
+        _ensure_tab_order(app, wb)
 
     if touched:
         try:
@@ -1221,6 +1391,7 @@ def update_workbook(sheets: List[Sheet], workbook_path: str | Path) -> bool:
                 fp = _fingerprint(sheet)
                 if _RENDER_CACHE.get(sheet.name) == fp:
                     continue  # unchanged — leave it alone so filters/scroll persist
+                _RENDER_CACHE.pop(sheet.name, None)   # failed paint must retry next pass
                 render_sheet(app, wb, sheet)
                 _RENDER_CACHE[sheet.name] = fp
                 rendered.append(sheet.name)
