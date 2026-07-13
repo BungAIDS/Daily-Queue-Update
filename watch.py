@@ -288,7 +288,10 @@ def _changes_sheet(master: dict, lq_jobs: list, new_today: set, today: date,
     new_today_jobs = sorted((j for j in lq_jobs if str(j.get("job") or "") in new_today),
                             key=lambda j: _sim_sort_key(str(j.get("job") or "")), reverse=True)
     events = change_log.load(today)
-    removed_today = sorted((e.get("job", {}) for e in master.get("orders", {}).values()
+    # Copies with the entry's departure time attached, for the table's leading
+    # Time column (the timestamp lives on the entry, not the job dict).
+    removed_today = sorted(({**e.get("job", {}), "_left_iso": e.get("left") or ""}
+                            for e in master.get("orders", {}).values()
                             if e.get("seen_on_queue") and not e.get("on_queue")
                             and str(e.get("left") or "")[:10] == today.isoformat()),
                            key=lambda j: _sim_sort_key(str(j.get("job") or "")), reverse=True)

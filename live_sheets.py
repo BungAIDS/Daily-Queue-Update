@@ -359,17 +359,29 @@ def full_queue_sheet(
 # --------------------------------------------------------------------------- #
 def _job_table(sh: Sheet, title: str, jobs: List[Dict[str, Any]],
                extra_headers: Optional[List[str]] = None,
-               extra: Optional[Any] = None) -> None:
+               extra: Optional[Any] = None,
+               time: Optional[Any] = None) -> None:
     """A titled mini-table of full job rows (used by the Changes sections).
 
-    A blank spacer column is inserted right after Job # so these tables line up
-    with 'Orders that changed today', whose leading Time column pushes its Job #
-    into column B and Folder into column C. Here Job # stays in column A, the
-    spacer fills column B, and Folder lands in column C to match — so Folder,
-    Quote Run, CO#, … align across all three sections."""
+    With `time` (a job -> ISO-timestamp callback) the table leads with a Time
+    column in the same format and position as 'Orders that changed today':
+    Time in column A, Job # in column B, Folder in column C. Without it, a
+    blank spacer column is inserted right after Job # instead, so Folder still
+    lands in column C — either way Folder, Quote Run, CO#, … align across all
+    the tab's sections."""
     sh.row([Cell(f"{title} ({len(jobs)})", font=F_SECTION)])
     if not jobs:
         sh.row([Cell("(none)")])
+        sh.blank()
+        return
+    if time is not None:
+        sh.row(_header_cells(["Time"] + list(QUEUE_HEADERS) + (extra_headers or [])))
+        for j in jobs:
+            cells = _job_value_cells(j, co_changed=False, arrange_comment=True)
+            row = [Cell(_fmt_time(str(time(j) or "")))] + cells
+            if extra is not None:
+                row.append(Cell(extra(j)))
+            sh.row(row)
         sh.blank()
         return
     # [Job #][spacer][Folder, Quote Run, …]. The spacer keeps Folder in column C
@@ -568,8 +580,10 @@ def changes_sheet(
         sh.row([Cell(f"Last updated {updated_at}", font=F_NOTE, volatile=True)])
     sh.blank()
 
+    # Leads with the arrival time (same format/position as the changed table's
+    # Time column), which replaces the old trailing 'Added' column.
     _job_table(sh, "New orders today", new_today,
-               extra_headers=["Added"], extra=lambda j: added_label(j))
+               time=lambda j: j.get("_added_iso") or j.get("_first_seen") or "")
 
     newest_first = sorted(change_events, key=lambda e: e.get("time", ""), reverse=True)
     co_events = [e for e in newest_first if e.get("field") == "CO#"]
@@ -598,7 +612,8 @@ def changes_sheet(
     field_events = [e for e in newest_first if e.get("field") != "CO#"]
     _orders_changed_table(sh, field_events, order_lookup=order_lookup)
 
-    _job_table(sh, "Removed / completed today", removed_today)
+    _job_table(sh, "Removed / completed today", removed_today,
+               time=lambda j: j.get("_left_iso") or "")
     return sh
 
 

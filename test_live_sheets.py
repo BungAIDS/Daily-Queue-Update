@@ -209,14 +209,14 @@ def test_change_orders_table_columns_and_abbrev_header():
 
 
 def test_changes_today_columns_align_across_sections():
-    """The 'changed today' table leads with a Time column, so its Job # sits in
-    column B and Folder in C. The 'New' and 'Removed' tables keep Job # in column
-    A and get a blank spacer in column B, so Folder / Quote Run / CO# line up in
-    the same columns across all three sections."""
-    new_today = [_job("421001")]
+    """Every section leads with a Time column in the same format and position as
+    'Orders that changed today': Time in column A, Job # in column B, Folder in
+    C — New orders show their arrival time, Removed orders their departure time,
+    so Folder / Quote Run / CO# line up in the same columns across all three."""
+    new_today = [_job("421001", _added_iso="2026-06-16T07:33:00")]
     events = [{"time": "2026-06-16T09:30:00", "job": "420800", "customer": "X",
                "field": "Oper", "old": "10", "new": "20"}]
-    removed_today = [_job("420900")]
+    removed_today = [_job("420900", _left_iso="2026-06-16T10:15:00")]
     sh = ls.changes_sheet(new_today, events, removed_today, "2026-06-16",
                           updated_at="x", order_lookup={"420800": {"design": "47"}})
 
@@ -228,27 +228,25 @@ def test_changes_today_columns_align_across_sections():
     chg_hdr = header_after("Orders that changed today")
     rem_hdr = header_after("Removed / completed today")
 
-    # New / Removed: Job # in A, blank spacer in B, Folder in C.
-    for hdr in (new_hdr, rem_hdr):
-        assert hdr[0] == "Job #" and hdr[1] == "" and hdr[2] == "Folder"
-    # Changed: Time in A, Job # in B, Folder in C.
-    assert chg_hdr[0] == "Time" and chg_hdr[1] == "Job #" and chg_hdr[2] == "Folder"
-    # Folder, Quote Run, CO# line up in the same columns (C/D/E) across all three.
+    # All three: Time in A, Job # in B, Folder in C; Quote Run / CO# follow.
     for hdr in (new_hdr, chg_hdr, rem_hdr):
+        assert hdr[0] == "Time" and hdr[1] == "Job #" and hdr[2] == "Folder"
         assert hdr[2:5] == ["Folder", "Quote Run", "CO#"]
 
-    # Data rows match: New/Removed put the job # in column A and leave B blank.
+    # Data rows: the arrival / departure time leads in the changed-table format.
     nr, _ = _find(sh, "New orders today")
     new_data = sh.grid[nr + 2]
-    assert new_data[0].value == "421001" and new_data[1].value == ""
+    assert new_data[0].value == ls.fmt_time("2026-06-16T07:33:00")   # e.g. '7:33 AM'
+    assert new_data[1].value == "421001"
+    rr, _ = _find(sh, "Removed / completed today")
+    rem_data = sh.grid[rr + 2]
+    assert rem_data[0].value == ls.fmt_time("2026-06-16T10:15:00")
+    assert rem_data[1].value == "420900"
 
-    # New/Removed merge Job # across its spacer (colspan 2) so there's no wall
-    # after the job number; the changed table keeps Time and Job # as two cells.
-    nh = sh.grid[_find(sh, "New orders today")[0] + 1]
-    rh = sh.grid[_find(sh, "Removed / completed today")[0] + 1]
-    ch = sh.grid[_find(sh, "Orders that changed today")[0] + 1]
-    assert nh[0].colspan == 2 and rh[0].colspan == 2 and new_data[0].colspan == 2
-    assert ch[0].colspan == 1 and ch[1].colspan == 1   # Time / Job # untouched
+    # No merged spacer anywhere: Time and Job # stay two separate cells.
+    for row in (sh.grid[nr + 1], new_data, sh.grid[rr + 1], rem_data,
+                sh.grid[_find(sh, "Orders that changed today")[0] + 1]):
+        assert row[0].colspan == 1 and row[1].colspan == 1
 
 
 def test_changes_arrangement_size_suffix_moves_to_comment():
