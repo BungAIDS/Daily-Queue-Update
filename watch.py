@@ -357,7 +357,8 @@ def _similar_orders_rows(lq_jobs: list) -> list:
             return 0
 
     key = (tuple(sorted(str(j.get("job") or "") for j in lq_jobs)),
-           _mtime(line_items.store_path()), _mtime(autocad_scan.PROGRESS_PATH))
+           _mtime(line_items.store_path()), _mtime(line_items.backfill_store_path()),
+           _mtime(autocad_scan.PROGRESS_PATH))
     if _SIM_CACHE["key"] == key:
         return _SIM_CACHE["rows"]
     try:
