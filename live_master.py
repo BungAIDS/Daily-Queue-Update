@@ -43,6 +43,12 @@ log = logging.getLogger(__name__)
 
 MASTER_PATH = SNAPSHOT_DIR / "live_master.json"
 
+DRIVE_RUN_FIELDS = (
+    "has_drive_run", "drive_run_pdf", "drive_run_count", "drive_run_rev",
+    "drive_run", "drive_run_summary", "drive_run_template", "drive_run_design",
+    "drive_run_parsed_at",
+)
+
 
 def load_master() -> Dict[str, Any]:
     if not MASTER_PATH.exists():
@@ -81,6 +87,15 @@ def _merge_external_before_save(master: Dict[str, Any], external: Dict[str, Any]
 
         current_job = current_entry.setdefault("job", {})
         external_job = external_entry.get("job") or {}
+        external_parsed = str(external_job.get("drive_run_parsed_at") or "")
+        current_parsed = str(current_job.get("drive_run_parsed_at") or "")
+        if external_parsed and external_parsed > current_parsed:
+            # A backfill/helper parsed the run after this watcher loaded its
+            # in-memory master. Copy the whole parse, including intentional
+            # empty values that clear a prior malformed binary interpretation.
+            for field in DRIVE_RUN_FIELDS:
+                if field in external_job:
+                    current_job[field] = copy.deepcopy(external_job[field])
         for key, value in external_job.items():
             if key not in current_job:
                 current_job[key] = copy.deepcopy(value)
@@ -167,7 +182,8 @@ _ENRICHMENT_KEEP = (
     "so_design_temp", "so_max_temp", "so_special_temp",
     "line_items", "line_item_tags",
     "has_drive_run", "drive_run_pdf", "drive_run_count", "drive_run_rev",
-    "drive_run", "drive_run_summary", "drive_run_template",
+    "drive_run", "drive_run_summary", "drive_run_template", "drive_run_design",
+    "drive_run_parsed_at",
     "job_type", "job_folder", "dwg_extras", "dwg_missing_std",
     # Transmittal fields — keep them too so a failed SO re-fetch can't blank them.
     "so_emails", "so_po", "so_released", "so_imi",
@@ -325,6 +341,35 @@ def merge_order(master: Dict[str, Any], job_num: str, fields: Dict[str, Any],
             continue                      # don't write/clobber with an empty value
         if job.get(k) != v:
             job[k] = v
+            changed = True
+    return changed
+
+
+def merge_drive_run(master: Dict[str, Any], job_num: str, fields: Dict[str, Any],
+                    when: datetime | None = None) -> bool:
+    """Apply a timestamped drive-run parse exactly, including deliberate blanks."""
+    parsed_at = str((fields or {}).get("drive_run_parsed_at") or "")
+    if not parsed_at:
+        return False
+    jn = str(job_num or "").strip()
+    if not jn:
+        return False
+    orders = master.setdefault("orders", {})
+    entry = orders.get(jn)
+    if entry is None:
+        now_iso = (when or datetime.now()).isoformat(timespec="seconds")
+        entry = orders[jn] = {
+            "added": now_iso, "left": None, "on_queue": False, "job": {"job": jn},
+        }
+    job = entry.setdefault("job", {})
+    job.setdefault("job", jn)
+    current_at = str(job.get("drive_run_parsed_at") or "")
+    if current_at and parsed_at < current_at:
+        return False
+    changed = False
+    for field in DRIVE_RUN_FIELDS:
+        if field in fields and job.get(field) != fields[field]:
+            job[field] = copy.deepcopy(fields[field])
             changed = True
     return changed
 

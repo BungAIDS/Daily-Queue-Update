@@ -130,28 +130,37 @@ def merge_backfill(master: Dict[str, Any]) -> int:
         "job", "status", "scanned_at", "line_item_count",
         "backfill_scan_version", "backfill_attempts",
     }
-    orders = master.get("orders") or {}
     n = 0
     for job, rec in recs.items():
         status = str(rec.get("status") or "")
         if status != "ok" and not (status == "error" and rec.get("so_validation") == "MATCH"):
             continue
-        entry = orders.get(str(job)) or {}
-        # The live watcher owns on-board orders: it enriches and re-verifies them
-        # itself, and every poll folds the live values back into the master — so
-        # anything this merge writes that disagrees (a stale weekend scan, a
-        # different parse of the same PDF) is flipped straight back, logging a
-        # spurious change per field on every startup. The backfill's job is the
-        # off-board backlog; leave the board to the watcher.
+        timestamped_drive = bool(rec.get("drive_run_parsed_at"))
+        drive_changed = live_master.merge_drive_run(master, job, rec) if timestamped_drive else False
+
+        entry = (master.get("orders") or {}).get(str(job)) or {}
+        # The live watcher owns on-board Sales Order fields. Preserve the
+        # independently timestamped quote parse above, then leave the rest of
+        # the board record alone so the next poll cannot flip stale values back.
         if entry.get("on_queue"):
+            if drive_changed:
+                n += 1
             continue
-        # Off-board: a live enrichment newer than this scan is the same
-        # fetch+parse run later — the older scan has nothing to add.
+
+        # Off-board, a live enrichment newer than this scan is the same
+        # fetch+parse run later. Keep the quote parse above, but do not merge
+        # older Sales Order fields over the fresher live result.
         verified = str((entry.get("job") or {}).get("so_verified_at") or "")
         if verified and verified >= str(rec.get("scanned_at") or ""):
+            if drive_changed:
+                n += 1
             continue
-        fields = {k: v for k, v in rec.items() if k not in skip}
-        if fields and live_master.merge_order(master, job, fields):
+
+        fields = {
+            k: v for k, v in rec.items()
+            if k not in skip and (not timestamped_drive or k not in live_master.DRIVE_RUN_FIELDS)
+        }
+        if (fields and live_master.merge_order(master, job, fields)) or drive_changed:
             n += 1
     return n
 

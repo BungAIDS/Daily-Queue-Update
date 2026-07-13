@@ -258,6 +258,18 @@ def test_excel_safe_value_removes_only_illegal_control_characters():
     assert backfill_orders._excel_safe_value(42) == 42
 
 
+def test_quote_run_parse_gets_a_freshness_timestamp():
+    rec = {}
+    with patch("backfill_orders.parse_quote_run", return_value={
+        "fields": {"Size": "27"}, "summary": "Size=27", "template": "pdf",
+    }):
+        backfill_orders._attach_quote_run_parse(rec, "run-without-an-extension")
+
+    assert rec["drive_run"] == {"Size": "27"}
+    assert rec["drive_run_template"] == "pdf"
+    assert rec["drive_run_parsed_at"].startswith("20")
+
+
 def test_watcher_fetch_uses_the_shared_cbc_lock():
     events = []
 
@@ -310,6 +322,56 @@ def test_live_master_save_preserves_external_backfill_rows(tmp: Path):
     assert saved["orders"]["401001"]["job"]["so_pdf"] == "verified.pdf"
     assert saved["orders"]["401001"]["left"] is None
     assert "401000" in watcher["orders"]
+
+
+def test_live_master_save_accepts_a_fresher_external_drive_run_parse(tmp: Path):
+    path = tmp / "live_master.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    external = {
+        "orders": {
+            "401001": {
+                "added": "old",
+                "on_queue": False,
+                "job": {
+                    "job": "401001",
+                    "drive_run": {},
+                    "drive_run_summary": "",
+                    "drive_run_template": "unknown",
+                    "drive_run_parsed_at": "2026-07-13T08:00:00",
+                },
+            },
+        },
+    }
+    path.write_text(json.dumps(external), encoding="utf-8")
+    watcher = {
+        "orders": {
+            "401001": {
+                "added": "old",
+                "on_queue": False,
+                "job": {
+                    "job": "401001",
+                    "status_note": "live",
+                    "drive_run": {"binary": "garbage"},
+                    "drive_run_summary": "bad bytes",
+                    "drive_run_template": "generic_text",
+                },
+            },
+        },
+    }
+
+    with (
+        patch.object(live_master, "MASTER_PATH", path),
+        patch("live_master.data_file_lock", side_effect=lambda *_a, **_k: contextlib.nullcontext()),
+    ):
+        live_master.save_master(watcher)
+
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    job = saved["orders"]["401001"]["job"]
+    assert job["status_note"] == "live"
+    assert job["drive_run"] == {}
+    assert job["drive_run_summary"] == ""
+    assert job["drive_run_template"] == "unknown"
+    assert job["drive_run_parsed_at"] == "2026-07-13T08:00:00"
 
 
 def test_kernel_lock_excludes_a_second_process(tmp: Path):

@@ -45,17 +45,32 @@ def test_merge_backfill():
             "421000": {"job": "421000", "status": "ok", "scanned_at": "t",
                        "backfill_scan_version": "serial-verified-v1",
                        "backfill_attempts": 2,
-                       "so_size": "27", "so_arrangement": "9", "co_number": 2},
+                       "so_size": "27", "so_arrangement": "9", "co_number": 2,
+                       "drive_run": {}, "drive_run_summary": "",
+                       "drive_run_template": "unknown",
+                       "drive_run_parsed_at": "2026-07-13T08:00:00"},
             "421999": {"job": "421999", "status": "needs-retry-wrong-SO-quarantined",
                        "so_pdf": "wrong.pdf", "so_size": "WRONG"},
+            "421003": {"job": "421003", "status": "ok",
+                       "drive_run": {"Size": "31"},
+                       "drive_run_template": "pdf"},
         })
-        m = {"orders": {}}
-        assert master_sync.merge_backfill(m) == 1
+        m = {"orders": {"421000": {"job": {
+            "job": "421000",
+            "drive_run": {"binary": "garbage"},
+            "drive_run_summary": "bad bytes",
+            "drive_run_template": "generic_text",
+            "drive_run_parsed_at": "2026-07-13T08:00:00",
+        }}}}
+        assert master_sync.merge_backfill(m) == 2
         job = m["orders"]["421000"]["job"]
         assert job["so_size"] == "27" and job["co_number"] == 2
         assert "status" not in job and "scanned_at" not in job   # metadata skipped
         assert "backfill_scan_version" not in job
         assert "backfill_attempts" not in job
+        assert job["drive_run"] == {} and job["drive_run_summary"] == ""
+        assert job["drive_run_template"] == "unknown"
+        assert m["orders"]["421003"]["job"]["drive_run"] == {"Size": "31"}
         assert "421999" not in m["orders"]
     finally:
         if backup is not None:
@@ -71,36 +86,50 @@ def test_merge_backfill_skips_scans_older_than_live_verification():
     try:
         _write(p, {
             "421000": {"job": "421000", "status": "ok",
-                       "scanned_at": "2026-07-12T09:00:00", "so_size": "27"},
+                       "scanned_at": "2026-07-12T09:00:00", "so_size": "27",
+                       "drive_run": {}, "drive_run_summary": "",
+                       "drive_run_template": "unknown",
+                       "drive_run_parsed_at": "2026-07-13T08:00:00"},
             "421001": {"job": "421001", "status": "ok",
                        "scanned_at": "2026-07-12T09:00:00", "so_size": "31"},
             "421002": {"job": "421002", "status": "ok",
                        "scanned_at": "2026-07-12T09:00:00", "so_size": "44"},
             "421003": {"job": "421003", "status": "ok",
                        "scanned_at": "2026-07-12T09:00:00", "so_size": "55",
-                       "so_motor_pos": "H21"},
+                       "so_motor_pos": "H21", "drive_run": {"Size": "55"},
+                       "drive_run_template": "pdf",
+                       "drive_run_parsed_at": "2026-07-13T09:00:00"},
         })
         m = {"orders": {
             # Live-verified AFTER the scan -> the older scan must not clobber it.
             "421000": {"job": {"job": "421000", "so_size": "245",
-                               "so_verified_at": "2026-07-13T06:30:00"}},
+                               "so_verified_at": "2026-07-13T06:30:00",
+                               "drive_run": {"binary": "garbage"},
+                               "drive_run_summary": "bad bytes",
+                               "drive_run_template": "generic_text",
+                               "drive_run_parsed_at": "2026-07-13T07:00:00"}},
             # Live-verified BEFORE the scan -> the scan is fresher and merges.
             "421001": {"job": {"job": "421001", "so_size": "30",
                                "so_verified_at": "2026-07-11T12:00:00"}},
             # No verification stamp -> merges as before.
             "421002": {"job": {"job": "421002", "so_size": "43"}},
-            # ON THE BOARD -> the live watcher owns it; never merged, stamped
-            # or not (its next poll would flip the values back with a spurious
-            # change-log entry per field).
+            # ON THE BOARD -> the live watcher owns its Sales Order fields. A
+            # separately timestamped quote repair can still merge safely.
             "421003": {"on_queue": True,
-                       "job": {"job": "421003", "so_size": "56", "so_motor_pos": ""}},
+                       "job": {"job": "421003", "so_size": "56", "so_motor_pos": "",
+                               "drive_run": {"Size": "56"},
+                               "drive_run_template": "generic_text",
+                               "drive_run_parsed_at": "2026-07-13T07:00:00"}},
         }}
-        assert master_sync.merge_backfill(m) == 2
+        assert master_sync.merge_backfill(m) == 4
         assert m["orders"]["421000"]["job"]["so_size"] == "245"   # untouched
+        assert m["orders"]["421000"]["job"]["drive_run"] == {}     # quote repaired
+        assert m["orders"]["421000"]["job"]["drive_run_template"] == "unknown"
         assert m["orders"]["421001"]["job"]["so_size"] == "31"    # updated
         assert m["orders"]["421002"]["job"]["so_size"] == "44"    # updated
         assert m["orders"]["421003"]["job"]["so_size"] == "56"    # board order untouched
         assert m["orders"]["421003"]["job"]["so_motor_pos"] == ""
+        assert m["orders"]["421003"]["job"]["drive_run"] == {"Size": "55"}
     finally:
         if backup is not None:
             p.write_text(backup)
