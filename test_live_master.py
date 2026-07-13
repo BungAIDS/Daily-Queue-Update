@@ -251,6 +251,47 @@ def test_newer_change_order_parse_blanks_do_not_erase_known_summary():
     ]
 
 
+def test_order_verification_data_cannot_revive_after_invalidation():
+    stored = _job(
+        "200",
+        so_invalidated_at="2026-07-13T10:00:00",
+        drive_run_pdf="keep-run.pdf",
+    )
+    stale_report = _job(
+        "200",
+        co_number=2,
+        so_pdf="Z:/SO/200/report.pdf",
+        so_verified_at="2026-07-13T11:00:00",
+        so_document_kind="ORDER_VERIFICATION",
+        so_source_type="CS_SalesOrder",
+        so_size="270",
+        line_items=[{"raw": "wrong"}],
+    )
+
+    cleaned = lm._keep_better_enrichment(stored, stale_report)
+    assert "so_pdf" not in cleaned and "co_number" not in cleaned
+    assert "line_items" not in cleaned and "so_size" not in cleaned
+    assert cleaned["drive_run_pdf"] == "keep-run.pdf"
+
+    genuine = _job(
+        "200",
+        co_number=3,
+        so_pdf="Z:/SO/200/200 - Sales Order CO3.pdf",
+        so_verified_at="9999-01-01T00:00:00",
+        so_document_kind="SALES_ORDER",
+        so_source_type="CBC_SalesOrder",
+        so_size="33",
+    )
+    restored = lm._keep_better_enrichment(cleaned, genuine)
+    assert restored["so_pdf"].endswith("CO3.pdf")
+    assert restored["co_number"] == 3 and restored["so_size"] == "33"
+
+    direct_recovery = lm._keep_better_enrichment(stale_report, genuine)
+    assert direct_recovery["so_document_kind"] == "SALES_ORDER"
+    assert direct_recovery["so_pdf"].endswith("CO3.pdf")
+    assert "line_items" not in direct_recovery
+
+
 def test_realign_orders_resets_silently_and_next_update_logs_nothing():
     live = _job("100", co_number=1, so_pdf="Z:/SO/100/CO#1.pdf", so_size="56")
     m = {"orders": {}}

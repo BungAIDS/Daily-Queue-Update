@@ -33,7 +33,7 @@ def test_resume_trusts_only_current_serial_misses():
     assert backfill_orders._is_done({"status": "ok"})
     assert not backfill_orders._is_done({
         "status": "ok", "so_document_kind": "ORDER_VERIFICATION"})
-    assert backfill_orders._is_done({
+    assert not backfill_orders._is_done({
         "status": "ok", "so_document_kind": "ORDER_VERIFICATION",
         "so_source_type": "CS_SalesOrder"})
     with patch("backfill_orders.validate_sales_order_pdf", return_value=SimpleNamespace(

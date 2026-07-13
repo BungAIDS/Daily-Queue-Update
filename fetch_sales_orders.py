@@ -24,12 +24,14 @@ import logging
 import re
 import sys
 import time
-from urllib.parse import urlparse, parse_qs, urljoin
+from pathlib import Path
+from urllib.parse import urlparse, parse_qs
 
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
 from config import CBC_URL, CBC_QUEUE_URL, STORAGE_STATE_PATH, SALES_ORDER_DIR, SO_CONCURRENCY
-from sales_orders import _download_error
+from sales_orders import _download_sales_order
+from sales_order_validation import DOCUMENT_KIND_SALES_ORDER
 from scraper import CONTAINER_SELECTOR
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
@@ -112,8 +114,10 @@ async def _process_job(page, context, job: str, args_js: str) -> dict:
         if "downloaddoc.aspx" in href.lower():
             docs.append((href, _parse_doc(href)))
 
-    sos = [(h, d) for h, d in docs
-           if "salesorder" in (d["type"] or "").lower() and "sales order" in (d["fn"] or "").lower()]
+    sos = [
+        (h, d) for h, d in docs
+        if str(d.get("type") or "").casefold() == "cbc_salesorder"
+    ]
     if not sos:
         res["status"] = "no sales order doc"
         return res
@@ -124,21 +128,24 @@ async def _process_job(page, context, job: str, args_js: str) -> dict:
     res["co"] = f"CO#{rev - 1}" if rev and rev > 1 else "(original)"
 
     dest = SALES_ORDER_DIR / job / _so_filename(job, rev)
-    if dest.exists():
-        res["status"] = "have it"
-        return res
+    had_existing = dest.exists()
     try:
-        resp = await context.request.get(urljoin(page.url, href))
-        body = await resp.body()
-        # Never write an error page / expired-session login page into the
-        # archive — the dest.exists() check would trust it forever.
-        err = _download_error(resp.status, body)
-        if err:
-            res["status"] = f"download FAILED: {err}"
+        accepted = await _download_sales_order(
+            context,
+            page.url,
+            href,
+            dest,
+            job,
+            DOCUMENT_KIND_SALES_ORDER,
+        )
+        if accepted.path:
+            size = Path(accepted.path).stat().st_size
+            res["status"] = "have it" if had_existing else f"downloaded {size}b"
         else:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(body)
-            res["status"] = f"downloaded {len(body)}b"
+            res["status"] = (
+                f"download REJECTED: {accepted.validation.status} "
+                f"({accepted.validation.document_kind})"
+            )
     except Exception as e:  # noqa: BLE001
         res["status"] = f"download FAILED: {e}"
     return res

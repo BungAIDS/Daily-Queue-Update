@@ -11,8 +11,12 @@ from the morning snapshot, and the newest-first present-orders ordering.
 """
 from __future__ import annotations
 
+import json
 import sys
-from datetime import datetime
+import tempfile
+from datetime import date, datetime
+from pathlib import Path
+from unittest.mock import patch
 
 import live_state
 
@@ -140,13 +144,121 @@ def test_mark_enriched_preserves_parser_gaps_from_newer_change_order():
     assert job["line_items"] == [{"tags": ["UNITARY BASE"]}]
 
 
+def test_mark_enriched_rejects_order_verification_report_data():
+    state = {
+        "200": {
+            "present": True,
+            "enriched": False,
+            "job": {
+                "job": "200",
+                "so_invalidated_at": "2026-07-13T10:00:00",
+                "drive_run_pdf": "keep-run.pdf",
+            },
+        },
+    }
+    report = [{
+        "job": "200",
+        "co_number": 1,
+        "so_pdf": "report.pdf",
+        "so_document_kind": "ORDER_VERIFICATION",
+        "so_source_type": "CS_SalesOrder",
+        "line_items": [{"raw": "wrong"}],
+        "drive_run_pdf": "keep-run.pdf",
+    }]
+
+    live_state.mark_enriched(state, report)
+
+    job = state["200"]["job"]
+    assert "so_pdf" not in job and "co_number" not in job
+    assert "line_items" not in job
+    assert job["drive_run_pdf"] == "keep-run.pdf"
+    assert state["200"]["enriched"] is False
+
+
+def test_mark_enriched_allows_true_so_to_replace_report_without_reusing_its_items():
+    state = {
+        "200": {
+            "present": True,
+            "enriched": False,
+            "job": {
+                "job": "200",
+                "so_pdf": "report.pdf",
+                "so_document_kind": "ORDER_VERIFICATION",
+                "so_source_type": "CS_SalesOrder",
+                "line_items": [{"raw": "wrong"}],
+            },
+        },
+    }
+    genuine = [{
+        "job": "200",
+        "so_pdf": "200 - Sales Order CO1.pdf",
+        "so_document_kind": "SALES_ORDER",
+        "so_source_type": "CBC_SalesOrder",
+        "so_verified_at": "9999-01-01T00:00:00",
+        "line_items": [],
+    }]
+
+    live_state.mark_enriched(state, genuine)
+
+    job = state["200"]["job"]
+    assert job["so_document_kind"] == "SALES_ORDER"
+    assert job["so_pdf"].endswith("CO1.pdf")
+    assert job["line_items"] == []
+    assert state["200"]["enriched"] is True
+
+
+def test_save_state_cannot_overwrite_external_report_cleanup(tmp: Path):
+    path = tmp / "live_state.json"
+    external = {
+        "200": {
+            "present": True,
+            "enriched": False,
+            "job": {
+                "job": "200",
+                "so_invalidated_at": "2026-07-13T10:00:00",
+            },
+        },
+    }
+    path.write_text(json.dumps(external), encoding="utf-8")
+    stale_watcher = {
+        "200": {
+            "present": True,
+            "enriched": True,
+            "job": {
+                "job": "200",
+                "so_pdf": "report.pdf",
+                "so_document_kind": "ORDER_VERIFICATION",
+                "so_source_type": "CS_SalesOrder",
+                "co_number": 1,
+                "line_items": [{"raw": "wrong"}],
+            },
+        },
+    }
+
+    with patch("live_state.state_path", return_value=path):
+        live_state.save_state(stale_watcher, date(2026, 7, 13))
+
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        job = saved["200"]["job"]
+        assert "so_pdf" not in job and "line_items" not in job
+        assert saved["200"]["enriched"] is False
+
+        # A later strict no-SO check is allowed to finish; the invalidation
+        # marker must not force this job through enrichment every poll forever.
+        saved["200"]["enriched"] = True
+        live_state.save_state(saved, date(2026, 7, 13))
+        assert json.loads(path.read_text(encoding="utf-8"))["200"]["enriched"] is True
+
+
 def main() -> int:
     passed = 0
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            fn()
-            print(f"  ok  {name}")
-            passed += 1
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+        tmp = Path(directory)
+        for name, fn in sorted(globals().items()):
+            if name.startswith("test_") and callable(fn):
+                fn(tmp) if "tmp" in fn.__code__.co_varnames else fn()
+                print(f"  ok  {name}")
+                passed += 1
     print(f"\n{passed} tests passed.")
     return 0
 

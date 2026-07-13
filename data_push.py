@@ -62,6 +62,12 @@ def data_files() -> List[Path]:
         BACKLOG_DIR / "line_items.xlsx",
         BACKLOG_DIR / "autocad_dwgs.xlsx",
     ]
+    cleanup_audit = BACKLOG_DIR / "order_verification_cleanup.json"
+    try:
+        cleanup_mtime = cleanup_audit.stat().st_mtime
+    except OSError:
+        cleanup_mtime = 0.0
+
     seen, out = set(), []
     for p in candidates:
         rp = Path(p)
@@ -69,6 +75,15 @@ def data_files() -> List[Path]:
             continue
         seen.add(rp)
         if rp.is_file():
+            # A cleanup can invalidate rows in the JSON stores before these
+            # derived spreadsheets are regenerated. Do not publish a stale
+            # workbook containing report-derived Sales Order data.
+            if rp.name in {"backlog.xlsx", "line_items.xlsx"} and cleanup_mtime:
+                try:
+                    if rp.stat().st_mtime < cleanup_mtime:
+                        continue
+                except OSError:
+                    continue
             out.append(rp)
     return out
 

@@ -38,6 +38,13 @@ from typing import Any, Dict, List, Tuple
 import engineers
 from config import SNAPSHOT_DIR
 from process_lock import data_file_lock
+from sales_order_validation import (
+    SALES_ORDER_DERIVED_FIELDS,
+    clear_sales_order_data,
+    effective_sales_order_invalidation,
+    is_order_verification_record,
+    is_true_sales_order_record,
+)
 
 log = logging.getLogger(__name__)
 
@@ -215,6 +222,48 @@ def _keep_better_enrichment(stored: Dict[str, Any], incoming: Dict[str, Any]) ->
     only the fresh board fields. Re-reading any archived PDF, including a newer
     change order, cannot erase known fan-summary or line-item values merely
     because that PDF layout returned parser blanks."""
+    invalidated_at = effective_sales_order_invalidation(stored, incoming)
+    if (
+        not invalidated_at
+        and is_order_verification_record(stored)
+        and is_true_sales_order_record(incoming)
+    ):
+        merged = dict(incoming)
+        for field in _ENRICHMENT_KEEP:
+            if field in SALES_ORDER_DERIVED_FIELDS:
+                continue
+            if (
+                stored.get(field) not in (None, "", [], {}, False)
+                and merged.get(field) in (None, "", [], {}, False)
+            ):
+                merged[field] = stored[field]
+        return merged
+    if (
+        is_order_verification_record(incoming)
+        or (
+            is_order_verification_record(stored)
+            and not is_true_sales_order_record(incoming)
+        )
+    ):
+        invalidated_at = max(
+            invalidated_at,
+            str(stored.get("so_invalidated_at") or ""),
+            str(incoming.get("so_invalidated_at") or ""),
+            datetime.now().isoformat(timespec="seconds"),
+        )
+    if invalidated_at:
+        merged = dict(incoming)
+        for field in _ENRICHMENT_KEEP:
+            if field in SALES_ORDER_DERIVED_FIELDS:
+                continue
+            if (
+                stored.get(field) not in (None, "", [], {}, False)
+                and merged.get(field) in (None, "", [], {}, False)
+            ):
+                merged[field] = stored[field]
+        clear_sales_order_data(merged, invalidated_at)
+        return merged
+
     s_co = int(stored.get("co_number") or 0)
     i_co = int(incoming.get("co_number") or 0)
     s_pdf = (stored.get("so_pdf") or "").strip()
@@ -402,9 +451,34 @@ def merge_order(master: Dict[str, Any], job_num: str, fields: Dict[str, Any],
     job = entry.setdefault("job", {})
     job.setdefault("job", jn)
     changed = False
+    incoming = fields or {}
+    invalidated_at = effective_sales_order_invalidation(job, incoming)
+    if (
+        not invalidated_at
+        and is_order_verification_record(job)
+        and is_true_sales_order_record(incoming)
+    ):
+        changed = clear_sales_order_data(job) or changed
+    if (
+        is_order_verification_record(incoming)
+        or (
+            is_order_verification_record(job)
+            and not is_true_sales_order_record(incoming)
+        )
+    ):
+        invalidated_at = max(
+            invalidated_at,
+            str(job.get("so_invalidated_at") or ""),
+            str(incoming.get("so_invalidated_at") or ""),
+            now_iso,
+        )
+    if invalidated_at:
+        changed = clear_sales_order_data(job, invalidated_at) or changed
     for k, v in (fields or {}).items():
         if v in (None, "", [], {}):
             continue                      # don't write/clobber with an empty value
+        if invalidated_at and k in SALES_ORDER_DERIVED_FIELDS:
+            continue
         if job.get(k) != v:
             job[k] = v
             changed = True

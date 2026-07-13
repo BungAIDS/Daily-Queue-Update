@@ -103,7 +103,7 @@ def test_same_job_verification_report_cannot_fill_true_so_slot(tmp_path: Path):
     ], report)
 
     legacy = validate_sales_order_pdf(report, "422027")
-    strict = accept_existing(report, "422027", DOCUMENT_KIND_SALES_ORDER)
+    strict = accept_existing(report, "422027")
 
     assert legacy.matched
     assert legacy.document_kind == DOCUMENT_KIND_ORDER_VERIFICATION
@@ -142,7 +142,11 @@ def test_valid_staged_pdf_is_promoted(tmp_path: Path):
     root = tmp_path / "SALES ORDERS FOR DAILY QUEUE"
     destination = root / "421314" / "421314 - Sales Order (original).pdf"
     candidate = tmp_path / "pending" / destination.name
-    _mini_pdf(["Order# RepRef#", "421314 987"], candidate)
+    _mini_pdf([
+        "Chicago Blower Corporation Sales Order",
+        "Order# RepRef#",
+        "421314 987",
+    ], candidate)
 
     accepted = finalize_candidate(candidate, destination, "421314")
 
@@ -185,8 +189,12 @@ def test_line_item_scan_uses_latest_verified_sales_order(tmp_path: Path):
     from line_items_scan import _latest_so_pdf
 
     folder = tmp_path / "421314"
-    _mini_pdf(["Order# RepRef#", "421314 1"], folder / "421314 - Sales Order (original).pdf")
-    _mini_pdf(["Order# RepRef#", "421314 1"], folder / "421314 - Sales Order CO2.pdf")
+    _mini_pdf([
+        "Chicago Blower Corporation Sales Order", "Order# RepRef#", "421314 1"
+    ], folder / "421314 - Sales Order (original).pdf")
+    _mini_pdf([
+        "Chicago Blower Corporation Sales Order", "Order# RepRef#", "421314 1"
+    ], folder / "421314 - Sales Order CO2.pdf")
     _mini_pdf(["Order# RepRef#", "421999 1"], folder / "421314 - Sales Order CO3.pdf")
     _mini_pdf(["Order# RepRef#", "421314 1"], folder / "unrelated.pdf")
 

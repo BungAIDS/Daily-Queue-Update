@@ -35,6 +35,24 @@ DOCUMENT_KIND_SALES_ORDER = "SALES_ORDER"
 DOCUMENT_KIND_ORDER_VERIFICATION = "ORDER_VERIFICATION"
 DOCUMENT_KIND_UNKNOWN = "UNKNOWN"
 
+# Everything populated from the contents or provenance of a Sales Order PDF.
+# ``so_imi`` is intentionally absent: it comes from the AutoCAD job folder, not
+# from the PDF.  These fields are cleared together when a stored document is
+# proven to be an Order Verification Report.
+SALES_ORDER_DERIVED_FIELDS = frozenset({
+    "co_number", "co_history",
+    "so_pdf", "so_verified_at", "so_validation", "so_internal_order",
+    "so_validation_method", "so_document_kind", "so_source_type", "so_quarantine",
+    "so_design_desc", "so_size", "so_arrangement", "so_motor_pos", "so_class",
+    "so_rotation", "so_discharge", "so_pct_width", "so_wheel_type",
+    "so_design_temp", "so_max_temp", "so_special_temp",
+    "so_emails", "so_po", "so_released",
+    "line_items", "line_item_tags", "line_item_count",
+    "dwg_reuse", "dwg_reuse_label", "dwg_reuse_note",
+})
+
+SO_INVALIDATED_AT = "so_invalidated_at"
+
 
 @dataclass(frozen=True)
 class SalesOrderValidation:
@@ -59,6 +77,55 @@ class SalesOrderAcceptance:
 
 def normalize_order(value: str) -> str:
     return re.sub(r"[^0-9A-Z]", "", str(value or "").upper())
+
+
+def clear_sales_order_data(record: dict, invalidated_at: str = "") -> bool:
+    """Remove all PDF-derived Sales Order data from one stored job record."""
+    changed = False
+    for field in SALES_ORDER_DERIVED_FIELDS:
+        if field in record:
+            record.pop(field, None)
+            changed = True
+    if invalidated_at and record.get(SO_INVALIDATED_AT) != invalidated_at:
+        record[SO_INVALIDATED_AT] = invalidated_at
+        changed = True
+    return changed
+
+
+def is_order_verification_record(record: dict) -> bool:
+    """True when stored provenance identifies an Order Verification Report."""
+    return (
+        str(record.get("so_document_kind") or "").upper()
+        == DOCUMENT_KIND_ORDER_VERIFICATION
+        or str(record.get("so_source_type") or "").casefold() == "cs_salesorder"
+        or str(record.get("so_validation_method") or "").casefold()
+        == "order-verification-table"
+        or "orderverificationreportviewer" in str(record.get("so_pdf") or "").casefold()
+    )
+
+
+def is_true_sales_order_record(record: dict) -> bool:
+    """True when provenance and a stored path identify a genuine Sales Order."""
+    kind = str(record.get("so_document_kind") or "").upper()
+    source = str(record.get("so_source_type") or "").casefold()
+    return (
+        kind == DOCUMENT_KIND_SALES_ORDER
+        and bool(str(record.get("so_pdf") or "").strip())
+        and source in {"", "cbc_salesorder"}
+    )
+
+
+def effective_sales_order_invalidation(*records: dict) -> str:
+    """Newest invalidation that has not been superseded by a later true SO."""
+    invalidated = max(
+        (str(record.get(SO_INVALIDATED_AT) or "") for record in records if record),
+        default="",
+    )
+    verified = max(
+        (str(record.get("so_verified_at") or "") for record in records if record),
+        default="",
+    )
+    return invalidated if invalidated and invalidated >= verified else ""
 
 
 def extract_internal_order(text: str) -> tuple[str, str]:
@@ -211,7 +278,7 @@ def quarantine_candidate(
 def quarantine_superseded_verification_reports(
     destination: str | Path, expected_order: str
 ) -> list[str]:
-    """Move same-job verification reports aside once a true SO is confirmed."""
+    """Move sibling verification reports aside once a true SO is confirmed."""
     destination = Path(destination)
     moved: list[str] = []
     try:
@@ -223,8 +290,7 @@ def quarantine_superseded_verification_reports(
             if path.resolve() == destination.resolve():
                 continue
             validation = validate_sales_order_pdf(path, expected_order)
-            if (not validation.matched
-                    or validation.document_kind != DOCUMENT_KIND_ORDER_VERIFICATION):
+            if validation.document_kind != DOCUMENT_KIND_ORDER_VERIFICATION:
                 continue
             target = quarantine_candidate(
                 path,
@@ -242,10 +308,11 @@ def finalize_candidate(
     candidate: str | Path,
     destination: str | Path,
     expected_order: str,
-    required_document_kind: str | None = None,
+    required_document_kind: str | None = DOCUMENT_KIND_SALES_ORDER,
 ) -> SalesOrderAcceptance:
     candidate = Path(candidate)
     destination = Path(destination)
+    required_document_kind = required_document_kind or DOCUMENT_KIND_SALES_ORDER
     validation = validate_sales_order_pdf(
         candidate, expected_order, required_document_kind
     )
@@ -280,7 +347,7 @@ def finalize_candidate(
 def accept_existing(
     destination: str | Path,
     expected_order: str,
-    required_document_kind: str | None = None,
+    required_document_kind: str | None = DOCUMENT_KIND_SALES_ORDER,
 ) -> SalesOrderAcceptance | None:
     destination = Path(destination)
     if not destination.exists():

@@ -37,7 +37,15 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from config import SNAPSHOT_DIR
+from process_lock import data_file_lock
 from scraper import _design_from_item  # only a pure string helper; no browser
+from sales_order_validation import (
+    SALES_ORDER_DERIVED_FIELDS,
+    clear_sales_order_data,
+    effective_sales_order_invalidation,
+    is_order_verification_record,
+    is_true_sales_order_record,
+)
 
 log = logging.getLogger(__name__)
 
@@ -77,9 +85,40 @@ def save_state(state: Dict[str, Any], d: date) -> None:
     """Write the state atomically (temp file + replace) so a crash mid-write
     can't leave a half-written file that the next poll would discard."""
     path = state_path(d)
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
-    tmp.replace(path)
+    with data_file_lock(path, label="live-state data update"):
+        external = load_state(d)
+        for job, external_entry in external.items():
+            current_entry = state.get(job)
+            if not isinstance(current_entry, dict) or not isinstance(external_entry, dict):
+                continue
+            current_job = current_entry.get("job") or {}
+            external_job = external_entry.get("job") or {}
+            invalidated_at = effective_sales_order_invalidation(
+                external_job, current_job
+            )
+            if (
+                is_order_verification_record(current_job)
+                or (
+                    is_order_verification_record(external_job)
+                    and not is_true_sales_order_record(current_job)
+                )
+            ):
+                invalidated_at = max(
+                    invalidated_at,
+                    str(external_job.get("so_invalidated_at") or ""),
+                    str(current_job.get("so_invalidated_at") or ""),
+                    datetime.now().isoformat(timespec="seconds"),
+                )
+            if invalidated_at:
+                removed_stale_data = clear_sales_order_data(
+                    current_job, invalidated_at
+                )
+                current_entry["job"] = current_job
+                if removed_stale_data:
+                    current_entry["enriched"] = False
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+        tmp.replace(path)
 
 
 def _job_number(j: Dict[str, Any]) -> str:
@@ -118,10 +157,11 @@ def seed_from_snapshot(
             continue
         job = dict(j)
         job.setdefault("design", _design_from_item(job.get("item", "")))
+        invalidated = effective_sales_order_invalidation(job)
         state[jn] = {
             "first_seen": seen_at,
             "carried_over": True,   # was already in the queue when the watch began
-            "enriched": True,       # the 5 AM run enriched it
+            "enriched": not bool(invalidated),
             "present": True,
             "last_seen": seen_at,
             "job": job,
@@ -207,10 +247,17 @@ def mark_enriched(state: Dict[str, Any], enriched_jobs: List[Dict[str, Any]]) ->
             continue
         stored = entry.get("job") or {}
         merged = dict(j)
+        recovering_true_so = (
+            is_order_verification_record(stored)
+            and is_true_sales_order_record(merged)
+            and not effective_sales_order_invalidation(stored, merged)
+        )
         for field, stored_value in stored.items():
             protects_enrichment = (
                 field.startswith("so_") or field in ("line_items", "line_item_tags")
             )
+            if recovering_true_so and field in SALES_ORDER_DERIVED_FIELDS:
+                continue
             if (
                 protects_enrichment
                 and stored_value not in (None, "", [], {})
@@ -224,8 +271,24 @@ def mark_enriched(state: Dict[str, Any], enriched_jobs: List[Dict[str, Any]]) ->
             and not merged.get("so_max_temp")
         ):
             merged["so_special_temp"] = stored["so_special_temp"]
+        invalidated_at = effective_sales_order_invalidation(stored, merged)
+        if (
+            is_order_verification_record(merged)
+            or (
+                is_order_verification_record(stored)
+                and not is_true_sales_order_record(merged)
+            )
+        ):
+            invalidated_at = max(
+                invalidated_at,
+                str(stored.get("so_invalidated_at") or ""),
+                str(merged.get("so_invalidated_at") or ""),
+                datetime.now().isoformat(timespec="seconds"),
+            )
+        if invalidated_at:
+            clear_sales_order_data(merged, invalidated_at)
         entry["job"] = merged
-        entry["enriched"] = True
+        entry["enriched"] = not is_order_verification_record(j)
 
 
 def present_jobs(state: Dict[str, Any]) -> List[Dict[str, Any]]:
