@@ -725,6 +725,15 @@ def test_sales_order_data_sheet_layout():
     assert sh.grid[2][key + 1].value == "ACME CORP"
     assert sh.grid[2][ls._SO_CO_HIST_COL - 1].value == "CO#1 - PRICE CHANGE"
     assert sh.grid[2][ls._SO_PDF_COL - 1].value == "Z:\\SO\\421001.pdf"
+    # Hierarchy block: 421000 has no items, so the tree rows are all 421001's —
+    # its LINE row (price/type tails stripped) then its DETAIL row, banded at
+    # the group start and cross-referenced to the flat table's item #.
+    tkey = ls._SO_TREE_KEY_COL - 1
+    assert hdr[tkey] == "Queue Order" and hdr[tkey + 1:tkey + 5] == ls.SO_TREE_HEADERS
+    assert sh.grid[1][tkey].value == "421001" and sh.grid[1][tkey].fill == FILL_NEW
+    assert sh.grid[1][tkey + 1].value.startswith("FAN WHEEL")
+    assert sh.grid[1][tkey + 3].value == "LINE" and sh.grid[1][tkey + 4].value == 1
+    assert sh.grid[2][tkey + 3].value == "DETAIL" and sh.grid[2][tkey].fill is None
 
 
 def test_sales_order_sheet_picker_and_formulas():
@@ -742,9 +751,20 @@ def test_sales_order_sheet_picker_and_formulas():
     pdf = summary[len(ls.SO_SUMMARY_COLUMNS)]
     assert "HYPERLINK" in pdf.value and pdf.font == ls.F_LINK
     assert "INDEX" in summary[-1].value and summary[-1].overflow
-    # Line-items spill: FILTER over the item block (cols B..) keyed on col A; a
-    # blank picker collapses to blank rather than spilling every row.
-    items = tab.grid[8][0].value
+    # Line items twice, side by side: the component hierarchy on the left
+    # (FILTER over the tree block), the flat capture table to its right
+    # (FILTER over the item block, keyed on col A). Both collapse to blank on
+    # a blank picker rather than spilling every row.
+    headers = [c.value for c in tab.grid[7]]
+    assert headers[:len(ls.SO_TREE_HEADERS)] == ls.SO_TREE_HEADERS
+    flat_c0 = len(ls.SO_TREE_HEADERS) + 1              # 0-based flat block start
+    assert headers[flat_c0:] == ls.SO_ITEM_HEADERS
+    tree = tab.grid[8][0].value
+    tkey = get_column_letter(ls._SO_TREE_KEY_COL)
+    t1 = get_column_letter(ls._SO_TREE_FIRST)
+    assert tree.startswith('=IF($B$1&""="",""')
+    assert f"FILTER('SO Data'!${t1}$2:" in tree and f"${tkey}$2:${tkey}$6" in tree
+    items = tab.grid[8][flat_c0].value
     assert items.startswith('=IF($B$1&""="",""')
     assert "FILTER('SO Data'!$B$2:" in items and "$A$2:$A$6" in items
 
