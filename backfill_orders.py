@@ -46,6 +46,7 @@ import logging
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -59,18 +60,21 @@ from config import (
 from templates import parse_quote_run
 from sales_orders import (
     _parse_doc, _latest_of_type, _run_docs, _run_filename, _run_files_in_folder,
-    _trigger_js, _so_filename, _download_error, SO_TYPE, parse_sales_order_pdf,
+    _trigger_js, _so_filename, _download_error, _required_so_document_kind,
+    _co_number_for_so_doc, SO_TYPE, parse_sales_order_pdf,
 )
 from scraper import CONTAINER_SELECTOR
 import autocad_scan
 import line_items
 from process_lock import cbc_fetch_lock
 from sales_order_validation import (
+    DOCUMENT_KIND_ORDER_VERIFICATION,
     accept_existing,
     failed_acceptance,
     finalize_candidate,
     modal_text_matches_job,
     staging_path,
+    validate_sales_order_pdf,
 )
 
 log = logging.getLogger("backfill")
@@ -278,8 +282,15 @@ def _download(context, page_url: str, href: str, dest: Path) -> Optional[str]:
         return None
 
 
-def _download_sales_order(context, page_url: str, href: str, destination: Path, job: str):
-    existing = accept_existing(destination, job)
+def _download_sales_order(
+    context,
+    page_url: str,
+    href: str,
+    destination: Path,
+    job: str,
+    required_document_kind: str | None = None,
+):
+    existing = accept_existing(destination, job, required_document_kind)
     if existing and existing.path:
         return existing
     if existing:
@@ -294,7 +305,9 @@ def _download_sales_order(context, page_url: str, href: str, destination: Path, 
     downloaded = _download(context, page_url, href, staged)
     if not downloaded:
         return failed_acceptance(job, f"download failed for {destination.name}")
-    accepted = finalize_candidate(downloaded, destination, job)
+    accepted = finalize_candidate(
+        downloaded, destination, job, required_document_kind
+    )
     if not accepted.path:
         log.warning(
             "  %s: rejected downloaded Sales Order internal=%s status=%s -> %s",
@@ -313,7 +326,19 @@ def _close_modal(page) -> None:
     try:
         page.evaluate(
             "() => {"
-            " if (window.jQuery) jQuery('#modalDetail').modal('hide');"
+            " const modal = document.querySelector('#modalDetail');"
+            " try { if (modal && window.bootstrap?.Modal)"
+            "   bootstrap.Modal.getOrCreateInstance(modal).hide(); } catch (_) {}"
+            " try { if (window.jQuery?.fn?.modal)"
+            "   jQuery('#modalDetail').modal('hide'); } catch (_) {}"
+            " if (modal) {"
+            "   modal.classList.remove('show'); modal.style.display = 'none';"
+            "   modal.setAttribute('aria-hidden', 'true'); modal.removeAttribute('aria-modal');"
+            " }"
+            " document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());"
+            " document.body.classList.remove('modal-open');"
+            " document.body.style.removeProperty('overflow');"
+            " document.body.style.removeProperty('padding-right');"
             " document.querySelectorAll(\"#modalDetail a[href*='downloaddoc.aspx' i]\")"
             "  .forEach(a => a.remove());"
             "}")
@@ -367,21 +392,24 @@ def process_one(page, context, job: str, folder: str = "",
         so = _latest_of_type(docs, SO_TYPE)
         if so:
             href, doc = so
+            rec["so_source_type"] = doc.get("type", "")
             accepted = _download_sales_order(
                 context,
                 page.url,
                 href,
                 SALES_ORDER_DIR / job / _so_filename(job, doc["rev"]),
                 job,
+                _required_so_document_kind(doc),
             )
             so_pdf = accepted.path
             rec["so_validation"] = accepted.validation.status
             rec["so_internal_order"] = accepted.validation.internal_order
             rec["so_validation_method"] = accepted.validation.method
+            rec["so_document_kind"] = accepted.validation.document_kind
             rec["so_quarantine"] = accepted.quarantine_path
             if so_pdf:
-                rec["co_number"] = (doc["rev"] - 1) if doc["rev"] and doc["rev"] > 1 else 0
                 p = parse_sales_order_pdf(so_pdf)
+                rec["co_number"] = _co_number_for_so_doc(doc, p)
                 rec.update({
                     "so_design_desc": p.get("design_desc", ""), "so_size": p.get("size", ""),
                     "so_arrangement": p.get("arrangement", ""), "so_motor_pos": p.get("motor_pos", ""),
@@ -596,9 +624,14 @@ async def _download_async(context, page_url: str, href: str, dest: Path) -> Opti
 
 
 async def _download_sales_order_async(
-    context, page_url: str, href: str, destination: Path, job: str
+    context,
+    page_url: str,
+    href: str,
+    destination: Path,
+    job: str,
+    required_document_kind: str | None = None,
 ):
-    existing = accept_existing(destination, job)
+    existing = accept_existing(destination, job, required_document_kind)
     if existing and existing.path:
         return existing
     if existing:
@@ -613,7 +646,9 @@ async def _download_sales_order_async(
     downloaded = await _download_async(context, page_url, href, staged)
     if not downloaded:
         return failed_acceptance(job, f"download failed for {destination.name}")
-    accepted = finalize_candidate(downloaded, destination, job)
+    accepted = finalize_candidate(
+        downloaded, destination, job, required_document_kind
+    )
     if not accepted.path:
         log.warning(
             "  %s: rejected downloaded Sales Order internal=%s status=%s -> %s",
@@ -634,7 +669,19 @@ async def _close_modal_async(page) -> None:
     try:
         await page.evaluate(
             "() => {"
-            " if (window.jQuery) jQuery('#modalDetail').modal('hide');"
+            " const modal = document.querySelector('#modalDetail');"
+            " try { if (modal && window.bootstrap?.Modal)"
+            "   bootstrap.Modal.getOrCreateInstance(modal).hide(); } catch (_) {}"
+            " try { if (window.jQuery?.fn?.modal)"
+            "   jQuery('#modalDetail').modal('hide'); } catch (_) {}"
+            " if (modal) {"
+            "   modal.classList.remove('show'); modal.style.display = 'none';"
+            "   modal.setAttribute('aria-hidden', 'true'); modal.removeAttribute('aria-modal');"
+            " }"
+            " document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());"
+            " document.body.classList.remove('modal-open');"
+            " document.body.style.removeProperty('overflow');"
+            " document.body.style.removeProperty('padding-right');"
             " document.querySelectorAll(\"#modalDetail a[href*='downloaddoc.aspx' i]\")"
             "  .forEach(a => a.remove());"
             "}")
@@ -695,6 +742,7 @@ async def process_one_async(page, context, job: str, folder: str = "",
                     href,
                     SALES_ORDER_DIR / job / _so_filename(job, doc["rev"]),
                     job,
+                    _required_so_document_kind(doc),
                 )
                 if accepted.path or accepted.validation.status != "MISMATCH":
                     break
@@ -715,13 +763,15 @@ async def process_one_async(page, context, job: str, folder: str = "",
                 if not so:
                     break
             so_pdf = accepted.path
+            rec["so_source_type"] = doc.get("type", "")
             rec["so_validation"] = accepted.validation.status
             rec["so_internal_order"] = accepted.validation.internal_order
             rec["so_validation_method"] = accepted.validation.method
+            rec["so_document_kind"] = accepted.validation.document_kind
             rec["so_quarantine"] = accepted.quarantine_path
             if so_pdf:
-                rec["co_number"] = (doc["rev"] - 1) if doc["rev"] and doc["rev"] > 1 else 0
                 p = parse_sales_order_pdf(so_pdf)
+                rec["co_number"] = _co_number_for_so_doc(doc, p)
                 rec.update({
                     "so_design_desc": p.get("design_desc", ""), "so_size": p.get("size", ""),
                     "so_arrangement": p.get("arrangement", ""), "so_motor_pos": p.get("motor_pos", ""),
@@ -1081,6 +1131,47 @@ def save_progress(records: Dict[str, Dict[str, Any]]) -> None:
     tmp.replace(PROGRESS_PATH)  # atomic — a crash mid-write never corrupts the store
 
 
+def annotate_progress_document_kinds(
+    records: Dict[str, Dict[str, Any]], max_workers: int = 8
+) -> Dict[str, int]:
+    """Classify old completed PDFs once so report-backed rows can be retried."""
+    todo = [
+        (job, rec, str(rec.get("so_pdf") or ""))
+        for job, rec in records.items()
+        if rec.get("status") == "ok"
+        and not rec.get("so_document_kind")
+        and rec.get("so_pdf")
+    ]
+    counts: Dict[str, int] = {}
+    if not todo:
+        return counts
+
+    log.info("Checking document kind for %d completed Sales Order file(s)...", len(todo))
+
+    def classify(row):
+        job, _rec, pdf = row
+        return row, validate_sales_order_pdf(pdf, job)
+
+    workers = max(1, min(max_workers, len(todo)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for (job, rec, _pdf), validation in pool.map(classify, todo):
+            kind = validation.document_kind
+            rec["so_document_kind"] = kind if validation.matched else ""
+            rec["so_validation"] = validation.status
+            rec["so_internal_order"] = validation.internal_order
+            rec["so_validation_method"] = validation.method
+            key = kind if validation.matched else validation.status
+            counts[key] = counts.get(key, 0) + 1
+
+    reports = counts.get(DOCUMENT_KIND_ORDER_VERIFICATION, 0)
+    log.info(
+        "Completed-file audit: %s. %d report-backed row(s) will be rechecked.",
+        ", ".join(f"{kind}={count}" for kind, count in sorted(counts.items())),
+        reports,
+    )
+    return counts
+
+
 def _is_done(rec: Dict[str, Any], retry_not_found: bool = False) -> bool:
     """Skip trusted answers and misses made by this serial scanner version.
 
@@ -1091,6 +1182,32 @@ def _is_done(rec: Dict[str, Any], retry_not_found: bool = False) -> bool:
     if not rec:
         return False
     if rec.get("status") == "ok":
+        kind = str(rec.get("so_document_kind") or "")
+        source = str(rec.get("so_source_type") or "")
+        if kind == DOCUMENT_KIND_ORDER_VERIFICATION:
+            # A newly scanned CS-only legacy order is an intentional fallback.
+            # An unclassified/other-source report needs one pass with the fixed
+            # selector so CBC_SalesOrder gets a chance to replace it.
+            return source.casefold() == "cs_salesorder"
+        if kind:
+            return True
+
+        # Old completed records predate document-kind metadata. Inspect their
+        # archived PDF once at resume so only report-backed rows are revisited;
+        # genuine Sales Orders remain trusted and do not inflate the todo list.
+        pdf = str(rec.get("so_pdf") or "").strip()
+        job = str(rec.get("job") or "").strip()
+        if pdf and job:
+            try:
+                validation = validate_sales_order_pdf(pdf, job)
+                if validation.matched:
+                    rec["so_document_kind"] = validation.document_kind
+                    if validation.document_kind == DOCUMENT_KIND_ORDER_VERIFICATION:
+                        return False
+                else:
+                    return False
+            except OSError:
+                pass
         return True
     if rec.get("status") in {"not-found", "no-SO"}:
         return (not retry_not_found
@@ -1256,6 +1373,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         targets = sorted(targets, key=_job_num_key, reverse=True)
     log.info("Backfill target set: %d job(s).", len(targets))
     records = {} if args.rescan else load_progress()
+    if not args.rescan:
+        annotate_progress_document_kinds(records)
     dwg = autocad_scan.load_progress()  # read-only merge of the DWG scan, if it's been run
     if dwg:
         log.info("Merging AutoCAD DWG scan for %d job(s).", len(dwg))

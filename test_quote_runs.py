@@ -17,8 +17,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from sales_orders import (
-    _download_error, _is_run_name, _latest_of_type, _run_docs, _run_filename,
-    _run_files_in_folder, SO_TYPE,
+    _co_number_for_so_doc, _download_error, _is_run_name, _latest_of_type,
+    _run_docs, _run_filename, _run_files_in_folder, SO_TYPE,
 )
 from excel_writer import _drive_run_label
 from templates import QuoteRunContext, parse_quote_run
@@ -73,13 +73,26 @@ def test_d64_wheel_construction_xlsx():
         ["421492_314-26-1647 D64 Wheel Construction (Inner).xlsx"], runs
 
 
-def test_so_accepts_cs_salesorder():
-    # Some historical orders file their actual Sales Order as CS_SalesOrder,
-    # so CBC_ and CS_ SalesOrder pid types are the same document family.
-    for docs, fn in ((DOCS_421473, "OrderVerificationReportViewer_04ccbc64-2e6e-4c0d"),
-                     (DOCS_421492, "OrderVerificationReportViewer_de47e417-9c6f-4271")):
+def test_true_cbc_salesorder_outranks_verification_report():
+    # CS_SalesOrder is an Order Verification Report with its own revision
+    # counter. It must not outrank the actual CBC_SalesOrder document.
+    for docs, fn in ((DOCS_421473, "421473 - Sales Order.pdf"),
+                     (DOCS_421492, "421492 - Sales Order.pdf")):
         so = _latest_of_type(docs, SO_TYPE)
-        assert so[1]["fn"] == fn and so[1]["rev"] == 2
+        assert so[1]["fn"] == fn and so[1]["rev"] == 1
+
+
+def test_cs_salesorder_remains_legacy_fallback():
+    docs = [_doc("CS_SalesOrder", 3, "OrderVerificationReportViewer_old.pdf")]
+    assert _latest_of_type(docs, SO_TYPE) == docs[0]
+
+
+def test_verification_report_revision_is_not_a_change_order():
+    assert _co_number_for_so_doc({"type": "CBC_SalesOrder", "rev": 3}) == 2
+    assert _co_number_for_so_doc({"type": "CS_SalesOrder", "rev": 3}) == 0
+    assert _co_number_for_so_doc(
+        {"type": "CS_SalesOrder", "rev": 3}, {"header_co": 1}
+    ) == 1
 
 
 def test_dedicated_pid_type_sorts_first():

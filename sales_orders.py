@@ -55,6 +55,8 @@ import autocad_scan
 import line_items
 from process_lock import cbc_fetch_lock
 from sales_order_validation import (
+    DOCUMENT_KIND_ORDER_VERIFICATION,
+    DOCUMENT_KIND_SALES_ORDER,
     accept_existing,
     failed_acceptance,
     finalize_candidate,
@@ -328,9 +330,11 @@ _CO_IN_SO_NAME = re.compile(r"CO#?(\d+)", re.I)
 
 
 def _latest_so_in_folder(folder: Path, expected_job: str):
-    """The newest Sales Order revision on disk in a job's folder: the highest CO#
-    in the file name ('… CO2.pdf' beats '… (original).pdf'), mtime as a
-    tiebreak. Returns (path, co_number) or None."""
+    """Best verified Sales Order in a job folder, with reports as fallback.
+
+    A true Sales Order always outranks an Order Verification Report whose old
+    archive name happens to contain a larger CO number.
+    """
     best = None
     try:
         for p in folder.glob("*.pdf"):
@@ -348,8 +352,11 @@ def _latest_so_in_folder(folder: Path, expected_job: str):
                     )
                 continue
             m = _CO_IN_SO_NAME.search(p.name)
-            co = int(m.group(1)) if m else 0
-            key = (co, p.stat().st_mtime)
+            is_report = (
+                accepted.validation.document_kind == DOCUMENT_KIND_ORDER_VERIFICATION
+            )
+            co = 0 if is_report else (int(m.group(1)) if m else 0)
+            key = (int(not is_report), co, p.stat().st_mtime)
             if best is None or key > best[0]:
                 best = (key, p, co)
     except OSError:
@@ -750,10 +757,43 @@ def _norm_type(t: str | None) -> str:
 
 
 def _latest_of_type(docs: List, type_name: str):
-    """Highest-revision (href, doc) whose pid type matches type_name, or None."""
+    """Highest revision from the requested pid family, preferring exact type.
+
+    CBC currently exposes both ``CBC_SalesOrder`` (the actual Sales Order) and
+    ``CS_SalesOrder`` (an Order Verification Report). Their revision counters
+    are unrelated, so an exact CBC match must win before normalized fallbacks.
+    """
     want = _norm_type(type_name)
     matches = [hd for hd in docs if _norm_type(hd[1].get("type")) == want]
-    return max(matches, key=lambda hd: hd[1].get("rev") or 0) if matches else None
+    exact = [
+        hd for hd in matches
+        if str(hd[1].get("type") or "").casefold() == str(type_name or "").casefold()
+    ]
+    candidates = exact or matches
+    return max(candidates, key=lambda hd: hd[1].get("rev") or 0) if candidates else None
+
+
+def _required_so_document_kind(doc: Dict[str, Any]) -> str | None:
+    """Require true Sales Order contents only for the explicit CBC pid type.
+
+    ``CS_SalesOrder`` remains a legacy fallback when CBC has no true Sales
+    Order link. Leaving that fallback unforced also prevents a transient modal
+    miss from replacing an already archived true Sales Order with a report.
+    """
+    if str(doc.get("type") or "").casefold() == SO_TYPE.casefold():
+        return DOCUMENT_KIND_SALES_ORDER
+    return None
+
+
+def _co_number_for_so_doc(doc: Dict[str, Any], parsed: Dict[str, Any] | None = None) -> int:
+    """Return a trustworthy CO number for the selected Sales Order document."""
+    if str(doc.get("type") or "").casefold() == SO_TYPE.casefold():
+        rev = doc.get("rev")
+        return (int(rev) - 1) if rev and int(rev) > 1 else 0
+    try:
+        return max(0, int((parsed or {}).get("header_co") or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _is_run_name(fn: str) -> bool:
@@ -855,9 +895,14 @@ async def _download(context, page_url: str, href: str, dest: Path) -> str | None
 
 
 async def _download_sales_order(
-    context, page_url: str, href: str, destination: Path, expected_job: str
+    context,
+    page_url: str,
+    href: str,
+    destination: Path,
+    expected_job: str,
+    required_document_kind: str | None = None,
 ):
-    existing = accept_existing(destination, expected_job)
+    existing = accept_existing(destination, expected_job, required_document_kind)
     if existing and existing.path:
         return existing
     if existing:
@@ -873,7 +918,9 @@ async def _download_sales_order(
     downloaded = await _download(context, page_url, href, staged)
     if not downloaded:
         return failed_acceptance(expected_job, f"download failed for {destination.name}")
-    accepted = finalize_candidate(downloaded, destination, expected_job)
+    accepted = finalize_candidate(
+        downloaded, destination, expected_job, required_document_kind
+    )
     if not accepted.path:
         log.warning(
             "Rejected downloaded Sales Order for %s: internal=%s status=%s -> %s",
@@ -946,17 +993,20 @@ async def _process_job(page, context, job: str, args_js: str) -> Dict[str, Any]:
     if so:
         href, doc = so
         res["rev"] = doc["rev"]
+        res["so_source_type"] = doc.get("type", "")
         accepted = await _download_sales_order(
             context,
             page.url,
             href,
             SALES_ORDER_DIR / job / _so_filename(job, doc["rev"]),
             job,
+            _required_so_document_kind(doc),
         )
         res["pdf_path"] = accepted.path
         res["so_validation"] = accepted.validation.status
         res["so_internal_order"] = accepted.validation.internal_order
         res["so_validation_method"] = accepted.validation.method
+        res["so_document_kind"] = accepted.validation.document_kind
         res["so_quarantine"] = accepted.quarantine_path
     else:
         # The docs DID load and there's just no Sales Order among them (e.g.
@@ -1113,14 +1163,17 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2,
         r = so_results.get(jn, {})
         rev = r.get("rev")
         pdf = r.get("pdf_path")
-        j["co_number"] = (rev - 1) if pdf and rev and rev > 1 else 0
+        parsed = parse_sales_order_pdf(pdf) if pdf else {}
+        selected_doc = {"type": r.get("so_source_type", ""), "rev": rev}
+        j["co_number"] = _co_number_for_so_doc(selected_doc, parsed) if pdf else 0
         if j["co_number"]:
             n_co += 1
 
-        parsed = parse_sales_order_pdf(pdf) if pdf else {}
         j["so_validation"] = r.get("so_validation", "")
         j["so_internal_order"] = r.get("so_internal_order", "")
         j["so_validation_method"] = r.get("so_validation_method", "")
+        j["so_document_kind"] = r.get("so_document_kind", "")
+        j["so_source_type"] = r.get("so_source_type", "")
         j["so_quarantine"] = r.get("so_quarantine", "")
         j["co_history"] = parsed.get("co_history", [])
         j["so_design_desc"] = parsed.get("design_desc", "")

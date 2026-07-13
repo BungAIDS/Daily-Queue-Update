@@ -40,7 +40,11 @@ from typing import List, Optional, Tuple
 
 from config import SALES_ORDER_DIR
 import line_items as li
-from sales_order_validation import normalize_order, validate_sales_order_pdf
+from sales_order_validation import (
+    DOCUMENT_KIND_ORDER_VERIFICATION,
+    normalize_order,
+    validate_sales_order_pdf,
+)
 
 log = logging.getLogger("line-items-scan")
 
@@ -55,9 +59,7 @@ _DUMP_MARKS = {
 
 
 def _latest_so_pdf(folder: Path) -> Optional[Tuple[Path, int]]:
-    """The newest Sales Order revision in a job's archive folder: highest CO#
-    in the file name ('... CO#2.pdf' beats '... (original).pdf'), mtime as the
-    tiebreak. Returns (pdf, co_number) or None."""
+    """Best verified Sales Order, falling back to a verification report."""
     best = None
     expected_job = normalize_order(folder.name)
     try:
@@ -75,8 +77,9 @@ def _latest_so_pdf(folder: Path) -> Optional[Tuple[Path, int]]:
                 )
                 continue
             m = CO_IN_NAME.search(p.name)
-            co = int(m.group(1)) if m else 0
-            key = (co, p.stat().st_mtime)
+            is_report = validation.document_kind == DOCUMENT_KIND_ORDER_VERIFICATION
+            co = 0 if is_report else (int(m.group(1)) if m else 0)
+            key = (int(not is_report), co, p.stat().st_mtime)
             if best is None or key > best[0]:
                 best = (key, p, co)
     except OSError as e:
@@ -112,7 +115,9 @@ def _resolve(args_jobs: List[str]) -> List[Tuple[str, Path, int]]:
             job = normalize_order(jm.group(1) if jm else p.stem)
             validation = validate_sales_order_pdf(p, job)
             if validation.matched:
-                out.append((job, p, int(m.group(1)) if m else 0))
+                is_report = validation.document_kind == DOCUMENT_KIND_ORDER_VERIFICATION
+                co = 0 if is_report else (int(m.group(1)) if m else 0)
+                out.append((job, p, co))
             else:
                 log.warning(
                     "Skipping unverified Sales Order %s (expected %s, internal %s, status %s)",

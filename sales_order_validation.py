@@ -26,6 +26,14 @@ ORDER_VERIFICATION_RE = re.compile(
     r"\s*(?:\r?\n)+\s*([0-9]{5,7}[A-Z]?)\b",
     re.IGNORECASE,
 )
+ORDER_VERIFICATION_TITLE_RE = re.compile(r"\bOrder\s+Verification\s+Report\b", re.IGNORECASE)
+SALES_ORDER_TITLE_RE = re.compile(
+    r"\b(?:Chicago\s+Blower\s+Corporation\s+)?Sales\s+Order\b", re.IGNORECASE
+)
+
+DOCUMENT_KIND_SALES_ORDER = "SALES_ORDER"
+DOCUMENT_KIND_ORDER_VERIFICATION = "ORDER_VERIFICATION"
+DOCUMENT_KIND_UNKNOWN = "UNKNOWN"
 
 
 @dataclass(frozen=True)
@@ -35,6 +43,7 @@ class SalesOrderValidation:
     status: str
     method: str
     error: str = ""
+    document_kind: str = DOCUMENT_KIND_UNKNOWN
 
     @property
     def matched(self) -> bool:
@@ -66,6 +75,16 @@ def extract_internal_order(text: str) -> tuple[str, str]:
     return "", "none"
 
 
+def classify_sales_order_document(text: str) -> str:
+    """Identify the two same-order PDF layouts CBC exposes as SalesOrder pids."""
+    text = text or ""
+    if ORDER_VERIFICATION_TITLE_RE.search(text) or ORDER_VERIFICATION_RE.search(text):
+        return DOCUMENT_KIND_ORDER_VERIFICATION
+    if SALES_ORDER_TITLE_RE.search(text):
+        return DOCUMENT_KIND_SALES_ORDER
+    return DOCUMENT_KIND_UNKNOWN
+
+
 def _extract_first_page(path: Path) -> str:
     try:
         from pypdf import PdfReader
@@ -84,16 +103,38 @@ def _extract_first_page(path: Path) -> str:
         return (pdf.pages[0].extract_text() or "") if pdf.pages else ""
 
 
-def validate_sales_order_pdf(path: str | Path, expected_order: str) -> SalesOrderValidation:
+def validate_sales_order_pdf(
+    path: str | Path,
+    expected_order: str,
+    required_document_kind: str | None = None,
+) -> SalesOrderValidation:
     expected = normalize_order(expected_order)
     try:
-        internal, method = extract_internal_order(_extract_first_page(Path(path)))
+        text = _extract_first_page(Path(path))
+        internal, method = extract_internal_order(text)
+        document_kind = classify_sales_order_document(text)
     except Exception as exc:  # noqa: BLE001 - validation must fail closed
-        return SalesOrderValidation(expected, "", "ERROR", "none", f"{type(exc).__name__}: {exc}")
+        return SalesOrderValidation(
+            expected,
+            "",
+            "ERROR",
+            "none",
+            f"{type(exc).__name__}: {exc}",
+            DOCUMENT_KIND_UNKNOWN,
+        )
     if not internal:
-        return SalesOrderValidation(expected, "", "UNREADABLE", method)
-    status = "MATCH" if internal == expected else "MISMATCH"
-    return SalesOrderValidation(expected, internal, status, method)
+        return SalesOrderValidation(
+            expected, "", "UNREADABLE", method, document_kind=document_kind
+        )
+    if internal != expected:
+        status = "MISMATCH"
+    elif required_document_kind and document_kind != required_document_kind:
+        status = "WRONG_DOCUMENT"
+    else:
+        status = "MATCH"
+    return SalesOrderValidation(
+        expected, internal, status, method, document_kind=document_kind
+    )
 
 
 def modal_text_matches_job(text: str, expected_order: str) -> bool:
@@ -167,37 +208,86 @@ def quarantine_candidate(
     return target
 
 
+def quarantine_superseded_verification_reports(
+    destination: str | Path, expected_order: str
+) -> list[str]:
+    """Move same-job verification reports aside once a true SO is confirmed."""
+    destination = Path(destination)
+    moved: list[str] = []
+    try:
+        siblings = list(destination.parent.glob("*.pdf"))
+    except OSError:
+        return moved
+    for path in siblings:
+        try:
+            if path.resolve() == destination.resolve():
+                continue
+            validation = validate_sales_order_pdf(path, expected_order)
+            if (not validation.matched
+                    or validation.document_kind != DOCUMENT_KIND_ORDER_VERIFICATION):
+                continue
+            target = quarantine_candidate(
+                path,
+                destination,
+                validation,
+                bucket="superseded-order-verification-reports",
+            )
+            moved.append(str(target))
+        except OSError:
+            continue
+    return moved
+
+
 def finalize_candidate(
-    candidate: str | Path, destination: str | Path, expected_order: str
+    candidate: str | Path,
+    destination: str | Path,
+    expected_order: str,
+    required_document_kind: str | None = None,
 ) -> SalesOrderAcceptance:
     candidate = Path(candidate)
     destination = Path(destination)
-    validation = validate_sales_order_pdf(candidate, expected_order)
+    validation = validate_sales_order_pdf(
+        candidate, expected_order, required_document_kind
+    )
     if not validation.matched:
         quarantined = quarantine_candidate(candidate, destination, validation)
         return SalesOrderAcceptance(None, validation, str(quarantined))
 
     if candidate.resolve() == destination.resolve():
+        if required_document_kind == DOCUMENT_KIND_SALES_ORDER:
+            quarantine_superseded_verification_reports(destination, expected_order)
         return SalesOrderAcceptance(str(destination), validation)
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists():
-        existing = validate_sales_order_pdf(destination, expected_order)
+        existing = validate_sales_order_pdf(
+            destination, expected_order, required_document_kind
+        )
         if existing.matched:
             duplicate = quarantine_candidate(
                 candidate, destination, validation, bucket="duplicate-valid-downloads"
             )
+            if required_document_kind == DOCUMENT_KIND_SALES_ORDER:
+                quarantine_superseded_verification_reports(destination, expected_order)
             return SalesOrderAcceptance(str(destination), existing, str(duplicate))
         quarantine_candidate(destination, destination, existing, bucket="rejected-existing-files")
     candidate.replace(destination)
+    if required_document_kind == DOCUMENT_KIND_SALES_ORDER:
+        quarantine_superseded_verification_reports(destination, expected_order)
     return SalesOrderAcceptance(str(destination), validation)
 
 
-def accept_existing(destination: str | Path, expected_order: str) -> SalesOrderAcceptance | None:
+def accept_existing(
+    destination: str | Path,
+    expected_order: str,
+    required_document_kind: str | None = None,
+) -> SalesOrderAcceptance | None:
     destination = Path(destination)
     if not destination.exists():
         return None
-    return finalize_candidate(destination, destination, expected_order)
+    return finalize_candidate(
+        destination, destination, expected_order, required_document_kind
+    )
 
 
 def failed_acceptance(expected_order: str, error: str) -> SalesOrderAcceptance:

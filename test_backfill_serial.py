@@ -31,6 +31,15 @@ def test_dead_session_probe_has_a_bootstrap_known_good_order():
 def test_resume_trusts_only_current_serial_misses():
     version = backfill_orders.BACKFILL_SCAN_VERSION
     assert backfill_orders._is_done({"status": "ok"})
+    assert not backfill_orders._is_done({
+        "status": "ok", "so_document_kind": "ORDER_VERIFICATION"})
+    assert backfill_orders._is_done({
+        "status": "ok", "so_document_kind": "ORDER_VERIFICATION",
+        "so_source_type": "CS_SalesOrder"})
+    with patch("backfill_orders.validate_sales_order_pdf", return_value=SimpleNamespace(
+        matched=True, document_kind="ORDER_VERIFICATION")):
+        assert not backfill_orders._is_done({
+            "status": "ok", "job": "422018", "so_pdf": __file__})
     assert not backfill_orders._is_done({"status": "error"})
     assert not backfill_orders._is_done({"status": "needs-retry-wrong-SO-quarantined"})
     assert not backfill_orders._is_done({"status": "search-state-retry"})
@@ -51,6 +60,32 @@ def test_resume_trusts_only_current_serial_misses():
          "backfill_attempts": 2},
         retry_not_found=True,
     )
+
+
+def test_completed_file_audit_marks_report_rows_for_retry(tmp: Path):
+    pdf = tmp / "422018.pdf"
+    pdf.parent.mkdir(parents=True, exist_ok=True)
+    pdf.write_bytes(b"placeholder")
+    records = {
+        "422018": {"job": "422018", "status": "ok", "so_pdf": str(pdf)},
+        "422019": {"job": "422019", "status": "ok",
+                   "so_pdf": str(pdf), "so_document_kind": "SALES_ORDER"},
+    }
+    validation = SimpleNamespace(
+        matched=True,
+        document_kind="ORDER_VERIFICATION",
+        status="MATCH",
+        internal_order="422018",
+        method="order-verification-table",
+    )
+    with patch("backfill_orders.validate_sales_order_pdf", return_value=validation) as validate:
+        counts = backfill_orders.annotate_progress_document_kinds(records, max_workers=1)
+
+    assert counts == {"ORDER_VERIFICATION": 1}
+    assert validate.call_count == 1
+    assert records["422018"]["so_document_kind"] == "ORDER_VERIFICATION"
+    assert not backfill_orders._is_done(records["422018"])
+    assert backfill_orders._is_done(records["422019"])
 
 
 def test_serial_pass_has_one_order_in_flight_and_saves_each_job():

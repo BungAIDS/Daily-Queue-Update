@@ -9,9 +9,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from sales_order_validation import (
+    DOCUMENT_KIND_ORDER_VERIFICATION,
+    DOCUMENT_KIND_SALES_ORDER,
     SalesOrderAcceptance,
     SalesOrderValidation,
     accept_existing,
+    classify_sales_order_document,
     extract_internal_order,
     finalize_candidate,
     modal_text_matches_job,
@@ -82,6 +85,59 @@ def test_validate_pdf_matches_internal_order(tmp_path: Path):
     assert validation.internal_order == "421314"
 
 
+def test_distinguishes_sales_order_from_verification_report():
+    assert classify_sales_order_document(
+        "Chicago Blower Corporation Sales Order\nOrder# RepRef#"
+    ) == DOCUMENT_KIND_SALES_ORDER
+    assert classify_sales_order_document(
+        "Order Verification Report\nOrder Cust PO Ship Via"
+    ) == DOCUMENT_KIND_ORDER_VERIFICATION
+
+
+def test_same_job_verification_report_cannot_fill_true_so_slot(tmp_path: Path):
+    report = tmp_path / "422027 - Sales Order (original).pdf"
+    _mini_pdf([
+        "Order Verification Report",
+        "Order Cust PO Ship Via Package Prepaid Date Order Terms Verification Date",
+        "422027 CBC PO UPS",
+    ], report)
+
+    legacy = validate_sales_order_pdf(report, "422027")
+    strict = accept_existing(report, "422027", DOCUMENT_KIND_SALES_ORDER)
+
+    assert legacy.matched
+    assert legacy.document_kind == DOCUMENT_KIND_ORDER_VERIFICATION
+    assert strict is not None and strict.path is None
+    assert strict.validation.status == "WRONG_DOCUMENT"
+    assert Path(strict.quarantine_path).exists()
+    assert not report.exists()
+
+
+def test_confirmed_true_so_quarantines_sibling_report(tmp_path: Path):
+    root = tmp_path / "SALES ORDERS FOR DAILY QUEUE"
+    folder = root / "422018"
+    true_so = folder / "422018 - Sales Order (original).pdf"
+    report = folder / "422018 - Sales Order CO1.pdf"
+    _mini_pdf([
+        "Chicago Blower Corporation Sales Order",
+        "Order# RepRef#",
+        "422018 987",
+    ], true_so)
+    _mini_pdf([
+        "Order Verification Report",
+        "Order Cust PO Ship Via Package Prepaid Date Order Terms Verification Date",
+        "422018 CBC PO UPS",
+    ], report)
+
+    accepted = accept_existing(true_so, "422018", DOCUMENT_KIND_SALES_ORDER)
+
+    assert accepted is not None and accepted.path == str(true_so)
+    assert true_so.exists()
+    assert not report.exists()
+    quarantined = list((tmp_path / "SALES ORDERS FOR DAILY QUEUE QUARANTINE").rglob(report.name))
+    assert len(quarantined) == 1
+
+
 def test_valid_staged_pdf_is_promoted(tmp_path: Path):
     root = tmp_path / "SALES ORDERS FOR DAILY QUEUE"
     destination = root / "421314" / "421314 - Sales Order (original).pdf"
@@ -137,6 +193,28 @@ def test_line_item_scan_uses_latest_verified_sales_order(tmp_path: Path):
     path, co_number = _latest_so_pdf(folder)
     assert path.name == "421314 - Sales Order CO2.pdf"
     assert co_number == 2
+
+
+def test_true_sales_order_outranks_report_with_co_filename(tmp_path: Path):
+    from line_items_scan import _latest_so_pdf
+    from sales_orders import _latest_so_in_folder
+
+    folder = tmp_path / "422018"
+    true_so = folder / "422018 - Sales Order (original).pdf"
+    report = folder / "422018 - Sales Order CO9.pdf"
+    _mini_pdf([
+        "Chicago Blower Corporation Sales Order",
+        "Order# RepRef#",
+        "422018 987",
+    ], true_so)
+    _mini_pdf([
+        "Order Verification Report",
+        "Order Cust PO Ship Via Package Prepaid Date Order Terms Verification Date",
+        "422018 CBC PO UPS",
+    ], report)
+
+    assert _latest_so_pdf(folder) == (true_so, 0)
+    assert _latest_so_in_folder(folder, "422018") == (true_so, 0)
 
 
 def test_async_backfill_rejection_cannot_save_co_or_so_data():
