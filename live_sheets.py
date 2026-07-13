@@ -799,17 +799,26 @@ SO_SUMMARY_COLUMNS = [
     ("Max Temp", "so_max_temp"), ("Special Temp", "so_special_temp"),
     ("Primary Rep", "primary_rep"),
 ]
+# The component-hierarchy block (see so_hierarchy.tree_rows): the rolled-up
+# tree the tab shows beside the flat capture table. Item # cross-references
+# the flat table's '#' column; Kind says where each row lives in the store
+# (FAMILY/LINE/FACTS/DETAIL/REVIEW).
+SO_TREE_HEADERS = ["Hierarchy", "Price", "Kind", "Item #"]
 # SO Data column geometry (1-based), shared by both builders so the visible
 # tab's formulas always aim at the right data columns: the line-item block
-# (Queue Order + SO_ITEM_HEADERS), a blank gap, then the per-order summary
-# block (Queue Order — the picker's dropdown source — the spec fields, the CO
-# history, and the SO PDF path the Open-PDF link looks up).
+# (Queue Order + SO_ITEM_HEADERS), a blank gap, the per-order summary block
+# (Queue Order — the picker's dropdown source — the spec fields, the CO
+# history, and the SO PDF path the Open-PDF link looks up), a blank gap, then
+# the hierarchy block (Queue Order + SO_TREE_HEADERS).
 _SO_ITEM_NCOLS = 1 + len(SO_ITEM_HEADERS)
 _SO_KEY_COL = _SO_ITEM_NCOLS + 2
 _SO_SUM_FIRST = _SO_KEY_COL + 1
 _SO_SUM_LAST = _SO_SUM_FIRST + len(SO_SUMMARY_COLUMNS) - 1
 _SO_CO_HIST_COL = _SO_SUM_LAST + 1
 _SO_PDF_COL = _SO_CO_HIST_COL + 1
+_SO_TREE_KEY_COL = _SO_PDF_COL + 2
+_SO_TREE_FIRST = _SO_TREE_KEY_COL + 1
+_SO_TREE_LAST = _SO_TREE_KEY_COL + len(SO_TREE_HEADERS)
 
 
 def _job_num_key(job: str) -> tuple:
@@ -838,24 +847,38 @@ def _so_summary_values(j: Dict[str, Any]) -> List[Any]:
 
 def sales_order_data_sheet(jobs: List[Dict[str, Any]]) -> Sheet:
     """The flat table behind the Sales Order tab: the line-item block on the
-    left (one row per captured item, grouped by order) and one summary row per
-    on-board order on the right — the parsed spec fields plus the CO history
-    and the SO PDF path. The summary block's Queue Order column doubles as the
-    picker's dropdown source. Ordered by JOB NUMBER, not board position, so the
-    board reshuffling every poll doesn't repaint this tab."""
+    left (one row per captured item, grouped by order), one summary row per
+    on-board order in the middle — the parsed spec fields plus the CO history
+    and the SO PDF path — and the component-hierarchy block on the right (one
+    row per so_hierarchy tree row). The summary block's Queue Order column
+    doubles as the picker's dropdown source. Ordered by JOB NUMBER, not board
+    position, so the board reshuffling every poll doesn't repaint this tab."""
+    import so_hierarchy
+
     jobs = sorted(jobs, key=lambda j: _job_num_key(str(j.get("job") or "")))
     item_rows: List[List[Any]] = []
+    tree_vals: List[List[Any]] = []
+    tree_first: set = set()                    # each order's first tree row (banded)
     for j in jobs:
         jn = str(j.get("job") or "")
         for r in sales_order_item_rows(j):
             item_rows.append([jn] + r)
+        first = True
+        for r in so_hierarchy.tree_rows(j.get("line_items") or []):
+            if first:
+                tree_first.add(len(tree_vals))
+                first = False
+            tree_vals.append([jn, so_hierarchy.indent_text(r), r["price"],
+                              r["kind"], r["item_no"] or ""])
 
     sh = Sheet(SO_DATA_TAB, freeze="A2")
     sh.row(_header_cells(["Queue Order"] + SO_ITEM_HEADERS) + [Cell("")]
            + _header_cells(["Queue Order"] + [h for h, _ in SO_SUMMARY_COLUMNS]
-                           + ["CO History", "SO PDF"]))
+                           + ["CO History", "SO PDF"]) + [Cell("")]
+           + _header_cells(["Queue Order"] + SO_TREE_HEADERS))
+    n_summary = 1 + len(SO_SUMMARY_COLUMNS) + 2    # key + fields + CO hist + PDF
     prev = None
-    for i in range(max(len(item_rows), len(jobs))):
+    for i in range(max(len(item_rows), len(jobs), len(tree_vals))):
         if i < len(item_rows):
             vals = item_rows[i]
             first = vals[0] != prev            # grey band starts each order's group
@@ -871,6 +894,11 @@ def sales_order_data_sheet(jobs: List[Dict[str, Any]]) -> Sheet:
                       + [Cell(v) for v in _so_summary_values(j)]
                       + [Cell(" | ".join(str(x) for x in j.get("co_history") or [])),
                          Cell((j.get("so_pdf") or "").strip())])
+        elif i < len(tree_vals):               # pad so the tree block stays aligned
+            cells += [Cell("")] * n_summary
+        if i < len(tree_vals):
+            fill = FILL_NEW if i in tree_first else None
+            cells += [Cell("")] + [Cell(v, fill=fill) for v in tree_vals[i]]
         sh.row(cells)
     return sh
 
@@ -878,10 +906,12 @@ def sales_order_data_sheet(jobs: List[Dict[str, Any]]) -> Sheet:
 def sales_order_sheet(n_data_rows: int, n_orders: int) -> Sheet:
     """The visible Sales Order tab: yellow input cell in B1 (dropdown of the
     queue's orders; typing an order # also works), a one-row spill of the
-    order's parsed SO spec — with an Open-PDF link and its CO history — and a
-    FILTER spill of every line item captured from its Sales Order.
-    `n_data_rows` is the SO Data sheet's data row count (its nrows minus the
-    header); `n_orders` the number of on-board orders (= summary rows)."""
+    order's parsed SO spec — with an Open-PDF link and its CO history — then
+    the line items TWICE: the component hierarchy (so_hierarchy's rollup) on
+    the left and the flat capture table on the right, cross-referenced by
+    item #. `n_data_rows` is the SO Data sheet's data row count (its nrows
+    minus the header); `n_orders` the number of on-board orders (= summary
+    rows)."""
     from openpyxl.utils import get_column_letter
 
     sh = Sheet(SALES_ORDER_TAB, freeze="A9")   # pin the pick + summary + item headers
@@ -938,13 +968,30 @@ def sales_order_sheet(n_data_rows: int, n_orders: int) -> Sheet:
     sh.row(summary)
     sh.blank()
 
-    sh.row([Cell("Line items", font=F_SECTION)])
-    sh.row(_header_cells(SO_ITEM_HEADERS))
+    # Line items, two synchronized views: the component HIERARCHY on the left
+    # (so_hierarchy's rollup — one [FAMILY] per component, its facts, details
+    # and satellite charges beneath it) and the flat CAPTURE table on the right
+    # (one row per stored item, exactly as parsed). The tree's 'Item #' column
+    # matches the flat table's '#' column, so a funky tree row can be traced
+    # straight to the captured line that produced it.
+    flat_c0 = len(SO_TREE_HEADERS) + 2         # flat block starts after a gap col
+    title = [Cell("Line items — hierarchy", font=F_SECTION)]
+    title += [Cell("")] * (flat_c0 - len(title) - 1)
+    title.append(Cell("Captured lines (flat)", font=F_SECTION))
+    sh.row(title)
+    sh.row(_header_cells(SO_TREE_HEADERS) + [Cell("")] + _header_cells(SO_ITEM_HEADERS))
+    tkey = get_column_letter(_SO_TREE_KEY_COL)
+    t1, t2 = get_column_letter(_SO_TREE_FIRST), get_column_letter(_SO_TREE_LAST)
     item2 = get_column_letter(_SO_ITEM_NCOLS)
-    sh.row([Cell(f"=IF($B$1&\"\"=\"\",\"\",IFERROR("
-                 f"FILTER('{d}'!$B$2:${item2}${last},"
-                 f"('{d}'!$A$2:$A${last}&\"\")=($B$1&\"\"),"
-                 f"\"no line items captured for that order # yet\"),\"\"))")])
+    tree_f = Cell(f"=IF($B$1&\"\"=\"\",\"\",IFERROR("
+                  f"FILTER('{d}'!${t1}$2:${t2}${last},"
+                  f"('{d}'!${tkey}$2:${tkey}${last}&\"\")=($B$1&\"\"),"
+                  f"\"no line items captured for that order # yet\"),\"\"))")
+    flat_f = Cell(f"=IF($B$1&\"\"=\"\",\"\",IFERROR("
+                  f"FILTER('{d}'!$B$2:${item2}${last},"
+                  f"('{d}'!$A$2:$A${last}&\"\")=($B$1&\"\"),"
+                  f"\"no line items captured for that order # yet\"),\"\"))")
+    sh.row([tree_f] + [Cell("")] * (flat_c0 - 2) + [flat_f])
     return sh
 
 
