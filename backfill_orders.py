@@ -95,6 +95,10 @@ class DeadSessionError(RuntimeError):
     """CBC could not resolve a known-good order after a fresh-page retry."""
 
 
+class SearchPageError(RuntimeError):
+    """CBC's search controls disappeared or rejected the search action."""
+
+
 def _excel_safe_value(value: Any) -> Any:
     return _EXCEL_ILLEGAL_CHARS.sub("", value) if isinstance(value, str) else value
 
@@ -533,14 +537,14 @@ async def open_order_detail_async(page, job: str, search_timeout_s: float = 75.0
     await _close_modal_async(page)
     box = await find_search_box_async(page)
     if box is None:
-        return False
+        raise SearchPageError(f"Search Order input is unavailable for {job}")
     try:
         await box.click()
         await box.fill("")
         await box.fill(job)
         await box.press("Enter")
-    except Exception:  # noqa: BLE001
-        return False
+    except Exception as e:  # noqa: BLE001
+        raise SearchPageError(f"Search Order input failed for {job}: {e}") from e
     if CBC_SEARCH_BUTTON:
         try:
             btn = page.locator(CBC_SEARCH_BUTTON)
@@ -763,6 +767,8 @@ async def process_one_async(page, context, job: str, folder: str = "",
             rec["status"] = "ok"
         else:
             rec["status"] = "error"
+    except SearchPageError:
+        raise
     except Exception as e:  # noqa: BLE001
         log.warning("  %s: error (%s)", job, e)
         rec["status"] = "error"
@@ -857,18 +863,46 @@ async def _run_serial_pass(context, jobs: List[str],
                 if previous.get("backfill_scan_version") == BACKFILL_SCAN_VERSION else 0
             )
             try:
-                # watch.py may continue polling. It gets the same lock for its
-                # short Sales Order batch, so CBC searches never overlap.
-                with cbc_fetch_lock():
-                    rec = await process_one_async(
-                        page,
-                        context,
-                        job,
-                        dwg.get(job, {}).get("folder", ""),
-                        search_timeout_s=search_timeout_s,
-                        doc_timeout_ms=doc_timeout_ms,
-                    )
+                try:
+                    # watch.py may continue polling. It gets the same lock for its
+                    # short Sales Order batch, so CBC searches never overlap.
+                    with cbc_fetch_lock():
+                        rec = await process_one_async(
+                            page,
+                            context,
+                            job,
+                            dwg.get(job, {}).get("folder", ""),
+                            search_timeout_s=search_timeout_s,
+                            doc_timeout_ms=doc_timeout_ms,
+                        )
+                except SearchPageError as e:
+                    log.warning(
+                        "  %s: CBC search page became unusable (%s); reopening and "
+                        "retrying this order immediately.", job, e)
+                    replacement = await _open_backfill_page(context)
+                    old_page, page = page, replacement
+                    if old_page is not page:
+                        with contextlib.suppress(Exception):
+                            await old_page.close()
+                    with cbc_fetch_lock():
+                        rec = await process_one_async(
+                            page,
+                            context,
+                            job,
+                            dwg.get(job, {}).get("folder", ""),
+                            search_timeout_s=search_timeout_s,
+                            doc_timeout_ms=doc_timeout_ms,
+                        )
                 _commit_line_items(job, rec)
+            except SearchPageError as e:
+                log.warning("  %s: fresh CBC search page also failed: %s", job, e)
+                rec = {
+                    "job": job,
+                    "status": "search-state-retry",
+                    "retry_reason": "CBC search controls failed again after reopening the page.",
+                    "scanned_at": datetime.now().isoformat(timespec="seconds"),
+                    "backfill_scan_version": BACKFILL_SCAN_VERSION,
+                }
             except Exception as e:  # noqa: BLE001
                 log.warning("Backfill error for %s: %s", job, e)
                 rec = rec or {
