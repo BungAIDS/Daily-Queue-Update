@@ -99,6 +99,69 @@ def test_serial_pass_has_one_order_in_flight_and_saves_each_job():
     page.close.assert_awaited_once()
 
 
+def test_missing_search_input_is_not_reported_as_job_not_found():
+    page = SimpleNamespace()
+    with (
+        patch("backfill_orders._close_modal_async", new=AsyncMock()),
+        patch("backfill_orders.find_search_box_async", new=AsyncMock(return_value=None)),
+    ):
+        try:
+            asyncio.run(backfill_orders.open_order_detail_async(page, "413393", 1, 1))
+            assert False, "a broken search page must not become a not-found result"
+        except backfill_orders.SearchPageError:
+            pass
+
+
+def test_process_one_propagates_a_broken_search_page_to_the_runner():
+    page = SimpleNamespace()
+    with (
+        patch("backfill_orders.open_order_detail_async",
+              new=AsyncMock(side_effect=backfill_orders.SearchPageError("stale input"))),
+        patch("backfill_orders._close_modal_async", new=AsyncMock()),
+    ):
+        try:
+            asyncio.run(backfill_orders.process_one_async(page, object(), "413393"))
+            assert False, "the serial runner must receive the broken-page signal"
+        except backfill_orders.SearchPageError:
+            pass
+
+
+def test_serial_pass_reopens_a_broken_search_page_and_retries_same_job():
+    page = SimpleNamespace(close=AsyncMock())
+    fresh_page = SimpleNamespace(close=AsyncMock())
+    calls = []
+
+    async def process(active_page, _context, job, _folder, **_kwargs):
+        calls.append((active_page, job))
+        if active_page is page:
+            raise backfill_orders.SearchPageError("detached search input")
+        return {
+            "job": job,
+            "status": "ok",
+            "scanned_at": "now",
+            "backfill_scan_version": backfill_orders.BACKFILL_SCAN_VERSION,
+        }
+
+    records = {}
+    state = {"processed": 0, "publish_every": 0}
+    with (
+        patch("backfill_orders._open_backfill_page",
+              new=AsyncMock(side_effect=[page, fresh_page])),
+        patch("backfill_orders.process_one_async", new=process),
+        patch("backfill_orders.cbc_fetch_lock", side_effect=lambda: contextlib.nullcontext()),
+        patch("backfill_orders.save_progress", side_effect=lambda _v: None),
+    ):
+        completed = asyncio.run(backfill_orders._run_serial_pass(
+            object(), ["413393"], records, {}, 0, 1, 1, 1, state))
+
+    assert completed == 1
+    assert records["413393"]["status"] == "ok"
+    assert records["413393"]["backfill_attempts"] == 1
+    assert calls == [(page, "413393"), (fresh_page, "413393")]
+    page.close.assert_awaited_once()
+    fresh_page.close.assert_awaited_once()
+
+
 def test_atomic_line_item_update_preserves_existing_jobs(tmp: Path):
     path = tmp / "line_items.json"
     line_items.save_store({
