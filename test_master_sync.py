@@ -64,6 +64,40 @@ def test_merge_backfill():
             p.unlink()
 
 
+def test_merge_backfill_skips_scans_older_than_live_verification():
+    p = master_sync._BACKFILL
+    existed = p.exists()
+    backup = p.read_text() if existed else None
+    try:
+        _write(p, {
+            "421000": {"job": "421000", "status": "ok",
+                       "scanned_at": "2026-07-12T09:00:00", "so_size": "27"},
+            "421001": {"job": "421001", "status": "ok",
+                       "scanned_at": "2026-07-12T09:00:00", "so_size": "31"},
+            "421002": {"job": "421002", "status": "ok",
+                       "scanned_at": "2026-07-12T09:00:00", "so_size": "44"},
+        })
+        m = {"orders": {
+            # Live-verified AFTER the scan -> the older scan must not clobber it.
+            "421000": {"job": {"job": "421000", "so_size": "245",
+                               "so_verified_at": "2026-07-13T06:30:00"}},
+            # Live-verified BEFORE the scan -> the scan is fresher and merges.
+            "421001": {"job": {"job": "421001", "so_size": "30",
+                               "so_verified_at": "2026-07-11T12:00:00"}},
+            # No verification stamp -> merges as before.
+            "421002": {"job": {"job": "421002", "so_size": "43"}},
+        }}
+        assert master_sync.merge_backfill(m) == 2
+        assert m["orders"]["421000"]["job"]["so_size"] == "245"   # untouched
+        assert m["orders"]["421001"]["job"]["so_size"] == "31"    # updated
+        assert m["orders"]["421002"]["job"]["so_size"] == "44"    # updated
+    finally:
+        if backup is not None:
+            p.write_text(backup)
+        elif p.exists():
+            p.unlink()
+
+
 def test_merge_quote_runs():
     p = master_sync._QUOTE_RUNS
     existed = p.exists()

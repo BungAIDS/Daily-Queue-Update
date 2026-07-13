@@ -37,6 +37,7 @@ import contextlib
 import logging
 import re
 import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 from urllib.parse import urlparse, parse_qs, urljoin
@@ -919,6 +920,9 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2,
         j["so_released"] = bool(parsed.get("released", False))
         if pdf:
             n_dl += 1
+            # Freshness stamp (flows into the state + master): lets merge_backfill
+            # skip re-imposing an older backfill scan over this verification.
+            j["so_verified_at"] = datetime.now().isoformat(timespec="seconds")
 
         # Line items: tag (rules + AI cache), surface on the job for the report
         # and snapshot, and record in the lookup store.

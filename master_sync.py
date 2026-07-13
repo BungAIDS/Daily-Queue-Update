@@ -130,10 +130,18 @@ def merge_backfill(master: Dict[str, Any]) -> int:
         "job", "status", "scanned_at", "line_item_count",
         "backfill_scan_version", "backfill_attempts",
     }
+    orders = master.get("orders") or {}
     n = 0
     for job, rec in recs.items():
         status = str(rec.get("status") or "")
         if status != "ok" and not (status == "error" and rec.get("so_validation") == "MATCH"):
+            continue
+        # A live enrichment newer than this scan is the same fetch+parse run
+        # later — merging the older scan over it would just be flipped back by
+        # the next poll, logging a spurious change per field on every startup.
+        entry = orders.get(str(job)) or {}
+        verified = str((entry.get("job") or {}).get("so_verified_at") or "")
+        if verified and verified >= str(rec.get("scanned_at") or ""):
             continue
         fields = {k: v for k, v in rec.items() if k not in skip}
         if fields and live_master.merge_order(master, job, fields):
