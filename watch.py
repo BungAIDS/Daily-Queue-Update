@@ -51,8 +51,9 @@ from compare import load_latest_snapshot, load_snapshot, save_snapshot
 from config import (DATA_PUSH_BRANCH, DATA_PUSH_ON_CHANGE, EXCEL_RECYCLE_EVERY_POLLS,
                     LIVE_MORNING_SNAPSHOT, LIVE_WORKBOOK_PATH, LOG_DIR,
                     LOG_PUSH_BRANCH, OUTPUT_DIR, POLL_INTERVAL_SECONDS,
-                    SO_REVERIFY_MIN_AGE_MIN, SO_REVERIFY_PER_POLL, WATCH_END,
-                    WATCH_START, validate_runtime_config)
+                    SIMILAR_REFRESH_INTERVAL_SECONDS, SO_REVERIFY_MIN_AGE_MIN,
+                    SO_REVERIFY_PER_POLL, WATCH_END, WATCH_START,
+                    validate_runtime_config)
 from live_excel import (recycle_workbook, save_morning_copy,
                         update_master_workbook)
 from live_sheets import added_label
@@ -331,10 +332,10 @@ def _new_today_ids(lq_jobs: list, today: date) -> set:
     return ids & board_ids
 
 
-# Similar-order rows are recomputed only when the board or the stores actually
-# change — the index build over the whole line-items store is ~1s, too much to
-# repeat every poll for identical output.
-_SIM_CACHE: dict = {"key": None, "rows": []}
+# Similar-order rows are recomputed when the board changes, or periodically while
+# the backing stores change. A backlog scan writes those stores continuously;
+# repainting Similar Data after every order made Excel busy almost all day.
+_SIM_CACHE: dict = {"key": None, "rows": [], "queue_ids": (), "refreshed_at": 0.0}
 
 
 def _sim_sort_key(job: str) -> tuple:
@@ -363,6 +364,14 @@ def _similar_orders_rows(lq_jobs: list) -> list:
            _mtime(autocad_scan.PROGRESS_PATH))
     if _SIM_CACHE["key"] == key:
         return _SIM_CACHE["rows"]
+    queue_ids = key[0]
+    now = time.monotonic()
+    if (SIMILAR_REFRESH_INTERVAL_SECONDS
+            and _SIM_CACHE["key"] is not None
+            and _SIM_CACHE["queue_ids"] == queue_ids
+            and now - _SIM_CACHE["refreshed_at"] < SIMILAR_REFRESH_INTERVAL_SECONDS):
+        log.debug("Similar Orders refresh deferred while backlog data is changing.")
+        return _SIM_CACHE["rows"]
     try:
         idx = find_orders.build_index(line_items.load_store(),
                                       dwg=autocad_scan.load_progress())
@@ -378,7 +387,7 @@ def _similar_orders_rows(lq_jobs: list) -> list:
                     "shared": "; ".join(r["shared_lines"][:3] or r["shared_tags"][:4]),
                     "folder": r["dwg_folder"],
                 })
-        _SIM_CACHE.update(key=key, rows=rows)
+        _SIM_CACHE.update(key=key, rows=rows, queue_ids=queue_ids, refreshed_at=now)
     except Exception as e:  # noqa: BLE001 - the tab is a nicety, never sink a poll
         log.warning("Similar Orders rows not refreshed (%s)", e)
     return _SIM_CACHE["rows"]

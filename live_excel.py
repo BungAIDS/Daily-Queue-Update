@@ -117,6 +117,11 @@ _AUTOFIT_NCOLS: Dict[str, int] = {}
 # already done this process, so we don't rewrite the header every cycle.
 _HEADER_DONE: set = set()
 
+# Order History is intentionally not rebuilt at process start, but the first
+# pass must still inspect the existing sheet once.  After that successful pass,
+# an empty op list means there is literally no Excel work to do.
+_ORDER_HISTORY_READY: set = set()
+
 # Last-rendered 'below' block per sheet, so it's only re-drawn (and repositioned)
 # when the live data row count shifts or the block's content changes.
 _BELOW_LAST: Dict[str, Any] = {}
@@ -145,7 +150,7 @@ def _tuned(app):
     =HYPERLINK() formulas and the conditional-format rules on the Order History
     matrices. That's the bulk of the CPU, and the recalc/redraw caches it churns
     are a steady source of the memory growth. With recalc held to manual we do all
-    the writes, then Calculate() once at the end.
+    the writes before restoring normal calculation.
 
     Each setting is application-level (so it also covers a coworker's other open
     files on this box) and is restored in the finally, so it's only suspended for
@@ -162,20 +167,22 @@ def _tuned(app):
     try:
         yield
     finally:
-        # Recompute once now that every write is in (manual calc skipped them), then
-        # restore each setting to what it was before — including Calculation, so we
-        # don't leave the user's Excel stuck on manual.
-        try:
-            app.Calculate()
-        except Exception:  # noqa: BLE001
-            pass
+        # Do not call Application.Calculate here.  That recalculates every open
+        # workbook on the user's desktop, even on a tiny queue update, and was the
+        # main reason Excel stayed unusable long after the cells were written.
+        # Restoring automatic calculation is sufficient for Excel to evaluate the
+        # dirty formulas in its normal dependency order.
+        #
         # Restore to known-GOOD values, not the values seen on entry: if a prior
         # render was force-killed mid-tune, ScreenUpdating/Calculation were left
         # OFF (the classic "the whole Excel window went blank, but the data is
         # there") — restoring the stuck value would keep it broken. Resetting to
-        # the normal live state self-heals it on the next successful render.
-        for attr, good in (("ScreenUpdating", True), ("EnableEvents", True),
-                           ("DisplayAlerts", True), ("Calculation", _XL_CALC_AUTOMATIC)):
+        # the normal live state self-heals it on the next successful render. Put
+        # Calculation back first while repainting is still suspended, then restore
+        # the UI-facing settings.
+        for attr, good in (("Calculation", _XL_CALC_AUTOMATIC),
+                           ("EnableEvents", True), ("DisplayAlerts", True),
+                           ("ScreenUpdating", True)):
             try:
                 setattr(app, attr, good)
             except Exception:  # noqa: BLE001
@@ -1014,6 +1021,7 @@ def reset_sheet(name: str) -> None:
     it from scratch — used when its column schema changed (e.g. a new DWG suffix
     or feature tag appeared in the Order History matrices)."""
     _HEADER_DONE.discard(name)
+    _ORDER_HISTORY_READY.discard(name)
     _FROZEN.discard(name)
     _SEARCH_CF_DONE.discard(name)
 
@@ -1029,11 +1037,45 @@ def _cell_to_value(cell) -> Any:
     return cell.value if cell.value is not None else ""
 
 
-def _write_oh_row(ws, r: int, cells: List, ncols: int) -> None:
+def _oh_values(cells: List, ncols: int) -> List[Any]:
     vals = [_cell_to_value(c) for c in cells]
     if len(vals) < ncols:
         vals += [""] * (ncols - len(vals))
-    ws.Range(ws.Cells(r, 1), ws.Cells(r, ncols)).Value = [vals]
+    return vals
+
+
+def _write_oh_rows(ws, rows: List[tuple[int, List]], ncols: int,
+                   chunk_size: int = 250) -> int:
+    """Bulk-write contiguous Order History updates.
+
+    A cleanup/backfill can change hundreds of adjacent history rows. Writing one
+    COM Range per row held Excel for minutes; grouping contiguous rows reduces
+    that to a handful of calls while leaving untouched rows alone.
+    Returns the number of Range writes performed.
+    """
+    if not rows:
+        return 0
+    ordered = sorted(rows, key=lambda row: row[0])
+    writes = 0
+    block: List[tuple[int, List]] = []
+
+    def flush() -> None:
+        nonlocal writes
+        if not block:
+            return
+        top = block[0][0]
+        bottom = block[-1][0]
+        grid = [_oh_values(cells, ncols) for _row, cells in block]
+        ws.Range(ws.Cells(top, 1), ws.Cells(bottom, ncols)).Value = grid
+        writes += 1
+        block.clear()
+
+    for row, cells in ordered:
+        if block and (row != block[-1][0] + 1 or len(block) >= chunk_size):
+            flush()
+        block.append((row, cells))
+    flush()
+    return writes
 
 
 def _apply_matrix_cf(ws, key_col: int, c0: int, c1: int, last_row: int) -> None:
@@ -1139,20 +1181,23 @@ def apply_order_history(app, wb, name: str, spec: Dict[str, Any], ops: List,
     # flags changed. The tab is never wiped here.
     updates = [(k, c) for kind, k, c in ops if kind == "update"]
     appends = [(k, c) for kind, k, c in ops if kind == "append"]
+    write_rows: Dict[int, List] = {}
     for k, cells in updates:
         r = keymap.get(k)
         if r:
-            _write_oh_row(ws, r, cells, ncols)
+            write_rows[r] = cells
         else:
             appends.append((k, cells))
     for k, cells in appends:
         r = keymap.get(k)
-        if r:                                  # already present (re-planned after a
-            _write_oh_row(ws, r, cells, ncols)  # failed write) -> update, never duplicate
-            continue
-        last_row += 1
-        keymap[k] = last_row
-        _write_oh_row(ws, last_row, cells, ncols)
+        if not r:
+            last_row += 1
+            r = last_row
+            keymap[k] = r
+        # Already present means this append was re-planned after a failed write;
+        # overwrite it in place rather than adding a duplicate.
+        write_rows[r] = cells
+    _write_oh_rows(ws, list(write_rows.items()), ncols)
     if appends:   # re-extend AutoFilter to cover the newly appended rows
         try:
             if ws.AutoFilterMode:
@@ -1167,7 +1212,7 @@ def apply_order_history(app, wb, name: str, spec: Dict[str, Any], ops: List,
 # Watchdog: never let a busy/modal Excel hang the watcher                       #
 # --------------------------------------------------------------------------- #
 _EXCEL_WRITE_GUARD = threading.Lock()   # protects _excel_write_active
-_excel_write_active = [0.0]             # monotonic start of the in-flight write (0 = none)
+_excel_write_active: List[Optional[Dict[str, Any]]] = [None]
 
 
 def _excel_write_timeout() -> float:
@@ -1185,24 +1230,17 @@ def _run_excel_guarded(label: str, func, default, *args, **kwargs):
     a cell) can NEVER hang the watcher's main loop.
 
     All COM work happens inside the worker (its own CoInitialize), so nothing is
-    marshaled across threads. A new write is skipped only while a previous one is
-    *still within its timeout*; once a write exceeds the timeout it is treated as
-    abandoned and the next poll is allowed to try again — so a permanently stuck
-    write (Excel left showing a dialog) can't block every future write forever.
+    marshaled across threads. A timed-out COM call cannot be killed safely; it
+    remains the active writer until it really returns. Later polls skip instead
+    of starting overlapping Excel writers, which used to make the workbook stay
+    locked for minutes after the first timeout.
+
     On timeout/skip/error it returns `default` — the same "nothing rendered,
     retry next poll" outcome the callers already expect from a failed write."""
     timeout = _excel_write_timeout()
     now = time.monotonic()
-    with _EXCEL_WRITE_GUARD:
-        active = _excel_write_active[0]
-        if active and (now - active) < timeout:
-            log.warning("%s skipped: a previous Excel write is still in progress (Excel is "
-                        "likely busy / showing a dialog). Will retry next poll.", label)
-            return default
-        my_start = now
-        _excel_write_active[0] = my_start   # claim the slot (also reclaims a stale one)
-
     box: dict = {}
+    token: Dict[str, Any] = {"start": now, "thread": None}
 
     def _runner():
         try:
@@ -1223,17 +1261,28 @@ def _run_excel_guarded(label: str, func, default, *args, **kwargs):
                     pass
         finally:
             with _EXCEL_WRITE_GUARD:
-                if _excel_write_active[0] == my_start:   # only if a newer write hasn't taken over
-                    _excel_write_active[0] = 0.0
+                if _excel_write_active[0] is token:
+                    _excel_write_active[0] = None
 
     worker = threading.Thread(target=_runner, name="excel-write", daemon=True)
+    token["thread"] = worker
+    with _EXCEL_WRITE_GUARD:
+        active = _excel_write_active[0]
+        active_thread = active.get("thread") if active else None
+        if active_thread is not None and active_thread.is_alive():
+            age = now - float(active.get("start") or now)
+            log.warning("%s skipped: the previous Excel write is still running after %.0fs. "
+                        "No second writer will be started; the next poll will retry after "
+                        "it returns.", label, age)
+            return default
+        _excel_write_active[0] = token
     worker.start()
     worker.join(timeout)
     if worker.is_alive():
-        log.warning("%s exceeded %.0fs and was abandoned — Excel is busy or showing a "
+        log.warning("%s exceeded %.0fs and is still running — Excel is busy or showing a "
                     "dialog (co-authoring conflict, 'file in use', a save prompt). The "
-                    "watcher keeps running; the write retries next poll once Excel is free.",
-                    label, timeout)
+                    "watcher keeps polling, but no overlapping writer will start until this "
+                    "one returns.", label, timeout)
         return default
     if "error" in box:
         log.warning("%s failed (%s)", label, box["error"])
@@ -1254,6 +1303,40 @@ def update_master_workbook(workbook_path: str | Path, lq_payload: Dict[str, Any]
     )
 
 
+def _upsert_needs_excel(payload: Dict[str, Any]) -> bool:
+    """Whether a Live Queue payload requires any COM work this poll."""
+    name = payload["name"]
+    if name not in _HEADER_DONE or payload.get("ops"):
+        return True
+    positions = payload.get("positions")
+    if positions is not None:
+        normalized = {_norm_key(k): v for k, v in positions.items()}
+        if _POS_LAST.get(name) != normalized:
+            return True
+    below = payload.get("below")
+    if below is not None and _BELOW_LAST.get(name) != below:
+        return True
+    if payload.get("search") and name not in _SEARCH_CF_DONE:
+        return True
+    return False
+
+
+def _history_needs_excel(payload: Dict[str, Any]) -> bool:
+    return bool(
+        payload.get("rebuild")
+        or payload.get("ops")
+        or payload["name"] not in _ORDER_HISTORY_READY
+    )
+
+
+def _stage_elapsed(label: str, started: float) -> None:
+    elapsed = time.monotonic() - started
+    if elapsed >= 1.0:
+        log.info("Live workbook stage %-16s %.1fs", label + ":", elapsed)
+    else:
+        log.debug("Live workbook stage %s: %.3fs", label, elapsed)
+
+
 def _update_master_workbook_impl(workbook_path: str | Path, lq_payload: Dict[str, Any],
                            oh_payload: Dict[str, Any],
                            changes_sheet: Sheet | None = None,
@@ -1267,6 +1350,25 @@ def _update_master_workbook_impl(workbook_path: str | Path, lq_payload: Dict[str
     (Excel busy / OLE error) its name is omitted, so its rows are re-planned and
     re-drawn next poll rather than being silently treated as already on the sheet."""
     path = Path(workbook_path)
+    repaint_models = ([changes_sheet] if changes_sheet is not None else [])
+    repaint_models += list(extra_sheets or [])
+    repaint_work = []
+    for model in repaint_models:
+        fp = _fingerprint(model)
+        if _RENDER_CACHE.get(model.name) != fp:
+            repaint_work.append((model, fp))
+    lq_needed = _upsert_needs_excel(lq_payload)
+    oh_needed = _history_needs_excel(oh_payload)
+
+    # Most polls only confirm that the board is unchanged. Previously they still
+    # opened Excel, read all ~13K Order History keys, rewrote the search bar and
+    # forced an application-wide calculation. That made a no-op poll lock Excel
+    # for 30-80 seconds. Return before COM when every rendered model is current.
+    if not (lq_needed or oh_needed or repaint_work):
+        log.info("Live workbook unchanged this cycle — Excel was not touched.")
+        return {lq_payload["name"], oh_payload["name"]}
+
+    total_started = time.monotonic()
     try:
         app = _get_excel()
     except Exception as e:  # noqa: BLE001
@@ -1308,52 +1410,65 @@ def _update_master_workbook_impl(workbook_path: str | Path, lq_payload: Dict[str
     touched = []
     ok: set = set()
     with _tuned(app):
-        try:
-            n = apply_upserts(app, wb, lq_payload["name"], lq_payload["headers"], lq_payload["ops"],
-                              lq_payload["key_col"], lq_payload["allow_delete"], lq_payload.get("freeze"),
-                              sort_col=lq_payload.get("sort_col"), text_cols=lq_payload.get("text_cols"),
-                              below=lq_payload.get("below"), header_row=lq_payload.get("header_row", 1),
-                              search=lq_payload.get("search", False),
-                              positions=lq_payload.get("positions"))
+        if lq_needed:
+            started = time.monotonic()
+            try:
+                n = apply_upserts(app, wb, lq_payload["name"], lq_payload["headers"], lq_payload["ops"],
+                                  lq_payload["key_col"], lq_payload["allow_delete"], lq_payload.get("freeze"),
+                                  sort_col=lq_payload.get("sort_col"), text_cols=lq_payload.get("text_cols"),
+                                  below=lq_payload.get("below"), header_row=lq_payload.get("header_row", 1),
+                                  search=lq_payload.get("search", False),
+                                  positions=lq_payload.get("positions"))
+                ok.add(lq_payload["name"])
+                touched.append(f"{lq_payload['name']}(+{n})" if n else lq_payload["name"])
+            except Exception as e:  # noqa: BLE001
+                log.warning("Live Queue update failed (%s)", e)
+            finally:
+                _stage_elapsed(lq_payload["name"], started)
+        else:
             ok.add(lq_payload["name"])
-            if n:
-                touched.append(f"{lq_payload['name']}(+{n})")
-        except Exception as e:  # noqa: BLE001
-            log.warning("Live Queue update failed (%s)", e)
-        try:
-            n = apply_order_history(app, wb, oh_payload["name"], oh_payload["spec"],
-                                    oh_payload["ops"], oh_payload["key_col"], oh_payload.get("freeze"),
-                                    rebuild=oh_payload.get("rebuild", False))
+
+        if oh_needed:
+            started = time.monotonic()
+            try:
+                n = apply_order_history(app, wb, oh_payload["name"], oh_payload["spec"],
+                                        oh_payload["ops"], oh_payload["key_col"], oh_payload.get("freeze"),
+                                        rebuild=oh_payload.get("rebuild", False))
+                _ORDER_HISTORY_READY.add(oh_payload["name"])
+                ok.add(oh_payload["name"])
+                if n:
+                    touched.append(f"{oh_payload['name']}(+{n})")
+            except Exception as e:  # noqa: BLE001
+                log.warning("Order History update failed (%s)", e)
+            finally:
+                _stage_elapsed(oh_payload["name"], started)
+        else:
             ok.add(oh_payload["name"])
-            if n:
-                touched.append(f"{oh_payload['name']}(+{n})")
-        except Exception as e:  # noqa: BLE001
-            log.warning("Order History update failed (%s)", e)
+
         # Full-repaint tabs (Changes + any extras, e.g. Similar Data/Orders):
         # skipped entirely when unchanged — a repaint would reset a viewer's
         # filter/scroll (and wipe the Similar Orders picker mid-use).
-        repaints = ([changes_sheet] if changes_sheet is not None else [])
-        repaints += list(extra_sheets or [])
-        for model in repaints:
+        for model, fp in repaint_work:
+            started = time.monotonic()
             try:
-                fp = _fingerprint(model)
-                if _RENDER_CACHE.get(model.name) != fp:
-                    # Drop the cached fingerprint BEFORE painting: a repaint that
-                    # dies after Cells.Clear (Excel busy — someone mid-edit) has
-                    # already wiped the sheet, and a stale cache entry would make
-                    # every later cycle skip the rewrite, leaving the tab blank
-                    # until the model happens to change. Popping first guarantees
-                    # a failed paint is retried next poll.
-                    _RENDER_CACHE.pop(model.name, None)
-                    render_sheet(app, wb, model)
-                    _RENDER_CACHE[model.name] = fp
-                    touched.append(model.name)
-                else:
-                    # Content unchanged — just refresh any 'Last updated' stamp in
-                    # place so the tab still reads as live. AutoSave carries it.
-                    _refresh_volatile(wb, model)
+                # Drop the cached fingerprint BEFORE painting: a repaint that
+                # dies after Cells.Clear must be retried next poll.
+                _RENDER_CACHE.pop(model.name, None)
+                render_sheet(app, wb, model)
+                _RENDER_CACHE[model.name] = fp
+                touched.append(model.name)
             except Exception as e:  # noqa: BLE001
                 log.warning("%s update failed (%s)", model.name, e)
+            finally:
+                _stage_elapsed(model.name, started)
+
+        # If another tab genuinely needed Excel, keep unchanged tabs' volatile
+        # stamps current too. A completely unchanged poll returns before COM, so
+        # these tiny writes never turn a no-op back into a workbook freeze.
+        repaint_names = {model.name for model, _fp in repaint_work}
+        for model in repaint_models:
+            if model.name not in repaint_names:
+                _refresh_volatile(wb, model)
 
         # Housekeeping: retire tabs an older build managed, then snap the
         # managed tabs back into SHEET_ORDER (both no-ops when already right).
@@ -1361,13 +1476,16 @@ def _update_master_workbook_impl(workbook_path: str | Path, lq_payload: Dict[str
         _ensure_tab_order(app, wb)
 
     if touched:
+        started = time.monotonic()
         try:
             wb.Save()
         except Exception as e:  # noqa: BLE001
             log.debug("wb.Save() raised (likely AutoSave-managed): %s", e)
+        _stage_elapsed("Save", started)
         log.info("Live workbook updated: %s [%s]", path.name, ", ".join(touched))
     else:
         log.info("Live workbook unchanged this cycle — nothing written.")
+    _stage_elapsed("Total Excel", total_started)
     return ok
 
 
