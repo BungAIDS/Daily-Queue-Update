@@ -226,6 +226,17 @@ try:
 except ValueError:
     POLL_INTERVAL_SECONDS = 120
 
+# Backfill can change the similarity index after every scanned order. Repainting
+# the grouped Similar Data tab for each tiny change monopolizes desktop Excel,
+# while a 10-15 minute lag in ranking candidates is harmless. Queue membership
+# changes still force an immediate refresh. Set 0 to refresh on every store write.
+try:
+    SIMILAR_REFRESH_INTERVAL_SECONDS = max(
+        0, int(os.environ.get("SIMILAR_REFRESH_INTERVAL_SECONDS", "900"))
+    )
+except ValueError:
+    SIMILAR_REFRESH_INTERVAL_SECONDS = 900
+
 # The watcher drives the DESKTOP Excel app over COM all day and never quits it, so
 # Excel keeps accumulating memory it doesn't fully reclaim (fragmented conditional-
 # format rules, a growing calc chain, undo/redraw caches) — left unchecked it
