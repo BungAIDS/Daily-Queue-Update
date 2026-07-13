@@ -206,6 +206,25 @@ def test_blank_so_link_does_not_overwrite_known_link():
     assert m["orders"]["200"]["job"]["so_pdf"] == "Z:/SO/200/CO#1.pdf"
 
 
+def test_same_pdf_parse_blanks_do_not_erase_known_summary():
+    m = {"orders": {}}
+    known = _job(
+        "200", co_number=1, so_pdf="Z:/SO/200/200 - Sales Order CO1.pdf",
+        so_design_desc="Backward Curved SW", so_size="270", so_arrangement="A/4",
+        so_rotation="CW", so_pct_width="44.5", line_items=[{"tags": ["MOTOR"]}],
+    )
+    lm.update(m, [known], T0)
+    failed_parse = _job(
+        "200", co_number=1, so_pdf="Z:/SO/200/200 - Sales Order CO1.pdf",
+        so_design_desc="", so_size="", so_arrangement="", so_rotation="",
+        so_pct_width="", line_items=[],
+    )
+    assert lm.update(m, [failed_parse], T1) == []
+    job = m["orders"]["200"]["job"]
+    assert job["so_design_desc"] == "Backward Curved SW" and job["so_size"] == "270"
+    assert job["so_rotation"] == "CW" and job["line_items"] == [{"tags": ["MOTOR"]}]
+
+
 def test_realign_orders_resets_silently_and_next_update_logs_nothing():
     live = _job("100", co_number=1, so_pdf="Z:/SO/100/CO#1.pdf", so_size="56")
     m = {"orders": {}}

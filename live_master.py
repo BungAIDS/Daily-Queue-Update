@@ -176,7 +176,7 @@ def _diffs(old_job: Dict[str, Any], new_job: Dict[str, Any]) -> List[Tuple[str, 
 # keep these from what we knew rather than wiping them to the failed fetch's
 # blanks. Board fields (status, dates, price, assignee, …) still refresh.
 _ENRICHMENT_KEEP = (
-    "co_number", "so_pdf", "co_history",
+    "co_number", "so_pdf", "so_verified_at", "co_history",
     "so_design_desc", "so_size", "so_arrangement", "so_motor_pos", "so_class",
     "so_rotation", "so_discharge", "so_pct_width", "so_wheel_type",
     "so_design_temp", "so_max_temp", "so_special_temp",
@@ -194,17 +194,25 @@ def _keep_better_enrichment(stored: Dict[str, Any], incoming: Dict[str, Any]) ->
     """Guard against a regression: if `incoming` has a LOWER change order than
     `stored` (or the same CO# but a now-blank SO link), a re-fetch must have failed
     or returned a stale/original Sales Order — keep the prior enrichment and take
-    only the fresh board fields. Otherwise use `incoming` unchanged."""
+    only the fresh board fields. Re-reading the exact same archived PDF also
+    cannot erase known enrichment merely because a parser returned blanks."""
     s_co = int(stored.get("co_number") or 0)
     i_co = int(incoming.get("co_number") or 0)
     s_pdf = (stored.get("so_pdf") or "").strip()
     i_pdf = (incoming.get("so_pdf") or "").strip()
     regressed = i_co < s_co or (i_co == s_co and s_pdf and not i_pdf)
-    if not regressed:
+    s_name = s_pdf.replace("/", "\\").rsplit("\\", 1)[-1].replace("#", "").casefold()
+    i_name = i_pdf.replace("/", "\\").rsplit("\\", 1)[-1].replace("#", "").casefold()
+    same_document = (i_co == s_co and s_pdf and i_pdf
+                     and s_name == i_name)
+    if not regressed and not same_document:
         return incoming
     merged = dict(incoming)
     for f in _ENRICHMENT_KEEP:
-        if stored.get(f) not in (None, "", [], {}):
+        stored_value = stored.get(f)
+        incoming_value = incoming.get(f)
+        if stored_value not in (None, "", [], {}, False) and (
+                regressed or incoming_value in (None, "", [], {}, False)):
             merged[f] = stored[f]
     return merged
 

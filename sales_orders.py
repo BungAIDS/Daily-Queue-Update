@@ -91,6 +91,26 @@ SPEC_CELL = re.compile(
     r"^(DesignTemp|MaxTemp|Design|Size|Arrangement|MotorPos|Class|Rotation|Discharge|%Width|WheelType)\b\s*(.*)$",
     re.I,
 )
+# The legacy Infor document is an "Order Verification Report" rather than the
+# newer Sales Order table. Its fan summary lives in two plain-text sections:
+#
+#   Design Info
+#   D95 Backward Curved SW, SIZE 270, A/4, CW, TH, 44.5%, WHEEL TYPE Backward Curved
+#   Performance
+#   ..., DESIGN TEMP 95, MAX TEMP 95, ...
+_LEGACY_DESIGN_INFO = re.compile(r"^\s*Design\s+Info\s*$", re.I)
+_LEGACY_SECTION_STOP = re.compile(
+    r"^(?:_+|Performance\b|Base\s+Fan\b|Inquiry\b|Motor\b|CSIV\w*\b|\S+@\S+)",
+    re.I,
+)
+_LEGACY_ARRANGEMENT = re.compile(r"^(A/[A-Z0-9-]+(?:\s+[A-Z])?)(?:\s|$)", re.I)
+_LEGACY_WHEEL_CODES = {
+    "airfoil": "AF",
+    "backward curved": "BC",
+    "backward inclined": "BI",
+    "forward curved": "FC",
+    "radial blade": "RB",
+}
 # Special temperature rating, written in the Base Fan line as "Suitable for
 # <temp>" (e.g. "Suitable for -45C", "Suitable for -40°"). Distinct from the
 # DesignTemp/MaxTemp airstream values and the BHP@ reference temp. Requires a
@@ -428,6 +448,90 @@ def _spec_from_tables(tables) -> Dict[str, str]:
     return fields
 
 
+def _legacy_spec_from_text(lines: List[str]) -> Dict[str, str]:
+    """Parse the fan summary from an Infor ``Order Verification Report``.
+
+    These PDFs have no extractable spec table, but the same values are present
+    in stable comma-delimited Design Info and Performance lines. Return keys in
+    the same shape as :func:`parse_sales_order_pdf`; an unrecognized block is a
+    harmless empty dict.
+    """
+    block: List[str] = []
+    for index, line in enumerate(lines):
+        if not _LEGACY_DESIGN_INFO.match(line or ""):
+            continue
+        for raw in lines[index + 1:]:
+            value = re.sub(r"\s+", " ", raw or "").strip()
+            if not value:
+                continue
+            if _LEGACY_SECTION_STOP.match(value):
+                break
+            block.append(value)
+        break
+    if not block:
+        return {}
+
+    text = " ".join(block)
+    design_size = re.split(r",\s*SIZE\s+", text, maxsplit=1, flags=re.I)
+    if len(design_size) != 2:
+        return {}
+    raw_design, rest = (part.strip() for part in design_size)
+    wheel_parts = re.split(r",\s*WHEEL\s+TYPE\s*", rest, maxsplit=1, flags=re.I)
+    if len(wheel_parts) != 2:
+        return {}
+    before_wheel, raw_wheel = wheel_parts
+
+    parts = [part.strip() for part in before_wheel.split(",") if part.strip()]
+    if not parts:
+        return {}
+    size = parts[0]
+    rotation_index = next(
+        (i for i, part in enumerate(parts[1:], start=1)
+         if part.upper() in {"CW", "CCW"}),
+        None,
+    )
+    if rotation_index is None:
+        return {}
+
+    pre_rotation = parts[1:rotation_index]
+    arrangement = ""
+    fan_class = ""
+    for part in pre_rotation:
+        arrangement_match = _LEGACY_ARRANGEMENT.match(part)
+        if arrangement_match and not arrangement:
+            arrangement = arrangement_match.group(1)
+        if re.fullmatch(r"C/[A-Z0-9-]+", part, re.I) and not fan_class:
+            fan_class = part
+
+    design_match = re.match(r"^D[0-9A-Z-]+\s+(.+)$", raw_design, re.I)
+    design_desc = design_match.group(1).strip() if design_match else raw_design
+    wheel = re.sub(r"\s+", " ", raw_wheel).strip(" ,")
+    wheel = _LEGACY_WHEEL_CODES.get(wheel.casefold(), wheel)
+    discharge = parts[rotation_index + 1] if len(parts) > rotation_index + 1 else ""
+    pct_width = parts[rotation_index + 2] if len(parts) > rotation_index + 2 else ""
+    pct_width = pct_width.rstrip("%").strip()
+
+    all_text = "\n".join(lines)
+    # Horizontal whitespace only: ``\s`` could cross a newline and steal the C
+    # from the following ``CSIV10C`` page footer as a temperature unit.
+    temp_value = r"(-?\d+(?:\.\d+)?(?:[ \t]*(?:°[ \t]*)?[CF]\b)?)"
+    design_temp = re.search(r"\bDESIGN\s+TEMP\s+" + temp_value, all_text, re.I)
+    max_temp = re.search(r"\bMAX\s+TEMP\s+" + temp_value, all_text, re.I)
+    return {
+        "design_desc": design_desc,
+        "size": size,
+        "arrangement": arrangement or "N/A",
+        "motor_pos": "N/A",
+        "fan_class": fan_class or "N/A",
+        "rotation": parts[rotation_index].upper(),
+        "discharge": discharge,
+        "pct_width": pct_width,
+        "wheel_type": wheel,
+        "design_temp": design_temp.group(1).strip() if design_temp else "",
+        "max_temp": max_temp.group(1).strip() if max_temp else "",
+    }
+
+
 def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
     """Pull Design/Size/Arrangement + change-order history out of an SO pdf."""
     res = {"design_desc": "", "size": "", "arrangement": "", "motor_pos": "", "fan_class": "",
@@ -445,7 +549,8 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
     try:
         with pdfplumber.open(str(path)) as pdf:
             p1 = pdf.pages[0]
-            for ln in (p1.extract_text() or "").splitlines()[:8]:
+            page_texts = [(page.extract_text() or "") for page in pdf.pages]
+            for ln in page_texts[0].splitlines()[:8]:
                 if res["header_co"] is None:
                     m = re.search(r"CO\s*#\s*(\d+)", ln)
                     if m:
@@ -473,6 +578,13 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
                     res["design_temp"] = spec.get("DesignTemp", "")
                     res["max_temp"] = spec.get("MaxTemp", "")
                     break
+            # Infor's legacy Order Verification Report has no extractable table.
+            # Fill any still-missing summary values from its Design Info and
+            # Performance text instead of treating a successful fetch as blanks.
+            plain_lines = [line for text in page_texts for line in text.splitlines()]
+            for key, value in _legacy_spec_from_text(plain_lines).items():
+                if not res.get(key) and value:
+                    res[key] = value
             recon_all: List[str] = []
             for page in pdf.pages:
                 recon_all.extend(_recon_lines(page))
@@ -491,7 +603,7 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
             res["customer_po"] = _td.parse_po(recon_all)
             res["released"] = _td.parse_approval(recon_all)[1]
             # Special temperature rating from the "Suitable for <temp>" phrase.
-            raw_all = "\n".join((page.extract_text() or "") for page in pdf.pages)
+            raw_all = "\n".join(page_texts)
             mt = TEMP_RE.search(raw_all)
             if mt:
                 res["temp"] = re.sub(r"\s+", "", mt.group(1))
@@ -499,6 +611,47 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
     except Exception as e:  # noqa: BLE001 - never let a bad pdf fail the run
         log.warning("Could not parse SO pdf %s: %s", path, e)
     return res
+
+
+_SO_SUMMARY_FIELDS = {
+    "so_design_desc": "design_desc",
+    "so_size": "size",
+    "so_arrangement": "arrangement",
+    "so_motor_pos": "motor_pos",
+    "so_class": "fan_class",
+    "so_rotation": "rotation",
+    "so_discharge": "discharge",
+    "so_pct_width": "pct_width",
+    "so_wheel_type": "wheel_type",
+    "so_design_temp": "design_temp",
+    "so_max_temp": "max_temp",
+    "so_special_temp": "special_temp",
+}
+_SO_SUMMARY_CORE = ("so_design_desc", "so_size", "so_arrangement")
+
+
+def repair_missing_sales_order_summaries(jobs: List[Dict[str, Any]]) -> int:
+    """Fill missing summary fields from already-archived Sales Order PDFs.
+
+    This is intentionally fill-only: a startup repair can recover fields after
+    adding support for another PDF layout, but can never replace a known value
+    or create a change event. Returns the number of job dicts repaired.
+    """
+    repaired = 0
+    for job in jobs:
+        pdf = str(job.get("so_pdf") or "").strip()
+        if not pdf or all(job.get(field) for field in _SO_SUMMARY_CORE):
+            continue
+        missing = [field for field in _SO_SUMMARY_FIELDS if not job.get(field)]
+        parsed = parse_sales_order_pdf(pdf)
+        changed = False
+        for field in missing:
+            value = parsed.get(_SO_SUMMARY_FIELDS[field])
+            if value not in (None, "", [], {}):
+                job[field] = value
+                changed = True
+        repaired += int(changed)
+    return repaired
 
 
 # --------------------------------------------------------------------------- #

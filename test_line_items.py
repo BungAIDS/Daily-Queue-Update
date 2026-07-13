@@ -2125,6 +2125,78 @@ def _mini_pdf(lines: list, path: Path) -> None:
     path.write_bytes(bytes(out))
 
 
+def test_legacy_order_verification_summary_roundtrip(tmp: Path):
+    """The Infor Order Verification Report has text sections, not a spec table."""
+    from sales_orders import parse_sales_order_pdf
+
+    pdf = tmp / "421507 - Sales Order CO2.pdf"
+    _mini_pdf([
+        "Order Verification Report",
+        "Design Info",
+        "D95 Backward Curved SW, SIZE 270, A/4, CW, TH, 44.5%, WHEEL TYPE Backward Curved",
+        "Performance",
+        "CFM 12689, RPM 3570, DESIGN TEMP 95, MAX TEMP 95, ELEV 965",
+    ], pdf)
+    parsed = parse_sales_order_pdf(pdf)
+    assert {key: parsed[key] for key in (
+        "design_desc", "size", "arrangement", "motor_pos", "fan_class",
+        "rotation", "discharge", "pct_width", "wheel_type", "design_temp", "max_temp",
+    )} == {
+        "design_desc": "Backward Curved SW", "size": "270", "arrangement": "A/4",
+        "motor_pos": "N/A", "fan_class": "N/A", "rotation": "CW",
+        "discharge": "TH", "pct_width": "44.5", "wheel_type": "BC",
+        "design_temp": "95", "max_temp": "95",
+    }
+
+
+def test_legacy_summary_handles_class_and_wrapped_wheel_type():
+    from sales_orders import _legacy_spec_from_text
+
+    parsed = _legacy_spec_from_text([
+        "Design Info",
+        "D38 CAPB, SIZE 1400, A/4 With Base for foot mounted motor, WHEEL SIZE 13 x 3-1/4,",
+        "INLET DIAMETER 8, CCW, TH, 100%, WHEEL TYPE",
+        "Radial Blade",
+        "Base Fan, 13 x 3-1/4 RB Wheel",
+        "Performance",
+        "RPM 3600, DESIGN TEMP 70, MAX TEMP 70",
+    ])
+    assert parsed["design_desc"] == "CAPB"
+    assert parsed["size"] == "1400" and parsed["arrangement"] == "A/4"
+    assert parsed["rotation"] == "CCW" and parsed["discharge"] == "TH"
+    assert parsed["pct_width"] == "100" and parsed["wheel_type"] == "RB"
+
+    classed = _legacy_spec_from_text([
+        "Design Info",
+        "D1903 PFD, SIZE 3612 (1800 RPM or less), C/HD, A/4, CCW, DB, 95%, WHEEL TYPE Airfoil",
+        "Performance",
+        "RPM 1780, DESIGN TEMP 120, MAX TEMP 120",
+        "CSIV10C Chicago Blower Corporation Page 1 of 4",
+    ])
+    assert classed["size"] == "3612 (1800 RPM or less)"
+    assert classed["fan_class"] == "C/HD" and classed["arrangement"] == "A/4"
+    assert classed["wheel_type"] == "AF"
+    assert classed["design_temp"] == "120" and classed["max_temp"] == "120"
+
+
+def test_repair_missing_sales_order_summaries_is_fill_only(tmp: Path):
+    from sales_orders import repair_missing_sales_order_summaries
+
+    pdf = tmp / "421618 - Sales Order CO1.pdf"
+    _mini_pdf([
+        "Order Verification Report",
+        "Design Info",
+        "D95 Backward Curved SW, SIZE 200, A/4, CCW, UB, 80.9%, WHEEL TYPE Backward Curved",
+        "Performance",
+        "CFM 3178, DESIGN TEMP 77, MAX TEMP 77",
+    ], pdf)
+    job = {"job": "421618", "so_pdf": str(pdf), "so_size": "KEEP"}
+    assert repair_missing_sales_order_summaries([job]) == 1
+    assert job["so_size"] == "KEEP"                 # known values are never replaced
+    assert job["so_rotation"] == "CCW" and job["so_pct_width"] == "80.9"
+    assert repair_missing_sales_order_summaries([job]) == 0   # now complete / idempotent
+
+
 def test_pdf_roundtrip(tmp: Path):
     # End to end: a real (tiny) PDF through parse_sales_order_pdf.
     try:

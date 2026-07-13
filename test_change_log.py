@@ -51,6 +51,24 @@ def test_scrub_phantom_blanks():
             p.unlink()
 
 
+def test_dedupe_repeated_transitions_keeps_real_reversals():
+    d = date(2025, 1, 5)
+    ab = {"time": "t1", "job": "100", "field": "% Width", "old": "65.4", "new": "64.7"}
+    ba = {"time": "t4", "job": "100", "field": "% Width", "old": "64.7", "new": "65.4"}
+    other = {"time": "t3", "job": "200", "field": "Checker", "old": "A", "new": "B"}
+    try:
+        change_log.save(d, [ab, dict(ab, time="t2"), other, dict(ab, time="t3"),
+                            ba, dict(ab, time="t5")])
+        assert change_log.dedupe_repeated_transitions(d) == 2
+        # A real B->A reversal makes the later A->B a coherent new transition.
+        assert change_log.load(d) == [ab, other, ba, dict(ab, time="t5")]
+        assert change_log.dedupe_repeated_transitions(d) == 0
+    finally:
+        p = change_log.log_path(d)
+        if p.exists():
+            p.unlink()
+
+
 def test_purge_day_once_archives_then_never_runs_again():
     d = date(2025, 1, 4)              # a date unlikely to collide with real logs
     marker = change_log.SNAPSHOT_DIR / ".change_log_purged_once"

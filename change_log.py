@@ -111,3 +111,33 @@ def scrub_phantom_blanks(d: date, master: Dict[str, Any]) -> int:
     if dropped:
         save(d, kept)
     return dropped
+
+
+def dedupe_repeated_transitions(d: date) -> int:
+    """Drop impossible repeated copies of the same field transition.
+
+    A field cannot move from A to B twice without first moving away from B. The
+    old live/backfill flip-flop nevertheless logged identical A->B events on
+    successive restarts. Keep the first transition and any later transition
+    whose old/new pair differs; if a real B->A reversal occurs, a subsequent
+    A->B is retained. Returns the number removed.
+    """
+    events = load(d)
+    if not events:
+        return 0
+    last_by_field: Dict[tuple[str, str], tuple[str, str]] = {}
+    kept = []
+    for event in events:
+        job = str(event.get("job") or "")
+        field = str(event.get("field") or "")
+        transition = (str(event.get("old") or ""), str(event.get("new") or ""))
+        key = (job, field)
+        if job and field and last_by_field.get(key) == transition:
+            continue
+        kept.append(event)
+        if job and field:
+            last_by_field[key] = transition
+    dropped = len(events) - len(kept)
+    if dropped:
+        save(d, kept)
+    return dropped

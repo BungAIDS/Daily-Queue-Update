@@ -58,8 +58,8 @@ from live_excel import (recycle_workbook, save_morning_copy,
 from live_sheets import added_label
 from log_push import push_logs
 from runstate import load_diff
-from sales_orders import (enrich_with_sales_orders, refresh_autocad_folders,
-                          refresh_sales_orders)
+from sales_orders import (enrich_with_sales_orders, repair_missing_sales_order_summaries,
+                          refresh_autocad_folders, refresh_sales_orders)
 from scraper import scrape_queue
 
 log = logging.getLogger("queue-watch")
@@ -719,9 +719,12 @@ def run_watch(ignore_window: bool = False) -> int:
     if purged:
         log.info("One-time purge: archived %d pre-fix event(s); today's change log "
                  "(and the Changes tab) restarts clean.", purged)
-    scrubbed = change_log.scrub_phantom_blanks(today, master)
-    if scrubbed:
-        log.info("Scrubbed %d phantom '-> blank' event(s) from today's change log.", scrubbed)
+    state_jobs = [entry["job"] for entry in state.values()
+                  if entry.get("present") and entry.get("job")]
+    repaired = repair_missing_sales_order_summaries(state_jobs)
+    if repaired:
+        log.info("Repaired missing Sales Order summary fields for %d on-board order(s) "
+                 "from the archived PDFs.", repaired)
     # Reclaim on-board orders whose master copy a helper merge overwrote while
     # we were down: reset them to the live state's values silently, so the
     # difference doesn't surface as bogus 'changes' when polls/re-verifications
@@ -730,6 +733,17 @@ def run_watch(ignore_window: bool = False) -> int:
     if realigned:
         log.info("Re-aligned %d on-board order(s) in the master to the live state "
                  "(no change events).", realigned)
+    # Persist repairs before using the restored values to clean the event log.
+    if repaired or realigned:
+        live_state.save_state(state, today)
+        live_master.save_master(master)
+    scrubbed = change_log.scrub_phantom_blanks(today, master)
+    if scrubbed:
+        log.info("Scrubbed %d phantom '-> blank' event(s) from today's change log.", scrubbed)
+    deduped = change_log.dedupe_repeated_transitions(today)
+    if deduped:
+        log.info("Removed %d repeated field-transition event(s) from today's change log.",
+                 deduped)
     tagged = engineers.backfill(master)   # tag historical orders by engineer (roster edits too)
     if tagged:
         log.info("Engineer roster: tagged/updated %d existing order(s)", tagged)

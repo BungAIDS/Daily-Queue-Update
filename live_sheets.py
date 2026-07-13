@@ -439,11 +439,14 @@ def _events_table(sh: Sheet, title: str, headers: List[str],
     sh.blank()
 
 
-def _suffix_comment_cell(label: str, value: Any, **cell_kw) -> Cell:
+def _suffix_comment_cell(label: str, value: Any, show_cleared: bool = False,
+                         **cell_kw) -> Cell:
     """A changed-field cell that mirrors the display tabs: for Arrangement / Size
     show the short code and move the descriptive suffix to a hover note (so the
     column stays narrow); any other field is shown as-is. Extra Cell kwargs
     (fill/font) pass through."""
+    if show_cleared and value in (None, ""):
+        return Cell("(cleared)", **cell_kw)
     if label == "Arrangement":
         code, note = split_arrangement(value)
     elif label == "Size":
@@ -534,8 +537,10 @@ def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]],
             for label, newval in step.items():
                 ci = qh_idx.get(label)
                 if ci is not None:
-                    cells[ci] = _suffix_comment_cell(label, newval, fill=fill, font=F_RED)
-            extra_cells = [Cell(step[label], fill=fill, font=F_RED) if label in step
+                    cells[ci] = _suffix_comment_cell(label, newval, show_cleared=True,
+                                                     fill=fill, font=F_RED)
+            extra_cells = [_suffix_comment_cell(label, step[label], show_cleared=True,
+                                                fill=fill, font=F_RED) if label in step
                            else Cell("", fill=fill) for label in extra_cols]
             sh.row([Cell(_fmt_time(t), fill=fill)] + cells + extra_cells)
     sh.blank()

@@ -319,6 +319,20 @@ def test_orders_changed_one_instance_multiple_fields():
     assert after[0].fill == ls.FILL_CHANGE1     # after row shaded grey
 
 
+def test_orders_changed_marks_a_genuine_clear_explicitly():
+    from excel_writer import QUEUE_HEADERS
+
+    events = [{"time": "2026-06-16T09:30:00", "job": "420800", "customer": "X",
+               "field": "Note", "old": "NEEDS CHECKING", "new": ""}]
+    sh = ls.changes_sheet([], events, [], "2026-06-16", updated_at="x")
+    start = next(i for i, row in enumerate(sh.grid)
+                 if row and str(row[0].value).startswith("Orders that changed today"))
+    instance = sh.grid[start + 3]               # title, header, was, changed row
+    note_col = QUEUE_HEADERS.index("Note") + 1  # leading Time column
+    assert instance[note_col].value == "(cleared)"
+    assert instance[note_col].font == ls.F_RED
+
+
 def test_changes_fingerprint_ignores_timestamp_but_not_content():
     # The 'Last updated' stamp is volatile: it must NOT change the render
     # fingerprint (else the tab fully repaints every poll), but a real content
