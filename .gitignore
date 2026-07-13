@@ -19,6 +19,9 @@ venv/
 __pycache__/
 *.pyc
 
+# Scratch dir left behind by test_backfill_serial.py's runner
+.tmp_backfill_serial_tests/
+
 # Launcher<->script stop-flag files (runtime only)
 .launcher_stops/
 
