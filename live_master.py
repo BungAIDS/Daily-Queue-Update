@@ -267,7 +267,16 @@ def update(master: Dict[str, Any], present: List[Dict[str, Any]],
         else:
             stored_job = entry.get("job") or {}
             # Never let a failed/stale re-fetch wipe a change order we already had.
-            merged = _keep_better_enrichment(stored_job, j)
+            merged = dict(_keep_better_enrichment(stored_job, j))
+            # A source that has no key for a field doesn't know about it, so it
+            # can't wipe it (same sparse-source rule as merge_order). A board-only
+            # job dict (e.g. one seeded from a raw morning snapshot) folding over
+            # a backfill-enriched entry used to strip every enrichment field
+            # here; _merge_external_before_save then revived them from disk on
+            # save, so the same "-> blank" change was re-logged every poll.
+            for k, v in stored_job.items():
+                if k not in merged:
+                    merged[k] = v
             # Accumulate engineers: union the names already attached with any
             # found this poll, so an association is never dropped on reassignment.
             merged["engineers"] = engineers.merge(stored_job.get("engineers"),
@@ -300,6 +309,35 @@ def update(master: Dict[str, Any], present: List[Dict[str, Any]],
                 entry["left"] = now_iso
 
     return events
+
+
+def realign_orders(master: Dict[str, Any], jobs: List[Dict[str, Any]]) -> int:
+    """Reset each order's stored job dict to `jobs`' version WITHOUT logging
+    change events — same merge rules as update() (enrichment regression guard,
+    sparse keys carry over). For reclaiming on-board orders whose master copy a
+    helper store overwrote while the watcher was down: left alone, every field
+    the helper's parse disagreed on surfaces as a bogus 'change' when the next
+    poll or re-verification folds the live values back in. Orders not already
+    in the master are ignored (this aligns, it never inserts). Returns how many
+    entries actually changed."""
+    orders = master.setdefault("orders", {})
+    n = 0
+    for j in jobs:
+        jn = _jobnum(j)
+        entry = orders.get(jn)
+        if not jn or entry is None:
+            continue
+        stored = entry.get("job") or {}
+        merged = dict(_keep_better_enrichment(stored, j))
+        for k, v in stored.items():
+            if k not in merged:
+                merged[k] = v
+        merged["engineers"] = engineers.merge(stored.get("engineers"),
+                                              engineers.detect(merged))
+        if merged != stored:
+            entry["job"] = merged
+            n += 1
+    return n
 
 
 def merge_order(master: Dict[str, Any], job_num: str, fields: Dict[str, Any],

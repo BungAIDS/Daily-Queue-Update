@@ -137,6 +137,25 @@ def merge_backfill(master: Dict[str, Any]) -> int:
             continue
         timestamped_drive = bool(rec.get("drive_run_parsed_at"))
         drive_changed = live_master.merge_drive_run(master, job, rec) if timestamped_drive else False
+
+        entry = (master.get("orders") or {}).get(str(job)) or {}
+        # The live watcher owns on-board Sales Order fields. Preserve the
+        # independently timestamped quote parse above, then leave the rest of
+        # the board record alone so the next poll cannot flip stale values back.
+        if entry.get("on_queue"):
+            if drive_changed:
+                n += 1
+            continue
+
+        # Off-board, a live enrichment newer than this scan is the same
+        # fetch+parse run later. Keep the quote parse above, but do not merge
+        # older Sales Order fields over the fresher live result.
+        verified = str((entry.get("job") or {}).get("so_verified_at") or "")
+        if verified and verified >= str(rec.get("scanned_at") or ""):
+            if drive_changed:
+                n += 1
+            continue
+
         fields = {
             k: v for k, v in rec.items()
             if k not in skip and (not timestamped_drive or k not in live_master.DRIVE_RUN_FIELDS)

@@ -59,6 +59,15 @@ def push_logs(branch: str | None = None) -> bool:
     if not branch:
         return False
     files = sorted(p for p in LOG_DIR.glob("watch.log*") if p.is_file())
+    try:
+        # Today's field-change log rides along so a remote reader can see the
+        # exact rows behind the Changes tab, not just the per-poll counts.
+        import change_log
+        cl = change_log.log_path(datetime.now().date())
+        if cl.is_file():
+            files.append(cl)
+    except Exception:  # noqa: BLE001 - the watch log alone is still worth pushing
+        pass
     if not files:
         return False
     try:

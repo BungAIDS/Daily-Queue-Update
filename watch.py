@@ -288,7 +288,10 @@ def _changes_sheet(master: dict, lq_jobs: list, new_today: set, today: date,
     new_today_jobs = sorted((j for j in lq_jobs if str(j.get("job") or "") in new_today),
                             key=lambda j: _sim_sort_key(str(j.get("job") or "")), reverse=True)
     events = change_log.load(today)
-    removed_today = sorted((e.get("job", {}) for e in master.get("orders", {}).values()
+    # Copies with the entry's departure time attached, for the table's leading
+    # Time column (the timestamp lives on the entry, not the job dict).
+    removed_today = sorted(({**e.get("job", {}), "_left_iso": e.get("left") or ""}
+                            for e in master.get("orders", {}).values()
                             if e.get("seen_on_queue") and not e.get("on_queue")
                             and str(e.get("left") or "")[:10] == today.isoformat()),
                            key=lambda j: _sim_sort_key(str(j.get("job") or "")), reverse=True)
@@ -712,6 +715,21 @@ def run_watch(ignore_window: bool = False) -> int:
     state = live_state.load_state(today)
     _merge_backlog_sources()
     master = live_master.load_master()
+    purged = change_log.purge_day_once(today)
+    if purged:
+        log.info("One-time purge: archived %d pre-fix event(s); today's change log "
+                 "(and the Changes tab) restarts clean.", purged)
+    scrubbed = change_log.scrub_phantom_blanks(today, master)
+    if scrubbed:
+        log.info("Scrubbed %d phantom '-> blank' event(s) from today's change log.", scrubbed)
+    # Reclaim on-board orders whose master copy a helper merge overwrote while
+    # we were down: reset them to the live state's values silently, so the
+    # difference doesn't surface as bogus 'changes' when polls/re-verifications
+    # fold the live values back in.
+    realigned = live_master.realign_orders(master, live_state.present_jobs(state))
+    if realigned:
+        log.info("Re-aligned %d on-board order(s) in the master to the live state "
+                 "(no change events).", realigned)
     tagged = engineers.backfill(master)   # tag historical orders by engineer (roster edits too)
     if tagged:
         log.info("Engineer roster: tagged/updated %d existing order(s)", tagged)
