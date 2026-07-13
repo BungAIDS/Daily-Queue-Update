@@ -24,11 +24,17 @@ def test_default_search_population_starts_at_401000():
     assert backfill_orders._inside_job_caps("401000", minimum)
 
 
+def test_dead_session_probe_has_a_bootstrap_known_good_order():
+    assert backfill_orders._probe_job({}) == "401468"
+
+
 def test_resume_trusts_only_current_serial_misses():
     version = backfill_orders.BACKFILL_SCAN_VERSION
     assert backfill_orders._is_done({"status": "ok"})
     assert not backfill_orders._is_done({"status": "error"})
     assert not backfill_orders._is_done({"status": "needs-retry-wrong-SO-quarantined"})
+    assert not backfill_orders._is_done({"status": "search-state-retry"})
+    assert not backfill_orders._is_done({"status": "session-failed"})
     assert not backfill_orders._is_done({"status": "not-found"})
     assert not backfill_orders._is_done({"status": "no-SO"})
     assert not backfill_orders._is_done({
@@ -140,8 +146,9 @@ def test_backfill_overlay_survives_and_merges_with_main_store(tmp: Path):
     assert merged["jobs"]["401001"]["items"][0]["raw"] == "fresh"
 
 
-def test_dead_session_probe_failure_warns_but_never_stops():
+def test_dead_session_probe_failure_invalidates_streak_and_stops():
     page = SimpleNamespace(close=AsyncMock())
+    fresh_page = SimpleNamespace(close=AsyncMock())
 
     async def all_misses(_page, _context, job, _folder, **_kwargs):
         return {"job": job, "status": "not-found", "scanned_at": "now",
@@ -158,9 +165,51 @@ def test_dead_session_probe_failure_warns_but_never_stops():
         return False
 
     with (
-        patch("backfill_orders._open_backfill_page", new=AsyncMock(return_value=page)),
+        patch("backfill_orders._open_backfill_page",
+              new=AsyncMock(side_effect=[page, fresh_page])),
         patch("backfill_orders.process_one_async", new=all_misses),
         patch("backfill_orders.open_order_detail_async", new=probe_fails),
+        patch("backfill_orders._close_modal_async", new=AsyncMock()),
+        patch("backfill_orders.cbc_fetch_lock", side_effect=lambda: contextlib.nullcontext()),
+        patch("backfill_orders.save_progress", side_effect=lambda _v: None),
+    ):
+        try:
+            asyncio.run(backfill_orders._run_serial_pass(
+                object(), jobs, records, {}, 0, 1, 1, 1, state))
+            assert False, "dead CBC session should stop the serial pass"
+        except backfill_orders.DeadSessionError:
+            pass
+
+    assert state["processed"] == backfill_orders.DEAD_SESSION_STREAK
+    assert state.get("dead_session") == 1
+    assert probes == ["401001", "401001"]       # current page, then fresh page
+    assert all(records[j]["status"] == "session-failed"
+               for j in jobs[:backfill_orders.DEAD_SESSION_STREAK])
+    assert all(not backfill_orders._is_done(records[j])
+               for j in jobs[:backfill_orders.DEAD_SESSION_STREAK])
+    page.close.assert_awaited_once()
+    fresh_page.close.assert_awaited_once()
+
+
+def test_dead_session_fresh_page_recovery_marks_streak_for_retry():
+    page = SimpleNamespace(close=AsyncMock())
+    fresh_page = SimpleNamespace(close=AsyncMock())
+
+    async def all_misses(_page, _context, job, _folder, **_kwargs):
+        return {"job": job, "status": "not-found", "scanned_at": "now",
+                "backfill_scan_version": backfill_orders.BACKFILL_SCAN_VERSION}
+
+    jobs = [str(401100 + i) for i in range(backfill_orders.DEAD_SESSION_STREAK + 3)]
+    records = {"401001": {"status": "ok",
+                          "backfill_scan_version": backfill_orders.BACKFILL_SCAN_VERSION}}
+    state = {"processed": 0, "publish_every": 0}
+
+    with (
+        patch("backfill_orders._open_backfill_page",
+              new=AsyncMock(side_effect=[page, fresh_page])),
+        patch("backfill_orders.process_one_async", new=all_misses),
+        patch("backfill_orders.open_order_detail_async",
+              new=AsyncMock(side_effect=[False, True])),
         patch("backfill_orders._close_modal_async", new=AsyncMock()),
         patch("backfill_orders.cbc_fetch_lock", side_effect=lambda: contextlib.nullcontext()),
         patch("backfill_orders.save_progress", side_effect=lambda _v: None),
@@ -168,9 +217,12 @@ def test_dead_session_probe_failure_warns_but_never_stops():
         completed = asyncio.run(backfill_orders._run_serial_pass(
             object(), jobs, records, {}, 0, 1, 1, 1, state))
 
-    assert completed == len(jobs)               # LOG-ONLY: the run never stops
-    assert state.get("dead_session_warned") is True
-    assert probes == ["401001", "401001"]       # one probe per streak window
+    assert completed == len(jobs)
+    assert all(records[j]["status"] == "search-state-retry"
+               for j in jobs[:backfill_orders.DEAD_SESSION_STREAK])
+    assert all(records[j]["status"] == "not-found"
+               for j in jobs[backfill_orders.DEAD_SESSION_STREAK:])
+    assert not state.get("dead_session")
 
 
 def test_dead_session_probe_success_resets_and_continues():
@@ -198,6 +250,11 @@ def test_dead_session_probe_success_resets_and_continues():
 
     assert completed == len(jobs)               # thin stretch: the pass finishes
     assert not state.get("dead_session")
+
+
+def test_excel_safe_value_removes_only_illegal_control_characters():
+    assert backfill_orders._excel_safe_value("A\x00B\x07C\nD\tE") == "ABC\nD\tE"
+    assert backfill_orders._excel_safe_value(42) == 42
 
 
 def test_watcher_fetch_uses_the_shared_cbc_lock():
