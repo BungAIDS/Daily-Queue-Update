@@ -633,22 +633,59 @@ _SO_SUMMARY_CORE = ("so_design_desc", "so_size", "so_arrangement")
 def repair_missing_sales_order_summaries(jobs: List[Dict[str, Any]]) -> int:
     """Fill missing summary fields from already-archived Sales Order PDFs.
 
-    This is intentionally fill-only: a startup repair can recover fields after
-    adding support for another PDF layout, but can never replace a known value
-    or create a change event. Returns the number of job dicts repaired.
+    Source summary fields are intentionally fill-only.  The derived Special
+    Temp is recomputed while repairing a legacy summary, and an obvious high
+    temperature can also be corrected from already-stored Design/Max Temp
+    fields.  Returns the number of job dicts repaired.
     """
     repaired = 0
     for job in jobs:
-        pdf = str(job.get("so_pdf") or "").strip()
-        if not pdf or all(job.get(field) for field in _SO_SUMMARY_CORE):
+        core_missing = not all(job.get(field) for field in _SO_SUMMARY_CORE)
+        high_temp = _special_temp(
+            str(job.get("so_design_temp") or ""),
+            str(job.get("so_max_temp") or ""),
+            "",
+        )
+        high_temp_mismatch = (
+            high_temp != "0"
+            and str(job.get("so_special_temp") or "") != high_temp
+        )
+        if not core_missing and not high_temp_mismatch:
             continue
-        missing = [field for field in _SO_SUMMARY_FIELDS if not job.get(field)]
-        parsed = parse_sales_order_pdf(pdf)
+
         changed = False
-        for field in missing:
-            value = parsed.get(_SO_SUMMARY_FIELDS[field])
-            if value not in (None, "", [], {}):
-                job[field] = value
+        if high_temp_mismatch:
+            job["so_special_temp"] = high_temp
+            changed = True
+
+        pdf = str(job.get("so_pdf") or "").strip()
+        if core_missing and pdf:
+            missing = [field for field in _SO_SUMMARY_FIELDS if not job.get(field)]
+            parsed = parse_sales_order_pdf(pdf)
+            for field in missing:
+                value = parsed.get(_SO_SUMMARY_FIELDS[field])
+                if value not in (None, "", [], {}):
+                    job[field] = value
+                    changed = True
+
+            parsed_special_temp = parsed.get("special_temp")
+            stored_high_temp = _special_temp(
+                str(job.get("so_design_temp") or ""),
+                str(job.get("so_max_temp") or ""),
+                "",
+            )
+            if stored_high_temp != "0":
+                parsed_special_temp = stored_high_temp
+            current_special_temp = str(job.get("so_special_temp") or "")
+            if (
+                parsed_special_temp not in (None, "")
+                and not (
+                    str(parsed_special_temp) == "0"
+                    and current_special_temp not in ("", "0")
+                )
+                and current_special_temp != str(parsed_special_temp)
+            ):
+                job["so_special_temp"] = str(parsed_special_temp)
                 changed = True
         repaired += int(changed)
     return repaired

@@ -2188,13 +2188,48 @@ def test_repair_missing_sales_order_summaries_is_fill_only(tmp: Path):
         "Design Info",
         "D95 Backward Curved SW, SIZE 200, A/4, CCW, UB, 80.9%, WHEEL TYPE Backward Curved",
         "Performance",
-        "CFM 3178, DESIGN TEMP 77, MAX TEMP 77",
+        "CFM 3178, DESIGN TEMP 300, MAX TEMP 300",
     ], pdf)
-    job = {"job": "421618", "so_pdf": str(pdf), "so_size": "KEEP"}
+    job = {
+        "job": "421618",
+        "so_pdf": str(pdf),
+        "so_size": "KEEP",
+        "so_special_temp": "0",
+    }
     assert repair_missing_sales_order_summaries([job]) == 1
     assert job["so_size"] == "KEEP"                 # known values are never replaced
     assert job["so_rotation"] == "CCW" and job["so_pct_width"] == "80.9"
+    assert job["so_special_temp"] == "300"          # derived fields are reconciled
     assert repair_missing_sales_order_summaries([job]) == 0   # now complete / idempotent
+
+    complete = {
+        "job": "421973",
+        "so_design_desc": "SQB SW Belt Drive",
+        "so_size": "27",
+        "so_arrangement": "A/9SL",
+        "so_design_temp": "300",
+        "so_max_temp": "300",
+        "so_special_temp": "0",
+    }
+    assert repair_missing_sales_order_summaries([complete]) == 1
+    assert complete["so_special_temp"] == "300"
+    assert repair_missing_sales_order_summaries([complete]) == 0
+
+    standard_pdf = tmp / "421619 - Sales Order CO1.pdf"
+    _mini_pdf([
+        "Order Verification Report",
+        "Design Info",
+        "D95 Backward Curved SW, SIZE 245, A/4, CCW, UB, 101.6%, WHEEL TYPE Backward Curved",
+        "Performance",
+        "CFM 3178, DESIGN TEMP 77, MAX TEMP 77",
+    ], standard_pdf)
+    known_low = {
+        "job": "421619",
+        "so_pdf": str(standard_pdf),
+        "so_special_temp": "-45",
+    }
+    assert repair_missing_sales_order_summaries([known_low]) == 1
+    assert known_low["so_special_temp"] == "-45"     # a parser default cannot erase it
 
 
 def test_pdf_roundtrip(tmp: Path):
