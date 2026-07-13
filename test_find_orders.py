@@ -7,6 +7,8 @@ inline; nothing touches disk.
 from __future__ import annotations
 
 import sys
+from types import SimpleNamespace
+from unittest import mock
 
 import find_orders as fo
 
@@ -111,6 +113,45 @@ def test_attach_dwg_annotates_hits():
     assert hits[0]["dwg_extras"] == {"07": "DWG"} and hits[0]["dwg_scanned"]
     assert hits[1]["dwg_extras"] == {} and hits[1]["dwg_scanned"]   # scanned, all standard
     assert hits[2]["dwg_extras"] == {} and not hits[2]["dwg_scanned"]  # never scanned
+
+
+def test_watch_similarity_cache_tracks_backfill_overlay_updates():
+    import autocad_scan
+    import watch
+
+    class FakePath:
+        def __init__(self, mtime: int):
+            self.mtime = mtime
+
+        def stat(self):
+            return SimpleNamespace(st_mtime_ns=self.mtime)
+
+    base = FakePath(10)
+    overlay = FakePath(20)
+    dwg = FakePath(30)
+    jobs = [{"job": "421000", "line_items": []}]
+    old_cache = dict(watch._SIM_CACHE)
+    try:
+        watch._SIM_CACHE.update(key=None, rows=[])
+        with (
+            mock.patch.object(watch.line_items, "store_path", return_value=base),
+            mock.patch.object(watch.line_items, "backfill_store_path", return_value=overlay),
+            mock.patch.object(watch.line_items, "load_store", return_value={"jobs": {}}) as load,
+            mock.patch.object(autocad_scan, "PROGRESS_PATH", dwg),
+            mock.patch.object(autocad_scan, "load_progress", return_value={}),
+            mock.patch.object(fo, "build_index", return_value={}),
+            mock.patch.object(fo, "similar_to_items", return_value=[]),
+        ):
+            watch._similar_orders_rows(jobs)
+            watch._similar_orders_rows(jobs)
+            assert load.call_count == 1
+
+            overlay.mtime += 1
+            watch._similar_orders_rows(jobs)
+            assert load.call_count == 2
+    finally:
+        watch._SIM_CACHE.clear()
+        watch._SIM_CACHE.update(old_cache)
 
 
 def main() -> int:
