@@ -134,6 +134,10 @@ def test_watch_similarity_cache_tracks_backfill_overlay_updates():
     try:
         watch._SIM_CACHE.update(key=None, rows=[])
         with (
+            # Throttling OFF: this test proves the cache KEY tracks the backfill
+            # overlay's mtime; the deferred-refresh behavior has its own suite
+            # (test_watch_similarity_cache.py).
+            mock.patch.object(watch, "SIMILAR_REFRESH_INTERVAL_SECONDS", 0),
             mock.patch.object(watch.line_items, "store_path", return_value=base),
             mock.patch.object(watch.line_items, "backfill_store_path", return_value=overlay),
             mock.patch.object(watch.line_items, "load_store", return_value={"jobs": {}}) as load,
