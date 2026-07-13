@@ -43,6 +43,51 @@ from typing import Any, Dict, List, Optional
 log = logging.getLogger(__name__)
 
 
+def _sniff_extension(path: Path) -> str:
+    """Identify common binary run formats when CBC omits the file extension."""
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(16)
+    except OSError:
+        return ""
+    if head.startswith(b"%PDF-"):
+        return ".pdf"
+    if head.startswith(b"PK\x03\x04"):
+        import zipfile
+
+        try:
+            with zipfile.ZipFile(path) as archive:
+                names = set(archive.namelist())
+            if "xl/workbook.xml" in names:
+                return ".xlsx"
+            if "word/document.xml" in names:
+                return ".docx"
+        except (OSError, zipfile.BadZipFile):
+            pass
+        return ".zip"
+    if head.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+        return ".bin"
+    return ""
+
+
+def _decode_text_bytes(data: bytes) -> str:
+    """Decode a text-shaped run without turning compressed bytes into fields."""
+    sample = data[:8192]
+    if not sample:
+        return ""
+    if b"\x00" in sample:
+        return ""
+    controls = sum(byte < 32 and byte not in (9, 10, 12, 13) for byte in sample)
+    if controls / len(sample) > 0.02:
+        return ""
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        # Older RTF/text exports are commonly Windows-1252. Binary payloads
+        # have already been rejected by their NUL/control-byte density.
+        return data.decode("cp1252", errors="replace")
+
+
 def _design_num(design: Any) -> Optional[int]:
     """'64' -> 64, '36P' -> 36, 'EMSI'/''/None -> None. Leading digits only."""
     m = re.match(r"\s*(\d+)", str(design or ""))
@@ -61,7 +106,7 @@ class QuoteRunContext:
     def __init__(self, path: str | Path, design: Any = None):
         self.path = Path(path)
         self.filename = self.path.name
-        self.ext = self.path.suffix.lower()
+        self.ext = self.path.suffix.lower() or _sniff_extension(self.path)
         self.design = _design_num(design)
         self._text: Optional[str] = None
 
@@ -82,7 +127,7 @@ class QuoteRunContext:
         if self.ext not in (".txt", ".rtf", ".csv", ".md", ""):
             return ""
         try:
-            data = self.path.read_text(encoding="utf-8", errors="replace")
+            data = _decode_text_bytes(self.path.read_bytes())
         except OSError as e:
             log.warning("Could not read quote-run text %s: %s", self.path, e)
             return ""
