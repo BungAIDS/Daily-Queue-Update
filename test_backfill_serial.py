@@ -6,7 +6,6 @@ import contextlib
 import json
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -462,14 +461,14 @@ def test_kernel_lock_excludes_a_second_process(tmp: Path):
 
 def main() -> int:
     passed = 0
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
-        tmp = Path(directory)
-        for name, function in sorted(globals().items()):
-            if not name.startswith("test_") or not callable(function):
-                continue
-            function(tmp / name) if "tmp" in function.__code__.co_varnames else function()
-            print(f"  ok  {name}")
-            passed += 1
+    tmp = Path.cwd() / ".tmp_backfill_serial_tests"
+    tmp.mkdir(exist_ok=True)
+    for name, function in sorted(globals().items()):
+        if not name.startswith("test_") or not callable(function):
+            continue
+        function(tmp / name) if "tmp" in function.__code__.co_varnames else function()
+        print(f"  ok  {name}")
+        passed += 1
     print(f"\n{passed} tests passed.")
     return 0
 
