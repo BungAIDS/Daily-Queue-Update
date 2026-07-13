@@ -1,24 +1,27 @@
 # Launcher debug report
-generated: 2026-07-10T12:23:40
-code version: branch claude/master-sync-currency-qj95j1 @ commit bc18fae051
+generated: 2026-07-13T07:35:38
+code version: branch claude/gl-live-queue-logs-yieetr @ commit 0a9198baf9
 os.name: nt   platform: win32
-python (launcher): C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\pythonw.exe
+python (launcher): C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe
 python (for scripts): C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe
 
 ## Process scan (external-status detection)
 method used: powershell-cim
 error: none
-python process lines seen: 1
+python process lines seen: 3
 detected running outside launcher: none
 
 ### python process command lines (up to 40)
-  pid=65632 C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\pythonw.exe "C:\CBC INSIDER GL QUEUE CHECKER\launcher.py"
+  pid=9212 C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe "C:\CBC INSIDER GL QUEUE CHECKER\launcher.py"
+  pid=47180 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
+  pid=66432 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
 
 ## Launcher-started processes
-  (none)
+  watch: pid=47180 alive=True started=2026-07-13 07:32:47
+      cmd: "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
 
 ## Last exit codes
-  (none yet)
+  backfill_orders: 1
 
 ## Last Email Drawings run (tail of its per-run log)
   [20260706_163651_email_drawings.log]
@@ -62,64 +65,6 @@ detected running outside launcher: none
   SEND is disabled � review the form and submit it yourself if it's correct.
 
 ## Tail of launcher_debug.log (last 120 lines)
-  2026-07-01 15:28:09 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@63ad3757)
-  2026-07-01 15:28:18 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-07-02 05:00:05 status scan: method=powershell-cim error=none python_lines=6 detected=['watch']
-  2026-07-02 07:03:38 close: publishing debug report to debug/launcher
-  2026-07-02 07:04:12 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@63ad3757)
-  2026-07-02 07:04:21 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-07-02 07:06:41 close: publishing debug report to debug/launcher
-  2026-07-02 07:07:03 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/job-so-linking-issue-ivl7hw@9770f496)
-  2026-07-02 07:07:12 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-07-02 07:30:11 relaunching launcher; closing this instance
-  2026-07-02 07:30:20 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/job-so-linking-issue-ivl7hw@941ae2b8)
-  2026-07-02 07:30:30 status scan: method=powershell-cim error=none python_lines=1 detected=none
-  2026-07-02 07:30:30 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-02 10:16:30 relaunching launcher; closing this instance
-  2026-07-02 10:16:40 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/quirky-hypatia-7pwmqp@465c6b85)
-  2026-07-02 10:16:50 status scan: method=powershell-cim error=none python_lines=1 detected=none
-  2026-07-02 10:16:50 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-02 15:05:30 relaunching launcher; closing this instance
-  2026-07-02 15:05:40 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/quirky-hypatia-7pwmqp@4484fabe)
-  2026-07-02 15:05:50 status scan: method=powershell-cim error=none python_lines=1 detected=none
-  2026-07-02 15:05:50 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-02 16:27:51 relaunching launcher; closing this instance
-  2026-07-02 16:28:01 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/quirky-hypatia-7pwmqp@cd773901)
-  2026-07-02 16:28:11 status scan: method=powershell-cim error=none python_lines=1 detected=none
-  2026-07-02 16:28:11 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-03 05:00:05 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
-  2026-07-03 17:00:19 status scan: method=wmic error=none python_lines=3 detected=['watch']
-  2026-07-03 17:01:15 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-04 19:24:25 status scan: method=none error=powershell-cim: TimeoutExpired: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' timed out after 8 seconds python_lines=0 detected=none
-  2026-07-04 19:24:39 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-06 05:00:05 status scan: method=wmic error=none python_lines=3 detected=['watch']
-  2026-07-06 07:53:08 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
-  2026-07-06 15:32:29 publishing debug report to branch debug/launcher
-  2026-07-06 15:32:32 publish ok: pushed 234cf48059 to origin/debug/launcher
-  2026-07-06 16:36:31 relaunching launcher; closing this instance
-  2026-07-06 16:36:41 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@b5456843)
-  2026-07-06 16:36:51 status scan: method=powershell-cim error=none python_lines=1 detected=none
-  2026-07-06 16:36:51 pending restart: restarted=['Prepare Email Drawings Form', 'Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-07 05:00:03 status scan: method=powershell-cim error=none python_lines=5 detected=['watch']
-  2026-07-07 07:13:07 status scan: method=wmic error=none python_lines=5 detected=['watch']
-  2026-07-07 07:17:53 status scan: method=powershell-cim error=none python_lines=5 detected=['watch']
-  2026-07-07 10:59:14 close: publishing debug report to debug/launcher
-  2026-07-07 10:59:40 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@b5456843)
-  2026-07-07 10:59:54 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-07-07 20:36:44 status scan: method=none error=powershell-cim: TimeoutExpired: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' timed out after 8 seconds python_lines=0 detected=none
-  2026-07-07 20:37:01 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-07-07 20:44:31 status scan: method=none error=powershell-cim: TimeoutExpired: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' timed out after 8 seconds python_lines=0 detected=none
-  2026-07-07 20:44:46 status scan: method=powershell-cim error=none python_lines=2 detected=none
-  2026-07-08 05:00:15 status scan: method=powershell-cim error=none python_lines=4 detected=['watch']
-  2026-07-08 10:42:08 relaunching launcher; closing this instance
-  2026-07-08 10:42:18 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/quirky-hypatia-7pwmqp@7b0fd438)
-  2026-07-08 10:42:28 status scan: method=powershell-cim error=none python_lines=1 detected=none
-  2026-07-08 10:42:28 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-09 05:00:09 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
-  2026-07-09 05:22:41 status scan: method=none error=powershell-cim: TimeoutExpired: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' timed out after 8 seconds python_lines=0 detected=none
-  2026-07-09 05:23:00 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
-  2026-07-09 07:39:22 status scan: method=powershell-cim error=none python_lines=7 detected=['line_items_scan', 'watch']
-  2026-07-09 07:39:38 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
   2026-07-09 07:56:11 status scan: method=powershell-cim error=none python_lines=7 detected=['login', 'watch']
   2026-07-09 07:59:55 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
   2026-07-09 08:00:11 status scan: method=powershell-cim error=none python_lines=7 detected=['backfill_orders', 'watch']
@@ -182,4 +127,62 @@ detected running outside launcher: none
   2026-07-10 10:52:35 status scan: method=none error=powershell-cim: TimeoutExpired: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' timed out after 8 seconds python_lines=0 detected=none
   2026-07-10 10:52:52 status scan: method=powershell-cim error=none python_lines=3 detected=none
   2026-07-10 12:23:31 close: publishing debug report to debug/launcher
+  2026-07-10 12:23:52 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/master-sync-currency-qj95j1@bc18fae0)
+  2026-07-10 12:24:02 status scan: method=powershell-cim error=none python_lines=2 detected=none
+  2026-07-10 12:24:02 pending restart: restarted=['Run Live Watcher All Day', 'Backfill Historical Orders'] skipped=[] failed=[]
+  2026-07-10 13:37:38 status scan: method=wmic error=none python_lines=6 detected=none
+  2026-07-10 13:40:32 status scan: method=powershell-cim error=none python_lines=6 detected=none
+  2026-07-10 15:13:00 relaunching launcher; closing this instance
+  2026-07-10 15:13:10 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/master-sync-currency-qj95j1@89b1f0ff)
+  2026-07-10 15:13:20 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-10 15:13:20 pending restart: restarted=['Run Live Watcher All Day', 'Backfill Historical Orders'] skipped=[] failed=[]
+  2026-07-10 16:18:26 relaunching launcher; closing this instance
+  2026-07-10 16:18:35 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/master-sync-currency-qj95j1@bc9f19ec)
+  2026-07-10 16:18:45 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-10 16:18:45 pending restart: restarted=['Run Live Watcher All Day', 'Backfill Historical Orders'] skipped=[] failed=[]
+  2026-07-10 16:27:06 relaunching launcher; closing this instance
+  2026-07-10 16:27:15 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/master-sync-currency-qj95j1@ffe4a0be)
+  2026-07-10 16:27:25 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-10 16:27:25 pending restart: restarted=['Run Live Watcher All Day', 'Backfill Historical Orders'] skipped=[] failed=[]
+  2026-07-10 16:31:09 relaunching launcher; closing this instance
+  2026-07-10 16:31:19 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/master-sync-currency-qj95j1@caa12715)
+  2026-07-10 16:31:29 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-10 16:31:29 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-10 16:49:27 relaunching launcher; closing this instance
+  2026-07-10 16:49:37 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/master-sync-currency-qj95j1@67c691e9)
+  2026-07-10 16:49:47 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-10 16:49:47 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-10 16:53:43 relaunching launcher; closing this instance
+  2026-07-10 16:53:52 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/master-sync-currency-qj95j1@11cecf80)
+  2026-07-10 16:54:02 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-10 16:54:02 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-10 16:57:35 status scan: method=none error=powershell-cim: TimeoutExpired: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' timed out after 8 seconds python_lines=0 detected=none
+  2026-07-10 16:58:09 status scan: method=powershell-cim error=none python_lines=5 detected=none
+  2026-07-10 17:00:19 relaunching launcher; closing this instance
+  2026-07-10 17:00:29 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/master-sync-currency-qj95j1@11cecf80)
+  2026-07-10 17:00:39 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-10 17:00:39 pending restart: restarted=['Run Live Watcher All Day', 'Backfill Historical Orders'] skipped=[] failed=[]
+  2026-07-13 05:00:10 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-13 05:13:15 status scan: method=none error=powershell-cim: TimeoutExpired: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' timed out after 8 seconds python_lines=0 detected=none
+  2026-07-13 05:13:25 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-13 05:35:09 status scan: method=none error=powershell-cim: TimeoutExpired: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' timed out after 8 seconds python_lines=0 detected=none
+  2026-07-13 05:35:27 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-13 05:39:57 status scan: method=none error=powershell-cim: CalledProcessError: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' returned non-zero exit status 4294901760. python_lines=0 detected=none
+  2026-07-13 05:40:14 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-13 05:57:00 status scan: method=none error=powershell-cim: TimeoutExpired: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' timed out after 8 seconds python_lines=0 detected=none
+  2026-07-13 05:57:12 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-13 06:00:21 status scan: method=none error=powershell-cim: CalledProcessError: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' returned non-zero exit status 4294901760. python_lines=0 detected=none
+  2026-07-13 06:00:32 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-13 06:15:10 status scan: method=none error=powershell-cim: CalledProcessError: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' returned non-zero exit status 4294901760. python_lines=0 detected=none
+  2026-07-13 06:15:23 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-13 06:16:53 status scan: method=wmic error=none python_lines=3 detected=['watch']
+  2026-07-13 06:17:55 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-13 06:28:27 status scan: method=none error=powershell-cim: CalledProcessError: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' returned non-zero exit status 4294901760. python_lines=0 detected=none
+  2026-07-13 06:28:44 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
+  2026-07-13 06:29:16 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-13 06:39:09 status scan: method=none error=powershell-cim: TimeoutExpired: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' timed out after 8 seconds python_lines=0 detected=none
+  2026-07-13 06:39:26 status scan: method=powershell-cim error=none python_lines=3 detected=none
+  2026-07-13 06:41:50 status scan: method=none error=powershell-cim: CalledProcessError: Command '['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }']' returned non-zero exit status 1. python_lines=0 detected=none
+  2026-07-13 06:42:01 status scan: method=wmic error=none python_lines=3 detected=none
+  2026-07-13 07:35:22 status scan: method=powershell-cim error=none python_lines=3 detected=none
 
