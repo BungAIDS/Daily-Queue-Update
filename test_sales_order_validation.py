@@ -55,6 +55,11 @@ def _mini_pdf(lines: list[str], path: Path) -> None:
 
 def test_extracts_standard_and_order_verification_layouts():
     assert extract_internal_order("Order# RepRef#\n421314 987") == ("421314", "header")
+    hdx = (
+        "Order# Job# Rep. Ref. # Customer P.O. # Fan S/N\n"
+        "420402 251535 329-6-1005, rev.3 L227508"
+    )
+    assert extract_internal_order(hdx) == ("420402", "order-job-table")
     verification = (
         "Order Cust PO Ship Via Package Prepaid Date Order Terms Verification Date\n"
         "421899 CBC PO UPS"
