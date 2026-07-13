@@ -193,6 +193,29 @@ def test_merge_order_adds_and_never_regresses():
     assert m["orders"]["900"]["job"]["so_arrangement"] == "9"
 
 
+def test_merge_drive_run_clears_stale_binary_parse_at_same_timestamp():
+    master = {"orders": {
+        "100": {"job": {
+            "job": "100",
+            "drive_run": {"binary": "garbage"},
+            "drive_run_summary": "bad bytes",
+            "drive_run_template": "generic_text",
+            "drive_run_parsed_at": "2026-07-13T08:00:00",
+        }},
+    }}
+    changed = lm.merge_drive_run(master, "100", {
+        "drive_run": {},
+        "drive_run_summary": "",
+        "drive_run_template": "unknown",
+        "drive_run_parsed_at": "2026-07-13T08:00:00",
+    })
+    job = master["orders"]["100"]["job"]
+    assert changed
+    assert job["drive_run"] == {}
+    assert job["drive_run_summary"] == ""
+    assert job["drive_run_template"] == "unknown"
+
+
 def test_merged_backlog_is_not_a_removal():
     m = {"orders": {}}
     # A merged backlog order was never on the board: off-queue, no left, not seen.

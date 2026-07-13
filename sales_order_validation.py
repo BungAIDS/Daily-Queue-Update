@@ -13,6 +13,10 @@ ORDER_HEADER_RE = re.compile(
     r"\bOrder\s*#\s*(?:Rep\s*Ref\.?\s*#|RepRef\.?\s*#).*?(?:\r?\n)+\s*([0-9]{5,7}[A-Z]?)\b",
     re.IGNORECASE | re.DOTALL,
 )
+ORDER_JOB_TABLE_RE = re.compile(
+    r"\bOrder\s*#\s+Job\s*#[^\r\n]*(?:\r?\n)+\s*([0-9]{5,7}[A-Z]?)\b",
+    re.IGNORECASE,
+)
 ORDER_INLINE_RE = re.compile(r"\bOrder\s*#\s*[:\-]?\s*([0-9]{5,7}[A-Z]?)\b", re.IGNORECASE)
 SALES_ORDER_RE = re.compile(
     r"\bSales\s+Order\s+(?:No\.?\s*)?([0-9]{5,7}[A-Z]?)\b", re.IGNORECASE
@@ -50,6 +54,7 @@ def normalize_order(value: str) -> str:
 
 def extract_internal_order(text: str) -> tuple[str, str]:
     for regex, method in (
+        (ORDER_JOB_TABLE_RE, "order-job-table"),
         (ORDER_HEADER_RE, "header"),
         (ORDER_INLINE_RE, "inline"),
         (ORDER_VERIFICATION_RE, "order-verification-table"),

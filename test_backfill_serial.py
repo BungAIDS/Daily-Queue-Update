@@ -6,7 +6,6 @@ import contextlib
 import json
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -25,11 +24,17 @@ def test_default_search_population_starts_at_401000():
     assert backfill_orders._inside_job_caps("401000", minimum)
 
 
+def test_dead_session_probe_has_a_bootstrap_known_good_order():
+    assert backfill_orders._probe_job({}) == "401468"
+
+
 def test_resume_trusts_only_current_serial_misses():
     version = backfill_orders.BACKFILL_SCAN_VERSION
     assert backfill_orders._is_done({"status": "ok"})
     assert not backfill_orders._is_done({"status": "error"})
     assert not backfill_orders._is_done({"status": "needs-retry-wrong-SO-quarantined"})
+    assert not backfill_orders._is_done({"status": "search-state-retry"})
+    assert not backfill_orders._is_done({"status": "session-failed"})
     assert not backfill_orders._is_done({"status": "not-found"})
     assert not backfill_orders._is_done({"status": "no-SO"})
     assert not backfill_orders._is_done({
@@ -94,6 +99,69 @@ def test_serial_pass_has_one_order_in_flight_and_saves_each_job():
     page.close.assert_awaited_once()
 
 
+def test_missing_search_input_is_not_reported_as_job_not_found():
+    page = SimpleNamespace()
+    with (
+        patch("backfill_orders._close_modal_async", new=AsyncMock()),
+        patch("backfill_orders.find_search_box_async", new=AsyncMock(return_value=None)),
+    ):
+        try:
+            asyncio.run(backfill_orders.open_order_detail_async(page, "413393", 1, 1))
+            assert False, "a broken search page must not become a not-found result"
+        except backfill_orders.SearchPageError:
+            pass
+
+
+def test_process_one_propagates_a_broken_search_page_to_the_runner():
+    page = SimpleNamespace()
+    with (
+        patch("backfill_orders.open_order_detail_async",
+              new=AsyncMock(side_effect=backfill_orders.SearchPageError("stale input"))),
+        patch("backfill_orders._close_modal_async", new=AsyncMock()),
+    ):
+        try:
+            asyncio.run(backfill_orders.process_one_async(page, object(), "413393"))
+            assert False, "the serial runner must receive the broken-page signal"
+        except backfill_orders.SearchPageError:
+            pass
+
+
+def test_serial_pass_reopens_a_broken_search_page_and_retries_same_job():
+    page = SimpleNamespace(close=AsyncMock())
+    fresh_page = SimpleNamespace(close=AsyncMock())
+    calls = []
+
+    async def process(active_page, _context, job, _folder, **_kwargs):
+        calls.append((active_page, job))
+        if active_page is page:
+            raise backfill_orders.SearchPageError("detached search input")
+        return {
+            "job": job,
+            "status": "ok",
+            "scanned_at": "now",
+            "backfill_scan_version": backfill_orders.BACKFILL_SCAN_VERSION,
+        }
+
+    records = {}
+    state = {"processed": 0, "publish_every": 0}
+    with (
+        patch("backfill_orders._open_backfill_page",
+              new=AsyncMock(side_effect=[page, fresh_page])),
+        patch("backfill_orders.process_one_async", new=process),
+        patch("backfill_orders.cbc_fetch_lock", side_effect=lambda: contextlib.nullcontext()),
+        patch("backfill_orders.save_progress", side_effect=lambda _v: None),
+    ):
+        completed = asyncio.run(backfill_orders._run_serial_pass(
+            object(), ["413393"], records, {}, 0, 1, 1, 1, state))
+
+    assert completed == 1
+    assert records["413393"]["status"] == "ok"
+    assert records["413393"]["backfill_attempts"] == 1
+    assert calls == [(page, "413393"), (fresh_page, "413393")]
+    page.close.assert_awaited_once()
+    fresh_page.close.assert_awaited_once()
+
+
 def test_atomic_line_item_update_preserves_existing_jobs(tmp: Path):
     path = tmp / "line_items.json"
     line_items.save_store({
@@ -141,8 +209,9 @@ def test_backfill_overlay_survives_and_merges_with_main_store(tmp: Path):
     assert merged["jobs"]["401001"]["items"][0]["raw"] == "fresh"
 
 
-def test_dead_session_probe_failure_warns_but_never_stops():
+def test_dead_session_probe_failure_invalidates_streak_and_stops():
     page = SimpleNamespace(close=AsyncMock())
+    fresh_page = SimpleNamespace(close=AsyncMock())
 
     async def all_misses(_page, _context, job, _folder, **_kwargs):
         return {"job": job, "status": "not-found", "scanned_at": "now",
@@ -159,9 +228,51 @@ def test_dead_session_probe_failure_warns_but_never_stops():
         return False
 
     with (
-        patch("backfill_orders._open_backfill_page", new=AsyncMock(return_value=page)),
+        patch("backfill_orders._open_backfill_page",
+              new=AsyncMock(side_effect=[page, fresh_page])),
         patch("backfill_orders.process_one_async", new=all_misses),
         patch("backfill_orders.open_order_detail_async", new=probe_fails),
+        patch("backfill_orders._close_modal_async", new=AsyncMock()),
+        patch("backfill_orders.cbc_fetch_lock", side_effect=lambda: contextlib.nullcontext()),
+        patch("backfill_orders.save_progress", side_effect=lambda _v: None),
+    ):
+        try:
+            asyncio.run(backfill_orders._run_serial_pass(
+                object(), jobs, records, {}, 0, 1, 1, 1, state))
+            assert False, "dead CBC session should stop the serial pass"
+        except backfill_orders.DeadSessionError:
+            pass
+
+    assert state["processed"] == backfill_orders.DEAD_SESSION_STREAK
+    assert state.get("dead_session") == 1
+    assert probes == ["401001", "401001"]       # current page, then fresh page
+    assert all(records[j]["status"] == "session-failed"
+               for j in jobs[:backfill_orders.DEAD_SESSION_STREAK])
+    assert all(not backfill_orders._is_done(records[j])
+               for j in jobs[:backfill_orders.DEAD_SESSION_STREAK])
+    page.close.assert_awaited_once()
+    fresh_page.close.assert_awaited_once()
+
+
+def test_dead_session_fresh_page_recovery_marks_streak_for_retry():
+    page = SimpleNamespace(close=AsyncMock())
+    fresh_page = SimpleNamespace(close=AsyncMock())
+
+    async def all_misses(_page, _context, job, _folder, **_kwargs):
+        return {"job": job, "status": "not-found", "scanned_at": "now",
+                "backfill_scan_version": backfill_orders.BACKFILL_SCAN_VERSION}
+
+    jobs = [str(401100 + i) for i in range(backfill_orders.DEAD_SESSION_STREAK + 3)]
+    records = {"401001": {"status": "ok",
+                          "backfill_scan_version": backfill_orders.BACKFILL_SCAN_VERSION}}
+    state = {"processed": 0, "publish_every": 0}
+
+    with (
+        patch("backfill_orders._open_backfill_page",
+              new=AsyncMock(side_effect=[page, fresh_page])),
+        patch("backfill_orders.process_one_async", new=all_misses),
+        patch("backfill_orders.open_order_detail_async",
+              new=AsyncMock(side_effect=[False, True])),
         patch("backfill_orders._close_modal_async", new=AsyncMock()),
         patch("backfill_orders.cbc_fetch_lock", side_effect=lambda: contextlib.nullcontext()),
         patch("backfill_orders.save_progress", side_effect=lambda _v: None),
@@ -169,9 +280,12 @@ def test_dead_session_probe_failure_warns_but_never_stops():
         completed = asyncio.run(backfill_orders._run_serial_pass(
             object(), jobs, records, {}, 0, 1, 1, 1, state))
 
-    assert completed == len(jobs)               # LOG-ONLY: the run never stops
-    assert state.get("dead_session_warned") is True
-    assert probes == ["401001", "401001"]       # one probe per streak window
+    assert completed == len(jobs)
+    assert all(records[j]["status"] == "search-state-retry"
+               for j in jobs[:backfill_orders.DEAD_SESSION_STREAK])
+    assert all(records[j]["status"] == "not-found"
+               for j in jobs[backfill_orders.DEAD_SESSION_STREAK:])
+    assert not state.get("dead_session")
 
 
 def test_dead_session_probe_success_resets_and_continues():
@@ -199,6 +313,23 @@ def test_dead_session_probe_success_resets_and_continues():
 
     assert completed == len(jobs)               # thin stretch: the pass finishes
     assert not state.get("dead_session")
+
+
+def test_excel_safe_value_removes_only_illegal_control_characters():
+    assert backfill_orders._excel_safe_value("A\x00B\x07C\nD\tE") == "ABC\nD\tE"
+    assert backfill_orders._excel_safe_value(42) == 42
+
+
+def test_quote_run_parse_gets_a_freshness_timestamp():
+    rec = {}
+    with patch("backfill_orders.parse_quote_run", return_value={
+        "fields": {"Size": "27"}, "summary": "Size=27", "template": "pdf",
+    }):
+        backfill_orders._attach_quote_run_parse(rec, "run-without-an-extension")
+
+    assert rec["drive_run"] == {"Size": "27"}
+    assert rec["drive_run_template"] == "pdf"
+    assert rec["drive_run_parsed_at"].startswith("20")
 
 
 def test_watcher_fetch_uses_the_shared_cbc_lock():
@@ -255,6 +386,56 @@ def test_live_master_save_preserves_external_backfill_rows(tmp: Path):
     assert "401000" in watcher["orders"]
 
 
+def test_live_master_save_accepts_a_fresher_external_drive_run_parse(tmp: Path):
+    path = tmp / "live_master.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    external = {
+        "orders": {
+            "401001": {
+                "added": "old",
+                "on_queue": False,
+                "job": {
+                    "job": "401001",
+                    "drive_run": {},
+                    "drive_run_summary": "",
+                    "drive_run_template": "unknown",
+                    "drive_run_parsed_at": "2026-07-13T08:00:00",
+                },
+            },
+        },
+    }
+    path.write_text(json.dumps(external), encoding="utf-8")
+    watcher = {
+        "orders": {
+            "401001": {
+                "added": "old",
+                "on_queue": False,
+                "job": {
+                    "job": "401001",
+                    "status_note": "live",
+                    "drive_run": {"binary": "garbage"},
+                    "drive_run_summary": "bad bytes",
+                    "drive_run_template": "generic_text",
+                },
+            },
+        },
+    }
+
+    with (
+        patch.object(live_master, "MASTER_PATH", path),
+        patch("live_master.data_file_lock", side_effect=lambda *_a, **_k: contextlib.nullcontext()),
+    ):
+        live_master.save_master(watcher)
+
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    job = saved["orders"]["401001"]["job"]
+    assert job["status_note"] == "live"
+    assert job["drive_run"] == {}
+    assert job["drive_run_summary"] == ""
+    assert job["drive_run_template"] == "unknown"
+    assert job["drive_run_parsed_at"] == "2026-07-13T08:00:00"
+
+
 def test_kernel_lock_excludes_a_second_process(tmp: Path):
     lock_path = tmp / "shared.lock"
     child = (
@@ -280,14 +461,14 @@ def test_kernel_lock_excludes_a_second_process(tmp: Path):
 
 def main() -> int:
     passed = 0
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
-        tmp = Path(directory)
-        for name, function in sorted(globals().items()):
-            if not name.startswith("test_") or not callable(function):
-                continue
-            function(tmp / name) if "tmp" in function.__code__.co_varnames else function()
-            print(f"  ok  {name}")
-            passed += 1
+    tmp = Path.cwd() / ".tmp_backfill_serial_tests"
+    tmp.mkdir(exist_ok=True)
+    for name, function in sorted(globals().items()):
+        if not name.startswith("test_") or not callable(function):
+            continue
+        function(tmp / name) if "tmp" in function.__code__.co_varnames else function()
+        print(f"  ok  {name}")
+        passed += 1
     print(f"\n{passed} tests passed.")
     return 0
 

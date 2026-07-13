@@ -77,13 +77,30 @@ log = logging.getLogger("backfill")
 
 PROGRESS_PATH = BACKLOG_DIR / "backfill_progress.json"
 WORKBOOK_PATH = BACKLOG_DIR / "backlog.xlsx"
-RETRYABLE_STATUSES = {"error", "not-found", "no-SO"}
-BACKFILL_SCAN_VERSION = "serial-verified-v1"
+RETRYABLE_STATUSES = {
+    "error", "not-found", "no-SO", "search-state-retry", "session-failed",
+}
+# v1 could trust a second miss even when both attempts happened after the CBC
+# login expired. v2 only creates trusted misses while the session probe passes.
+BACKFILL_SCAN_VERSION = "serial-verified-v2"
 REQUIRED_MISS_ATTEMPTS = 2
 # CBC's normal Search Order box handles the 401xxx+ population. The earlier
 # 400xxx orders need the separate legacy lookup path, which is not implemented.
 DEFAULT_CBC_SEARCH_MIN_JOB = 401000
 DEFAULT_PUBLISH_EVERY = 25
+_EXCEL_ILLEGAL_CHARS = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
+
+
+class DeadSessionError(RuntimeError):
+    """CBC could not resolve a known-good order after a fresh-page retry."""
+
+
+class SearchPageError(RuntimeError):
+    """CBC's search controls disappeared or rejected the search action."""
+
+
+def _excel_safe_value(value: Any) -> Any:
+    return _EXCEL_ILLEGAL_CHARS.sub("", value) if isinstance(value, str) else value
 
 
 def _attempt_count(rec: Dict[str, Any]) -> int:
@@ -327,6 +344,7 @@ def _attach_quote_run_parse(rec: Dict[str, Any], dr_path: str | None) -> None:
     rec["drive_run"] = qr.get("fields", {})
     rec["drive_run_summary"] = qr.get("summary", "")
     rec["drive_run_template"] = qr.get("template", "")
+    rec["drive_run_parsed_at"] = datetime.now().isoformat(timespec="seconds")
     if qr.get("design") is not None:
         rec["drive_run_design"] = qr.get("design")
 
@@ -519,14 +537,14 @@ async def open_order_detail_async(page, job: str, search_timeout_s: float = 75.0
     await _close_modal_async(page)
     box = await find_search_box_async(page)
     if box is None:
-        return False
+        raise SearchPageError(f"Search Order input is unavailable for {job}")
     try:
         await box.click()
         await box.fill("")
         await box.fill(job)
         await box.press("Enter")
-    except Exception:  # noqa: BLE001
-        return False
+    except Exception as e:  # noqa: BLE001
+        raise SearchPageError(f"Search Order input failed for {job}: {e}") from e
     if CBC_SEARCH_BUTTON:
         try:
             btn = page.locator(CBC_SEARCH_BUTTON)
@@ -749,6 +767,8 @@ async def process_one_async(page, context, job: str, folder: str = "",
             rec["status"] = "ok"
         else:
             rec["status"] = "error"
+    except SearchPageError:
+        raise
     except Exception as e:  # noqa: BLE001
         log.warning("  %s: error (%s)", job, e)
         rec["status"] = "error"
@@ -790,18 +810,16 @@ def _publish_checkpoint() -> bool:
     return False
 
 
-# Consecutive not-founds that trigger the dead-session probe: when the saved
-# CBC session dies mid-run, EVERY search comes back empty — the overnight run
-# recorded ~7K bogus misses that way. On a streak this long, re-search a job
-# that is KNOWN to resolve. LOG-ONLY by request: the run keeps going either
-# way (misses are retried on the next run); the log just gains a clear marker
-# of when the session died so nobody has to guess on Monday.
+# Consecutive not-founds that trigger the dead-session probe. A fresh-page
+# retry recovers a stuck search page; failure to resolve a known-good order
+# stops the pass before the streak can become trusted backlog data.
 DEAD_SESSION_STREAK = 15
+DEFAULT_DEAD_SESSION_PROBE_JOB = "401468"
 
 
 def _probe_job(records: Dict[str, Dict[str, Any]]) -> str:
     """A job number whose search is known to resolve — a serial-verified 'ok'
-    first, any previously-ok record otherwise ('' when none exist yet)."""
+    first, any previously-ok record otherwise, then the reviewed bootstrap job."""
     fallback = ""
     for j, r in records.items():
         if r.get("status") != "ok":
@@ -809,7 +827,20 @@ def _probe_job(records: Dict[str, Dict[str, Any]]) -> str:
         if r.get("backfill_scan_version"):
             return j
         fallback = fallback or j
-    return fallback
+    return fallback or DEFAULT_DEAD_SESSION_PROBE_JOB
+
+
+def _mark_miss_streak_for_retry(records: Dict[str, Dict[str, Any]], jobs: List[str],
+                                status: str, reason: str) -> None:
+    now = datetime.now().isoformat(timespec="seconds")
+    for job in jobs:
+        rec = records.get(job) or {}
+        if rec.get("status") != "not-found":
+            continue
+        rec["status"] = status
+        rec["retry_reason"] = reason
+        rec["invalidated_at"] = now
+        records[job] = rec
 
 
 async def _run_serial_pass(context, jobs: List[str],
@@ -818,11 +849,11 @@ async def _run_serial_pass(context, jobs: List[str],
                            delay: float, pass_no: int,
                            search_timeout_s: float,
                            doc_timeout_ms: int,
-                           run_state: Dict[str, int]) -> int:
+                           run_state: Dict[str, Any]) -> int:
     """Process one pass in strict sequence and checkpoint every completed job."""
     page = await _open_backfill_page(context)
     completed = 0
-    miss_streak = 0
+    recent_misses: List[str] = []
     try:
         for index, job in enumerate(jobs, start=1):
             rec: Dict[str, Any] | None = None
@@ -832,18 +863,46 @@ async def _run_serial_pass(context, jobs: List[str],
                 if previous.get("backfill_scan_version") == BACKFILL_SCAN_VERSION else 0
             )
             try:
-                # watch.py may continue polling. It gets the same lock for its
-                # short Sales Order batch, so CBC searches never overlap.
-                with cbc_fetch_lock():
-                    rec = await process_one_async(
-                        page,
-                        context,
-                        job,
-                        dwg.get(job, {}).get("folder", ""),
-                        search_timeout_s=search_timeout_s,
-                        doc_timeout_ms=doc_timeout_ms,
-                    )
+                try:
+                    # watch.py may continue polling. It gets the same lock for its
+                    # short Sales Order batch, so CBC searches never overlap.
+                    with cbc_fetch_lock():
+                        rec = await process_one_async(
+                            page,
+                            context,
+                            job,
+                            dwg.get(job, {}).get("folder", ""),
+                            search_timeout_s=search_timeout_s,
+                            doc_timeout_ms=doc_timeout_ms,
+                        )
+                except SearchPageError as e:
+                    log.warning(
+                        "  %s: CBC search page became unusable (%s); reopening and "
+                        "retrying this order immediately.", job, e)
+                    replacement = await _open_backfill_page(context)
+                    old_page, page = page, replacement
+                    if old_page is not page:
+                        with contextlib.suppress(Exception):
+                            await old_page.close()
+                    with cbc_fetch_lock():
+                        rec = await process_one_async(
+                            page,
+                            context,
+                            job,
+                            dwg.get(job, {}).get("folder", ""),
+                            search_timeout_s=search_timeout_s,
+                            doc_timeout_ms=doc_timeout_ms,
+                        )
                 _commit_line_items(job, rec)
+            except SearchPageError as e:
+                log.warning("  %s: fresh CBC search page also failed: %s", job, e)
+                rec = {
+                    "job": job,
+                    "status": "search-state-retry",
+                    "retry_reason": "CBC search controls failed again after reopening the page.",
+                    "scanned_at": datetime.now().isoformat(timespec="seconds"),
+                    "backfill_scan_version": BACKFILL_SCAN_VERSION,
+                }
             except Exception as e:  # noqa: BLE001
                 log.warning("Backfill error for %s: %s", job, e)
                 rec = rec or {
@@ -870,13 +929,13 @@ async def _run_serial_pass(context, jobs: List[str],
                 if _publish_checkpoint():
                     run_state["last_published"] = run_state["processed"]
 
-            # Dead-session detector (log-only): a long miss streak is either a
-            # genuinely thin stretch of the backlog or a dead login — a probe
-            # of a known-resolvable order tells them apart. Either way the run
-            # CONTINUES; misses recorded meanwhile are retried on the next run.
-            miss_streak = miss_streak + 1 if rec.get("status") == "not-found" else 0
-            if miss_streak >= DEAD_SESSION_STREAK:
-                miss_streak = 0
+            if rec.get("status") == "not-found":
+                recent_misses.append(job)
+            else:
+                recent_misses.clear()
+            if len(recent_misses) >= DEAD_SESSION_STREAK:
+                suspect_jobs = list(recent_misses)
+                recent_misses.clear()
                 probe = _probe_job(records)
                 found = False
                 if probe:
@@ -889,15 +948,46 @@ async def _run_serial_pass(context, jobs: List[str],
                     log.info("  %d consecutive misses, but known order %s still "
                              "resolves — thin stretch, carrying on.",
                              DEAD_SESSION_STREAK, probe)
-                elif not run_state.get("dead_session_warned"):
-                    run_state["dead_session_warned"] = True
-                    log.error(
-                        "%d consecutive not-founds and known-good order %s ALSO "
-                        "failed to resolve — the CBC session may be dead from "
-                        "here on. Continuing anyway (by request); these misses "
-                        "are retried on the next run. `python login.py` + a "
-                        "restart gets it fetching again sooner.",
-                        DEAD_SESSION_STREAK, probe or "<none on record>")
+                    continue
+
+                replacement = None
+                replacement_found = False
+                if probe:
+                    try:
+                        replacement = await _open_backfill_page(context)
+                        with cbc_fetch_lock():
+                            replacement_found = await open_order_detail_async(
+                                replacement, probe, search_timeout_s, doc_timeout_ms)
+                        await _close_modal_async(replacement)
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("Fresh CBC page probe failed: %s", e)
+
+                if replacement_found and replacement is not None:
+                    _mark_miss_streak_for_retry(
+                        records, suspect_jobs, "search-state-retry",
+                        "Known-good order failed on the old page but resolved on a fresh page.")
+                    save_progress(records)
+                    old_page, page = page, replacement
+                    if old_page is not page:
+                        with contextlib.suppress(Exception):
+                            await old_page.close()
+                    log.warning(
+                        "Recovered a stuck CBC search page. Marked the last %d misses "
+                        "for retry and continued on a fresh page.", len(suspect_jobs))
+                    continue
+
+                if replacement is not None and replacement is not page:
+                    with contextlib.suppress(Exception):
+                        await replacement.close()
+                _mark_miss_streak_for_retry(
+                    records, suspect_jobs, "session-failed",
+                    "CBC could not resolve a known-good order after reopening the page.")
+                save_progress(records)
+                run_state["dead_session"] = 1
+                run_state["dead_session_job"] = job
+                raise DeadSessionError(
+                    f"CBC session failed near {job}; {len(suspect_jobs)} suspect misses "
+                    "were invalidated. Run `python login.py`, then restart the backfill.")
 
             if delay:
                 await asyncio.sleep(delay)
@@ -945,6 +1035,10 @@ async def _run_backfill(jobs: List[str], records: Dict[str, Dict[str, Any]],
                     processed = await _run_serial_pass(
                         context, todo, records, dwg, delay, pass_no,
                         search_timeout_s, doc_timeout_ms, state)
+                except DeadSessionError as e:
+                    rc = 1
+                    log.error("Serial backfill stopped safely: %s", e)
+                    break
                 except Exception as e:  # noqa: BLE001
                     rc = 1
                     log.warning("Serial backfill pass stopped early: %s", e)
@@ -964,7 +1058,7 @@ async def _run_backfill(jobs: List[str], records: Dict[str, Dict[str, Any]],
                 await context.close()
             with contextlib.suppress(Exception):
                 await browser.close()
-    return processed_total, rc
+    return int(state.get("processed", processed_total)), rc
 
 
 # --------------------------------------------------------------------------- #
@@ -1053,7 +1147,7 @@ def write_workbook(records: Dict[str, Dict[str, Any]], dwg: Dict[str, Dict[str, 
             "", r.get("status", ""),  # "" = Folder placeholder (hyperlinked below)
         ]
         for c, v in enumerate(vals, start=1):
-            ws.cell(i, c, v)
+            ws.cell(i, c, _excel_safe_value(v))
         # Drive Run cell links to the archived drive-run PDF when we have it.
         if r.get("has_drive_run"):
             dr_cell = ws.cell(i, fixed.index("Quote Run") + 1)

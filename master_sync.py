@@ -135,8 +135,13 @@ def merge_backfill(master: Dict[str, Any]) -> int:
         status = str(rec.get("status") or "")
         if status != "ok" and not (status == "error" and rec.get("so_validation") == "MATCH"):
             continue
-        fields = {k: v for k, v in rec.items() if k not in skip}
-        if fields and live_master.merge_order(master, job, fields):
+        timestamped_drive = bool(rec.get("drive_run_parsed_at"))
+        drive_changed = live_master.merge_drive_run(master, job, rec) if timestamped_drive else False
+        fields = {
+            k: v for k, v in rec.items()
+            if k not in skip and (not timestamped_drive or k not in live_master.DRIVE_RUN_FIELDS)
+        }
+        if (fields and live_master.merge_order(master, job, fields)) or drive_changed:
             n += 1
     return n
 

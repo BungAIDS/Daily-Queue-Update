@@ -14,12 +14,14 @@ from __future__ import annotations
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from sales_orders import (
     _download_error, _is_run_name, _latest_of_type, _run_docs, _run_filename,
     _run_files_in_folder, SO_TYPE,
 )
 from excel_writer import _drive_run_label
+from templates import QuoteRunContext, parse_quote_run
 
 
 def _doc(t, rev, fn):
@@ -128,6 +130,37 @@ def test_download_guard_pdf_vs_other():
     assert _download_error(200, b"  <!DOCTYPE html><html>login", False) is not None
     assert _download_error(200, b"<HTML><body>err</body>", False) is not None
     assert _download_error(500, b"%PDF-", False) == "HTTP 500"
+
+
+def test_extensionless_pdf_is_routed_to_pdf_parser(tmp: Path):
+    path = tmp / "421462 - QT RUN-CO"
+    path.write_bytes(b"%PDF-1.7\r\nplaceholder")
+
+    assert QuoteRunContext(path).ext == ".pdf"
+    with patch("drive_run.parse_drive_run_pdf", return_value={
+        "text": "Material: 304 SS", "fields": {"Material": "304 SS"},
+    }):
+        parsed = parse_quote_run(path)
+
+    assert parsed["template"] == "pdf"
+    assert parsed["summary"] == "Material=304 SS"
+
+
+def test_extensionless_binary_payload_is_not_decoded_as_text(tmp: Path):
+    path = tmp / "unknown-run"
+    path.write_bytes(b"binary\x00payload\x01\x02Label: fake")
+    assert QuoteRunContext(path).text() == ""
+
+
+def test_extensionless_ole_payload_is_marked_unknown(tmp: Path):
+    path = tmp / "418120 - RE CBC ORDER"
+    path.write_bytes(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 32)
+
+    assert QuoteRunContext(path).ext == ".bin"
+    parsed = parse_quote_run(path)
+    assert parsed["template"] == "unknown"
+    assert parsed["fields"] == {}
+    assert parsed["summary"] == ""
 
 
 def test_folder_scan_recursive(tmp: Path):
