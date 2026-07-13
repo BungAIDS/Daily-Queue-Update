@@ -2272,6 +2272,23 @@ def test_pdf_roundtrip(tmp: Path):
     assert res["co_history"] and "CO#1" in res["co_history"][0].replace(" ", "")
 
 
+def test_co_history_joins_wrapped_description_lines():
+    from sales_orders import _co_history_from_lines
+
+    lines = [
+        "***UNAPPROVED ORDER - DRAWINGS ONLY***",
+        "CO#2 071326 DG - ADDED OUTLET DAMPER AND",
+        "IVC ACTUATORS PER CUSTOMER REQUEST",
+        "CO#1 070826 AMF - CORRECTED MOTOR VENDOR",
+        "__________________________",
+        "Design Info",
+    ]
+    assert _co_history_from_lines(lines) == [
+        "CO#2 071326 DG - ADDED OUTLET DAMPER AND IVC ACTUATORS PER CUSTOMER REQUEST",
+        "CO#1 070826 AMF - CORRECTED MOTOR VENDOR",
+    ]
+
+
 def main() -> int:
     passed = 0
     with tempfile.TemporaryDirectory() as d:

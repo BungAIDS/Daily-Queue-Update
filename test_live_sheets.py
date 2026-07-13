@@ -164,6 +164,18 @@ def test_changes_today_log_sections():
     assert sh.grid[r][c].overflow is True
 
 
+def test_co_change_desc_uses_latest_note_when_exact_revision_is_absent():
+    order = {"co_history": [
+        "CO#1 070826 AMF - CORRECTED BHP, MOTOR DESCRIPTION AND ENCLOSURE",
+    ]}
+    assert ls._co_change_desc(order, 2) == (
+        "CORRECTED BHP, MOTOR DESCRIPTION AND ENCLOSURE"
+    )
+
+    order["co_history"].insert(0, "C/O #2 7/13/26 DG: ADDED OUTLET DAMPER")
+    assert ls._co_change_desc(order, 2) == "ADDED OUTLET DAMPER"
+
+
 def test_verbose_arrangement_normalizes_to_short_code():
     """The Sales Order sometimes spells it out ('Arrangement 4') instead of the
     short 'A/4' code; that should normalize so the column stays narrow."""

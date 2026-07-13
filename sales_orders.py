@@ -79,6 +79,11 @@ RUN_NAME_RES = [re.compile(p, re.I) for p in DRIVE_RUN_NAME_PATTERNS]
 # by pid type is unaffected — that path doesn't go through here.)
 RUN_DOC_EXTS = {".txt", ".pdf", ".rtf", ".xlsx", ".xlsm", ".xls", ".doc", ".docx", ".csv", ".md"}
 CO_START = re.compile(r"^\s*C\s*/?\s*O\s*#?\s*\d", re.I)
+CO_HISTORY_END = re.compile(
+    r"^\s*(?:_{3,}|Design\s+Info\b|Order\s+Verification\s+Report\b|"
+    r"Total\s+Billing\b|Freight\b|Page\s+\d+\b|CSIV\w*\b)",
+    re.I,
+)
 DESIGN_HDR = re.compile(r"^\s*Design\s+(\S+)\s*(.*)$")
 # Spec-row cells look like "Label value" (e.g. "Size M2", "WheelType BI").
 SPEC_LABELS = {
@@ -411,6 +416,29 @@ def _recon_lines(page, x_tol: float = 1.5) -> List[str]:
     return out
 
 
+def _co_history_from_lines(lines: List[str]) -> List[str]:
+    """Collect CO notes, joining descriptions that wrap onto later PDF lines."""
+    history: List[str] = []
+    current: List[str] = []
+    for raw in lines:
+        line = str(raw or "").strip()
+        if CO_START.match(line):
+            if current:
+                history.append(" ".join(current))
+            current = [line]
+            continue
+        if not current or not line:
+            continue
+        if CO_HISTORY_END.match(line):
+            history.append(" ".join(current))
+            current = []
+            continue
+        current.append(line)
+    if current:
+        history.append(" ".join(current))
+    return history
+
+
 def _respace_value(value: str, recon_text: str) -> str:
     """Re-insert spaces that table extraction glued out of a value (e.g.
     'Flangemount' -> 'Flange mount'), using the page's word-position
@@ -594,9 +622,7 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
             recon_all: List[str] = []
             for page in pdf.pages:
                 recon_all.extend(_recon_lines(page))
-            for ln in recon_all:
-                if CO_START.match(ln):
-                    res["co_history"].append(ln.strip())
+            res["co_history"] = _co_history_from_lines(recon_all)
             # Every line item on the order — the priced item/accessory rows and
             # the "Additional Features"-style lines — normalized + tagged so
             # orders can be looked up by what's on them (see line_items.py).

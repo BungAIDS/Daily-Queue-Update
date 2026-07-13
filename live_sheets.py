@@ -548,13 +548,36 @@ def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]],
 
 def _co_change_desc(order: Dict[str, Any], co_num: Any) -> str:
     """The change-order description for CO#<co_num> from the order's co_history
-    (the part after the 'C/O #N date initials:' prefix), or '' if not found."""
+    (the part after the prefix). Some CBC revisions are numbered one higher than
+    the newest printed CO note; in that case use the closest preceding note rather
+    than leaving the Changes table blank."""
     cn = str(co_num or "").strip()
+    target = int(cn) if cn.isdigit() else None
+    candidates: List[tuple[int, str]] = []
+
+    def description(line: str) -> str:
+        if ":" in line:
+            return line.split(":", 1)[1].strip()
+        dash = re.search(r"\s+-\s+", line)
+        return line[dash.end():].strip() if dash else line.strip()
+
     for line in (order.get("co_history") or []):
         m = re.match(r"\s*C\s*/?\s*O\s*#?\s*(\d+)", str(line), re.I)
-        if m and m.group(1) == cn:
-            return line.split(":", 1)[1].strip() if ":" in line else str(line).strip()
-    return ""
+        if not m:
+            continue
+        number = int(m.group(1))
+        text = str(line).strip()
+        if m.group(1) == cn:
+            return description(text)
+        candidates.append((number, text))
+    if not candidates:
+        return ""
+    if target is None:
+        return description(max(candidates, key=lambda item: item[0])[1])
+    preceding = [item for item in candidates if item[0] < target]
+    chosen = (max(preceding, key=lambda item: item[0]) if preceding
+              else min(candidates, key=lambda item: abs(item[0] - target)))
+    return description(chosen[1])
 
 
 def changes_sheet(
