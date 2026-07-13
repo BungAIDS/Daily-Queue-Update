@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -55,6 +55,29 @@ def append(d: date, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     full.extend(events)
     save(d, full)
     return full
+
+
+def purge_day_once(d: date) -> int:
+    """ONE-SHOT cleanup (2026-07-13): the day's log accumulated flip artifacts
+    from the pre-fix backfill-merge era, tangled in with real changes; rather
+    than guess which is which, the first startup on this code archives the
+    day's log to <name>.json.bak and lets the Changes tab start clean. A
+    permanent marker file stops this ever running again — on any later day —
+    so real changes are never dropped after the one shot. Returns how many
+    events were archived (0 once the marker exists)."""
+    marker = SNAPSHOT_DIR / ".change_log_purged_once"
+    if marker.exists():
+        return 0
+    events = load(d)
+    p = log_path(d)
+    try:
+        if p.exists():
+            p.replace(p.parent / (p.name + ".bak"))
+        marker.write_text(datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
+    except OSError as e:
+        log.warning("One-time change-log purge failed (%s)", e)
+        return 0
+    return len(events)
 
 
 def scrub_phantom_blanks(d: date, master: Dict[str, Any]) -> int:

@@ -711,6 +711,10 @@ def run_watch(ignore_window: bool = False) -> int:
     state = live_state.load_state(today)
     _merge_backlog_sources()
     master = live_master.load_master()
+    purged = change_log.purge_day_once(today)
+    if purged:
+        log.info("One-time purge: archived %d pre-fix event(s); today's change log "
+                 "(and the Changes tab) restarts clean.", purged)
     scrubbed = change_log.scrub_phantom_blanks(today, master)
     if scrubbed:
         log.info("Scrubbed %d phantom '-> blank' event(s) from today's change log.", scrubbed)
