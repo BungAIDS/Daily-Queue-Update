@@ -206,6 +206,28 @@ def test_blank_so_link_does_not_overwrite_known_link():
     assert m["orders"]["200"]["job"]["so_pdf"] == "Z:/SO/200/CO#1.pdf"
 
 
+def test_realign_orders_resets_silently_and_next_update_logs_nothing():
+    live = _job("100", co_number=1, so_pdf="Z:/SO/100/CO#1.pdf", so_size="56")
+    m = {"orders": {}}
+    lm.update(m, [dict(live)], T0)
+    # A helper merge re-imposed a different parse while the watcher was down.
+    m["orders"]["100"]["job"]["so_size"] = "58"
+    assert lm.realign_orders(m, [dict(live)]) == 1
+    assert m["orders"]["100"]["job"]["so_size"] == "56"
+    # The next poll sees stored == incoming: the flip never hits the change log.
+    assert lm.update(m, [dict(live)], T1) == []
+    # Already aligned -> 0 changed; unknown orders are ignored, never inserted.
+    assert lm.realign_orders(m, [dict(live)]) == 0
+    assert lm.realign_orders(m, [_job("999")]) == 0 and "999" not in m["orders"]
+    # The regression guard still applies: a stale/failed live copy (CO dropped)
+    # must not wipe a better stored change order during a realign.
+    m["orders"]["100"]["job"]["co_number"] = 2
+    m["orders"]["100"]["job"]["so_pdf"] = "Z:/SO/100/CO#2.pdf"
+    lm.realign_orders(m, [_job("100", co_number=0, so_pdf="", so_size="")])
+    assert m["orders"]["100"]["job"]["co_number"] == 2
+    assert m["orders"]["100"]["job"]["so_pdf"] == "Z:/SO/100/CO#2.pdf"
+
+
 def test_merge_order_adds_and_never_regresses():
     m = {"orders": {}}
     # A backlog order we've never seen on the board is created off-queue.

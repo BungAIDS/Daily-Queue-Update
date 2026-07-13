@@ -714,6 +714,14 @@ def run_watch(ignore_window: bool = False) -> int:
     scrubbed = change_log.scrub_phantom_blanks(today, master)
     if scrubbed:
         log.info("Scrubbed %d phantom '-> blank' event(s) from today's change log.", scrubbed)
+    # Reclaim on-board orders whose master copy a helper merge overwrote while
+    # we were down: reset them to the live state's values silently, so the
+    # difference doesn't surface as bogus 'changes' when polls/re-verifications
+    # fold the live values back in.
+    realigned = live_master.realign_orders(master, live_state.present_jobs(state))
+    if realigned:
+        log.info("Re-aligned %d on-board order(s) in the master to the live state "
+                 "(no change events).", realigned)
     tagged = engineers.backfill(master)   # tag historical orders by engineer (roster edits too)
     if tagged:
         log.info("Engineer roster: tagged/updated %d existing order(s)", tagged)
