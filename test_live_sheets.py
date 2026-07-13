@@ -726,13 +726,13 @@ def test_sales_order_data_sheet_layout():
     assert sh.grid[2][ls._SO_CO_HIST_COL - 1].value == "CO#1 - PRICE CHANGE"
     assert sh.grid[2][ls._SO_PDF_COL - 1].value == "Z:\\SO\\421001.pdf"
     # Hierarchy block: 421000 has no items, so the tree rows are all 421001's —
-    # its LINE row (price/type tails stripped) then its DETAIL row, banded at
-    # the group start and cross-referenced to the flat table's item #.
+    # its COMPONENT row (price/type tails stripped) then its DETAIL row, banded
+    # at the group start and cross-referenced to the flat table's item #.
     tkey = ls._SO_TREE_KEY_COL - 1
     assert hdr[tkey] == "Queue Order" and hdr[tkey + 1:tkey + 5] == ls.SO_TREE_HEADERS
     assert sh.grid[1][tkey].value == "421001" and sh.grid[1][tkey].fill == FILL_NEW
     assert sh.grid[1][tkey + 1].value.startswith("FAN WHEEL")
-    assert sh.grid[1][tkey + 3].value == "LINE" and sh.grid[1][tkey + 4].value == 1
+    assert sh.grid[1][tkey + 3].value == "COMPONENT" and sh.grid[1][tkey + 4].value == 1
     assert sh.grid[2][tkey + 3].value == "DETAIL" and sh.grid[2][tkey].fill is None
 
 

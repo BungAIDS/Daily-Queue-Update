@@ -988,6 +988,8 @@ def _flange_attributes(primary: str, norm_blob: str, tags: set[str], raw_tags: s
         attrs["flange_scope"] = ", ".join(scopes)
     if re.search(r"\bC\s*[- ]?\s*FLANGE\b", norm_blob):
         attrs["flange_type"] = "C-FLANGE"
+    elif "UNPUNCHED" in norm_blob:      # must beat PUNCHED (its own substring)
+        attrs["flange_type"] = "UNPUNCHED"
     elif "PUNCHED" in norm_blob:
         attrs["flange_type"] = "PUNCHED"
     elif re.search(r"\bFLANGED\b", norm_blob):
@@ -1021,7 +1023,10 @@ def _inlet_attributes(primary: str, norm_blob: str, tags: set[str], raw_blob: st
     if re.search(r"\bINLET,\s*TUBE\b|\bINLET\s+TUBE\b", primary):
         add_subcategory("TUBE")
 
-    if "PUNCHED" in primary:
+    if "UNPUNCHED" in primary:          # must beat PUNCHED (its own substring)
+        add_subcategory("FLANGED/UNPUNCHED" if "FLANGED" in primary else "UNPUNCHED")
+        add_feature("UNPUNCHED")
+    elif "PUNCHED" in primary:
         add_subcategory("FLANGED/PUNCHED" if "FLANGED" in primary else "PUNCHED")
         add_feature("PUNCHED")
     elif "FLANGED" in primary:

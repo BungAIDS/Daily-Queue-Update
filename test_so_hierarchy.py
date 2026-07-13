@@ -1,5 +1,6 @@
-"""Tests for the component-hierarchy rollup over captured Sales-Order line
-items (so_hierarchy.py).
+"""Tests for the job-knowledge rollup over captured Sales-Order line items
+(so_hierarchy.py): every printed line ADDS information; only lines the
+extractors tied together become one component.
 
 No pytest — run directly:
 
@@ -32,83 +33,125 @@ def _item(raw, price="", used_on=None, details=None, tags=None, flags=None,
 def _ivc_items():
     main = _item("Inlet Volume Control, Low Leak, Automatic L 3,531.00",
                  "3,531.00", used_on="IVC",
-                 attrs={"operation": "Automatic", "leakage_class": "LOW LEAKAGE"},
+                 attrs={"operation": "Automatic", "leakage_class": "LOW LEAKAGE",
+                        "ivc_subcategory": "IVC ACTUATOR"},
                  details=["Actuator Manufacturer: By Others"])
     handle = _item("Inlet Volume Control Handle Location, Non-standard L 1,014.00",
                    "1,014.00", used_on="IVC",
+                   attrs={"ivc_subcategory": "IVC"},
                    details=["IVC handle location for Discharge"])
     flange = _item("Inlet, Flanged, Punched (with IVC) L 1,559.00",
-                   "1,559.00", used_on="IVC")
+                   "1,559.00", used_on="IVC",
+                   attrs={"ivc_subcategory": "IVC INLET FLANGE"})
     return main, handle, flange
 
 
-def test_family_rollup_anchor_and_satellites():
+def test_three_lines_one_component():
     main, handle, flange = _ivc_items()
-    rows = soh.tree_rows([handle, main, flange])   # capture order: handle first
-    fam = rows[0]
-    assert fam["kind"] == soh.KIND_FAMILY
-    assert fam["text"].startswith("[IVC]") and "3 lines" in fam["text"]
-    assert fam["price"] == "6,104.00" and fam["item_no"] == ""
-    lines = [r for r in rows if r["kind"] == soh.KIND_LINE]
-    # The priciest member is the component's own line: first, un-prefixed,
-    # nested under the family, and cross-referenced to its flat-table row.
-    assert lines[0]["text"].startswith("Inlet Volume Control, Low Leak")
-    assert lines[0]["depth"] == 1 and lines[0]["item_no"] == 2
-    # The other charges stay visible but demoted with '+', in capture order.
-    assert lines[1]["text"].startswith("+ Inlet Volume Control Handle Location")
-    assert lines[1]["item_no"] == 1
-    assert lines[2]["text"].startswith("+ Inlet, Flanged, Punched")
-    assert lines[2]["item_no"] == 3
+    comps = soh.components([handle, main, flange])
+    assert len(comps) == 1                       # one IVC, not three
+    c = comps[0]
+    assert c["name"] == "IVC" and c["keyed"]
+    assert c["price"] == 6104.0
+    # Facts accumulate from every contributing line...
+    assert c["facts"]["operation"] == "Automatic"
+    assert c["facts"]["leakage_class"] == "LOW LEAKAGE"
+    # ...collection keys union quietly (three different subcategories is
+    # expected, not a conflict).
+    assert c["facts"]["ivc_subcategory"] == "IVC ACTUATOR, IVC, IVC INLET FLANGE"
+    assert c["review"] == []
+    # Details from every line, in merge order.
+    assert "IVC handle location for Discharge" in c["details"]
+    # Sources: the priciest line is the component's own (primary), the rest in
+    # capture order — all cross-referenced to the flat table's item #s.
+    assert [s["item_no"] for s in c["sources"]] == [2, 1, 3]
+    assert c["sources"][0]["primary"] and not c["sources"][1]["primary"]
+
+
+def test_tree_rows_component_facts_sources():
+    main, handle, flange = _ivc_items()
+    rows = soh.tree_rows([handle, main, flange])
+    assert rows[0]["kind"] == soh.KIND_COMPONENT
+    assert rows[0]["text"] == "[IVC] — 3 lines"
+    assert rows[0]["price"] == "6,104.00" and rows[0]["item_no"] == ""
+    facts = [r["text"] for r in rows if r["kind"] == soh.KIND_FACT]
+    assert "operation: Automatic" in facts       # keys prettified for reading
+    srcs = [r for r in rows if r["kind"] == soh.KIND_SOURCE]
+    assert srcs[0]["text"].startswith("Inlet Volume Control, Low Leak")
+    assert srcs[0]["item_no"] == 2
+    assert srcs[1]["text"].startswith("+ ") and srcs[2]["text"].startswith("+ ")
+    assert all(r["depth"] == 1 for r in rows[1:])
+
+
+def test_conflicting_single_valued_fact_is_kept_and_flagged():
+    a = _item("IVC, Manual L 100.00", "100.00", used_on="IVC",
+              attrs={"operation": "Manual"})
+    b = _item("IVC Actuator L 50.00", "50.00", used_on="IVC",
+              attrs={"operation": "Automatic"})
+    c = soh.components([a, b])[0]
+    assert c["facts"]["operation"] == "Manual | Automatic"   # both kept...
+    assert any("CONFLICTING operation" in r for r in c["review"])  # ...and flagged
+    rows = soh.tree_rows([a, b])
+    assert any(r["kind"] == soh.KIND_REVIEW and "CONFLICTING" in r["text"]
+               for r in rows)
+
+
+def test_lone_line_stays_its_own_component():
+    # A single line referring to a component: no group header, no SOURCE rows —
+    # the component row IS the line, keeping its item # and printed price mark.
+    _m, _h, flange = _ivc_items()
+    rows = soh.tree_rows([flange])
+    assert rows[0]["kind"] == soh.KIND_COMPONENT
+    assert rows[0]["text"] == "[IVC]" and rows[0]["item_no"] == 1
+    assert all(r["kind"] != soh.KIND_SOURCE for r in rows)
+    std = _item("Lifting Lugs L STD", "STD")
+    r = soh.tree_rows([std])[0]
+    assert r["text"] == "Lifting Lugs" and r["price"] == "STD"
+
+
+def test_component_attr_groups_without_used_on():
+    # `component` links a line that IS the thing; two of them merge.
+    motor = _item("Motor C 3,194.37", "3,194.37", attrs={"component": "MOTOR",
+                                                         "vendor": "Baldor"})
+    base = _item("Motor Slide Base L 500.00", "500.00",
+                 attrs={"component": "MOTOR", "motor_base": "SLIDE BASE"})
+    comps = soh.components([motor, base])
+    assert len(comps) == 1 and comps[0]["name"] == "MOTOR"
+    assert comps[0]["facts"]["vendor"] == "Baldor"
+    assert comps[0]["facts"]["motor_base"] == "SLIDE BASE"
+
+
+def test_no_merge_on_loose_tag_overlap():
+    # Two flange lines share the FLANGE tag but nothing ties them to one
+    # thing -> two components (an inlet flange and an outlet flange).
+    inlet = _item("Inlet, Flanged, Punched L 100.00", "100.00",
+                  tags=["FLANGE", "INLET"], attrs={"flange_scope": "INLET"})
+    outlet = _item("Outlet, Flanged, Punched L 100.00", "100.00",
+                   tags=["FLANGE", "OUTLET"], attrs={"flange_scope": "OUTLET"})
+    assert len(soh.components([inlet, outlet])) == 2
+
+
+def test_review_flags_and_review_keys_stay_off_facts():
+    it = _item("Motor C 3,194.37", "3,194.37",
+               attrs={"vendor": "Baldor", "used_on_review": "INCONCLUSIVE"},
+               flags=["UNTAGGED"])
+    c = soh.components([it])[0]
+    assert "used_on_review" not in c["facts"]
+    assert c["review"] == ["UNTAGGED"]
+
+
+def test_component_sits_where_first_evidence_appeared():
+    main, handle, _f = _ivc_items()
+    solo = _item("Base Fan L 16,649.00", "16,649.00")
+    rows = soh.tree_rows([handle, solo, main])
+    assert rows[0]["text"] == "[IVC] — 2 lines"   # first member was line 1
+    base = next(r for r in rows if "Base Fan" in r["text"])
+    assert base["kind"] == soh.KIND_COMPONENT and base["item_no"] == 2
 
 
 def test_price_and_type_tails_are_stripped_from_line_text():
     main, _h, _f = _ivc_items()
     assert soh.line_text(main) == "Inlet Volume Control, Low Leak, Automatic"
-
-
-def test_single_member_family_stays_top_level():
-    # "unless it's the only line item referring to it" — no family of one.
-    _m, _h, flange = _ivc_items()
-    rows = soh.tree_rows([flange])
-    assert rows[0]["kind"] == soh.KIND_LINE and rows[0]["depth"] == 0
-    assert not rows[0]["text"].startswith("+")
-    assert all(r["kind"] != soh.KIND_FAMILY for r in rows)
-
-
-def test_facts_details_and_review_rows():
-    it = _item("Motor C 3,194.37", "3,194.37",
-               attrs={"vendor": "Baldor", "used_on_review": "INCONCLUSIVE"},
-               details=["75 HP, 1800 RPM"], flags=["UNTAGGED"])
-    rows = soh.tree_rows([it])
-    kinds = [r["kind"] for r in rows]
-    assert kinds == [soh.KIND_LINE, soh.KIND_FACTS, soh.KIND_DETAIL, soh.KIND_REVIEW]
-    # FACTS carries the attributes but never *_review keys (REVIEW's job)...
-    assert "vendor=Baldor" in rows[1]["text"] and "used_on_review" not in rows[1]["text"]
-    assert rows[2]["text"] == "· 75 HP, 1800 RPM"
-    assert rows[3]["text"] == "UNTAGGED"
-    # ...and every sub-row points back at the same flat-table item #.
-    assert all(r["item_no"] == 1 for r in rows)
-    assert all(r["depth"] == 1 for r in rows[1:])
-
-
-def test_ungrouped_items_keep_capture_order():
-    a = _item("Base Fan L 16,649.00", "16,649.00")
-    b = _item("Lifting Lugs L STD", "STD")
-    rows = soh.tree_rows([a, b])
-    lines = [r for r in rows if r["kind"] == soh.KIND_LINE]
-    assert [r["item_no"] for r in lines] == [1, 2]
-    assert all(r["depth"] == 0 for r in lines)
-
-
-def test_family_appears_where_first_member_did():
-    main, handle, _f = _ivc_items()
-    solo = _item("Base Fan L 16,649.00", "16,649.00")
-    rows = soh.tree_rows([handle, solo, main])
-    # The [IVC] family sits where its first member (handle) appeared: before
-    # Base Fan.
-    assert rows[0]["kind"] == soh.KIND_FAMILY and "[IVC]" in rows[0]["text"]
-    base = next(r for r in rows if "Base Fan" in r["text"])
-    assert base["depth"] == 0 and base["item_no"] == 2
 
 
 def test_parse_price_and_no_charge_marks():

@@ -889,6 +889,20 @@ def test_flange_scope_motor_and_non_wheel_end():
     assert housing["attributes"]["flange_location"] == "NON-WHEEL END"
 
 
+def test_unpunched_flange_is_not_punched():
+    # 421966 item 15: "Unpunched" contains "Punched", and the substring check
+    # used to stamp flange_type=PUNCHED on it.
+    outlet = li.extract_items(["Outlet, Flanged, Unpunched, Inquiry Num: 361-26- L 250.00"])[0]
+    assert outlet["attributes"]["flange_type"] == "UNPUNCHED"
+    inlet = li.extract_items(["Inlet, Flanged, Unpunched L 100.00"])[0]
+    assert inlet["attributes"]["flange_type"] == "UNPUNCHED"
+    assert inlet["attributes"]["inlet_subcategory"] == "FLANGED/UNPUNCHED"
+    assert "UNPUNCHED" in inlet["attributes"]["inlet_feature"]
+    # The punched wording keeps its original attributes.
+    punched = li.extract_items(["Outlet, Flanged, Punched L STD"])[0]
+    assert punched["attributes"]["flange_type"] == "PUNCHED"
+
+
 def test_housing_modified_flange_and_length_attributes():
     thickness = li.extract_items(['Housing Flange Thickness, 2-7/8", Inquiry Num: L 250.00'])[0]
     assert {"FLANGE", "HOUSING"} <= set(thickness["tags"])

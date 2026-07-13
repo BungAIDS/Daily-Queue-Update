@@ -9,14 +9,15 @@ deep-troubleshooting companion to the live workbook's Sales Order tab.
                                             # item / detail / skipped — which
                                             # the store alone can never show
 
-The tree (see so_hierarchy) is a pure re-arrangement of the stored capture:
-lines sharing a `used_on` attribute roll up under one [FAMILY] node (e.g. the
-three IVC charges), with the priciest as the component's own line and the rest
-demoted '+' satellites; each line's FACTS (derived attributes), stored DETAIL
-sub-lines and parser REVIEW flags print beneath it. A wrong tree therefore
-means a wrong capture or attribute — use --flat to see the stored item as-is,
-and --lines to replay the extractor over the PDF's text when the problem is a
-line that was skipped or merged before it ever reached the store.
+The tree (see so_hierarchy) shows what we KNOW about the job, not what the SO
+printed: ONE COMPONENT per real thing — lines the extractors tied together
+(shared used_on / component attribute, e.g. the three IVC charges) merge into
+it — with every merged FACT, stored DETAIL sub-line and REVIEW flag (including
+fact conflicts) beneath it, and the contributing SOURCE lines at the bottom.
+A wrong tree therefore means a wrong capture or attribute — use --flat to see
+the stored items exactly as captured, and --lines to replay the extractor over
+the PDF's text when the problem is a line that was skipped or merged before it
+ever reached the store.
 """
 from __future__ import annotations
 
@@ -47,7 +48,7 @@ def print_tree(jn: str, rec: dict) -> None:
     for r in rows:
         no = f"#{r['item_no']}" if r["item_no"] else ""
         price = f"  {r['price']}" if r["price"] else ""
-        print(f"{r['kind']:>6} {no:>4}  {soh.indent_text(r)}{price}")
+        print(f"{r['kind']:>9} {no:>4}  {soh.indent_text(r)}{price}")
 
 
 def print_flat(jn: str, rec: dict) -> None:
