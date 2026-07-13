@@ -76,6 +76,9 @@ def test_merge_backfill_skips_scans_older_than_live_verification():
                        "scanned_at": "2026-07-12T09:00:00", "so_size": "31"},
             "421002": {"job": "421002", "status": "ok",
                        "scanned_at": "2026-07-12T09:00:00", "so_size": "44"},
+            "421003": {"job": "421003", "status": "ok",
+                       "scanned_at": "2026-07-12T09:00:00", "so_size": "55",
+                       "so_motor_pos": "H21"},
         })
         m = {"orders": {
             # Live-verified AFTER the scan -> the older scan must not clobber it.
@@ -86,11 +89,18 @@ def test_merge_backfill_skips_scans_older_than_live_verification():
                                "so_verified_at": "2026-07-11T12:00:00"}},
             # No verification stamp -> merges as before.
             "421002": {"job": {"job": "421002", "so_size": "43"}},
+            # ON THE BOARD -> the live watcher owns it; never merged, stamped
+            # or not (its next poll would flip the values back with a spurious
+            # change-log entry per field).
+            "421003": {"on_queue": True,
+                       "job": {"job": "421003", "so_size": "56", "so_motor_pos": ""}},
         }}
         assert master_sync.merge_backfill(m) == 2
         assert m["orders"]["421000"]["job"]["so_size"] == "245"   # untouched
         assert m["orders"]["421001"]["job"]["so_size"] == "31"    # updated
         assert m["orders"]["421002"]["job"]["so_size"] == "44"    # updated
+        assert m["orders"]["421003"]["job"]["so_size"] == "56"    # board order untouched
+        assert m["orders"]["421003"]["job"]["so_motor_pos"] == ""
     finally:
         if backup is not None:
             p.write_text(backup)

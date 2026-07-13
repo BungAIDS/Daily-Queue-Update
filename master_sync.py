@@ -136,10 +136,17 @@ def merge_backfill(master: Dict[str, Any]) -> int:
         status = str(rec.get("status") or "")
         if status != "ok" and not (status == "error" and rec.get("so_validation") == "MATCH"):
             continue
-        # A live enrichment newer than this scan is the same fetch+parse run
-        # later — merging the older scan over it would just be flipped back by
-        # the next poll, logging a spurious change per field on every startup.
         entry = orders.get(str(job)) or {}
+        # The live watcher owns on-board orders: it enriches and re-verifies them
+        # itself, and every poll folds the live values back into the master — so
+        # anything this merge writes that disagrees (a stale weekend scan, a
+        # different parse of the same PDF) is flipped straight back, logging a
+        # spurious change per field on every startup. The backfill's job is the
+        # off-board backlog; leave the board to the watcher.
+        if entry.get("on_queue"):
+            continue
+        # Off-board: a live enrichment newer than this scan is the same
+        # fetch+parse run later — the older scan has nothing to add.
         verified = str((entry.get("job") or {}).get("so_verified_at") or "")
         if verified and verified >= str(rec.get("scanned_at") or ""):
             continue
