@@ -72,10 +72,7 @@ COLUMNS = [
     ("Job #", "job"),
     ("Folder", "folder"),
     ("Quote Run", "drive_run"),
-    # DWG Reuse sits AFTER CO#: the Changes tab keeps Folder/Quote Run/CO#
-    # aligned in the same columns across its tables (see live_sheets._job_table).
     ("CO#", "co"),
-    ("DWG Reuse", "dwg_reuse_label"),
     ("Oper", "oper"),
     ("Design", "design"),
     ("Customer", "customer"),
@@ -112,6 +109,9 @@ COLUMNS = [
     # every job in sales_orders.enrich_with_sales_orders (drive_run_summary).
     # Surfaces the real engineering data that was previously a YES flag only.
     ("Quote Run Details", "drive_run_summary"),
+    # Keep the recommendation at the far right of every full job table. The
+    # incremental Live Queue adds its utility columns before this one.
+    ("DWG Reuse", "dwg_reuse_label"),
 ]
 QUEUE_HEADERS = [h for h, _ in COLUMNS]
 _COL_IDX = {key: i for i, (_, key) in enumerate(COLUMNS, start=1)}

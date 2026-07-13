@@ -94,9 +94,11 @@ def test_removed_block_mirrors_live_queue_row():
                             (fresh, "2026-06-16T07:42:00")],
                            TODAY, new_ids={"421802"}, co_changed_ids={"421757"})
     # Leads with the removal time ('Removed'), then the same data columns as the
-    # board (so Job #/End Date line up under it); no trailing '#'.
+    # board (so Job #/End Date and far-right DWG Reuse line up under it).
     assert blk["header_cells"][0].value == "Removed"
     assert [c.value for c in blk["header_cells"]] == ls.LIVE_QUEUE_REMOVED_HEADERS
+    assert len(blk["header_cells"]) == len(ls.LIVE_QUEUE_HEADERS)
+    assert blk["header_cells"][-1].value == "DWG Reuse"
     r0, r1 = blk["rows"]
     assert len(r0) == len(ls.LIVE_QUEUE_REMOVED_HEADERS)
     assert r0[0].value == "6:26 AM" and r0[0].number_format == "@"   # removal time leads, as text
@@ -112,7 +114,8 @@ def test_live_queue_last_out_column():
     # A returning order shows its most recent prior departure in 'Last Out';
     # an order that has never left shows blank.
     assert ls.LIVE_QUEUE_HEADERS[ls.LIVE_QUEUE_LAST_OUT_COL - 1] == "Last Out"
-    assert ls.LIVE_QUEUE_HEADERS[-1] == "#"                       # '#' still the trailing sort col
+    assert ls.LIVE_QUEUE_HEADERS[ls.LIVE_QUEUE_CBC_COL - 1] == "#"
+    assert ls.LIVE_QUEUE_HEADERS[-1] == "DWG Reuse"
     returned = _job("421000", _added_iso="2026-06-16T08:00:00", _last_out="2026-06-12T16:30:00")
     cells = ls.live_queue_records([returned], TODAY)[0][1]
     assert cells[ls.LIVE_QUEUE_LAST_OUT_COL - 1].value == "Jun 12, 2026"   # prior departure (earlier day)
@@ -390,16 +393,46 @@ def test_live_queue_end_date_is_sortable_serial():
 
 
 def test_live_queue_board_position_column():
-    # "Added" leads, the "#" board-position column trails (the sort key).
-    assert ls.LIVE_QUEUE_HEADERS[0] == "Added" and ls.LIVE_QUEUE_HEADERS[-1] == "#"
-    j = _job("421000")
+    # "Added" leads; "#" remains the sort key while DWG Reuse is far right.
+    assert ls.LIVE_QUEUE_HEADERS[0] == "Added"
+    assert ls.LIVE_QUEUE_HEADERS[ls.LIVE_QUEUE_CBC_COL - 1] == "#"
+    assert ls.LIVE_QUEUE_HEADERS[-1] == "DWG Reuse"
+    j = _job("421000", dwg_reuse_label="421999 (-51)")
     j["_cbc_pos"] = 5
     cells = ls.live_queue_records([j], TODAY)[0][1]
-    assert cells[-1] is cells[ls.LIVE_QUEUE_CBC_COL - 1]   # "#" is the last column
-    assert cells[-1].value == 5 and cells[-1].center
+    cbc = cells[ls.LIVE_QUEUE_CBC_COL - 1]
+    assert cbc.value == 5 and cbc.center
+    assert cells[-1].value == "421999 (-51)"
     # No board position (off-board / unknown) leaves it blank so it sorts last.
     cells2 = ls.live_queue_records([_job("421001")], TODAY)[0][1]
-    assert cells2[-1].value == ""
+    assert cells2[ls.LIVE_QUEUE_CBC_COL - 1].value == ""
+
+
+def test_dwg_reuse_is_far_right_in_changes_tables():
+    from excel_writer import QUEUE_HEADERS
+
+    assert QUEUE_HEADERS[-1] == "DWG Reuse"
+    new_job = _job("421001", dwg_reuse_label="420999 (-51)",
+                   _added_iso="2026-06-16T09:14:00")
+    # Drawings is a dynamic changed-field column. DWG Reuse must remain after it.
+    events = [{"time": "2026-06-16T09:30:00", "job": "421002", "customer": "X",
+               "field": "Drawings", "old": "-51", "new": "-51, -95"}]
+    lookup = {"421002": _job("421002", dwg_reuse_label="420998 (-95)")}
+    sh = ls.changes_sheet([new_job], events, [], "2026-06-16",
+                          updated_at="x", order_lookup=lookup)
+
+    new_title, _ = _find(sh, "New orders today")
+    new_header = sh.grid[new_title + 1]
+    new_row = sh.grid[new_title + 2]
+    assert new_header[-1].value == "DWG Reuse"
+    assert new_row[-1].value == "420999 (-51)"
+
+    changed_title, _ = _find(sh, "Orders that changed today")
+    changed_header = sh.grid[changed_title + 1]
+    changed_was = sh.grid[changed_title + 2]
+    assert changed_header[-2].value == "Drawings"
+    assert changed_header[-1].value == "DWG Reuse"
+    assert changed_was[-1].value == "420998 (-95)"
 
 
 def test_due_today_is_orange_between_red_and_gold():

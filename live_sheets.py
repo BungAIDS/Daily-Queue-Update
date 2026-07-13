@@ -508,8 +508,10 @@ def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]],
     for o in orders.values():
         changed |= o["fields"]
     qh_idx = {h: i for i, h in enumerate(QUEUE_HEADERS)}
+    dwg_idx = qh_idx["DWG Reuse"]
+    queue_headers = [h for h in QUEUE_HEADERS if h != "DWG Reuse"]
     extra_cols = sorted(changed - set(QUEUE_HEADERS))    # changed fields with no queue column
-    sh.row(_header_cells(["Time"] + list(QUEUE_HEADERS) + extra_cols))
+    sh.row(_header_cells(["Time"] + queue_headers + extra_cols + ["DWG Reuse"]))
     for jn in sorted(orders, key=lambda j: orders[j]["time"], reverse=True):  # most recent first
         o = orders[jn]
         # 'was' row (white): the order's full row (so it reads like every other
@@ -525,7 +527,8 @@ def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]],
                 was[ci] = _suffix_comment_cell(label, o["baseline"][label], font=F_RED)
         extra_was = [Cell(o["baseline"][label], font=F_RED) if label in o["fields"] else Cell("")
                      for label in extra_cols]
-        sh.row([Cell("")] + was + extra_was)
+        dwg_was = was.pop(dwg_idx)
+        sh.row([Cell("")] + was + extra_was + [dwg_was])
         # one row per instance, progressively darker, stamped with the poll time and
         # showing only the fields that moved in that poll.
         for step_i, (t, step) in enumerate(o["steps"]):
@@ -538,7 +541,8 @@ def _orders_changed_table(sh: Sheet, field_events: List[Dict[str, Any]],
             extra_cells = [_suffix_comment_cell(label, step[label], fill=fill,
                                                 font=F_RED) if label in step
                            else Cell("", fill=fill) for label in extra_cols]
-            sh.row([Cell(_fmt_time(t), fill=fill)] + cells + extra_cells)
+            dwg_cell = cells.pop(dwg_idx)
+            sh.row([Cell(_fmt_time(t), fill=fill)] + cells + extra_cells + [dwg_cell])
     sh.blank()
 
 
@@ -752,22 +756,31 @@ def similar_orders_sheet(n_rows: int, n_queue: int) -> Sheet:
 # (order#, [Cell, ...]); the renderer writes/append/updates the row whose key   #
 # matches.                                                                     #
 # --------------------------------------------------------------------------- #
-# "Added" (last time it came onto the board), then the Full Queue columns, then a
-# trailing "#" column carrying the cbcinsider board position. The tab is sorted by
-# "#" so the order matches the queue on the site (re-sort "#" to restore it).
-# "Last Out" (most recent prior departure) sits just before the trailing "#"
-# board-position column, so adding it doesn't shift Job #/End Date (still after the
-# single leading "Added").
-LIVE_QUEUE_HEADERS = ["Added"] + [_abbrev_header(h) for h in QUEUE_HEADERS] + ["Last Out", "Similar", "#"]
-LIVE_QUEUE_CBC_COL = len(LIVE_QUEUE_HEADERS)                   # the trailing "#" board-position col (sort key)
-LIVE_QUEUE_SIMILAR_COL = len(LIVE_QUEUE_HEADERS) - 1          # "Similar" (count -> deep link to Similar Data)
-LIVE_QUEUE_LAST_OUT_COL = len(LIVE_QUEUE_HEADERS) - 2         # the "Last Out" col (AM/PM-or-date text)
+# "Added" (last time it came onto the board), then the Full Queue columns except
+# DWG Reuse, then the utility columns, and finally DWG Reuse at the far right.
+# The tab is still sorted by "#" so the order matches cbcinsider; moving that sort
+# key away from the edge does not change the renderer's behavior.
+_DWG_REUSE_HEADER = "DWG Reuse"
+_DWG_REUSE_IDX = QUEUE_HEADERS.index(_DWG_REUSE_HEADER)
+_LIVE_QUEUE_STANDARD_HEADERS = [
+    _abbrev_header(h) for h in QUEUE_HEADERS if h != _DWG_REUSE_HEADER
+]
+_LIVE_QUEUE_UTILITY_HEADERS = ["Last Out", "Similar", "#"]
+LIVE_QUEUE_HEADERS = (["Added"] + _LIVE_QUEUE_STANDARD_HEADERS
+                      + _LIVE_QUEUE_UTILITY_HEADERS + [_DWG_REUSE_HEADER])
+LIVE_QUEUE_CBC_COL = LIVE_QUEUE_HEADERS.index("#") + 1          # board-position sort key
+LIVE_QUEUE_SIMILAR_COL = LIVE_QUEUE_HEADERS.index("Similar") + 1
+LIVE_QUEUE_LAST_OUT_COL = LIVE_QUEUE_HEADERS.index("Last Out") + 1
+LIVE_QUEUE_DWG_REUSE_COL = LIVE_QUEUE_HEADERS.index(_DWG_REUSE_HEADER) + 1
 LIVE_QUEUE_KEY_COL = 2 + QUEUE_HEADERS.index("Job #")          # 1-based col of Job # (Added is col 1)
 LIVE_QUEUE_END_DATE_COL = 2 + QUEUE_HEADERS.index("End Date")  # 1-based col of End Date
 # The 'Removed since this morning' block lines its data columns up under the board
 # above, but LEADS with the removal time (the "Removed" column) instead of "Added"
-# — the most relevant fact for an order that just left — and drops the trailing "#".
-LIVE_QUEUE_REMOVED_HEADERS = ["Removed"] + [_abbrev_header(h) for h in QUEUE_HEADERS]
+# — the most relevant fact for an order that just left. Blank utility headers keep
+# DWG Reuse aligned with the main grid's far-right column.
+LIVE_QUEUE_REMOVED_HEADERS = (["Removed"] + _LIVE_QUEUE_STANDARD_HEADERS
+                              + [""] * len(_LIVE_QUEUE_UTILITY_HEADERS)
+                              + [_DWG_REUSE_HEADER])
 _END_DATE_IDX = QUEUE_HEADERS.index("End Date")               # its index within the standard cells
 _CO_IDX = [i for i, (_, k) in enumerate(COLUMNS) if k == "co"][0]   # CO# cell index
 
@@ -827,8 +840,9 @@ def _board_row_cells(j: Dict[str, Any], today: date, co_changed: bool, is_new: b
     """`leading` cell + every Full Queue column + `trailing` cells, styled exactly
     like a Live Queue row: real-date End Date, CO# hover note, CO#-red text, and the
     urgency / new-today row fill. `leading` is the Added time on the board or the
-    removal time in the Removed block; `trailing` is [Last Out, '#'] on the board,
-    [] in the Removed block — so both render with the same data columns aligned."""
+    removal time in the Removed block; `trailing` is [Last Out, Similar, '#'] on
+    the board and [] in the Removed block. DWG Reuse is always moved after those
+    cells so it remains the far-right column."""
     std = _job_value_cells(j, co_changed=co_changed, arrange_comment=True)
     # Write End Date as a real date so it sorts/filters as a date in Excel.
     ed = _parse_date(j.get("end_date", ""))
@@ -841,7 +855,8 @@ def _board_row_cells(j: Dict[str, Any], today: date, co_changed: bool, is_new: b
         leading.font = F_RED
         for t in trailing:
             t.font = F_RED
-    cells = [leading] + std + list(trailing)
+    dwg_reuse = std.pop(_DWG_REUSE_IDX)
+    cells = [leading] + std + list(trailing) + [dwg_reuse]
     fill = _row_fill(j, today, is_new=is_new)
     if fill:
         for c in cells:
@@ -855,17 +870,19 @@ def removed_block(removed: List, today: date, new_ids: Optional[set] = None,
                   title: str = "Removed from the queue since this morning") -> Dict[str, Any]:
     """The Live Queue's 'Removed since this morning' section as a styled block —
     each removed order drawn exactly like its Live Queue row (same columns, the
-    urgency/new-today fill and CO#-red text it had on the board), with the trailing
-    board-position '#' slot replaced by the time it left. `removed` is a list of
-    (job_dict, left_iso). Returns a payload the COM renderer draws below the board."""
+    urgency/new-today fill and CO#-red text it had on the board). The leading Added
+    slot becomes the removal time; utility cells are blank, and DWG Reuse remains
+    aligned at the far right. `removed` is a list of (job_dict, left_iso). Returns
+    a payload the COM renderer draws below the board."""
     new_ids = new_ids or set()
     co_changed_ids = co_changed_ids or set()
     rows = []
     for j, left in removed:
         jn = str(j.get("job") or "")
         rem = Cell(fmt_time(left), number_format="@")   # when it left -> the LEADING column
+        utility_spacers = [Cell("") for _ in _LIVE_QUEUE_UTILITY_HEADERS]
         rows.append(_board_row_cells(j, today, jn in co_changed_ids, jn in new_ids, ref,
-                                     leading=rem, trailing=[]))
+                                     leading=rem, trailing=utility_spacers))
     return {"title": title,
             "header_cells": _header_cells(LIVE_QUEUE_REMOVED_HEADERS),
             "rows": rows}
