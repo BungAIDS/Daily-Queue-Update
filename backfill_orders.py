@@ -340,6 +340,7 @@ def _attach_quote_run_parse(rec: Dict[str, Any], dr_path: str | None) -> None:
     rec["drive_run"] = qr.get("fields", {})
     rec["drive_run_summary"] = qr.get("summary", "")
     rec["drive_run_template"] = qr.get("template", "")
+    rec["drive_run_parsed_at"] = datetime.now().isoformat(timespec="seconds")
     if qr.get("design") is not None:
         rec["drive_run_design"] = qr.get("design")
 
