@@ -1462,6 +1462,14 @@ def _update_master_workbook_impl(workbook_path: str | Path, lq_payload: Dict[str
             finally:
                 _stage_elapsed(model.name, started)
 
+        # If another tab genuinely needed Excel, keep unchanged tabs' volatile
+        # stamps current too. A completely unchanged poll returns before COM, so
+        # these tiny writes never turn a no-op back into a workbook freeze.
+        repaint_names = {model.name for model, _fp in repaint_work}
+        for model in repaint_models:
+            if model.name not in repaint_names:
+                _refresh_volatile(wb, model)
+
         # Housekeeping: retire tabs an older build managed, then snap the
         # managed tabs back into SHEET_ORDER (both no-ops when already right).
         _drop_obsolete_sheets(wb)
