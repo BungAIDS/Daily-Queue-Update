@@ -58,6 +58,8 @@ from sales_order_validation import (
     DOCUMENT_KIND_ORDER_VERIFICATION,
     DOCUMENT_KIND_SALES_ORDER,
     accept_existing,
+    classify_sales_order_document,
+    clear_sales_order_data,
     failed_acceptance,
     finalize_candidate,
     staging_path,
@@ -98,8 +100,8 @@ SPEC_CELL = re.compile(
     r"^(DesignTemp|MaxTemp|Design|Size|Arrangement|MotorPos|Class|Rotation|Discharge|%Width|WheelType)\b\s*(.*)$",
     re.I,
 )
-# The legacy Infor document is an "Order Verification Report" rather than the
-# newer Sales Order table. Its fan summary lives in two plain-text sections:
+# Some older true Sales Orders have no usable spec table. Their fan summary
+# instead lives in two plain-text sections:
 #
 #   Design Info
 #   D95 Backward Curved SW, SIZE 270, A/4, CW, TH, 44.5%, WHEEL TYPE Backward Curved
@@ -330,17 +332,13 @@ _CO_IN_SO_NAME = re.compile(r"CO#?(\d+)", re.I)
 
 
 def _latest_so_in_folder(folder: Path, expected_job: str):
-    """Best verified Sales Order in a job folder, with reports as fallback.
-
-    A true Sales Order always outranks an Order Verification Report whose old
-    archive name happens to contain a larger CO number.
-    """
+    """Latest verified true Sales Order in a job folder."""
     best = None
     try:
         for p in folder.glob("*.pdf"):
             if "sales order" not in p.name.lower():
                 continue
-            accepted = accept_existing(p, expected_job)
+            accepted = accept_existing(p, expected_job, DOCUMENT_KIND_SALES_ORDER)
             if not accepted or not accepted.path:
                 if accepted:
                     log.warning(
@@ -352,11 +350,8 @@ def _latest_so_in_folder(folder: Path, expected_job: str):
                     )
                 continue
             m = _CO_IN_SO_NAME.search(p.name)
-            is_report = (
-                accepted.validation.document_kind == DOCUMENT_KIND_ORDER_VERIFICATION
-            )
-            co = 0 if is_report else (int(m.group(1)) if m else 0)
-            key = (int(not is_report), co, p.stat().st_mtime)
+            co = int(m.group(1)) if m else 0
+            key = (co, p.stat().st_mtime)
             if best is None or key > best[0]:
                 best = (key, p, co)
     except OSError:
@@ -379,7 +374,7 @@ def refresh_sales_orders(jobs: List[Dict[str, Any]]) -> int:
             continue
         cur = (j.get("so_pdf") or "").strip()
         if cur and Path(cur).exists():
-            accepted = accept_existing(cur, jn)
+            accepted = accept_existing(cur, jn, DOCUMENT_KIND_SALES_ORDER)
             if accepted and accepted.path:
                 continue                  # link still resolves and its printed Order# matches
             if accepted:
@@ -390,6 +385,13 @@ def refresh_sales_orders(jobs: List[Dict[str, Any]]) -> int:
                     accepted.validation.status,
                     accepted.quarantine_path,
                 )
+                if (
+                    accepted.validation.document_kind
+                    == DOCUMENT_KIND_ORDER_VERIFICATION
+                ):
+                    clear_sales_order_data(
+                        j, datetime.now().isoformat(timespec="seconds")
+                    )
         folder = Path(cur).parent if cur else (SALES_ORDER_DIR / jn)
         hit = _latest_so_in_folder(folder, jn)
         if not hit:
@@ -589,8 +591,16 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
         return res
     try:
         with pdfplumber.open(str(path)) as pdf:
-            p1 = pdf.pages[0]
             page_texts = [(page.extract_text() or "") for page in pdf.pages]
+            if (
+                classify_sales_order_document(page_texts[0])
+                == DOCUMENT_KIND_ORDER_VERIFICATION
+            ):
+                log.warning(
+                    "Refusing to parse Order Verification Report as a Sales Order: %s",
+                    path,
+                )
+                return res
             for ln in page_texts[0].splitlines()[:8]:
                 if res["header_co"] is None:
                     m = re.search(r"CO\s*#\s*(\d+)", ln)
@@ -619,9 +629,8 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
                     res["design_temp"] = spec.get("DesignTemp", "")
                     res["max_temp"] = spec.get("MaxTemp", "")
                     break
-            # Infor's legacy Order Verification Report has no extractable table.
-            # Fill any still-missing summary values from its Design Info and
-            # Performance text instead of treating a successful fetch as blanks.
+            # Some older true Sales Orders have no extractable spec table. Fill
+            # missing summary values from their Design Info / Performance text.
             plain_lines = [line for text in page_texts for line in text.splitlines()]
             for key, value in _legacy_spec_from_text(plain_lines).items():
                 if not res.get(key) and value:
@@ -699,8 +708,23 @@ def repair_missing_sales_order_summaries(jobs: List[Dict[str, Any]]) -> int:
 
         pdf = str(job.get("so_pdf") or "").strip()
         if core_missing and pdf:
+            accepted = accept_existing(
+                pdf,
+                str(job.get("job") or ""),
+                DOCUMENT_KIND_SALES_ORDER,
+            )
+            if not accepted or not accepted.path:
+                if (
+                    accepted
+                    and accepted.validation.document_kind
+                    == DOCUMENT_KIND_ORDER_VERIFICATION
+                ):
+                    clear_sales_order_data(
+                        job, datetime.now().isoformat(timespec="seconds")
+                    )
+                continue
             missing = [field for field in _SO_SUMMARY_FIELDS if not job.get(field)]
-            parsed = parse_sales_order_pdf(pdf)
+            parsed = parse_sales_order_pdf(accepted.path)
             for field in missing:
                 value = parsed.get(_SO_SUMMARY_FIELDS[field])
                 if value not in (None, "", [], {}):
@@ -757,11 +781,11 @@ def _norm_type(t: str | None) -> str:
 
 
 def _latest_of_type(docs: List, type_name: str):
-    """Highest revision from the requested pid family, preferring exact type.
+    """Highest revision for a pid type.
 
-    CBC currently exposes both ``CBC_SalesOrder`` (the actual Sales Order) and
-    ``CS_SalesOrder`` (an Order Verification Report). Their revision counters
-    are unrelated, so an exact CBC match must win before normalized fallbacks.
+    Sales Orders are deliberately exact-only: ``CS_SalesOrder`` is an Order
+    Verification Report and must never stand in for ``CBC_SalesOrder``.
+    Other document families retain the site's prefix-normalized matching.
     """
     want = _norm_type(type_name)
     matches = [hd for hd in docs if _norm_type(hd[1].get("type")) == want]
@@ -769,20 +793,13 @@ def _latest_of_type(docs: List, type_name: str):
         hd for hd in matches
         if str(hd[1].get("type") or "").casefold() == str(type_name or "").casefold()
     ]
-    candidates = exact or matches
+    candidates = exact if str(type_name or "").casefold() == SO_TYPE.casefold() else (exact or matches)
     return max(candidates, key=lambda hd: hd[1].get("rev") or 0) if candidates else None
 
 
 def _required_so_document_kind(doc: Dict[str, Any]) -> str | None:
-    """Require true Sales Order contents only for the explicit CBC pid type.
-
-    ``CS_SalesOrder`` remains a legacy fallback when CBC has no true Sales
-    Order link. Leaving that fallback unforced also prevents a transient modal
-    miss from replacing an already archived true Sales Order with a report.
-    """
-    if str(doc.get("type") or "").casefold() == SO_TYPE.casefold():
-        return DOCUMENT_KIND_SALES_ORDER
-    return None
+    """Every document entering the Sales Order bank must be a true SO."""
+    return DOCUMENT_KIND_SALES_ORDER
 
 
 def _co_number_for_so_doc(doc: Dict[str, Any], parsed: Dict[str, Any] | None = None) -> int:
@@ -790,10 +807,7 @@ def _co_number_for_so_doc(doc: Dict[str, Any], parsed: Dict[str, Any] | None = N
     if str(doc.get("type") or "").casefold() == SO_TYPE.casefold():
         rev = doc.get("rev")
         return (int(rev) - 1) if rev and int(rev) > 1 else 0
-    try:
-        return max(0, int((parsed or {}).get("header_co") or 0))
-    except (TypeError, ValueError):
-        return 0
+    return 0
 
 
 def _is_run_name(fn: str) -> bool:

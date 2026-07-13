@@ -66,7 +66,7 @@ from sales_orders import (
 from scraper import CONTAINER_SELECTOR
 import autocad_scan
 import line_items
-from process_lock import cbc_fetch_lock
+from process_lock import cbc_fetch_lock, data_file_lock
 from sales_order_validation import (
     DOCUMENT_KIND_ORDER_VERIFICATION,
     accept_existing,
@@ -419,6 +419,7 @@ def process_one(page, context, job: str, folder: str = "",
                     "so_design_temp": p.get("design_temp", ""), "so_max_temp": p.get("max_temp", ""),
                     "so_special_temp": p.get("special_temp", ""),
                     "so_pdf": so_pdf,
+                    "so_verified_at": rec["scanned_at"],
                 })
                 items = p.get("line_items") or []
                 rec["line_item_count"] = len(items)
@@ -781,6 +782,7 @@ async def process_one_async(page, context, job: str, folder: str = "",
                     "so_design_temp": p.get("design_temp", ""), "so_max_temp": p.get("max_temp", ""),
                     "so_special_temp": p.get("special_temp", ""),
                     "so_pdf": so_pdf,
+                    "so_verified_at": rec["scanned_at"],
                 })
                 items = p.get("line_items") or []
                 rec["line_item_count"] = len(items)
@@ -1125,10 +1127,11 @@ def load_progress() -> Dict[str, Dict[str, Any]]:
 
 
 def save_progress(records: Dict[str, Dict[str, Any]]) -> None:
-    PROGRESS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = PROGRESS_PATH.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(records, indent=2), encoding="utf-8")
-    tmp.replace(PROGRESS_PATH)  # atomic — a crash mid-write never corrupts the store
+    with data_file_lock(PROGRESS_PATH, label="backfill progress update"):
+        PROGRESS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = PROGRESS_PATH.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(records, indent=2), encoding="utf-8")
+        tmp.replace(PROGRESS_PATH)  # atomic — a crash mid-write never corrupts the store
 
 
 def annotate_progress_document_kinds(
@@ -1183,12 +1186,10 @@ def _is_done(rec: Dict[str, Any], retry_not_found: bool = False) -> bool:
         return False
     if rec.get("status") == "ok":
         kind = str(rec.get("so_document_kind") or "")
-        source = str(rec.get("so_source_type") or "")
         if kind == DOCUMENT_KIND_ORDER_VERIFICATION:
-            # A newly scanned CS-only legacy order is an intentional fallback.
-            # An unclassified/other-source report needs one pass with the fixed
-            # selector so CBC_SalesOrder gets a chance to replace it.
-            return source.casefold() == "cs_salesorder"
+            return False
+        if str(rec.get("so_source_type") or "").casefold() == "cs_salesorder":
+            return False
         if kind:
             return True
 
@@ -1362,6 +1363,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--rescan", action="store_true", help="Ignore saved progress.")
     args = ap.parse_args(sys.argv[1:] if argv is None else argv)
 
+    cleanup_changed = False
+    try:
+        import order_verification_cleanup
+
+        cleanup_counts = order_verification_cleanup.run()
+        cleanup_changed = order_verification_cleanup.changed(cleanup_counts)
+    except Exception as exc:  # noqa: BLE001 - log loudly, but do not strand the scanner
+        log.exception("Order Verification cleanup failed: %s", exc)
+
     if not STORAGE_STATE_PATH.exists():
         log.error("No saved session at %s. Run `python login.py` first.", STORAGE_STATE_PATH)
         return 1
@@ -1378,6 +1388,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     dwg = autocad_scan.load_progress()  # read-only merge of the DWG scan, if it's been run
     if dwg:
         log.info("Merging AutoCAD DWG scan for %d job(s).", len(dwg))
+    if cleanup_changed and args.publish_every > 0:
+        log.info("Publishing the cleaned Sales Order stores before the fetch resumes...")
+        _publish_checkpoint()
 
     rc = 0
     pending: List[str] = []

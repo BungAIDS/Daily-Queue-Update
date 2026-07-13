@@ -2125,8 +2125,7 @@ def _mini_pdf(lines: list, path: Path) -> None:
     path.write_bytes(bytes(out))
 
 
-def test_legacy_order_verification_summary_roundtrip(tmp: Path):
-    """The Infor Order Verification Report has text sections, not a spec table."""
+def test_order_verification_report_is_not_parsed_as_sales_order(tmp: Path):
     from sales_orders import parse_sales_order_pdf
 
     pdf = tmp / "421507 - Sales Order CO2.pdf"
@@ -2138,15 +2137,8 @@ def test_legacy_order_verification_summary_roundtrip(tmp: Path):
         "CFM 12689, RPM 3570, DESIGN TEMP 95, MAX TEMP 95, ELEV 965",
     ], pdf)
     parsed = parse_sales_order_pdf(pdf)
-    assert {key: parsed[key] for key in (
-        "design_desc", "size", "arrangement", "motor_pos", "fan_class",
-        "rotation", "discharge", "pct_width", "wheel_type", "design_temp", "max_temp",
-    )} == {
-        "design_desc": "Backward Curved SW", "size": "270", "arrangement": "A/4",
-        "motor_pos": "N/A", "fan_class": "N/A", "rotation": "CW",
-        "discharge": "TH", "pct_width": "44.5", "wheel_type": "BC",
-        "design_temp": "95", "max_temp": "95",
-    }
+    assert not parsed["design_desc"] and not parsed["size"]
+    assert not parsed["line_items"] and not parsed["co_history"]
 
 
 def test_legacy_summary_handles_class_and_wrapped_wheel_type():
@@ -2206,7 +2198,9 @@ def test_repair_missing_sales_order_summaries_is_fill_only(tmp: Path):
 
     pdf = tmp / "421618 - Sales Order CO1.pdf"
     _mini_pdf([
-        "Order Verification Report",
+        "Chicago Blower Corporation Sales Order",
+        "Order# RepRef#",
+        "421618 987",
         "Design Info",
         "D95 Backward Curved SW, SIZE 200, A/4, CCW, UB, 80.9%, WHEEL TYPE Backward Curved",
         "Performance",
@@ -2239,7 +2233,9 @@ def test_repair_missing_sales_order_summaries_is_fill_only(tmp: Path):
 
     standard_pdf = tmp / "421619 - Sales Order CO1.pdf"
     _mini_pdf([
-        "Order Verification Report",
+        "Chicago Blower Corporation Sales Order",
+        "Order# RepRef#",
+        "421619 987",
         "Design Info",
         "D95 Backward Curved SW, SIZE 245, A/4, CCW, UB, 101.6%, WHEEL TYPE Backward Curved",
         "Performance",

@@ -45,8 +45,11 @@ def _parse_doc(href: str) -> dict:
     fn = q.get("fn", [""])[0]
     m = PID_RE.match(pid)
     if m:
-        return {"pid": pid, "fn": fn, "type": m["type"], "id": m["id"], "rev": int(m["rev"])}
-    return {"pid": pid, "fn": fn, "type": pid, "id": "", "rev": None}
+        return {
+            "pid": pid, "fn": fn, "type": m["type"], "id": m["id"],
+            "rev": int(m["rev"]), "href": href,
+        }
+    return {"pid": pid, "fn": fn, "type": pid, "id": "", "rev": None, "href": href}
 
 
 def _is_change_order(doc: dict) -> bool:
@@ -126,7 +129,10 @@ def main() -> None:
             rev = f"rev {d['rev']}" if d["rev"] is not None else "rev ?"
             log.info("  %-22s %-6s  %s%s", d["type"], rev, d["fn"][:55], tag)
 
-        sales_orders = [d for d in docs if "salesorder" in (d["type"] or "").lower() and not _is_change_order(d)]
+        sales_orders = [
+            d for d in docs
+            if str(d.get("type") or "").casefold() == "cbc_salesorder"
+        ]
         change_orders = [d for d in docs if _is_change_order(d)]
 
         log.info("\n--- Summary ---")
@@ -139,10 +145,8 @@ def main() -> None:
                  [d["fn"] for d in change_orders] or "")
 
         # Download the SO as a sample.
-        so_link = page.locator("#modalDetail a").filter(has_text=re.compile(r"sales order", re.I))
-        if so_link.count() > 0:
-            href = so_link.first.get_attribute("href")
-            full = urljoin(page.url, href)
+        if sales_orders:
+            full = urljoin(page.url, top["href"])
             try:
                 resp = context.request.get(full)
                 dest = OUT / f"{jn}_sales_order.pdf"

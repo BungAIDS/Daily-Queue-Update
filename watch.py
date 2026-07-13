@@ -696,6 +696,14 @@ def run_watch(ignore_window: bool = False) -> int:
     except Exception:  # noqa: BLE001
         pass
     validate_runtime_config()
+    try:
+        import order_verification_cleanup
+
+        cleanup_counts = order_verification_cleanup.run()
+        if order_verification_cleanup.changed(cleanup_counts):
+            _publish_data()
+    except Exception:  # noqa: BLE001 - cleanup failure must remain visible without ending watch
+        log.exception("Order Verification cleanup failed at watcher startup")
     if not LIVE_WORKBOOK_PATH:
         log.warning("LIVE_WORKBOOK_PATH is not set in .env — the watcher will run "
                     "and notify, but won't write a live workbook until you set it.")
@@ -830,6 +838,14 @@ def main() -> int:
     if args.once:
         setup_logging()
         validate_runtime_config()
+        try:
+            import order_verification_cleanup
+
+            cleanup_counts = order_verification_cleanup.run()
+            if order_verification_cleanup.changed(cleanup_counts):
+                _publish_data()
+        except Exception:  # noqa: BLE001
+            log.exception("Order Verification cleanup failed at watcher startup")
         today = date.today()
         state = live_state.load_state(today)
         _merge_backlog_sources()

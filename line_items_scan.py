@@ -41,9 +41,9 @@ from typing import List, Optional, Tuple
 from config import SALES_ORDER_DIR
 import line_items as li
 from sales_order_validation import (
-    DOCUMENT_KIND_ORDER_VERIFICATION,
+    DOCUMENT_KIND_SALES_ORDER,
+    accept_existing,
     normalize_order,
-    validate_sales_order_pdf,
 )
 
 log = logging.getLogger("line-items-scan")
@@ -59,27 +59,31 @@ _DUMP_MARKS = {
 
 
 def _latest_so_pdf(folder: Path) -> Optional[Tuple[Path, int]]:
-    """Best verified Sales Order, falling back to a verification report."""
+    """Latest verified true Sales Order; verification reports are ineligible."""
     best = None
     expected_job = normalize_order(folder.name)
     try:
         for p in folder.glob("*.pdf"):
             if "sales order" not in p.name.lower():
                 continue
-            validation = validate_sales_order_pdf(p, expected_job)
-            if not validation.matched:
+            accepted = accept_existing(
+                p, expected_job, DOCUMENT_KIND_SALES_ORDER
+            )
+            if not accepted or not accepted.path:
+                if accepted is None and not p.exists():
+                    continue
+                validation = accepted.validation if accepted else None
                 log.warning(
                     "Skipping unverified Sales Order %s (expected %s, internal %s, status %s)",
                     p,
                     expected_job,
-                    validation.internal_order or "?",
-                    validation.status,
+                    (validation.internal_order if validation else "") or "?",
+                    validation.status if validation else "missing",
                 )
                 continue
             m = CO_IN_NAME.search(p.name)
-            is_report = validation.document_kind == DOCUMENT_KIND_ORDER_VERIFICATION
-            co = 0 if is_report else (int(m.group(1)) if m else 0)
-            key = (int(not is_report), co, p.stat().st_mtime)
+            co = int(m.group(1)) if m else 0
+            key = (co, p.stat().st_mtime)
             if best is None or key > best[0]:
                 best = (key, p, co)
     except OSError as e:
@@ -113,18 +117,22 @@ def _resolve(args_jobs: List[str]) -> List[Tuple[str, Path, int]]:
                 r"(\d{4,}[A-Za-z]?)", p.name
             )
             job = normalize_order(jm.group(1) if jm else p.stem)
-            validation = validate_sales_order_pdf(p, job)
-            if validation.matched:
-                is_report = validation.document_kind == DOCUMENT_KIND_ORDER_VERIFICATION
-                co = 0 if is_report else (int(m.group(1)) if m else 0)
+            accepted = accept_existing(
+                p, job, DOCUMENT_KIND_SALES_ORDER
+            )
+            if accepted and accepted.path:
+                co = int(m.group(1)) if m else 0
                 out.append((job, p, co))
             else:
+                if accepted is None and not p.exists():
+                    continue
+                validation = accepted.validation if accepted else None
                 log.warning(
                     "Skipping unverified Sales Order %s (expected %s, internal %s, status %s)",
                     p,
                     job,
-                    validation.internal_order or "?",
-                    validation.status,
+                    (validation.internal_order if validation else "") or "?",
+                    validation.status if validation else "missing",
                 )
             continue
         folder = SALES_ORDER_DIR / a
@@ -209,6 +217,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--rescan", action="store_true", help="Re-parse jobs already in the store.")
     ap.add_argument("--limit", type=int, default=0, help="Stop after N new jobs this run.")
     args = ap.parse_args(sys.argv[1:] if argv is None else argv)
+
+    try:
+        import order_verification_cleanup
+
+        order_verification_cleanup.run()
+    except Exception:  # noqa: BLE001 - keep the scanner usable, but make the failure visible
+        log.exception("Order Verification cleanup failed before line-item scan")
 
     if args.dump:
         targets = _resolve(args.jobs) if args.jobs else _iter_archive(SALES_ORDER_DIR)[:3]

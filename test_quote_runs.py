@@ -82,9 +82,9 @@ def test_true_cbc_salesorder_outranks_verification_report():
         assert so[1]["fn"] == fn and so[1]["rev"] == 1
 
 
-def test_cs_salesorder_remains_legacy_fallback():
+def test_cs_salesorder_is_never_a_sales_order_fallback():
     docs = [_doc("CS_SalesOrder", 3, "OrderVerificationReportViewer_old.pdf")]
-    assert _latest_of_type(docs, SO_TYPE) == docs[0]
+    assert _latest_of_type(docs, SO_TYPE) is None
 
 
 def test_verification_report_revision_is_not_a_change_order():
@@ -92,7 +92,7 @@ def test_verification_report_revision_is_not_a_change_order():
     assert _co_number_for_so_doc({"type": "CS_SalesOrder", "rev": 3}) == 0
     assert _co_number_for_so_doc(
         {"type": "CS_SalesOrder", "rev": 3}, {"header_co": 1}
-    ) == 1
+    ) == 0
 
 
 def test_dedicated_pid_type_sorts_first():

@@ -86,7 +86,7 @@ def _report_docs(jn: str, docs: list[dict]) -> None:
     for d in docs:
         rev = f"rev {d['rev']}" if d["rev"] is not None else "rev ?"
         flag = ""
-        if _norm_type(d["type"]) == _norm_type(SO_TYPE):
+        if str(d["type"] or "").casefold() == SO_TYPE.casefold():
             flag = "   <== SALES ORDER"
         elif d["href"] in run_hrefs:
             how = "file name" if _is_run_name(d["fn"]) else "pid type"
