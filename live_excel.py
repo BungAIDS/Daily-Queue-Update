@@ -8,8 +8,8 @@ Excel application means edits flow through Excel itself, which syncs them to
 OneDrive/SharePoint so coworkers see them live (cursors and all).
 
 What it writes: one worksheet per `live_sheets.Sheet` model, kept in SHEET_ORDER
-on the tab bar (Changes, Live Queue, Order History, Similar Orders, Similar
-Data). The *content* lives in live_sheets.py (pure, tested); this
+on the tab bar (Changes, Live Queue, Sales Order, Order History, Similar Orders,
+Similar Data, SO Data). The *content* lives in live_sheets.py (pure, tested); this
 module is the generic renderer — bulk-write the values, then map each cell's
 named fill/font to real Excel colors, add hyperlinks, freeze panes, and
 AutoFilter. The named styles mirror excel_writer so the live master and the daily
@@ -85,8 +85,8 @@ _FONT = {
 # tracking), so the archived-orders tab is "Order History".
 # The managed tabs are kept in THIS order at the front of the tab bar (any
 # user-added tabs follow); _ensure_tab_order snaps them back each cycle.
-SHEET_ORDER = ["Changes", "Live Queue", "Order History",
-               "Similar Orders", "Similar Data"]
+SHEET_ORDER = ["Changes", "Live Queue", "Sales Order", "Order History",
+               "Similar Orders", "Similar Data", "SO Data"]
 
 # Bot-generated tabs an older build managed; deleted on sight. Their data lives
 # in the stores ("Line Items" is superseded by the Similar tabs + find_orders'

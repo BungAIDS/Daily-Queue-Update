@@ -770,6 +770,185 @@ def similar_orders_sheet(n_rows: int, n_queue: int) -> Sheet:
 
 
 # --------------------------------------------------------------------------- #
+# Sales Order: pick a queue order at the top -> everything captured from its   #
+# Sales Order appears instantly — the parsed spec fields (plus an Open-PDF     #
+# link and the CO history) up top, and EVERY captured line item below. Same    #
+# no-macro mechanics as Similar Orders: the visible tab holds only the picker  #
+# and FILTER/INDEX formulas that spill from the flat SO Data sheet, so picking #
+# an order never waits for the next poll and repaints never wipe the pick.     #
+# --------------------------------------------------------------------------- #
+SALES_ORDER_TAB = "Sales Order"
+SO_DATA_TAB = "SO Data"
+SO_PICKER_CELL = "B1"
+# One row per captured line item (see line_items.extract_items): its position on
+# the SO, the section it printed under, qty, the raw line exactly as printed,
+# price / L-C-N type letter, the unpriced detail lines, the canonical feature
+# tags, the normalized form the matching runs on, and any parser review flags —
+# everything needed to judge how a line was captured and sorted.
+SO_ITEM_HEADERS = ["#", "Section", "Qty", "Description", "Price", "L/C/N",
+                   "Details", "Tags", "Normalized", "Review"]
+# The parsed SO spec fields shown in the tab's one-row summary (header, job key);
+# "co" renders via _co_label like every other tab.
+SO_SUMMARY_COLUMNS = [
+    ("Customer", "customer"), ("CO#", "co"), ("Total Price", "total_price"),
+    ("Design", "design"), ("Description", "so_design_desc"), ("Size", "so_size"),
+    ("Arrangement", "so_arrangement"), ("Motor Pos", "so_motor_pos"),
+    ("Class", "so_class"), ("Rotation", "so_rotation"),
+    ("Discharge", "so_discharge"), ("% Width", "so_pct_width"),
+    ("Wheel Type", "so_wheel_type"), ("Design Temp", "so_design_temp"),
+    ("Max Temp", "so_max_temp"), ("Special Temp", "so_special_temp"),
+    ("Primary Rep", "primary_rep"),
+]
+# SO Data column geometry (1-based), shared by both builders so the visible
+# tab's formulas always aim at the right data columns: the line-item block
+# (Queue Order + SO_ITEM_HEADERS), a blank gap, then the per-order summary
+# block (Queue Order — the picker's dropdown source — the spec fields, the CO
+# history, and the SO PDF path the Open-PDF link looks up).
+_SO_ITEM_NCOLS = 1 + len(SO_ITEM_HEADERS)
+_SO_KEY_COL = _SO_ITEM_NCOLS + 2
+_SO_SUM_FIRST = _SO_KEY_COL + 1
+_SO_SUM_LAST = _SO_SUM_FIRST + len(SO_SUMMARY_COLUMNS) - 1
+_SO_CO_HIST_COL = _SO_SUM_LAST + 1
+_SO_PDF_COL = _SO_CO_HIST_COL + 1
+
+
+def _job_num_key(job: str) -> tuple:
+    """Sort key: numeric job numbers ascending, then anything else."""
+    return (0, int(job), job) if job.isdigit() else (1, 0, job)
+
+
+def sales_order_item_rows(job: Dict[str, Any]) -> List[List[Any]]:
+    """One flat value row per captured line item, in SO print order, matching
+    SO_ITEM_HEADERS."""
+    rows = []
+    for i, it in enumerate(job.get("line_items") or [], start=1):
+        rows.append([i, it.get("section", ""), it.get("qty", ""), it.get("raw", ""),
+                     it.get("price", ""), it.get("ptype", ""),
+                     "; ".join(str(d) for d in it.get("details") or []),
+                     ", ".join(it.get("tags") or []),
+                     it.get("norm", ""),
+                     "; ".join(it.get("review_flags") or [])])
+    return rows
+
+
+def _so_summary_values(j: Dict[str, Any]) -> List[Any]:
+    return [_co_label(j) if key == "co" else j.get(key, "")
+            for _h, key in SO_SUMMARY_COLUMNS]
+
+
+def sales_order_data_sheet(jobs: List[Dict[str, Any]]) -> Sheet:
+    """The flat table behind the Sales Order tab: the line-item block on the
+    left (one row per captured item, grouped by order) and one summary row per
+    on-board order on the right — the parsed spec fields plus the CO history
+    and the SO PDF path. The summary block's Queue Order column doubles as the
+    picker's dropdown source. Ordered by JOB NUMBER, not board position, so the
+    board reshuffling every poll doesn't repaint this tab."""
+    jobs = sorted(jobs, key=lambda j: _job_num_key(str(j.get("job") or "")))
+    item_rows: List[List[Any]] = []
+    for j in jobs:
+        jn = str(j.get("job") or "")
+        for r in sales_order_item_rows(j):
+            item_rows.append([jn] + r)
+
+    sh = Sheet(SO_DATA_TAB, freeze="A2")
+    sh.row(_header_cells(["Queue Order"] + SO_ITEM_HEADERS) + [Cell("")]
+           + _header_cells(["Queue Order"] + [h for h, _ in SO_SUMMARY_COLUMNS]
+                           + ["CO History", "SO PDF"]))
+    prev = None
+    for i in range(max(len(item_rows), len(jobs))):
+        if i < len(item_rows):
+            vals = item_rows[i]
+            first = vals[0] != prev            # grey band starts each order's group
+            prev = vals[0]
+            fill = FILL_NEW if first else None
+            cells = [Cell(v, fill=fill) for v in vals]
+        else:
+            cells = [Cell("")] * _SO_ITEM_NCOLS
+        cells.append(Cell(""))
+        if i < len(jobs):
+            j = jobs[i]
+            cells += ([Cell(str(j.get("job") or ""))]
+                      + [Cell(v) for v in _so_summary_values(j)]
+                      + [Cell(" | ".join(str(x) for x in j.get("co_history") or [])),
+                         Cell((j.get("so_pdf") or "").strip())])
+        sh.row(cells)
+    return sh
+
+
+def sales_order_sheet(n_data_rows: int, n_orders: int) -> Sheet:
+    """The visible Sales Order tab: yellow input cell in B1 (dropdown of the
+    queue's orders; typing an order # also works), a one-row spill of the
+    order's parsed SO spec — with an Open-PDF link and its CO history — and a
+    FILTER spill of every line item captured from its Sales Order.
+    `n_data_rows` is the SO Data sheet's data row count (its nrows minus the
+    header); `n_orders` the number of on-board orders (= summary rows)."""
+    from openpyxl.utils import get_column_letter
+
+    sh = Sheet(SALES_ORDER_TAB, freeze="A9")   # pin the pick + summary + item headers
+    d = SO_DATA_TAB
+    key = get_column_letter(_SO_KEY_COL)
+    olast = n_orders + 1
+    if n_orders:
+        sh.picker = {
+            "cell": SO_PICKER_CELL,
+            "source": f"='{d}'!${key}$2:${key}${olast}",
+            "comment": ("Pick a queue order from the dropdown (or type its order "
+                        "#) and press Enter — everything captured from its Sales "
+                        "Order (the spec fields and every line item) appears "
+                        "below. Clear the cell to clear the view."),
+        }
+    sh.row([Cell("Order:", font=F_SECTION), Cell(""),
+            Cell("← pick a queue order (or type its order #) — everything from "
+                 "its Sales Order appears below, line items included",
+                 font=F_NOTE, overflow=True)])
+    sh.blank()
+    if not n_data_rows:
+        sh.row([Cell("No sales-order data yet — an order appears here once its "
+                     "Sales Order has been fetched and parsed.",
+                     font=F_NOTE, overflow=True)])
+        return sh
+
+    last = n_data_rows + 1
+    sum1, sum2 = get_column_letter(_SO_SUM_FIRST), get_column_letter(_SO_SUM_LAST)
+    hist, pdf = get_column_letter(_SO_CO_HIST_COL), get_column_letter(_SO_PDF_COL)
+    # Both sides of every comparison/lookup are coerced to text (&"") so a job
+    # stored as a number still matches digits typed in the picker, and the whole
+    # view collapses to blank while the picker is empty (no all-rows spill).
+    lookup = f"MATCH($B$1&\"\",'{d}'!${key}$2:${key}${olast}&\"\",0)"
+
+    sh.row([Cell("Order details", font=F_SECTION)])
+    sh.row(_header_cells([h for h, _ in SO_SUMMARY_COLUMNS]
+                         + ["Sales Order PDF", "CO History"]))
+    summary = [Cell(f"=IF($B$1&\"\"=\"\",\"\",IFERROR("
+                    f"FILTER('{d}'!${sum1}$2:${sum2}${olast},"
+                    f"('{d}'!${key}$2:${key}${olast}&\"\")=($B$1&\"\"),"
+                    f"\"no data for that order # (not on the queue?)\"),\"\"))")]
+    summary += [Cell("") for _ in range(len(SO_SUMMARY_COLUMNS) - 1)]  # spill room
+    # Blank stays blank when the order has no PDF path on file — a HYPERLINK to
+    # "" would render a link that errors on click.
+    pdf_rng = f"'{d}'!${pdf}$2:${pdf}${olast}"
+    summary.append(Cell(f"=IF($B$1&\"\"=\"\",\"\",IFERROR("
+                        f"IF(INDEX({pdf_rng},{lookup})&\"\"=\"\",\"\","
+                        f"HYPERLINK(INDEX({pdf_rng},{lookup}),\"Open PDF\")),\"\"))",
+                        font=F_LINK))
+    # CO history last, so the free text overruns the empty cells to its right.
+    summary.append(Cell(f"=IF($B$1&\"\"=\"\",\"\",IFERROR("
+                        f"INDEX('{d}'!${hist}$2:${hist}${olast},{lookup}),\"\"))",
+                        overflow=True))
+    sh.row(summary)
+    sh.blank()
+
+    sh.row([Cell("Line items", font=F_SECTION)])
+    sh.row(_header_cells(SO_ITEM_HEADERS))
+    item2 = get_column_letter(_SO_ITEM_NCOLS)
+    sh.row([Cell(f"=IF($B$1&\"\"=\"\",\"\",IFERROR("
+                 f"FILTER('{d}'!$B$2:${item2}${last},"
+                 f"('{d}'!$A$2:$A${last}&\"\")=($B$1&\"\"),"
+                 f"\"no line items captured for that order # yet\"),\"\"))")])
+    return sh
+
+
+# --------------------------------------------------------------------------- #
 # Incremental "master log" tabs (Live Queue + Order History)                   #
 #                                                                             #
 # These are upserted row-by-row (keyed on the order number) instead of being   #

@@ -691,6 +691,70 @@ def test_similar_orders_sheet_empty_has_note_not_formula():
     assert "No similar-order data yet" in tab.grid[3][0].value
 
 
+def _so_item(**kw):
+    it = {"raw": "1 FAN WHEEL SS SLEEVE 1,000.00 L",
+          "norm": "FAN WHEEL STAINLESS STEEL SLEEVE", "qty": "1",
+          "price": "1,000.00", "ptype": "L", "section": "",
+          "details": ["Product: Wheel"], "tags": ["STAINLESS STEEL"]}
+    it.update(kw)
+    return it
+
+
+def test_sales_order_data_sheet_layout():
+    a = _job("421001", line_items=[_so_item()], co_number=1,
+             co_history=["CO#1 - PRICE CHANGE"], so_pdf="Z:\\SO\\421001.pdf")
+    b = _job("421000", line_items=[])
+    sh = ls.sales_order_data_sheet([a, b])       # job-number order, not input order
+    assert sh.name == ls.SO_DATA_TAB and not sh.hidden and sh.freeze == "A2"
+    hdr = [c.value for c in sh.grid[0]]
+    assert hdr[0] == "Queue Order"
+    assert hdr[1:1 + len(ls.SO_ITEM_HEADERS)] == ls.SO_ITEM_HEADERS
+    key = ls._SO_KEY_COL - 1                     # summary block start (0-based)
+    assert hdr[key] == "Queue Order" and hdr[key + 1] == "Customer"
+    # Item block: 421001's one item aligned from column A, group-banded.
+    assert sh.grid[1][0].value == "421001" and sh.grid[1][0].fill == ls.FILL_NEW
+    assert sh.grid[1][1].value == 1                            # item #
+    assert sh.grid[1][4].value.startswith("1 FAN WHEEL")       # raw Description
+    assert sh.grid[1][7].value == "Product: Wheel"             # Details joined
+    assert sh.grid[1][8].value == "STAINLESS STEEL"            # Tags joined
+    assert sh.grid[1][9].value == "FAN WHEEL STAINLESS STEEL SLEEVE"  # Normalized
+    # Summary block: one row per order in job-number order, with the CO history
+    # and SO PDF path at the shared column positions the picker tab looks up.
+    assert sh.grid[1][key].value == "421000"
+    assert sh.grid[2][key].value == "421001"
+    assert sh.grid[2][key + 1].value == "ACME CORP"
+    assert sh.grid[2][ls._SO_CO_HIST_COL - 1].value == "CO#1 - PRICE CHANGE"
+    assert sh.grid[2][ls._SO_PDF_COL - 1].value == "Z:\\SO\\421001.pdf"
+
+
+def test_sales_order_sheet_picker_and_formulas():
+    from openpyxl.utils import get_column_letter
+    tab = ls.sales_order_sheet(5, 2)
+    key = get_column_letter(ls._SO_KEY_COL)
+    assert tab.picker["cell"] == ls.SO_PICKER_CELL
+    assert tab.picker["source"] == f"='SO Data'!${key}$2:${key}$3"
+    # Summary spill row: FILTER over the summary block keyed on the picker,
+    # then the Open-PDF HYPERLINK and the CO-history INDEX alongside it.
+    summary = tab.grid[4]
+    sum1 = get_column_letter(ls._SO_SUM_FIRST)
+    assert f"FILTER('SO Data'!${sum1}$2:" in summary[0].value
+    assert "$B$1" in summary[0].value
+    pdf = summary[len(ls.SO_SUMMARY_COLUMNS)]
+    assert "HYPERLINK" in pdf.value and pdf.font == ls.F_LINK
+    assert "INDEX" in summary[-1].value and summary[-1].overflow
+    # Line-items spill: FILTER over the item block (cols B..) keyed on col A; a
+    # blank picker collapses to blank rather than spilling every row.
+    items = tab.grid[8][0].value
+    assert items.startswith('=IF($B$1&""="",""')
+    assert "FILTER('SO Data'!$B$2:" in items and "$A$2:$A$6" in items
+
+
+def test_sales_order_sheet_empty_has_note_not_formula():
+    tab = ls.sales_order_sheet(0, 0)
+    assert tab.picker is None
+    assert "No sales-order data yet" in tab.grid[2][0].value
+
+
 def main() -> int:
     passed = 0
     for name, fn in sorted(globals().items()):

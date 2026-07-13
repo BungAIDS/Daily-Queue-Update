@@ -482,6 +482,14 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
     extra_sheets = [live_sheets.similar_data_sheet(sim_rows, queue_ids),
                     live_sheets.similar_orders_sheet(len(sim_rows), len(queue_ids))]
 
+    # Sales Order: pick an on-board order -> its parsed SO spec + every captured
+    # line item spill instantly from the flat SO Data tab (same mechanics as
+    # Similar Orders — the data sheet only repaints when an order's SO content
+    # actually changes).
+    so_data = live_sheets.sales_order_data_sheet(lq_jobs)
+    extra_sheets += [so_data,
+                     live_sheets.sales_order_sheet(so_data.nrows - 1, len(queue_ids))]
+
     rendered = update_master_workbook(LIVE_WORKBOOK_PATH, lq_payload, oh_payload,
                                       changes_sheet=_changes_sheet(master, lq_jobs, new_today, today, now),
                                       extra_sheets=extra_sheets)
