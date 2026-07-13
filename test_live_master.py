@@ -147,6 +147,39 @@ def test_update_tracks_co_and_skips_initial_population():
     assert any(x["field"] == "Size" and x["old"] == "M2" and x["new"] == "M3" for x in ev3)
 
 
+def test_sparse_source_keeps_unknown_fields_and_logs_no_blanks():
+    # A job dict with NO KEY for a field (a board-only seed from a raw morning
+    # snapshot folding over a backfill-enriched entry) must neither wipe the
+    # field nor log a '-> blank' change. Stripping here used to flip-flop with
+    # _merge_external_before_save reviving the fields from disk on every save,
+    # re-logging the same phantom changes poll after poll.
+    m = {"orders": {}}
+    lm.update(m, [_job("100", co_number=2, so_pdf="Z:/SO/100/CO#2.pdf",
+                       so_size="245", so_wheel_type="RTF",
+                       line_items=[{"tags": ["stainless"]}])], T0)
+    ev = lm.update(m, [_job("100")], T1)      # board fields only, nothing changed
+    assert ev == []
+    job = m["orders"]["100"]["job"]
+    assert job["so_size"] == "245" and job["so_wheel_type"] == "RTF"
+    assert job["line_items"] == [{"tags": ["stainless"]}]
+    # A genuine board change still lands and is still the only event.
+    ev2 = lm.update(m, [_job("100", end_date="06/25/2026")], T2)
+    assert [(e["field"], e["old"], e["new"]) for e in ev2] == \
+        [("End Date", "06/20/2026", "06/25/2026")]
+    assert m["orders"]["100"]["job"]["so_size"] == "245"
+
+
+def test_present_but_empty_key_still_blanks_and_logs():
+    # A source that DOES carry the key with an empty value is a real blanking
+    # (a Note cleared on the board) — applied and logged as before.
+    m = {"orders": {}}
+    lm.update(m, [_job("100", status_note="CREDIT HOLD")], T0)
+    ev = lm.update(m, [_job("100", status_note="")], T1)
+    assert [(e["field"], e["old"], e["new"]) for e in ev] == \
+        [("Note", "CREDIT HOLD", "")]
+    assert m["orders"]["100"]["job"]["status_note"] == ""
+
+
 def test_failed_refetch_does_not_regress_change_order():
     m = {"orders": {}}
     # A real change order with its SO link + spec.

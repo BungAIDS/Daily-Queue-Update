@@ -711,6 +711,9 @@ def run_watch(ignore_window: bool = False) -> int:
     state = live_state.load_state(today)
     _merge_backlog_sources()
     master = live_master.load_master()
+    scrubbed = change_log.scrub_phantom_blanks(today, master)
+    if scrubbed:
+        log.info("Scrubbed %d phantom '-> blank' event(s) from today's change log.", scrubbed)
     tagged = engineers.backfill(master)   # tag historical orders by engineer (roster edits too)
     if tagged:
         log.info("Engineer roster: tagged/updated %d existing order(s)", tagged)

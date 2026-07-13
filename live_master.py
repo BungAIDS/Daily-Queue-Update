@@ -251,7 +251,16 @@ def update(master: Dict[str, Any], present: List[Dict[str, Any]],
         else:
             stored_job = entry.get("job") or {}
             # Never let a failed/stale re-fetch wipe a change order we already had.
-            merged = _keep_better_enrichment(stored_job, j)
+            merged = dict(_keep_better_enrichment(stored_job, j))
+            # A source that has no key for a field doesn't know about it, so it
+            # can't wipe it (same sparse-source rule as merge_order). A board-only
+            # job dict (e.g. one seeded from a raw morning snapshot) folding over
+            # a backfill-enriched entry used to strip every enrichment field
+            # here; _merge_external_before_save then revived them from disk on
+            # save, so the same "-> blank" change was re-logged every poll.
+            for k, v in stored_job.items():
+                if k not in merged:
+                    merged[k] = v
             # Accumulate engineers: union the names already attached with any
             # found this poll, so an association is never dropped on reassignment.
             merged["engineers"] = engineers.merge(stored_job.get("engineers"),

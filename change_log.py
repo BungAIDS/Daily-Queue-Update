@@ -55,3 +55,36 @@ def append(d: date, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     full.extend(events)
     save(d, full)
     return full
+
+
+def scrub_phantom_blanks(d: date, master: Dict[str, Any]) -> int:
+    """Drop phantom '-> (blank)' events from day `d`'s log: ones claiming a field
+    went blank while the master still holds the exact non-empty value the event
+    said it changed FROM — i.e. the blanking never really happened. These were
+    mass-logged by the update()/save_master flip-flop (a board-only job dict
+    stripping enrichment fields that the save then revived from disk), repeating
+    every poll. Real blankings survive: for those the master's current value is
+    "" (or was later re-set to something other than the old value).
+
+    Returns how many events were removed; rewrites the log only when it changes.
+    """
+    events = load(d)
+    if not events:
+        return 0
+    import live_master   # local import: keep this module free of heavier deps
+
+    current: Dict[str, Dict[str, str]] = {}
+    for jn, entry in (master.get("orders") or {}).items():
+        current[jn] = live_master.tracked_values(entry.get("job") or {})
+
+    kept = []
+    for ev in events:
+        vals = current.get(str(ev.get("job") or ""))
+        phantom = (not ev.get("new") and ev.get("old") and vals is not None
+                   and vals.get(str(ev.get("field") or "")) == ev.get("old"))
+        if not phantom:
+            kept.append(ev)
+    dropped = len(events) - len(kept)
+    if dropped:
+        save(d, kept)
+    return dropped
