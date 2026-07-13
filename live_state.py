@@ -205,7 +205,26 @@ def mark_enriched(state: Dict[str, Any], enriched_jobs: List[Dict[str, Any]]) ->
         entry = state.get(jn)
         if entry is None:
             continue
-        entry["job"] = dict(j)
+        stored = entry.get("job") or {}
+        merged = dict(j)
+        for field, stored_value in stored.items():
+            protects_enrichment = (
+                field.startswith("so_") or field in ("line_items", "line_item_tags")
+            )
+            if (
+                protects_enrichment
+                and stored_value not in (None, "", [], {})
+                and merged.get(field) in (None, "", [], {})
+            ):
+                merged[field] = stored_value
+        if (
+            stored.get("so_special_temp") not in (None, "", "0")
+            and str(merged.get("so_special_temp") or "") == "0"
+            and not merged.get("so_design_temp")
+            and not merged.get("so_max_temp")
+        ):
+            merged["so_special_temp"] = stored["so_special_temp"]
+        entry["job"] = merged
         entry["enriched"] = True
 
 

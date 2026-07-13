@@ -200,7 +200,9 @@ def _enrich_pending(state: dict) -> list:
     """Run the slow Sales-Order enrichment for every present order not yet
     enriched, then fold the results back into the state. Returns the enriched
     job dicts."""
-    pending = [e["job"] for e in state.values()
+    # Enrichment mutates each job dict. Work on copies so mark_enriched can
+    # compare the result with the last trusted values and preserve parser gaps.
+    pending = [dict(e["job"]) for e in state.values()
                if e.get("present") and not e.get("enriched") and e.get("job")]
     if not pending:
         return []

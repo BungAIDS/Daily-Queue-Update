@@ -103,7 +103,10 @@ _LEGACY_SECTION_STOP = re.compile(
     r"^(?:_+|Performance\b|Base\s+Fan\b|Inquiry\b|Motor\b|CSIV\w*\b|\S+@\S+)",
     re.I,
 )
-_LEGACY_ARRANGEMENT = re.compile(r"^(A/[A-Z0-9-]+(?:\s+[A-Z])?)(?:\s|$)", re.I)
+_LEGACY_ARRANGEMENT = re.compile(
+    r"^((?:A/[A-Z0-9-]+(?:\s+[A-Z])?)|(?:Arrangement\s+[A-Z0-9/-]+))(?:\s|$)",
+    re.I,
+)
 _LEGACY_WHEEL_CODES = {
     "airfoil": "AF",
     "backward curved": "BC",
@@ -477,9 +480,8 @@ def _legacy_spec_from_text(lines: List[str]) -> Dict[str, str]:
         return {}
     raw_design, rest = (part.strip() for part in design_size)
     wheel_parts = re.split(r",\s*WHEEL\s+TYPE\s*", rest, maxsplit=1, flags=re.I)
-    if len(wheel_parts) != 2:
-        return {}
-    before_wheel, raw_wheel = wheel_parts
+    before_wheel = wheel_parts[0]
+    raw_wheel = wheel_parts[1] if len(wheel_parts) == 2 else ""
 
     parts = [part.strip() for part in before_wheel.split(",") if part.strip()]
     if not parts:
@@ -503,7 +505,11 @@ def _legacy_spec_from_text(lines: List[str]) -> Dict[str, str]:
         if re.fullmatch(r"C/[A-Z0-9-]+", part, re.I) and not fan_class:
             fan_class = part
 
-    design_match = re.match(r"^D[0-9A-Z-]+\s+(.+)$", raw_design, re.I)
+    design_match = re.match(
+        r"^(?:Design\s+[0-9A-Z-]+|D[0-9A-Z-]+)\s+(.+)$",
+        raw_design,
+        re.I,
+    )
     design_desc = design_match.group(1).strip() if design_match else raw_design
     wheel = re.sub(r"\s+", " ", raw_wheel).strip(" ,")
     wheel = _LEGACY_WHEEL_CODES.get(wheel.casefold(), wheel)

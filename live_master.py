@@ -188,14 +188,33 @@ _ENRICHMENT_KEEP = (
     # Transmittal fields — keep them too so a failed SO re-fetch can't blank them.
     "so_emails", "so_po", "so_released", "so_imi",
 )
+_SO_PARSE_KEEP = (
+    "so_design_desc", "so_size", "so_arrangement", "so_motor_pos", "so_class",
+    "so_rotation", "so_discharge", "so_pct_width", "so_wheel_type",
+    "so_design_temp", "so_max_temp", "so_special_temp",
+    "line_items", "line_item_tags",
+)
+
+
+def _parse_value_missing(field: str, incoming: Dict[str, Any]) -> bool:
+    value = incoming.get(field)
+    if value in (None, "", [], {}):
+        return True
+    return (
+        field == "so_special_temp"
+        and str(value) == "0"
+        and not incoming.get("so_design_temp")
+        and not incoming.get("so_max_temp")
+    )
 
 
 def _keep_better_enrichment(stored: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
     """Guard against a regression: if `incoming` has a LOWER change order than
     `stored` (or the same CO# but a now-blank SO link), a re-fetch must have failed
     or returned a stale/original Sales Order — keep the prior enrichment and take
-    only the fresh board fields. Re-reading the exact same archived PDF also
-    cannot erase known enrichment merely because a parser returned blanks."""
+    only the fresh board fields. Re-reading any archived PDF, including a newer
+    change order, cannot erase known fan-summary or line-item values merely
+    because that PDF layout returned parser blanks."""
     s_co = int(stored.get("co_number") or 0)
     i_co = int(incoming.get("co_number") or 0)
     s_pdf = (stored.get("so_pdf") or "").strip()
@@ -205,14 +224,24 @@ def _keep_better_enrichment(stored: Dict[str, Any], incoming: Dict[str, Any]) ->
     i_name = i_pdf.replace("/", "\\").rsplit("\\", 1)[-1].replace("#", "").casefold()
     same_document = (i_co == s_co and s_pdf and i_pdf
                      and s_name == i_name)
-    if not regressed and not same_document:
+    parse_gap = any(
+        stored.get(field) not in (None, "", [], {}, False)
+        and _parse_value_missing(field, incoming)
+        for field in _SO_PARSE_KEEP
+    )
+    if not regressed and not same_document and not parse_gap:
         return incoming
     merged = dict(incoming)
     for f in _ENRICHMENT_KEEP:
         stored_value = stored.get(f)
         incoming_value = incoming.get(f)
+        missing = (
+            _parse_value_missing(f, incoming)
+            if f in _SO_PARSE_KEEP
+            else incoming_value in (None, "", [], {}, False)
+        )
         if stored_value not in (None, "", [], {}, False) and (
-                regressed or incoming_value in (None, "", [], {}, False)):
+                regressed or ((same_document or f in _SO_PARSE_KEEP) and missing)):
             merged[f] = stored[f]
     return merged
 

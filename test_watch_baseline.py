@@ -101,6 +101,26 @@ def test_normal_poll_still_logs_a_real_change():
     assert events[0]["old"] == "07/01/2026" and events[0]["new"] == "07/20/2026"
 
 
+def test_enrich_pending_uses_a_copy_before_preserving_parser_gaps():
+    state = {"412348": {
+        "first_seen": "2026-06-25T05:00:00", "enriched": False,
+        "present": True, "last_seen": "2026-06-25T09:00:00",
+        "job": {"job": "412348", "co_number": 1,
+                "so_pdf": "Z:/SO/412348/CO1.pdf", "so_size": "33"},
+    }}
+
+    def blank_new_parse(jobs, deep_folders=False):
+        assert deep_folders is False
+        jobs[0].update({"co_number": 2, "so_pdf": "Z:/SO/412348/CO2.pdf", "so_size": ""})
+
+    with mock.patch.object(watch, "enrich_with_sales_orders", side_effect=blank_new_parse):
+        enriched = watch._enrich_pending(state)
+
+    assert enriched[0]["co_number"] == 2
+    assert state["412348"]["job"]["co_number"] == 2
+    assert state["412348"]["job"]["so_size"] == "33"
+
+
 def main() -> int:
     passed = 0
     for name, fn in sorted(globals().items()):

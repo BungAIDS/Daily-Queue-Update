@@ -117,6 +117,29 @@ def test_mark_enriched():
     assert state["200"]["job"]["so_design_desc"] == "Plug Fan"
 
 
+def test_mark_enriched_preserves_parser_gaps_from_newer_change_order():
+    state = {}
+    live_state.record_poll(state, [_job("200")], T1)
+    state["200"]["job"].update({
+        "co_number": 1,
+        "so_pdf": "Z:/SO/200/200 - Sales Order CO1.pdf",
+        "so_design_desc": "SQAD Dual Direct Drive",
+        "so_size": "33",
+        "so_special_temp": "300",
+        "line_items": [{"tags": ["UNITARY BASE"]}],
+    })
+    enriched = [_job(
+        "200", co_number=2, so_pdf="Z:/SO/200/200 - Sales Order CO2.pdf",
+        so_design_desc="", so_size="", so_special_temp="0", line_items=[],
+    )]
+    live_state.mark_enriched(state, enriched)
+    job = state["200"]["job"]
+    assert job["co_number"] == 2 and job["so_pdf"].endswith("CO2.pdf")
+    assert job["so_design_desc"] == "SQAD Dual Direct Drive" and job["so_size"] == "33"
+    assert job["so_special_temp"] == "300"
+    assert job["line_items"] == [{"tags": ["UNITARY BASE"]}]
+
+
 def main() -> int:
     passed = 0
     for name, fn in sorted(globals().items()):

@@ -225,6 +225,32 @@ def test_same_pdf_parse_blanks_do_not_erase_known_summary():
     assert job["so_rotation"] == "CW" and job["line_items"] == [{"tags": ["MOTOR"]}]
 
 
+def test_newer_change_order_parse_blanks_do_not_erase_known_summary():
+    m = {"orders": {}}
+    known = _job(
+        "200", co_number=1, so_pdf="Z:/SO/200/200 - Sales Order CO1.pdf",
+        so_design_desc="SQAD Dual Direct Drive", so_size="33",
+        so_arrangement="Arrangement 4", so_rotation="CW", so_pct_width="78.7",
+        line_items=[{"tags": ["UNITARY BASE"]}], line_item_tags="UNITARY BASE",
+    )
+    lm.update(m, [known], T0)
+    newer_with_parser_gaps = _job(
+        "200", co_number=2, so_pdf="Z:/SO/200/200 - Sales Order CO2.pdf",
+        so_design_desc="", so_size="", so_arrangement="", so_rotation="",
+        so_pct_width="", line_items=[], line_item_tags="",
+    )
+    events = lm.update(m, [newer_with_parser_gaps], T1)
+    job = m["orders"]["200"]["job"]
+    assert job["co_number"] == 2 and job["so_pdf"].endswith("CO2.pdf")
+    assert job["so_design_desc"] == "SQAD Dual Direct Drive"
+    assert job["so_size"] == "33" and job["so_arrangement"] == "Arrangement 4"
+    assert job["line_items"] == [{"tags": ["UNITARY BASE"]}]
+    assert job["line_item_tags"] == "UNITARY BASE"
+    assert [(event["field"], event["old"], event["new"]) for event in events] == [
+        ("CO#", "1", "2"),
+    ]
+
+
 def test_realign_orders_resets_silently_and_next_update_logs_nothing():
     live = _job("100", co_number=1, so_pdf="Z:/SO/100/CO#1.pdf", so_size="56")
     m = {"orders": {}}

@@ -3371,7 +3371,8 @@ def classify_line(line: str, section: str, rules: Dict[str, Any]) -> Tuple[str, 
         skip           never an item (detail = the skip pattern that hit)
         item-priced    an item line — it ends in price columns, an L/C/N
                        price-type letter, or both (detail = what anchored it)
-        item-section   an unpriced line captured because a section is open
+        item-section   an unpriced line captured because a section is open,
+                       or a legacy Base Fan description outside a section
         text           everything else
     """
     s = line.strip()
@@ -3397,6 +3398,8 @@ def classify_line(line: str, section: str, rules: Dict[str, Any]) -> Tuple[str, 
             return "text", ""  # spec-table row that happens to end in L/C/N
         anchor = " ".join(x for x in (ptype, mark or price) if x)
         return "item-priced", anchor
+    if re.match(r"^Base\s+Fan\b", body, re.I):
+        return "item-section", "Base Fan"
     if section:
         return "item-section", section
     return "text", ""

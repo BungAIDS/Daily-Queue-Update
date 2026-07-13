@@ -2178,6 +2178,28 @@ def test_legacy_summary_handles_class_and_wrapped_wheel_type():
     assert classed["wheel_type"] == "AF"
     assert classed["design_temp"] == "120" and classed["max_temp"] == "120"
 
+    direct = _legacy_spec_from_text([
+        "Design Info",
+        "Design 36A SQAD Dual Direct Drive, SIZE 33, Arrangement 4, CW, UB, 78.7%",
+        "Base Fan with CW and CCW Wheel and Housing, Dual Shaft Motor and Common Unitary Base",
+        "Performance",
+        "CFM 48000, DESIGN TEMP 105, MAX TEMP 105",
+    ])
+    assert direct == {
+        "design_desc": "SQAD Dual Direct Drive", "size": "33",
+        "arrangement": "Arrangement 4", "motor_pos": "N/A", "fan_class": "N/A",
+        "rotation": "CW", "discharge": "UB", "pct_width": "78.7",
+        "wheel_type": "", "design_temp": "105", "max_temp": "105",
+    }
+
+
+def test_unpriced_legacy_base_fan_is_captured():
+    items = li.extract_items([
+        "Base Fan with CW and CCW Wheel and Housing, Dual Shaft Motor and Common Unitary Base",
+    ])
+    assert len(items) == 1
+    assert {"BASE FAN", "HOUSING", "UNITARY BASE", "WHEEL"} <= set(items[0]["tags"])
+
 
 def test_repair_missing_sales_order_summaries_is_fill_only(tmp: Path):
     from sales_orders import repair_missing_sales_order_summaries

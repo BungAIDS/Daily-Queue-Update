@@ -319,7 +319,7 @@ def test_orders_changed_one_instance_multiple_fields():
     assert after[0].fill == ls.FILL_CHANGE1     # after row shaded grey
 
 
-def test_orders_changed_marks_a_genuine_clear_explicitly():
+def test_orders_changed_does_not_add_a_cleared_label():
     from excel_writer import QUEUE_HEADERS
 
     events = [{"time": "2026-06-16T09:30:00", "job": "420800", "customer": "X",
@@ -329,7 +329,7 @@ def test_orders_changed_marks_a_genuine_clear_explicitly():
                  if row and str(row[0].value).startswith("Orders that changed today"))
     instance = sh.grid[start + 3]               # title, header, was, changed row
     note_col = QUEUE_HEADERS.index("Note") + 1  # leading Time column
-    assert instance[note_col].value == "(cleared)"
+    assert instance[note_col].value == ""
     assert instance[note_col].font == ls.F_RED
 
 
