@@ -992,12 +992,12 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2,
 
     # Similar-order suggester: for each enriched order, shortlist the backlog
     # orders that share its rare SO features AND already have custom drawings
-    # on file. Rides the stores already in hand (li_store + the DWG scan), one
-    # index for the whole batch; lands on the job dict -> master -> the live
-    # workbook's "DWG Reuse" column and the new-order notification.
+    # on file. One index for the whole batch; lands on the job dict -> master ->
+    # the live workbook's "DWG Reuse" column and the new-order notification.
     try:
         import find_orders
-        ridx = find_orders.build_index(li_store, dwg=autocad_scan.load_progress())
+        ridx = find_orders.build_index(line_items.load_store(),
+                                       dwg=autocad_scan.load_progress())
         n_sugg = 0
         for jn, j in by_job.items():
             sugg = find_orders.reuse_suggestions(ridx, j.get("line_items") or [],
