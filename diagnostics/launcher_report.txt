@@ -1,6 +1,6 @@
 # Launcher debug report
-generated: 2026-07-13T08:31:54
-code version: branch claude/gl-live-queue-logs-yieetr @ commit 518b4e7a24
+generated: 2026-07-13T10:08:45
+code version: branch main @ commit 1f8dee3d25
 os.name: nt   platform: win32
 python (launcher): C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe
 python (for scripts): C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe
@@ -8,17 +8,21 @@ python (for scripts): C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe
 ## Process scan (external-status detection)
 method used: powershell-cim
 error: none
-python process lines seen: 3
+python process lines seen: 5
 detected running outside launcher: none
 
 ### python process command lines (up to 40)
-  pid=66140 C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe "C:\CBC INSIDER GL QUEUE CHECKER\launcher.py"
-  pid=25976 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
-  pid=130320 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
+  pid=21704 C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe "C:\CBC INSIDER GL QUEUE CHECKER\launcher.py"
+  pid=144964 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
+  pid=71752 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" backfill_orders.py --list jobs_priority.txt
+  pid=4672 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
+  pid=15776 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" backfill_orders.py --list jobs_priority.txt
 
 ## Launcher-started processes
-  watch: pid=25976 alive=True started=2026-07-13 08:27:58
+  watch: pid=144964 alive=True started=2026-07-13 09:32:39
       cmd: "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
+  backfill_orders: pid=71752 alive=True started=2026-07-13 09:32:39
+      cmd: "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" backfill_orders.py --list jobs_priority.txt
 
 ## Last exit codes
   (none yet)
@@ -65,24 +69,6 @@ detected running outside launcher: none
   SEND is disabled � review the form and submit it yourself if it's correct.
 
 ## Tail of launcher_debug.log (last 120 lines)
-  2026-07-09 13:21:00 status scan: method=powershell-cim error=none python_lines=7 detected=['backfill_orders', 'watch']
-  2026-07-09 14:44:46 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
-  2026-07-09 14:47:43 status scan: method=powershell-cim error=none python_lines=7 detected=['backfill_orders', 'watch']
-  2026-07-09 14:48:15 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
-  2026-07-09 15:04:26 status scan: method=wmic error=none python_lines=3 detected=['watch']
-  2026-07-09 15:05:20 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
-  2026-07-09 15:26:27 status scan: method=powershell-cim error=none python_lines=1 detected=none
-  2026-07-09 15:26:28 relaunching launcher; closing this instance
-  2026-07-09 15:26:38 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@b092ae6f)
-  2026-07-09 15:26:49 status scan: method=powershell-cim error=none python_lines=1 detected=none
-  2026-07-09 15:26:49 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-09 16:48:15 relaunching launcher; closing this instance
-  2026-07-09 16:48:26 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/master-sync-currency-qj95j1@e70b42f0)
-  2026-07-09 16:48:37 status scan: method=powershell-cim error=none python_lines=1 detected=none
-  2026-07-09 16:48:37 pending restart: restarted=['Backfill Historical Orders'] skipped=[] failed=[]
-  2026-07-10 05:00:09 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
-  2026-07-10 06:27:49 status scan: method=wmic error=none python_lines=3 detected=['watch']
-  2026-07-10 06:43:08 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
   2026-07-10 06:43:18 status scan: method=wmic error=none python_lines=3 detected=['watch']
   2026-07-10 06:44:12 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
   2026-07-10 06:59:28 publishing debug report to branch debug/launcher
@@ -185,4 +171,22 @@ detected running outside launcher: none
   2026-07-13 08:27:48 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/gl-live-queue-logs-yieetr@518b4e7a)
   2026-07-13 08:27:58 status scan: method=powershell-cim error=none python_lines=1 detected=none
   2026-07-13 08:27:58 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-13 08:31:54 publishing debug report to branch debug/launcher
+  2026-07-13 08:31:56 publish ok: pushed cf2afece24 to origin/debug/launcher
+  2026-07-13 08:40:53 relaunching launcher; closing this instance
+  2026-07-13 08:41:02 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/gl-live-queue-logs-yieetr@66b63cb8)
+  2026-07-13 08:41:12 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-13 08:41:12 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-13 08:56:45 status scan: method=powershell-cim error=none python_lines=6 detected=['backfill_orders']
+  2026-07-13 08:57:49 status scan: method=powershell-cim error=none python_lines=3 detected=none
+  2026-07-13 08:58:05 status scan: method=powershell-cim error=none python_lines=6 detected=['backfill_orders']
+  2026-07-13 09:00:45 status scan: method=powershell-cim error=none python_lines=3 detected=none
+  2026-07-13 09:09:37 relaunching launcher; closing this instance
+  2026-07-13 09:09:47 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@a70a6a5d)
+  2026-07-13 09:09:57 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-13 09:09:57 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-13 09:32:20 relaunching launcher; closing this instance
+  2026-07-13 09:32:29 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@1f8dee3d)
+  2026-07-13 09:32:39 status scan: method=powershell-cim error=none python_lines=1 detected=none
+  2026-07-13 09:32:39 pending restart: restarted=['Run Live Watcher All Day', 'Backfill Historical Orders'] skipped=[] failed=[]
 
