@@ -50,6 +50,15 @@ from config import BACKLOG_DIR
 REVIEW_STORE_PATH = BACKLOG_DIR / "so_review_notes.json"
 DEFAULT_WORKBOOK = BACKLOG_DIR / "sales_order_review.xlsx"
 
+# Return channel for Claude's handled-marks. The note queue flows UP to Claude
+# with the other published stores (data_push), but that push is one-way, so
+# Claude records each note it resolves in this small TRACKED ledger at the repo
+# root. It rides down to the user's machine on the normal Git Update, and the
+# "Update SO Review" action applies it — marking those notes handled locally so
+# they drop off the sheet. Append-only {handled: [{id, resolution, handled_at}]}
+# so it can never merge-conflict.
+HANDLED_MARKS_PATH = Path(__file__).resolve().parent / "so_review_handled.json"
+
 STATUS_OPEN = "open"
 STATUS_HANDLED = "handled"
 
@@ -128,12 +137,54 @@ def open_notes(store: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [n for n in store["notes"] if n.get("status") != STATUS_HANDLED]
 
 
-def notes_by_item(store: Dict[str, Any]) -> Dict[tuple, Dict[str, Any]]:
-    """(order, item#) -> the most recent note for it, for pre-filling the sheet."""
+def open_notes_by_item(store: Dict[str, Any]) -> Dict[tuple, Dict[str, Any]]:
+    """(order, item#) -> the most recent OPEN note for it, for pre-filling the
+    sheet. Handled notes are intentionally excluded so a resolved note drops off
+    the sheet on the next build, leaving every still-open note in place."""
     out: Dict[tuple, Dict[str, Any]] = {}
     for n in store["notes"]:
-        out[(str(n.get("order")), str(n.get("item_no")))] = n
+        if n.get("status") != STATUS_HANDLED:
+            out[(str(n.get("order")), str(n.get("item_no")))] = n
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Handled-marks ledger (Claude -> user return channel)                         #
+# --------------------------------------------------------------------------- #
+def _load_ledger() -> Dict[str, Any]:
+    if not HANDLED_MARKS_PATH.exists():
+        return {"handled": []}
+    try:
+        data = json.loads(HANDLED_MARKS_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {"handled": []}
+    return data if isinstance(data.get("handled"), list) else {"handled": []}
+
+
+def record_handled_mark(note_id: int, resolution: str, when: Optional[str] = None) -> None:
+    """Append (or update) a handled-mark in the tracked ledger, so it travels to
+    the user's machine on the next Git Update."""
+    led = _load_ledger()
+    led["handled"] = [m for m in led["handled"] if int(m.get("id", -1)) != int(note_id)]
+    led["handled"].append({"id": int(note_id), "resolution": str(resolution or "").strip(),
+                           "handled_at": when or _now()})
+    HANDLED_MARKS_PATH.write_text(json.dumps(led, indent=2), encoding="utf-8")
+
+
+def apply_handled_marks(store: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Fold the ledger's handled-marks into a local queue: any note whose id is
+    marked (and isn't already handled) becomes handled with the recorded
+    resolution. Returns the notes newly closed this call (for reporting)."""
+    marks = {int(m["id"]): m for m in _load_ledger()["handled"] if "id" in m}
+    closed = []
+    for n in store["notes"]:
+        m = marks.get(int(n.get("id", -1)))
+        if m and n.get("status") != STATUS_HANDLED:
+            n["status"] = STATUS_HANDLED
+            n["resolution"] = m.get("resolution", "")
+            n["handled_at"] = m.get("handled_at") or _now()
+            closed.append(n)
+    return closed
 
 
 # --------------------------------------------------------------------------- #
@@ -149,7 +200,7 @@ def review_rows(line_items_store: Dict[str, Any],
     store, newest job first, with any recorded note/status/resolution attached
     to its line item. `group_start` marks the first row of each order (banded in
     the sheet). Pure — no Excel."""
-    by_item = notes_by_item(review_store)
+    by_item = open_notes_by_item(review_store)   # handled notes drop off the sheet
     jobs = (line_items_store.get("jobs") or {})
     rows: List[Dict[str, Any]] = []
     for jn in sorted(jobs, key=_job_sort_key, reverse=True):
@@ -286,20 +337,56 @@ def _cmd_build(args) -> int:
     pend = len(open_notes(store))
     print(f"Wrote {args.out} ({n} rows). {pend} open note(s) shown; "
           f"filter the Order column, type in the yellow Note cells, save, then "
-          f"`python so_review.py sync`.")
+          f"'Read SO Notes'.")
+    return 0
+
+
+def _cmd_open(args) -> int:
+    """Open the review workbook in Excel, building it first if it's missing."""
+    import os
+    path = Path(args.out)
+    if not path.exists():
+        write_workbook(path, _load_line_items(), load_store())
+        print(f"Built {path}.")
+    try:
+        os.startfile(str(path))          # Windows: opens in Excel  # type: ignore[attr-defined]
+    except AttributeError:               # non-Windows: best-effort
+        import subprocess
+        subprocess.Popen(["xdg-open", str(path)])
+    print(f"Opened {path}.")
     return 0
 
 
 def _cmd_sync(args) -> int:
     path = Path(args.out)
     if not path.exists():
-        print(f"{path} not found — run `python so_review.py build` first.", file=sys.stderr)
+        print(f"{path} not found — 'Open SO Review' builds it first.", file=sys.stderr)
         return 1
     store = load_store()
     added = ingest_edits(store, read_edits(path))
     save_store(store)
     print(f"Recorded {added} new note(s). {len(open_notes(store))} open in the queue "
           f"({REVIEW_STORE_PATH}).")
+    return 0
+
+
+def _cmd_refresh(args) -> int:
+    """The 'Update SO Review' action: capture anything typed, fold in Claude's
+    handled-marks (so resolved notes drop off), and rewrite the sheet — leaving
+    every still-open note in place."""
+    path = Path(args.out)
+    store = load_store()
+    added = 0
+    if path.exists():
+        added = ingest_edits(store, read_edits(path))   # don't lose un-synced typing
+    closed = apply_handled_marks(store)                 # Claude's resolutions
+    save_store(store)
+    n = write_workbook(path, _load_line_items(), store)
+    print(f"Updated {path} ({n} rows). Captured {added} new note(s); "
+          f"removed {len(closed)} handled note(s); {len(open_notes(store))} still open.")
+    for c in closed:
+        print(f"  handled #{c['id']} (order {c['order']} item {c['item_no']}): "
+              f"{c.get('resolution', '')}")
     return 0
 
 
@@ -320,13 +407,16 @@ def _cmd_list(args) -> int:
 
 
 def _cmd_handle(args) -> int:
+    # Always record the mark in the tracked ledger (the return channel to the
+    # user's machine); also update a local queue if one is present here.
+    resolution = " ".join(args.resolution)
+    record_handled_mark(args.id, resolution)
     store = load_store()
-    if mark_handled(store, args.id, " ".join(args.resolution)):
+    if mark_handled(store, args.id, resolution):
         save_store(store)
-        print(f"Marked #{args.id} handled.")
-        return 0
-    print(f"No note #{args.id}.", file=sys.stderr)
-    return 1
+    print(f"Marked #{args.id} handled (recorded in {HANDLED_MARKS_PATH.name}; it "
+          f"applies on the user's next 'Update SO Review').")
+    return 0
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -337,9 +427,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     b.add_argument("--out", default=str(DEFAULT_WORKBOOK))
     b.set_defaults(func=_cmd_build)
 
+    o = sub.add_parser("open", help="open the review workbook (building it if missing)")
+    o.add_argument("--out", default=str(DEFAULT_WORKBOOK))
+    o.set_defaults(func=_cmd_open)
+
     s = sub.add_parser("sync", help="read your notes back out of the workbook into the queue")
     s.add_argument("--out", default=str(DEFAULT_WORKBOOK))
     s.set_defaults(func=_cmd_sync)
+
+    r = sub.add_parser("refresh", help="capture notes + apply handled-marks + rewrite the sheet")
+    r.add_argument("--out", default=str(DEFAULT_WORKBOOK))
+    r.set_defaults(func=_cmd_refresh)
 
     ls_ = sub.add_parser("list", help="show open notes (--all for handled too)")
     ls_.add_argument("--all", action="store_true")

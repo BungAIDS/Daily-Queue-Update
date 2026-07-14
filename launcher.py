@@ -550,6 +550,38 @@ def base_actions() -> list[LauncherAction]:
             options=(option("date", "Date", "Date in YYYY-MM-DD. Blank means script default.", positional=True),),
         ),
         LauncherAction(
+            "so_review_open",
+            "Tools",
+            "Open SO Review",
+            "Opens the Sales-Order review workbook in Excel (builds it from the "
+            "line-items store first if it's missing). Filter the Order column to "
+            "an order, type notes in the yellow Note cells on the line-item rows, "
+            "and save. Then use 'Read SO Notes'.",
+            "so_review.py",
+            default_args=("open",),
+        ),
+        LauncherAction(
+            "so_review_read",
+            "Tools",
+            "Read SO Notes",
+            "Reads the notes you typed into the review workbook back into the note "
+            "queue (published with the other data so Claude can read them). Safe to "
+            "run any time; re-reading the same notes never duplicates them.",
+            "so_review.py",
+            default_args=("sync",),
+        ),
+        LauncherAction(
+            "so_review_update",
+            "Tools",
+            "Update SO Review",
+            "Refreshes the review workbook: captures anything you've typed, applies "
+            "Claude's handled-marks (a note Claude resolved drops off the sheet), and "
+            "leaves every still-open note in place. Run after a Git Update to see "
+            "what Claude handled.",
+            "so_review.py",
+            default_args=("refresh",),
+        ),
+        LauncherAction(
             "custom_script",
             "Tools",
             "Run Any Python Script",

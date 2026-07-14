@@ -103,6 +103,53 @@ def test_store_roundtrip(tmp: Path):
     assert sr.load_store(tmp / "nope.json") == {"notes": []}
 
 
+def test_handled_notes_drop_off_the_sheet_open_ones_stay():
+    li = _line_items_store()
+    store = {"notes": []}
+    sr.record_note(store, "421966", 1, "Base Fan", "handled one")       # id 1
+    sr.record_note(store, "421966", 2, "IVC", "still open")             # id 2
+    sr.mark_handled(store, 1, "did the thing")
+    rows = sr.review_rows(li, store)
+    # The open note shows on its line item; the handled note is gone.
+    src1 = [r for r in rows if str(r["item_no"]) == "1" and r["kind"] == sr.so_hierarchy.KIND_SOURCE]
+    src2 = [r for r in rows if str(r["item_no"]) == "2" and r["kind"] == sr.so_hierarchy.KIND_SOURCE]
+    # 421966 item 1 is "Base Fan" (a lone COMPONENT, item_no on the component row).
+    comp1 = [r for r in rows if str(r["item_no"]) == "1"]
+    assert comp1 and comp1[0]["note"] == ""            # handled -> removed from sheet
+    assert src2 and src2[0]["note"] == "still open"    # open -> stays
+
+
+def test_handled_marks_ledger_roundtrip(tmp: Path):
+    import so_review
+    ledger = tmp / "so_review_handled.json"
+    old = so_review.HANDLED_MARKS_PATH
+    so_review.HANDLED_MARKS_PATH = ledger
+    try:
+        # Claude records two resolutions in the tracked ledger.
+        so_review.record_handled_mark(2, "confirmed IVC grouping")
+        so_review.record_handled_mark(5, "fixed the flange rule")
+        # Re-recording the same id updates in place (no duplicate).
+        so_review.record_handled_mark(2, "confirmed IVC grouping (v2)")
+        led = so_review._load_ledger()["handled"]
+        assert {m["id"] for m in led} == {2, 5} and len(led) == 2
+
+        # The user's local queue has notes 2 and 5 open; applying the ledger
+        # closes exactly those, with Claude's resolutions.
+        store = {"notes": [
+            {"id": 2, "order": "421966", "item_no": "2", "note": "x", "status": "open"},
+            {"id": 5, "order": "421966", "item_no": "15", "note": "y", "status": "open"},
+            {"id": 9, "order": "421900", "item_no": "3", "note": "z", "status": "open"},
+        ]}
+        closed = so_review.apply_handled_marks(store)
+        assert {c["id"] for c in closed} == {2, 5}
+        assert sr.open_notes(store) == [store["notes"][2]]       # note 9 still open
+        assert store["notes"][0]["resolution"] == "confirmed IVC grouping (v2)"
+        # Idempotent: applying again closes nothing new.
+        assert so_review.apply_handled_marks(store) == []
+    finally:
+        so_review.HANDLED_MARKS_PATH = old
+
+
 def test_workbook_write_read_and_sync_roundtrip(tmp: Path):
     li = _line_items_store()
     store = {"notes": []}
