@@ -246,59 +246,64 @@ def ingest_edits(review_store: Dict[str, Any],
 # --------------------------------------------------------------------------- #
 def write_workbook(path: Path, line_items_store: Dict[str, Any],
                    review_store: Dict[str, Any]) -> int:
-    """Write the standalone review workbook. Returns the row count."""
+    """Write the standalone review workbook. Returns the row count.
+
+    Values are bulk-appended and the only visual cues are applied as a handful
+    of workbook-level rules (header style + one conditional-format fill on the
+    Note column). Styling cell-by-cell across the ~16K rows was the whole cost
+    of this build (~30s, so the launcher button looked hung); the rules make it
+    ~1s."""
     from openpyxl import Workbook
-    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.formatting.rule import FormulaRule
+    from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
 
     header_fill = PatternFill("solid", fgColor="305496")
     header_font = Font(color="FFFFFF", bold=True)
-    band_fill = PatternFill("solid", fgColor="D9D9D9")
     note_fill = PatternFill("solid", fgColor="FFF2CC")      # invites typing
-    handled_fill = PatternFill("solid", fgColor="C6EFCE")   # green = handled
-    open_fill = PatternFill("solid", fgColor="FFEB9C")      # gold = open
 
     rows = review_rows(line_items_store, review_store)
     wb = Workbook()
     ws = wb.active
     ws.title = "Line Items"
+
+    # One bulk append of every row — the fast path. No per-cell styling.
     ws.append(HEADERS)
-    for c in range(1, len(HEADERS) + 1):
+    for r in rows:
+        ws.append([r["order"], r["item_no"], r["kind"], r["hierarchy"], r["price"],
+                   r["note"], r["status"], r["resolution"]])
+
+    for c in range(1, len(HEADERS) + 1):                    # header row only
         cell = ws.cell(row=1, column=c)
         cell.fill = header_fill
         cell.font = header_font
 
-    for r in rows:
-        ws.append([r["order"], r["item_no"], r["kind"], r["hierarchy"], r["price"],
-                   r["note"], r["status"], r["resolution"]])
-        i = ws.max_row
-        if r["group_start"]:
-            for c in range(1, len(HEADERS) + 1):
-                ws.cell(row=i, column=c).fill = band_fill
-        # Light-highlight the Note cell on annotatable (line-item) rows so it's
-        # clear where to type; leave derived rows (facts/details) plain.
-        if r["annotatable"]:
-            ws.cell(row=i, column=_COL["Note"] + 1).fill = note_fill
-        st = ws.cell(row=i, column=_COL["Status"] + 1)
-        if r["status"] == STATUS_HANDLED:
-            st.fill = handled_fill
-        elif r["status"] == STATUS_OPEN:
-            st.fill = open_fill
+    last = ws.max_row
+    note_col = get_column_letter(_COL["Note"] + 1)
+    if last >= 2:
+        # Tint the whole Note column via a SINGLE conditional-format rule (O(1)
+        # to write) instead of filling thousands of cells one at a time. Type on
+        # the rows that show an Item # — the others (component/attribute rows)
+        # aren't line items and are ignored on read.
+        ws.conditional_formatting.add(
+            f"{note_col}2:{note_col}{last}",
+            FormulaRule(formula=["TRUE"], fill=note_fill, stopIfTrue=False))
 
     ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:{get_column_letter(len(HEADERS))}{ws.max_row}"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(HEADERS))}{last}"
     widths = {"Order": 10, "Item": 6, "Kind": 11, "Hierarchy": 60, "Price": 12,
               "Note": 45, "Status": 10, "Resolution": 45}
     for h, w in widths.items():
         ws.column_dimensions[get_column_letter(_COL[h] + 1)].width = w
-    ws.column_dimensions[get_column_letter(_COL["Hierarchy"] + 1)].width = 60
-    for col in ("Hierarchy", "Note", "Resolution"):
-        for i in range(2, ws.max_row + 1):
-            ws.cell(row=i, column=_COL[col] + 1).alignment = Alignment(wrap_text=False)
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(str(path))
+    try:
+        wb.save(str(path))
+    except PermissionError:
+        raise RuntimeError(
+            f"Could not write {path.name} — it looks like it's still open in "
+            f"Excel. Close it, then run this again.") from None
     return len(rows)
 
 
@@ -419,6 +424,16 @@ def _cmd_handle(args) -> int:
     return 0
 
 
+def _run(func, args) -> int:
+    """Run a subcommand, turning an expected error (e.g. the workbook is open in
+    Excel) into a clear one-line message rather than a traceback in the log."""
+    try:
+        return func(args)
+    except RuntimeError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -449,7 +464,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     h.set_defaults(func=_cmd_handle)
 
     args = ap.parse_args(argv)
-    return args.func(args)
+    return _run(args.func, args)
 
 
 if __name__ == "__main__":
