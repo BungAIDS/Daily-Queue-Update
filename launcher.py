@@ -554,9 +554,9 @@ def base_actions() -> list[LauncherAction]:
             "Sales Order Review",
             "Open SO Review",
             "Opens the Sales-Order review workbook in Excel (builds it from the "
-            "line-items store first if it's missing). Filter the Order column to "
-            "an order, type notes in the yellow Note cells on the line-item rows, "
-            "and save. Then use 'Read SO Notes'.",
+            "line-items store first if it's missing). Pick an order, type in the "
+            "yellow Add Note cells, then save and close Excel. Use 'Read SO Notes' "
+            "before selecting another order.",
             "so_review.py",
             default_args=("open",),
         ),
@@ -564,9 +564,9 @@ def base_actions() -> list[LauncherAction]:
             "so_review_read",
             "Sales Order Review",
             "Read SO Notes",
-            "Reads the notes you typed into the review workbook back into the note "
-            "queue (published with the other data so Claude can read them). Safe to "
-            "run any time; re-reading the same notes never duplicates them.",
+            "Imports yellow Add Note entries from Sales Order into the Notes queue "
+            "and tab, then clears those input cells. Close Excel first. Re-reading "
+            "the same notes never duplicates them.",
             "so_review.py",
             default_args=("sync",),
         ),
