@@ -92,14 +92,35 @@ def _attrs(item: Dict[str, Any]) -> Dict[str, Any]:
     return a if isinstance(a, dict) else {}
 
 
+# Fan locations that ARE a component in their own right when a standalone line
+# describes one (e.g. "Outlet, Flanged, Punched"). Used only as a fallback, when
+# the extractor didn't already tie the line to a component/used_on — so two
+# lines describing the SAME location become ONE component (never two), and any
+# single-valued attribute they disagree on — e.g. flange_type PUNCHED vs
+# UNPUNCHED — is surfaced as a conflict rather than sitting silently in two
+# look-alike components.
+_LOCATION_COMPONENTS = ("OUTLET", "INLET")
+
+
+def _derived_component(a: Dict[str, Any]) -> str:
+    """A canonical component name inferred from a standalone line's own scope,
+    for parts the extractor named only in prose. Kept deliberately narrow (a
+    clear single-location flange scope) so it can only ever MERGE genuine
+    duplicates, never fuse unrelated lines."""
+    scope = str(a.get("flange_scope") or "").strip().upper()
+    return scope if scope in _LOCATION_COMPONENTS else ""
+
+
 def group_key(item: Dict[str, Any]) -> str:
     """The thing this line is evidence of: its `used_on` attribute (an explicit
     'this line belongs to that component' link), else its `component` attribute
-    (this line IS that component), else '' — the line stands alone. Loose tag
-    overlap is deliberately NOT a merge signal."""
+    (this line IS that component), else a component derived from its own scope
+    (so two lines for the same location merge), else '' — the line stands alone.
+    Loose tag overlap is deliberately NOT a merge signal."""
     a = _attrs(item)
     return (str(a.get("used_on") or "").strip().upper()
-            or str(a.get("component") or "").strip().upper())
+            or str(a.get("component") or "").strip().upper()
+            or _derived_component(a))
 
 
 def components(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

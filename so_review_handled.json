@@ -1,1 +1,14 @@
-{"handled": []}
+{
+  "handled": [
+    {
+      "id": 9,
+      "resolution": "Item 10 now groups as the [OUTLET] component (derived from its outlet flange scope), no longer a text-named line.",
+      "handled_at": "2026-07-14T20:34:06"
+    },
+    {
+      "id": 12,
+      "resolution": "The two Outlet lines (10 punched, 15 unpunched) now merge into ONE [OUTLET] component; the flange_type disagreement is flagged as CONFLICTING flange_type. General rule now in place: same-component lines in an order merge into one, and conflicting single-valued attributes are flagged.",
+      "handled_at": "2026-07-14T20:34:06"
+    }
+  ]
+}

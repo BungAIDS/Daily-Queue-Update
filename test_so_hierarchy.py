@@ -121,6 +121,27 @@ def test_component_attr_groups_without_used_on():
     assert "component" not in comps[0]["attributes"]
 
 
+def test_same_location_lines_merge_to_one_component_and_flag_conflict():
+    # 421967: two "Outlet, Flanged, ..." lines describe the ONE outlet, but the
+    # extractor named it only in prose (flange_scope=OUTLET, no component). They
+    # must fold into a single [OUTLET] component, and their disagreement on a
+    # single-valued attribute (flange_type) is surfaced — not left as two
+    # look-alike components, one of them wrong.
+    punched = _item("Outlet, Flanged, Punched L STD", "STD",
+                    attrs={"flange_scope": "OUTLET", "flange_type": "PUNCHED"})
+    unpunched = _item("Outlet, Flanged, Unpunched L 250.00", "250.00",
+                      attrs={"flange_scope": "OUTLET", "flange_type": "UNPUNCHED"})
+    comps = soh.components([punched, unpunched])
+    assert len(comps) == 1 and comps[0]["name"] == "OUTLET" and comps[0]["keyed"]
+    assert set(comps[0]["attributes"]["flange_type"].split(" | ")) == {"PUNCHED", "UNPUNCHED"}
+    assert any("CONFLICTING flange_type" in r["text"] for r in comps[0]["review"])
+    # A line already tied to another component keeps that tie — an inlet flange
+    # that is part of the IVC stays under IVC, it does not become its own INLET.
+    ivc_flange = _item("Inlet, Flanged, Punched (with IVC) L 1,559.00", "1,559.00",
+                       used_on="IVC", attrs={"flange_scope": "INLET"})
+    assert soh.group_key(ivc_flange) == "IVC"
+
+
 def test_no_merge_on_loose_tag_overlap():
     # Two flange lines share the FLANGE tag but nothing ties them to one
     # thing -> two components (an inlet flange and an outlet flange).
