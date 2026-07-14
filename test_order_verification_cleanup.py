@@ -203,6 +203,91 @@ def test_run_with_zero_lock_timeout_raises_instead_of_waiting(tmp: Path):
                 raise AssertionError("expected TimeoutError while the lock is held")
 
 
+def test_cleanup_preserves_verified_sales_order_reusing_historical_report_path(tmp: Path):
+    active = tmp / "SALES ORDERS FOR DAILY QUEUE"
+    backlog = tmp / "backlog"
+    snapshots = tmp / "snapshots"
+    corrected_pdf = active / "421496" / "421496 - Sales Order (original).pdf"
+    _sales_order(corrected_pdf, "421496")
+
+    quarantine = tmp / "SALES ORDERS FOR DAILY QUEUE QUARANTINE"
+    receipt = quarantine / "old-report.validation.json"
+    receipt.parent.mkdir(parents=True)
+    receipt.write_text(json.dumps({
+        "document_kind": "ORDER_VERIFICATION",
+        "original_path": str(corrected_pdf),
+        "expected_order": "421496",
+    }), encoding="utf-8")
+
+    progress_path = backlog / "backfill_progress.json"
+    main_items_path = backlog / "line_items.json"
+    overlay_path = backlog / "backfill_line_items.json"
+    master_path = snapshots / "live_master.json"
+    audit_path = backlog / "order_verification_cleanup.json"
+    backlog.mkdir(parents=True)
+    snapshots.mkdir(parents=True)
+
+    verified = {
+        "job": "421496",
+        "status": "ok",
+        "so_pdf": str(corrected_pdf),
+        "so_document_kind": "SALES_ORDER",
+        "so_source_type": "CBC_SalesOrder",
+        "so_validation": "MATCH",
+        "so_internal_order": "421496",
+        "so_validation_method": "order-job-table",
+        "so_verified_at": "2026-07-13T16:43:20",
+        "so_size": "4900",
+        "line_items": [{"raw": "verified good item"}],
+    }
+    progress_path.write_text(
+        json.dumps({"421496": dict(verified)}), encoding="utf-8"
+    )
+    for path in (main_items_path, overlay_path):
+        line_items.save_store({
+            "jobs": {
+                "421496": {
+                    "so_pdf": str(corrected_pdf),
+                    "items": [{"raw": "verified good item"}],
+                },
+            },
+            "ai_tags": {},
+        }, path)
+    master_path.write_text(json.dumps({
+        "orders": {
+            "421496": {"on_queue": False, "job": dict(verified)},
+        },
+    }), encoding="utf-8")
+
+    with (
+        patch.object(cleanup, "SALES_ORDER_DIR", active),
+        patch.object(cleanup, "SNAPSHOT_DIR", snapshots),
+        patch.object(cleanup, "PROGRESS_PATH", progress_path),
+        patch.object(cleanup, "CLEANUP_AUDIT_PATH", audit_path),
+        patch.object(cleanup, "SCAN_CACHE_PATH", backlog / "scan_cache.json"),
+        patch.object(live_master, "MASTER_PATH", master_path),
+        patch("line_items.store_path", return_value=main_items_path),
+        patch("line_items.backfill_store_path", return_value=overlay_path),
+    ):
+        counts = cleanup.run(max_workers=1)
+
+    assert counts == {
+        "reports_quarantined": 0,
+        "progress_invalidated": 0,
+        "line_items_removed": 0,
+        "master_invalidated": 0,
+        "states_invalidated": 0,
+        "snapshots_invalidated": 0,
+    }
+    assert corrected_pdf.exists()
+    assert json.loads(progress_path.read_text(encoding="utf-8"))["421496"] == verified
+    for path in (main_items_path, overlay_path):
+        assert set(line_items.load_store(path)["jobs"]) == {"421496"}
+    master = json.loads(master_path.read_text(encoding="utf-8"))
+    assert master["orders"]["421496"]["job"] == verified
+    assert not audit_path.exists()
+
+
 def main() -> int:
     passed = 0
     for name, fn in sorted(globals().items()):

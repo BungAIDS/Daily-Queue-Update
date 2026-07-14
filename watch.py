@@ -71,21 +71,20 @@ OH_BUILD_VERSION = 5   # rebuild once so the fixed ✓/red matrix conditional fo
 
 
 def setup_logging() -> None:
-    """Log to the console AND to a daily-rotated file under LOG_DIR (keeping ~a
-    week), so the output survives the window closing and there's a record to chase
-    a bug through after the fact."""
+    """Log to the console and daily-rotated files retained indefinitely."""
     fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
     try:
         fileh = TimedRotatingFileHandler(
-            LOG_DIR / "watch.log", when="midnight", backupCount=7, encoding="utf-8")
+            LOG_DIR / "watch.log", when="midnight", backupCount=0, encoding="utf-8")
         handlers.append(fileh)
     except OSError as e:  # a bad/locked log dir must never stop the watcher
         print(f"(could not open log file in {LOG_DIR}: {e}; console only)", file=sys.stderr)
     for h in handlers:
         h.setFormatter(fmt)
     logging.basicConfig(level=logging.INFO, handlers=handlers)
-    log.info("Logging to console and %s (rotated daily, ~7 days kept).", LOG_DIR / "watch.log")
+    log.info("Logging to console and %s (rotated daily, kept indefinitely).",
+             LOG_DIR / "watch.log")
 
 
 def _publish_logs() -> None:
