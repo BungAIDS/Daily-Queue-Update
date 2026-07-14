@@ -1321,7 +1321,11 @@ def _upsert_needs_excel(payload: Dict[str, Any]) -> bool:
     return False
 
 
-def _history_needs_excel(payload: Dict[str, Any]) -> bool:
+def _history_needs_excel(payload: Dict[str, Any] | None) -> bool:
+    # None: the watcher gated the ~9s rebuild out (Order History inputs were
+    # unchanged this poll), so there is nothing to render.
+    if payload is None:
+        return False
     return bool(
         payload.get("rebuild")
         or payload.get("ops")
@@ -1366,7 +1370,10 @@ def _update_master_workbook_impl(workbook_path: str | Path, lq_payload: Dict[str
     # for 30-80 seconds. Return before COM when every rendered model is current.
     if not (lq_needed or oh_needed or repaint_work):
         log.info("Live workbook unchanged this cycle — Excel was not touched.")
-        return {lq_payload["name"], oh_payload["name"]}
+        done = {lq_payload["name"]}
+        if oh_payload is not None:
+            done.add(oh_payload["name"])
+        return done
 
     total_started = time.monotonic()
     try:
@@ -1442,7 +1449,7 @@ def _update_master_workbook_impl(workbook_path: str | Path, lq_payload: Dict[str
                 log.warning("Order History update failed (%s)", e)
             finally:
                 _stage_elapsed(oh_payload["name"], started)
-        else:
+        elif oh_payload is not None:
             ok.add(oh_payload["name"])
 
         # Full-repaint tabs (Changes + any extras, e.g. Similar Data/Orders):

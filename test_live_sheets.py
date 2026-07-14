@@ -588,6 +588,71 @@ def test_order_history_build_matrices_flags_and_separator():
     assert spec["sep_col"] == de + 1 and fs == spec["sep_col"] + 1 and fe >= fs
 
 
+def _oh_order(jn, **kw):
+    """(job#, entry) shaped like _oh_orders output, for fingerprint tests."""
+    entry = {"on_queue": kw.pop("on_queue", True),
+             "added": kw.pop("added", "2026-06-16T09:00:00"),
+             "left": kw.pop("left", None)}
+    entry["job"] = _job(jn, **kw)
+    return (jn, entry)
+
+
+def test_order_history_fingerprint_ignores_board_fields():
+    # The whole point of gating: a churny board tick (price / dates / assignee /
+    # status) must NOT move the fingerprint, so it never forces the ~9s rebuild.
+    base = [_oh_order("421000", dwg_extras={"51": "x"}, line_items=[{"tags": ["SHAFT SEAL"]}])]
+    fp0 = ls.order_history_fingerprint(base)
+    ticked = [_oh_order("421000", dwg_extras={"51": "x"}, line_items=[{"tags": ["SHAFT SEAL"]}],
+                        total_price="$999,999.00", assigned_to="SOMEONE",
+                        end_date="01/01/2030", status_note="RUSH")]
+    assert ls.order_history_fingerprint(ticked) == fp0
+
+
+def test_order_history_fingerprint_moves_with_oh_content():
+    base = [_oh_order("421000", dwg_extras={"51": "x"}, line_items=[{"tags": ["SHAFT SEAL"]}])]
+    fp0 = ls.order_history_fingerprint(base)
+
+    def fp(order):
+        return ls.order_history_fingerprint([order])
+
+    # Every OH-relevant change moves the fingerprint...
+    assert fp(_oh_order("421000", dwg_extras={"51": "x"}, line_items=[{"tags": ["SHAFT SEAL"]}],
+                        so_size="ZZZ")) != fp0                                    # SO spec
+    assert fp(_oh_order("421000", dwg_extras={"51": "x"}, line_items=[{"tags": ["SHAFT SEAL"]}],
+                        co_number=3)) != fp0                                      # CO#
+    assert fp(_oh_order("421000", on_queue=False, dwg_extras={"51": "x"},
+                        line_items=[{"tags": ["SHAFT SEAL"]}])) != fp0            # flag flip
+    assert fp(_oh_order("421000", dwg_extras={"51": "x", "95": "x"},
+                        line_items=[{"tags": ["SHAFT SEAL"]}])) != fp0            # new DWG suffix
+    assert fp(_oh_order("421000", dwg_extras={"51": "x"},
+                        line_items=[{"tags": ["SHAFT SEAL", "COATING"]}])) != fp0  # new feature tag
+    # ...and a whole new order changes it (order set grew).
+    assert ls.order_history_fingerprint(base + [_oh_order("421001")]) != fp0
+
+
+def test_order_history_fingerprint_tracks_build_signatures_exactly():
+    # Anti-drift guard tying the cheap fingerprint to the real build: for any
+    # mutation, the fingerprint changes IFF the built row signatures change. If
+    # someone adds an OH column the fingerprint forgets, this fails.
+    base = [_oh_order("421000", dwg_extras={"51": "x"}, line_items=[{"tags": ["SHAFT SEAL"]}]),
+            _oh_order("420900", on_queue=False, left="2026-06-16T07:30:00")]
+
+    def sigs(orders):
+        return [ls.row_sig(c) for _, c in ls.order_history_build(orders, TODAY)["records"]]
+
+    fp0, s0 = ls.order_history_fingerprint(base), sigs(base)
+    mutations = [
+        [_oh_order("421000", dwg_extras={"51": "x"}, line_items=[{"tags": ["SHAFT SEAL"]}],
+                   total_price="$5.00"), base[1]],                       # board-only -> no move
+        [_oh_order("421000", dwg_extras={"51": "x"}, line_items=[{"tags": ["SHAFT SEAL"]}],
+                   so_arrangement="A/9"), base[1]],                      # OH field -> moves
+        [_oh_order("421000", dwg_extras={"51": "x"}, line_items=[{"tags": ["SHAFT SEAL"]}],
+                   customer="NEW CUST"), base[1]],                       # OH field -> moves
+    ]
+    for m in mutations:
+        assert (ls.order_history_fingerprint(m) != fp0) == (sigs(m) != s0)
+
+
 def test_order_history_columns_stable_append_only():
     a = ("100", {"on_queue": True, "added": "t", "left": None,
                  "job": _job("100", dwg_extras={"51": "x"}, line_items=[{"tags": ["SHAFT SEAL"]}])})

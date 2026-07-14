@@ -57,6 +57,26 @@ def test_noop_poll_never_opens_excel():
     assert rendered == {"Live Queue", "Order History"}
 
 
+def test_gated_order_history_is_none_and_never_opens_excel():
+    # The watcher passes oh_payload=None when the Order History inputs were
+    # unchanged (it skipped the ~9s rebuild). The Excel layer must treat that as
+    # "nothing to render" — not crash on oh_payload["name"] — and, with Live
+    # Queue also idle, never open Excel.
+    _clear_render_state()
+    assert not live_excel._history_needs_excel(None)
+    lq = {
+        "name": "Live Queue", "headers": ["Job #"], "ops": [],
+        "key_col": 1, "allow_delete": True, "positions": {}, "search": False,
+    }
+    live_excel._HEADER_DONE.add("Live Queue")
+    live_excel._POS_LAST["Live Queue"] = {}     # positions unchanged -> Live Queue idle
+    with mock.patch.object(
+        live_excel, "_get_excel", side_effect=AssertionError("Excel must not open")
+    ):
+        rendered = live_excel._update_master_workbook_impl("unused.xlsx", lq, None)
+    assert rendered == {"Live Queue"}     # OH absent, no crash on None
+
+
 def test_upsert_preflight_detects_real_work_only():
     _clear_render_state()
     payload = {

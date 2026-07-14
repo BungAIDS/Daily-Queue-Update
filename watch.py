@@ -336,6 +336,14 @@ def _new_today_ids(lq_jobs: list, today: date) -> set:
 # repainting Similar Data after every order made Excel busy almost all day.
 _SIM_CACHE: dict = {"key": None, "rows": [], "queue_ids": (), "refreshed_at": 0.0}
 
+# Order History is the poll's most expensive step (~9s to rebuild ~13K rows +
+# hash them) but its inputs are STABLE — it only moves a handful of times a day.
+# We keep the fingerprint of the inputs that were last SUCCESSFULLY rendered this
+# process, and skip the whole rebuild while it's unchanged. Reset on start so the
+# first poll always builds (verifying the on-disk tab). Committed only after the
+# Excel write lands, so a failed write re-plans next poll.
+_OH_RENDER_FP: dict = {"fp": None}
+
 
 def _sim_sort_key(job: str) -> tuple:
     return (0, int(job), job) if job.isdigit() else (1, 0, job)
@@ -465,21 +473,30 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
                                                     co_changed_ids=co_changed, ref=now)
 
     # Order History: live master + the whole line-items backlog, as a matrix log.
-    # Built ONCE then only appended to; we rebuild only on a build-format bump
-    # (one-time migration) or when the matrix columns actually grow.
-    spec = live_sheets.order_history_build(_oh_orders(master, line_items.load_store()), today,
-                                           prev_columns=master.get("oh_columns"))
-    rebuild = (master.get("oh_build_version") != OH_BUILD_VERSION
-               or master.get("oh_columns") != spec["columns"])
-    if rebuild:
-        master["oh_sigs"] = {}
-        master["oh_columns"] = spec["columns"]
-        master["oh_headers"] = spec["headers"]
-        master["oh_build_version"] = OH_BUILD_VERSION
-    oh_sigs = master.setdefault("oh_sigs", {})
-    oh_ops, oh_commit = _plan(spec["records"], oh_sigs, allow_delete=False)
-    oh_payload = {"name": "Order History", "spec": spec, "ops": oh_ops, "rebuild": rebuild,
-                  "key_col": live_sheets.ORDER_HISTORY_KEY_COL, "freeze": "B2"}  # pin Job # only
+    # Built ONCE then only appended to. The ~13K-row build+hash is the poll's
+    # single most expensive step (~9s), so skip it entirely when a cheap EXACT
+    # fingerprint of its inputs (order set + stable spec + flags + matrices) is
+    # unchanged from the last successful render this process — a churny board
+    # tick (price/date/assignee) never moves that fingerprint. A build-format
+    # bump forces a full rebuild regardless.
+    oh_orders = _oh_orders(master, line_items.load_store())
+    oh_fp = live_sheets.order_history_fingerprint(oh_orders)
+    force_build = master.get("oh_build_version") != OH_BUILD_VERSION
+    oh_payload = None
+    oh_commit = None
+    if force_build or _OH_RENDER_FP.get("fp") != oh_fp:
+        spec = live_sheets.order_history_build(oh_orders, today,
+                                               prev_columns=master.get("oh_columns"))
+        rebuild = (force_build or master.get("oh_columns") != spec["columns"])
+        if rebuild:
+            master["oh_sigs"] = {}
+            master["oh_columns"] = spec["columns"]
+            master["oh_headers"] = spec["headers"]
+            master["oh_build_version"] = OH_BUILD_VERSION
+        oh_sigs = master.setdefault("oh_sigs", {})
+        oh_ops, oh_commit = _plan(spec["records"], oh_sigs, allow_delete=False)
+        oh_payload = {"name": "Order History", "spec": spec, "ops": oh_ops, "rebuild": rebuild,
+                      "key_col": live_sheets.ORDER_HISTORY_KEY_COL, "freeze": "B2"}  # pin Job # only
 
     # Similar Orders: the picker tab + the grouped data tab it filters over
     # (sim_rows computed above, before the Live Queue rows were planned).
@@ -506,8 +523,13 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
     # ops are re-planned and re-drawn next poll instead of being lost.
     if lq_payload["name"] in rendered:
         lq_commit()
-    if oh_payload["name"] in rendered:
+    # Order History is skipped entirely (oh_payload None) when its inputs were
+    # unchanged; only when it was built AND rendered do we commit its sigs and
+    # remember the fingerprint, so a failed write re-plans (and re-fingerprints)
+    # next poll rather than being lost.
+    if oh_payload is not None and oh_payload["name"] in rendered:
         oh_commit()
+        _OH_RENDER_FP["fp"] = oh_fp
 
 
 def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce: bool) -> dict:

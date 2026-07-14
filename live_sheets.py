@@ -1204,6 +1204,46 @@ def _suffix_key(s: str):
     return (int(s), s) if str(s).isdigit() else (10 ** 9, s)
 
 
+# Fields the Order History rows pull straight from the job dict (cell value =
+# j.get(key)). Derived from OH_DATA_COLUMNS so a new PLAIN column is folded into
+# the fingerprint automatically; the computed columns (job/folder/co/drive_run/
+# engineers) are handled explicitly in order_history_fingerprint. Keep the two in
+# step — test_order_history_fingerprint_* guards them against drift.
+_OH_FINGERPRINT_COMPUTED = ("job", "folder", "co", "drive_run", "engineers")
+_OH_PLAIN_KEYS = [k for _, k in OH_DATA_COLUMNS if k not in _OH_FINGERPRINT_COMPUTED]
+
+
+def order_history_fingerprint(orders: List) -> str:
+    """A cheap, EXACT digest of everything the Order History tab is built from —
+    the order set and each order's stable spec, its On Queue/Added/Left flags,
+    and the two ✓/red matrices (custom DWGs, feature tags). Lets the poll loop
+    skip the ~9s order_history_build when nothing that shows on the tab changed.
+
+    By construction it excludes the churny board fields (price, dates, assignee,
+    status, notes) — they are not in OH_DATA_COLUMNS — so a normal intraday tick
+    never forces a rebuild. It DOES move when an order is added/departs/returns,
+    a CO# or SO-spec value lands, an engineer is (re)assigned, or a new DWG
+    suffix / feature tag appears (which is also what grows the matrix columns).
+    `orders` is the (job#, entry) list order_history_build consumes."""
+    h = hashlib.md5()
+    for jn, e in orders:
+        j = e.get("job") or {}
+        h.update(str(jn).encode())
+        h.update(("\x00%s|%s|%s|%s|%s|%s|%s|%s|%s|%s" % (
+            e.get("on_queue"), e.get("added"), e.get("left"),
+            j.get("co_number"), j.get("job_folder") or "", j.get("job_type") or "",
+            j.get("has_drive_run"), j.get("drive_run_pdf") or "",
+            j.get("drive_run_count"), engineers.cell_text(j))).encode())
+        for k in _OH_PLAIN_KEYS:
+            h.update(b"|")
+            h.update(str(j.get(k) or "").encode())
+        h.update(("|" + ",".join(sorted(j.get("dwg_extras") or {}))).encode())
+        tags = sorted({t for it in (j.get("line_items") or [])
+                       for t in (it.get("tags") or [])})
+        h.update(("|" + ",".join(tags) + "\n").encode())
+    return h.hexdigest()
+
+
 def order_history_build(orders: List, today: date,
                         prev_columns: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Build the Order History tab: one row per order with the stable data
