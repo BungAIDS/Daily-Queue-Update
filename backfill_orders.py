@@ -1485,8 +1485,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         import order_verification_cleanup
 
-        cleanup_counts = order_verification_cleanup.run()
+        # startup_check (not run): skips once a clean pass is recorded, and
+        # lock_timeout=0 steps aside instead of blocking for minutes if another
+        # process is already sweeping.
+        cleanup_counts = order_verification_cleanup.startup_check(lock_timeout=0)
         cleanup_changed = order_verification_cleanup.changed(cleanup_counts)
+    except TimeoutError:
+        log.info("Another process is running the Order Verification cleanup — "
+                 "skipping it here.")
     except Exception as exc:  # noqa: BLE001 - log loudly, but do not strand the scanner
         log.exception("Order Verification cleanup failed: %s", exc)
 

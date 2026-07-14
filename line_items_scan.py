@@ -219,19 +219,29 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--limit", type=int, default=0, help="Stop after N new jobs this run.")
     args = ap.parse_args(sys.argv[1:] if argv is None else argv)
 
-    try:
-        import order_verification_cleanup
-
-        order_verification_cleanup.run()
-    except Exception:  # noqa: BLE001 - keep the scanner usable, but make the failure visible
-        log.exception("Order Verification cleanup failed before line-item scan")
-
     if args.dump:
+        # A dump only PRINTS one PDF's reconstructed lines — it never writes the
+        # store, so it doesn't need the verification-report invariant enforced.
+        # Skip the cleanup entirely so the dump prints immediately (it used to
+        # block for minutes behind a full-bank sweep).
         targets = _resolve(args.jobs) if args.jobs else _iter_archive(SALES_ORDER_DIR)[:3]
         if not targets:
             return 1
         dump(targets)
         return 0
+
+    try:
+        import order_verification_cleanup
+
+        # startup_check (not run): skips once a clean pass has been recorded on
+        # this machine, and lock_timeout=0 steps aside if another process is
+        # already sweeping instead of blocking this scan for minutes.
+        order_verification_cleanup.startup_check(lock_timeout=0)
+    except TimeoutError:
+        log.info("Another process is running the Order Verification cleanup — "
+                 "skipping it here.")
+    except Exception:  # noqa: BLE001 - keep the scanner usable, but make the failure visible
+        log.exception("Order Verification cleanup failed before line-item scan")
 
     if args.renorm:
         with data_file_lock(li.store_path(), label="line-items renormalization"):
