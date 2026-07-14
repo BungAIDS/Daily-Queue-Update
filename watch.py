@@ -716,9 +716,15 @@ def run_watch(ignore_window: bool = False) -> int:
     try:
         import order_verification_cleanup
 
-        cleanup_counts = order_verification_cleanup.run()
+        # lock_timeout=0: if another process (backfill / line-items scan / an
+        # earlier watcher) is mid-sweep, skip instead of blocking startup — one
+        # runner is enough, and the stores it fixes are shared anyway.
+        cleanup_counts = order_verification_cleanup.run(lock_timeout=0)
         if order_verification_cleanup.changed(cleanup_counts):
             _publish_data()
+    except TimeoutError:
+        log.info("Another process is running the Order Verification cleanup — "
+                 "skipping it here; the watch starts now.")
     except Exception:  # noqa: BLE001 - cleanup failure must remain visible without ending watch
         log.exception("Order Verification cleanup failed at watcher startup")
     if not LIVE_WORKBOOK_PATH:
@@ -858,9 +864,12 @@ def main() -> int:
         try:
             import order_verification_cleanup
 
-            cleanup_counts = order_verification_cleanup.run()
+            cleanup_counts = order_verification_cleanup.run(lock_timeout=0)
             if order_verification_cleanup.changed(cleanup_counts):
                 _publish_data()
+        except TimeoutError:
+            log.info("Another process is running the Order Verification cleanup — "
+                     "skipping it here; the watch starts now.")
         except Exception:  # noqa: BLE001
             log.exception("Order Verification cleanup failed at watcher startup")
         today = date.today()

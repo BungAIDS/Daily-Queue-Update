@@ -33,6 +33,12 @@ log = logging.getLogger(__name__)
 
 PROGRESS_PATH = BACKLOG_DIR / "backfill_progress.json"
 CLEANUP_AUDIT_PATH = BACKLOG_DIR / "order_verification_cleanup.json"
+# Per-machine scan cache: {path key: [mtime_ns, size]} for every bank PDF that
+# validated CLEAN on the last pass. Unchanged entries skip the (expensive,
+# pdfplumber-over-Z:) re-validation, so only the FIRST pass sweeps the whole
+# bank; later passes touch just new/changed files. Deliberately not published
+# by data_push — it's local file-state, meaningless on another machine.
+SCAN_CACHE_PATH = BACKLOG_DIR / "order_verification_scan_cache.json"
 _JOB_FOLDER_RE = re.compile(r"^[0-9]{4,7}[A-Za-z]?$")
 
 
@@ -151,38 +157,77 @@ def _quarantined_report_evidence(root: Path) -> tuple[set[str], set[str]]:
     return found, jobs
 
 
+def _pdf_signature(path: Path) -> "list | None":
+    """A cheap change signature for a bank PDF ([mtime_ns, size]); None when it
+    can't be stat'ed (treated as changed, so it gets re-validated)."""
+    try:
+        st = path.stat()
+        return [st.st_mtime_ns, st.st_size]
+    except OSError:
+        return None
+
+
 def quarantine_active_reports(
     root: Path | None = None,
     max_workers: int = 8,
     known_report_paths: set[str] | None = None,
 ) -> Dict[str, Dict[str, str]]:
-    """Move every readable Order Verification Report out of the active bank."""
+    """Move every readable Order Verification Report out of the active bank.
+
+    Validation is a pdfplumber parse per file — expensive over the Z: drive —
+    so it only touches NEW or CHANGED PDFs: a file whose mtime+size still match
+    the scan cache validated clean on an earlier pass and is skipped. Only the
+    first pass (or a wiped cache) sweeps the whole bank."""
     root = Path(root or SALES_ORDER_DIR)
     rows = _active_pdf_rows(root)
     if not rows:
         return {}
+    cache = _read_json(SCAN_CACHE_PATH)
+    cache = cache if isinstance(cache, dict) else {}
+    known = known_report_paths or set()
 
-    def classify(row: tuple[Path, str]):
-        path, job = row
+    survivors: Dict[str, list] = {}          # clean PDFs -> the next pass's cache
+    pending: list = []                       # (path, job, signature) to validate
+    for path, job in rows:
+        key = _path_key(path)
+        sig = _pdf_signature(path)
+        named = "orderverificationreportviewer" in path.name.casefold()
+        if sig is not None and not named and key not in known and cache.get(key) == sig:
+            survivors[key] = sig             # validated clean before, unchanged since
+            continue
+        pending.append((path, job, sig))
+    if len(pending) > 25:
+        log.info(
+            "Order Verification sweep: validating %d Sales Order PDF(s)%s",
+            len(pending),
+            " — first pass over the whole bank; this can take a while."
+            if not cache else ".",
+        )
+
+    def classify(row):
+        path, job, _sig = row
         return row, validate_sales_order_pdf(path, job)
 
-    workers = max(1, min(max_workers, len(rows)))
     reports = []
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        for (path, job), validation in pool.map(classify, rows):
-            known = _path_key(path) in (known_report_paths or set())
-            named = "orderverificationreportviewer" in path.name.casefold()
-            if (
-                validation.document_kind == DOCUMENT_KIND_ORDER_VERIFICATION
-                or known
-                or named
-            ):
-                if validation.document_kind != DOCUMENT_KIND_ORDER_VERIFICATION:
-                    validation = replace(
-                        validation,
-                        document_kind=DOCUMENT_KIND_ORDER_VERIFICATION,
-                    )
-                reports.append((path, job, validation))
+    if pending:
+        workers = max(1, min(max_workers, len(pending)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for (path, job, sig), validation in pool.map(classify, pending):
+                is_known = _path_key(path) in known
+                named = "orderverificationreportviewer" in path.name.casefold()
+                if (
+                    validation.document_kind == DOCUMENT_KIND_ORDER_VERIFICATION
+                    or is_known
+                    or named
+                ):
+                    if validation.document_kind != DOCUMENT_KIND_ORDER_VERIFICATION:
+                        validation = replace(
+                            validation,
+                            document_kind=DOCUMENT_KIND_ORDER_VERIFICATION,
+                        )
+                    reports.append((path, job, validation))
+                elif sig is not None:
+                    survivors[_path_key(path)] = sig   # validated clean this pass
 
     moved: Dict[str, Dict[str, str]] = {}
     for path, job, validation in reports:
@@ -202,6 +247,13 @@ def quarantine_active_reports(
             "original_path": original,
             "quarantine_path": str(target),
         }
+    # Survivors only: quarantined/vanished files fall out, a failed quarantine
+    # stays uncached so the next pass retries it. Best-effort — a cache that
+    # can't be written just means the next pass validates more.
+    try:
+        _save_json_unlocked(SCAN_CACHE_PATH, survivors)
+    except OSError as exc:
+        log.debug("Order Verification scan cache not saved (%s)", exc)
     return moved
 
 
@@ -312,9 +364,15 @@ def _unique_paths(paths: Iterable[Path]) -> list[Path]:
     return result
 
 
-def run(max_workers: int = 8) -> Dict[str, int]:
-    """Enforce the no-verification-report invariant across files and stores."""
-    with data_file_lock(CLEANUP_AUDIT_PATH, label="Order Verification cleanup"):
+def run(max_workers: int = 8, lock_timeout: float = 900.0) -> Dict[str, int]:
+    """Enforce the no-verification-report invariant across files and stores.
+
+    One process at a time (the cleanup lock). `lock_timeout` is how long to
+    wait for another process's run to finish; pass 0 to raise TimeoutError
+    immediately instead — callers that merely piggyback the cleanup onto their
+    startup (the watcher) skip it when someone else is already sweeping."""
+    with data_file_lock(CLEANUP_AUDIT_PATH, label="Order Verification cleanup",
+                        timeout=lock_timeout):
         source_paths = _source_json_paths()
         report_paths: set[str] = set()
         report_jobs: set[str] = set()

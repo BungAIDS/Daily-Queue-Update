@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -101,6 +102,7 @@ def test_cleanup_quarantines_reports_and_removes_every_derived_record(tmp: Path)
         patch.object(cleanup, "SNAPSHOT_DIR", snapshots),
         patch.object(cleanup, "PROGRESS_PATH", progress_path),
         patch.object(cleanup, "CLEANUP_AUDIT_PATH", audit_path),
+        patch.object(cleanup, "SCAN_CACHE_PATH", backlog / "scan_cache.json"),
         patch.object(live_master, "MASTER_PATH", master_path),
         patch("line_items.store_path", return_value=main_items_path),
         patch("line_items.backfill_store_path", return_value=overlay_path),
@@ -150,10 +152,66 @@ def test_cleanup_quarantines_reports_and_removes_every_derived_record(tmp: Path)
     assert audit_path.exists()
 
 
+def test_scan_cache_skips_unchanged_clean_pdfs(tmp: Path):
+    # The sweep re-parses a PDF only when it is new or changed: a clean file
+    # whose mtime+size match the cache from the last pass is skipped, so only
+    # the first pass sweeps the whole bank (the pass that used to hold the
+    # cleanup lock for the length of a full Z:-drive re-validation).
+    active = tmp / "SALES ORDERS FOR DAILY QUEUE"
+    cache_path = tmp / "backlog" / "scan_cache.json"
+    true_pdf = active / "422018" / "422018 - Sales Order (original).pdf"
+    _sales_order(true_pdf, "422018")
+
+    calls = []
+    real = cleanup.validate_sales_order_pdf
+
+    def counting(path, job):
+        calls.append(str(path))
+        return real(path, job)
+
+    with (
+        patch.object(cleanup, "SALES_ORDER_DIR", active),
+        patch.object(cleanup, "SCAN_CACHE_PATH", cache_path),
+        patch.object(cleanup, "validate_sales_order_pdf", counting),
+    ):
+        assert cleanup.quarantine_active_reports(max_workers=1) == {}
+        assert len(calls) == 1                     # first pass validates it
+        assert cleanup.quarantine_active_reports(max_workers=1) == {}
+        assert len(calls) == 1                     # unchanged -> cache hit, no re-parse
+        os.utime(true_pdf, ns=(1, 1))              # changed -> re-validated
+        assert cleanup.quarantine_active_reports(max_workers=1) == {}
+        assert len(calls) == 2
+    cache = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert len(cache) == 1                         # the clean survivor is cached
+
+
+def test_run_with_zero_lock_timeout_raises_instead_of_waiting(tmp: Path):
+    # The watcher passes lock_timeout=0: when another process is mid-cleanup it
+    # must get TimeoutError immediately (and skip), never sit on the lock.
+    from process_lock import exclusive_file_lock
+
+    audit_path = tmp / "backlog" / "order_verification_cleanup.json"
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = audit_path.parent / ".process_locks" / (audit_path.name + ".lock")
+    with patch.object(cleanup, "CLEANUP_AUDIT_PATH", audit_path):
+        with exclusive_file_lock(lock_path, label="test holder"):
+            try:
+                cleanup.run(max_workers=1, lock_timeout=0)
+            except TimeoutError:
+                pass
+            else:
+                raise AssertionError("expected TimeoutError while the lock is held")
+
+
 def main() -> int:
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
-        test_cleanup_quarantines_reports_and_removes_every_derived_record(Path(directory))
-    print("\n1 test passed.")
+    passed = 0
+    for name, fn in sorted(globals().items()):
+        if name.startswith("test_") and callable(fn):
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+                fn(Path(directory))
+            print(f"  ok  {name}")
+            passed += 1
+    print(f"\n{passed} tests passed.")
     return 0
 
 

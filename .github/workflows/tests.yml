@@ -30,6 +30,7 @@ jobs:
       - run: python test_find_orders.py
       - run: python test_backfill_serial.py
       - run: python test_sales_order_validation.py
+      - run: python test_order_verification_cleanup.py
       - run: python test_live_state.py
       - run: python test_live_sheets.py
       - run: python test_live_master.py
