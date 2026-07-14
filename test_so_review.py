@@ -80,6 +80,30 @@ def test_review_rows_attach_notes_to_line_items_only():
     assert rows[0]["group_start"] and not rows[1]["group_start"]
 
 
+def test_multiple_notes_on_one_item_remain_visible_and_readable(tmp: Path):
+    li = _line_items_store()
+    store = {"notes": []}
+    sr.record_note(store, "421966", 2, "IVC", "first note for item 2")
+    sr.record_note(store, "421966", 2, "IVC", "second note for item 2")
+
+    rows = [
+        row for row in sr.review_rows(li, store)
+        if str(row["item_no"]) == "2" and row["note"]
+    ]
+    assert rows
+    assert all("first note for item 2" in row["note"] for row in rows)
+    assert all("second note for item 2" in row["note"] for row in rows)
+
+    wb = tmp / "review.xlsx"
+    sr.write_workbook(wb, li, store)
+    edits = sr.read_edits(wb)
+    notes = {
+        edit["note"] for edit in edits
+        if edit["order"] == "421966" and edit["item_no"] == "2"
+    }
+    assert notes == {"first note for item 2", "second note for item 2"}
+
+
 def test_ingest_edits_records_only_line_item_notes():
     store = {"notes": []}
     edits = [

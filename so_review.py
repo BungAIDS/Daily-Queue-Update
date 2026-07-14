@@ -62,6 +62,7 @@ HANDLED_MARKS_PATH = Path(__file__).resolve().parent / "so_review_handled.json"
 
 STATUS_OPEN = "open"
 STATUS_HANDLED = "handled"
+NOTE_SEPARATOR = "\n\n---\n\n"
 
 # Workbook columns (also the read-back contract). Order + Item + Note are the
 # ones sync reads; the rest are context the human reads.
@@ -149,14 +150,13 @@ def open_notes(store: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [n for n in store["notes"] if n.get("status") != STATUS_HANDLED]
 
 
-def open_notes_by_item(store: Dict[str, Any]) -> Dict[tuple, Dict[str, Any]]:
-    """(order, item#) -> the most recent OPEN note for it, for pre-filling the
-    sheet. Handled notes are intentionally excluded so a resolved note drops off
-    the sheet on the next build, leaving every still-open note in place."""
-    out: Dict[tuple, Dict[str, Any]] = {}
+def open_notes_by_item(store: Dict[str, Any]) -> Dict[tuple, List[Dict[str, Any]]]:
+    """(order, item#) -> every OPEN note for it, in queue order."""
+    out: Dict[tuple, List[Dict[str, Any]]] = {}
     for n in store["notes"]:
         if n.get("status") != STATUS_HANDLED:
-            out[(str(n.get("order")), str(n.get("item_no")))] = n
+            key = (str(n.get("order")), str(n.get("item_no")))
+            out.setdefault(key, []).append(n)
     return out
 
 
@@ -220,16 +220,20 @@ def review_rows(line_items_store: Dict[str, Any],
         first = True
         for tr in so_hierarchy.tree_rows(items):
             item_no = tr.get("item_no")
-            rec = by_item.get((str(jn), str(item_no))) if item_no != "" else None
+            recs = by_item.get((str(jn), str(item_no)), []) if item_no != "" else []
             rows.append({
                 "order": str(jn),
                 "item_no": item_no if item_no != "" else "",
                 "kind": tr["kind"],
                 "hierarchy": so_hierarchy.indent_text(tr),
                 "price": tr.get("price", ""),
-                "note": (rec or {}).get("note", "") or "",
-                "status": (rec or {}).get("status", "") or "",
-                "resolution": (rec or {}).get("resolution", "") or "",
+                "note": NOTE_SEPARATOR.join(
+                    str(rec.get("note", "")).strip()
+                    for rec in recs
+                    if str(rec.get("note", "")).strip()
+                ),
+                "status": STATUS_OPEN if recs else "",
+                "resolution": "",
                 "annotatable": item_no != "",   # only line-item rows take a note
                 "group_start": first,
             })
@@ -486,6 +490,11 @@ def _excel_text(value: Any) -> str:
     return str(value).strip()
 
 
+def _note_parts(value: Any) -> List[str]:
+    """Split a cell containing several rendered notes back into queue entries."""
+    return [part.strip() for part in _excel_text(value).split(NOTE_SEPARATOR) if part.strip()]
+
+
 def read_edits(path: Path) -> List[Dict[str, Any]]:
     """Read canonical Notes plus temporary Sales Order Add Note inputs."""
     from openpyxl import load_workbook
@@ -507,17 +516,17 @@ def read_edits(path: Path) -> List[Dict[str, Any]]:
 
         edits: List[Dict[str, Any]] = []
         for row in notes.iter_rows(min_row=2, values_only=True):
-            note = notes_value(row, "Note")
             order = notes_value(row, "Order")
             item_no = notes_value(row, "Item")
-            if order and item_no and note:
-                edits.append({
-                    "order": order,
-                    "item_no": item_no,
-                    "item_text": notes_value(row, "Hierarchy"),
-                    "note": note,
-                    "source": "notes",
-                })
+            if order and item_no:
+                for note in _note_parts(notes_value(row, "Note")):
+                    edits.append({
+                        "order": order,
+                        "item_no": item_no,
+                        "item_text": notes_value(row, "Hierarchy"),
+                        "note": note,
+                        "source": "notes",
+                    })
 
         if BROWSE_SHEET not in wb.sheetnames:
             return edits
