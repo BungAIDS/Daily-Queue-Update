@@ -14,6 +14,7 @@ movement keeps getting its own grey row.
 """
 from __future__ import annotations
 
+import logging
 import sys
 import tempfile
 from datetime import date, datetime
@@ -31,6 +32,17 @@ import live_state  # noqa: E402
 import watch  # noqa: E402
 
 TODAY = date(2026, 6, 25)
+
+
+def test_watch_logs_are_retained_indefinitely():
+    file_handler = mock.create_autospec(logging.Handler, instance=True)
+    with mock.patch.object(
+        watch, "TimedRotatingFileHandler", return_value=file_handler
+    ) as handler_type, mock.patch.object(watch.logging, "basicConfig"):
+        watch.setup_logging()
+
+    assert handler_type.call_args.kwargs["when"] == "midnight"
+    assert handler_type.call_args.kwargs["backupCount"] == 0
 
 
 def _master_with_enriched_order(so_pdf: str = "") -> dict:
