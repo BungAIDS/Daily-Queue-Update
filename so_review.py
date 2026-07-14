@@ -271,7 +271,7 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
     hung); this stays ~1-2s.
 
     Tabs (like the live GL Queue Sales Order view):
-      - 'Sales Order' — a picker: choose an order and its hierarchy spills below
+      - 'Sales Order' — a picker: choose an order and its hierarchy appears below
         (read-only), easy to read one order at a time.
       - 'Notes' — the flat grid you type notes into; sync reads it back."""
     from openpyxl import Workbook
@@ -291,6 +291,12 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
 
     rows = review_rows(line_items_store, review_store)
     orders = _unique_orders(rows)
+    order_windows: Dict[str, List[int]] = {}
+    for sheet_row, row in enumerate(rows, start=2):
+        order = row["order"]
+        if order not in order_windows:
+            order_windows[order] = [sheet_row, 0]
+        order_windows[order][1] += 1
     ncols = len(HEADERS)
     wb = Workbook()
 
@@ -328,13 +334,14 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
                  "Note": 45, "Status": 10, "Resolution": 45}.items():
         notes.column_dimensions[get_column_letter(_COL[h] + 1)].width = w
 
-    # --- Orders tab (hidden): the picker's dropdown list ---------------------
+    # --- Orders tab (hidden): dropdown plus source row windows ---------------
     osheet = wb.create_sheet(ORDERS_SHEET)
     for o in orders:
-        osheet.append([o])
+        start_row, row_count = order_windows[o]
+        osheet.append([o, start_row, row_count])
     osheet.sheet_state = "hidden"
 
-    # --- Sales Order tab (first): pick an order -> its hierarchy spills -------
+    # --- Sales Order tab (first): pick an order -> its hierarchy appears ------
     browse = wb.create_sheet(BROWSE_SHEET, 0)
     browse["A1"] = "Order:"
     browse["A1"].font = Font(bold=True)
@@ -353,13 +360,39 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
         browse.cell(3, i).value = h
         browse.cell(3, i).fill = header_fill
         browse.cell(3, i).font = header_font
-    # Spill the picked order's rows (Notes B:F = Item..Note); blank while the
-    # picker is empty, a friendly message when the order isn't found.
-    d = NOTES_SHEET
-    browse["A4"] = (f'=IF($B$1&""="","",IFERROR(FILTER({d}!$B$2:$F${last},'
-                    f'({d}!$A$2:$A${last}&"")=($B$1&""),'
-                    f'"no line items for that order # yet"),""))')
-    bmax = 4 + 4000                                         # CF window for the spill
+    # Keep the source lookup in hidden helper cells, then use ordinary INDEX
+    # formulas for the picked order.  openpyxl cannot emit Excel's required
+    # dynamic-array metadata for FILTER; writing FILTER as a normal formula
+    # makes Excel repair the workbook and remove Sales Order!A4 on open.
+    if orders:
+        order_last = len(orders)
+        browse["G1"] = (
+            f'=IFERROR(INDEX(\'{ORDERS_SHEET}\'!$B$1:$B${order_last},'
+            f'MATCH($B$1&"",\'{ORDERS_SHEET}\'!$A$1:$A${order_last},0)),0)'
+        )
+        browse["H1"] = (
+            f'=IFERROR(INDEX(\'{ORDERS_SHEET}\'!$C$1:$C${order_last},'
+            f'MATCH($B$1&"",\'{ORDERS_SHEET}\'!$A$1:$A${order_last},0)),0)'
+        )
+    else:
+        browse["G1"], browse["H1"] = 0, 0
+    browse.column_dimensions["G"].hidden = True
+    browse.column_dimensions["H"].hidden = True
+
+    max_order_rows = max((window[1] for window in order_windows.values()), default=1)
+    for output_row in range(4, 4 + max_order_rows):
+        position = f"ROWS($A$4:A{output_row})"
+        for output_col, source_col in enumerate(range(2, 7), start=1):
+            source_letter = get_column_letter(source_col)
+            lookup = (
+                f"INDEX('{NOTES_SHEET}'!${source_letter}:${source_letter},"
+                f"$G$1+{position}-1)"
+            )
+            browse.cell(output_row, output_col).value = (
+                f'=IF(OR($B$1="",$H$1<{position}),"",'
+                f'IF({lookup}="","",{lookup}))'
+            )
+    bmax = 3 + max_order_rows
     bkindL = get_column_letter(2)                           # Kind is the 2nd browse col (B)
     browse.conditional_formatting.add(f"A4:E{bmax}", FormulaRule(formula=[f'${bkindL}4="COMPONENT"'], fill=comp_fill, font=comp_font))
     browse.conditional_formatting.add(f"A4:E{bmax}", FormulaRule(formula=[f'${bkindL}4="REVIEW"'], font=review_font))

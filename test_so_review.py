@@ -200,12 +200,24 @@ def test_workbook_has_browse_and_notes_tabs(tmp: Path):
     assert book[sr.ORDERS_SHEET].sheet_state == "hidden"
     assert book.active.title == sr.BROWSE_SHEET
     browse = book[sr.BROWSE_SHEET]
-    # Picker dropdown on B1 and a FILTER spill that reads the Notes tab.
+    # Picker dropdown on B1 and compatible INDEX formulas that read Notes.
+    # A normal FILTER formula makes Excel repair and discard Sales Order!A4
+    # because openpyxl cannot write the required dynamic-array metadata.
     assert len(browse.data_validations.dataValidation) == 1
     f = browse["A4"].value
-    assert f.startswith("=IF($B$1") and f"FILTER({sr.NOTES_SHEET}!" in f
-    # The hidden Orders list holds each order once (dropdown source).
+    assert f.startswith('=IF(OR($B$1=""')
+    assert f"INDEX('{sr.NOTES_SHEET}'!$B:$B" in f
+    assert "FILTER(" not in f and not browse.array_formulae
+    assert str(browse["G1"].value).startswith("=IFERROR(INDEX('Orders'!")
+    assert str(browse["H1"].value).startswith("=IFERROR(INDEX('Orders'!")
+    assert '$B$1&""' in browse["G1"].value
+    assert '$B$1&""' in browse["H1"].value
+    assert browse.column_dimensions["G"].hidden
+    assert browse.column_dimensions["H"].hidden
+    # The hidden Orders list holds each order once plus its Notes row window.
     assert book[sr.ORDERS_SHEET].cell(1, 1).value == "421966"
+    assert book[sr.ORDERS_SHEET].cell(1, 2).value == 2
+    assert book[sr.ORDERS_SHEET].cell(1, 3).value > 1
     # Colour cues are conditional-format rules (fast), not per-cell styling.
     assert book[sr.NOTES_SHEET].conditional_formatting._cf_rules
 
