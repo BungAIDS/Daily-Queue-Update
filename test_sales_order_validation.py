@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 from sales_order_validation import (
     DOCUMENT_KIND_ORDER_VERIFICATION,
     DOCUMENT_KIND_SALES_ORDER,
+    LEGACY_UNVERIFIABLE_STATUS,
     SalesOrderAcceptance,
     SalesOrderValidation,
     accept_existing,
@@ -70,6 +71,34 @@ def test_extracts_standard_and_order_verification_layouts():
     assert extract_internal_order(verification) == ("421899", "order-verification-table")
 
 
+def test_legacy_header_does_not_mistake_customer_number_for_job():
+    legacy = (
+        "Chicago Blower Corporation Sales Order\n"
+        "Order# RepRef.# CustomerP.O.# FanSerialNumber:\n"
+        "CB224-11 68386-308592\n"
+        "Customer# ShipmentWanted: Salesperson: Page1of3\n"
+        "240048 5/17/2024 Bagwell Associates"
+    )
+    assert extract_internal_order(legacy) == ("", "none")
+
+
+def test_legacy_numeric_order_number_is_not_treated_as_wrong_job(tmp_path: Path):
+    pdf = tmp_path / "409201 - Sales Order.pdf"
+    _mini_pdf([
+        "Chicago Blower Corporation Sales Order",
+        "Order# RepRef.# CustomerP.O.# FanSerialNumber:",
+        "224367 4523836030",
+        "Customer# ShipmentWanted: Salesperson: Page1of3",
+        "R007693 5/19/2023 Mike Sink",
+    ], pdf)
+
+    validation = validate_sales_order_pdf(pdf, "409201")
+    assert validation.status == LEGACY_UNVERIFIABLE_STATUS
+    assert validation.internal_order == "224367"
+    assert validation.method == "header"
+    assert validation.document_kind == DOCUMENT_KIND_SALES_ORDER
+
+
 def test_modal_text_requires_the_requested_job():
     assert modal_text_matches_job("WORK CENTER DETAIL (417467-0) Documents", "417467")
     assert modal_text_matches_job("417467 - Sales Order.pdf", "417467")
@@ -83,6 +112,62 @@ def test_validate_pdf_matches_internal_order(tmp_path: Path):
     validation = validate_sales_order_pdf(pdf, "421314")
     assert validation.matched
     assert validation.internal_order == "421314"
+
+
+def test_reviewed_legacy_pdf_gets_hash_receipt_and_remains_accepted(tmp_path: Path):
+    destination = tmp_path / "bank" / "412648" / "412648 - Sales Order.pdf"
+    candidate = tmp_path / "pending" / destination.name
+    _mini_pdf([
+        "Chicago Blower Corporation Sales Order",
+        "Order# RepRef.# CustomerP.O.# FanSerialNumber:",
+        "CB224-11 68386-308592",
+        "Customer# ShipmentWanted: Salesperson: Page1of3",
+        "240048 5/17/2024 Bagwell Associates",
+    ], candidate)
+
+    strict = validate_sales_order_pdf(candidate, "412648")
+    assert strict.status == LEGACY_UNVERIFIABLE_STATUS
+    assert strict.internal_order == ""
+    assert strict.document_kind == DOCUMENT_KIND_SALES_ORDER
+
+    accepted = finalize_candidate(
+        candidate,
+        destination,
+        "412648",
+        allow_legacy_without_job=True,
+    )
+    assert accepted.path == str(destination)
+    assert accepted.validation.matched
+    assert accepted.validation.method == "legacy-link-and-recent-hash"
+    assert destination.with_suffix(
+        destination.suffix + ".legacy-trust.json"
+    ).exists()
+
+    existing = accept_existing(destination, "412648")
+    assert existing is not None and existing.path == str(destination)
+    assert existing.validation.method == "legacy-trusted-hash-receipt"
+
+
+def test_changed_legacy_pdf_cannot_reuse_old_hash_receipt(tmp_path: Path):
+    destination = tmp_path / "bank" / "412648" / "412648 - Sales Order.pdf"
+    candidate = tmp_path / "pending" / destination.name
+    lines = [
+        "Chicago Blower Corporation Sales Order",
+        "Order# RepRef.# CustomerP.O.# FanSerialNumber:",
+        "CB224-11 68386-308592",
+        "Customer# ShipmentWanted: Salesperson: Page1of3",
+        "240048 5/17/2024 Bagwell Associates",
+    ]
+    _mini_pdf(lines, candidate)
+    assert finalize_candidate(
+        candidate, destination, "412648", allow_legacy_without_job=True
+    ).path
+
+    _mini_pdf([*lines, "unexpected replacement"], destination)
+    existing = accept_existing(destination, "412648")
+    assert existing is not None and existing.path is None
+    assert existing.validation.status == LEGACY_UNVERIFIABLE_STATUS
+    assert not destination.exists()
 
 
 def test_distinguishes_sales_order_from_verification_report():
@@ -233,7 +318,10 @@ def test_async_backfill_rejection_cannot_save_co_or_so_data():
         SalesOrderValidation("400083", "421851", "MISMATCH", "header"),
         r"Z:\DAG\SALES ORDERS FOR DAILY QUEUE QUARANTINE\rejected.pdf",
     )
-    docs = [("/download", {"type": backfill_orders.SO_TYPE, "rev": 2})]
+    docs = [(
+        "/download?fn=400083 - Sales Order.pdf",
+        {"type": backfill_orders.SO_TYPE, "rev": 2},
+    )]
 
     async def run():
         with (

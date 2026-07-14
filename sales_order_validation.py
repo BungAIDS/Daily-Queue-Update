@@ -1,6 +1,7 @@
 """Validate a Sales Order PDF before it can enter the active archive or stores."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import uuid
@@ -10,8 +11,9 @@ from pathlib import Path
 
 
 ORDER_HEADER_RE = re.compile(
-    r"\bOrder\s*#\s*(?:Rep\s*Ref\.?\s*#|RepRef\.?\s*#).*?(?:\r?\n)+\s*([0-9]{5,7}[A-Z]?)\b",
-    re.IGNORECASE | re.DOTALL,
+    r"\bOrder\s*#\s*(?:Rep\s*Ref\.?\s*#|RepRef\.?\s*#)[^\r\n]*(?:\r?\n)+[ \t]*"
+    r"([0-9]{5,7}[A-Z]?)\b",
+    re.IGNORECASE,
 )
 ORDER_JOB_TABLE_RE = re.compile(
     r"\bOrder\s*#\s+Job\s*#[^\r\n]*(?:\r?\n)+\s*([0-9]{5,7}[A-Z]?)\b",
@@ -34,6 +36,8 @@ SALES_ORDER_TITLE_RE = re.compile(
 DOCUMENT_KIND_SALES_ORDER = "SALES_ORDER"
 DOCUMENT_KIND_ORDER_VERIFICATION = "ORDER_VERIFICATION"
 DOCUMENT_KIND_UNKNOWN = "UNKNOWN"
+LEGACY_UNVERIFIABLE_STATUS = "UNVERIFIABLE"
+_LEGACY_TRUST_SUFFIX = ".legacy-trust.json"
 
 # Everything populated from the contents or provenance of a Sales Order PDF.
 # ``so_imi`` is intentionally absent: it comes from the AutoCAD job folder, not
@@ -77,6 +81,67 @@ class SalesOrderAcceptance:
 
 def normalize_order(value: str) -> str:
     return re.sub(r"[^0-9A-Z]", "", str(value or "").upper())
+
+
+def sales_order_sha256(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _legacy_trust_path(path: str | Path) -> Path:
+    path = Path(path)
+    return path.with_suffix(path.suffix + _LEGACY_TRUST_SUFFIX)
+
+
+def _trusted_legacy_validation(
+    path: Path,
+    expected_order: str,
+    validation: "SalesOrderValidation",
+) -> "SalesOrderValidation | None":
+    if (
+        validation.status != LEGACY_UNVERIFIABLE_STATUS
+        or validation.document_kind != DOCUMENT_KIND_SALES_ORDER
+    ):
+        return None
+    try:
+        receipt = json.loads(_legacy_trust_path(path).read_text(encoding="utf-8"))
+        if normalize_order(receipt.get("expected_order")) != normalize_order(expected_order):
+            return None
+        if str(receipt.get("sha256") or "").lower() != sales_order_sha256(path):
+            return None
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+    return SalesOrderValidation(
+        normalize_order(expected_order),
+        "",
+        "MATCH",
+        "legacy-trusted-hash-receipt",
+        document_kind=DOCUMENT_KIND_SALES_ORDER,
+    )
+
+
+def _write_legacy_trust(path: Path, expected_order: str) -> None:
+    receipt = {
+        "expected_order": normalize_order(expected_order),
+        "sha256": sales_order_sha256(path),
+        "document_kind": DOCUMENT_KIND_SALES_ORDER,
+        "method": "legacy-link-and-recent-hash",
+        "trusted_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    destination = _legacy_trust_path(path)
+    tmp = destination.with_suffix(destination.suffix + ".tmp")
+    tmp.write_text(json.dumps(receipt, indent=2), encoding="utf-8")
+    tmp.replace(destination)
+
+
+def _remove_legacy_trust(path: Path) -> None:
+    try:
+        _legacy_trust_path(path).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def clear_sales_order_data(record: dict, invalidated_at: str = "") -> bool:
@@ -190,11 +255,25 @@ def validate_sales_order_pdf(
             DOCUMENT_KIND_UNKNOWN,
         )
     if not internal:
+        status = (
+            LEGACY_UNVERIFIABLE_STATUS
+            if document_kind == DOCUMENT_KIND_SALES_ORDER
+            else "UNREADABLE"
+        )
         return SalesOrderValidation(
-            expected, "", "UNREADABLE", method, document_kind=document_kind
+            expected, "", status, method, document_kind=document_kind
         )
     if internal != expected:
-        status = "MISMATCH"
+        # On legacy Sales Orders the bare "Order#" changed meaning over time:
+        # some releases printed the CBC job, while others printed a separate
+        # Sales Order number. Only an explicit Order#/Job# table can prove that
+        # a different number belongs to another job.
+        status = (
+            LEGACY_UNVERIFIABLE_STATUS
+            if document_kind == DOCUMENT_KIND_SALES_ORDER
+            and method in {"header", "inline", "sales-order-label"}
+            else "MISMATCH"
+        )
     elif required_document_kind and document_kind != required_document_kind:
         status = "WRONG_DOCUMENT"
     else:
@@ -259,7 +338,13 @@ def quarantine_candidate(
     )
     target.parent.mkdir(parents=True, exist_ok=True)
     original_path = str(candidate)
+    trust_receipt = _legacy_trust_path(candidate)
     candidate.replace(target)
+    if trust_receipt.exists():
+        try:
+            trust_receipt.replace(_legacy_trust_path(target))
+        except OSError:
+            pass
     metadata = {
         **asdict(validation),
         "original_path": original_path,
@@ -309,6 +394,7 @@ def finalize_candidate(
     destination: str | Path,
     expected_order: str,
     required_document_kind: str | None = DOCUMENT_KIND_SALES_ORDER,
+    allow_legacy_without_job: bool = False,
 ) -> SalesOrderAcceptance:
     candidate = Path(candidate)
     destination = Path(destination)
@@ -316,11 +402,28 @@ def finalize_candidate(
     validation = validate_sales_order_pdf(
         candidate, expected_order, required_document_kind
     )
+    if (
+        allow_legacy_without_job
+        and validation.status == LEGACY_UNVERIFIABLE_STATUS
+        and validation.document_kind == DOCUMENT_KIND_SALES_ORDER
+        and required_document_kind == DOCUMENT_KIND_SALES_ORDER
+    ):
+        validation = SalesOrderValidation(
+            normalize_order(expected_order),
+            "",
+            "MATCH",
+            "legacy-link-and-recent-hash",
+            document_kind=DOCUMENT_KIND_SALES_ORDER,
+        )
     if not validation.matched:
         quarantined = quarantine_candidate(candidate, destination, validation)
         return SalesOrderAcceptance(None, validation, str(quarantined))
 
     if candidate.resolve() == destination.resolve():
+        if validation.method == "legacy-link-and-recent-hash":
+            _write_legacy_trust(destination, expected_order)
+        else:
+            _remove_legacy_trust(destination)
         if required_document_kind == DOCUMENT_KIND_SALES_ORDER:
             quarantine_superseded_verification_reports(destination, expected_order)
         return SalesOrderAcceptance(str(destination), validation)
@@ -330,6 +433,9 @@ def finalize_candidate(
         existing = validate_sales_order_pdf(
             destination, expected_order, required_document_kind
         )
+        existing = _trusted_legacy_validation(
+            destination, expected_order, existing
+        ) or existing
         if existing.matched:
             duplicate = quarantine_candidate(
                 candidate, destination, validation, bucket="duplicate-valid-downloads"
@@ -338,7 +444,10 @@ def finalize_candidate(
                 quarantine_superseded_verification_reports(destination, expected_order)
             return SalesOrderAcceptance(str(destination), existing, str(duplicate))
         quarantine_candidate(destination, destination, existing, bucket="rejected-existing-files")
+    _remove_legacy_trust(destination)
     candidate.replace(destination)
+    if validation.method == "legacy-link-and-recent-hash":
+        _write_legacy_trust(destination, expected_order)
     if required_document_kind == DOCUMENT_KIND_SALES_ORDER:
         quarantine_superseded_verification_reports(destination, expected_order)
     return SalesOrderAcceptance(str(destination), validation)
@@ -352,6 +461,13 @@ def accept_existing(
     destination = Path(destination)
     if not destination.exists():
         return None
+    required_document_kind = required_document_kind or DOCUMENT_KIND_SALES_ORDER
+    validation = validate_sales_order_pdf(
+        destination, expected_order, required_document_kind
+    )
+    trusted = _trusted_legacy_validation(destination, expected_order, validation)
+    if trusted:
+        return SalesOrderAcceptance(str(destination), trusted)
     return finalize_candidate(
         destination, destination, expected_order, required_document_kind
     )

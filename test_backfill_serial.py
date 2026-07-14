@@ -161,6 +161,85 @@ def test_process_one_propagates_a_broken_search_page_to_the_runner():
             pass
 
 
+def test_unique_legacy_pdf_is_allowed_against_recent_job_hashes(tmp: Path):
+    href = (
+        "/intranet/csi/downloaddoc.aspx?pid=CBC_SalesOrder-14529-1-LATEST"
+        "&fn=412648 - Sales Order.pdf"
+    )
+    candidate = tmp / "pending.pdf"
+    accepted = SimpleNamespace(
+        path=str(tmp / "412648 - Sales Order (original).pdf"),
+        quarantine_path="",
+        validation=SimpleNamespace(
+            status="MATCH",
+            internal_order="",
+            method="legacy-link-and-recent-hash",
+            document_kind="SALES_ORDER",
+        ),
+    )
+    legacy = SimpleNamespace(
+        status=backfill_orders.LEGACY_UNVERIFIABLE_STATUS,
+        document_kind="SALES_ORDER",
+    )
+    recent = [("412541", "prior-hash")]
+    finalize = patch("backfill_orders.finalize_candidate", return_value=accepted)
+
+    with (
+        patch("backfill_orders.accept_existing", return_value=None),
+        patch("backfill_orders.staging_path", return_value=candidate),
+        patch("backfill_orders._download_async", new=AsyncMock(return_value=str(candidate))),
+        patch("backfill_orders.validate_sales_order_pdf", return_value=legacy),
+        patch("backfill_orders.sales_order_sha256", return_value="new-hash"),
+        finalize as promote,
+    ):
+        result = asyncio.run(
+            backfill_orders._download_sales_order_async(
+                object(), "https://example.invalid", href,
+                tmp / "412648 - Sales Order (original).pdf", "412648",
+                "SALES_ORDER", recent,
+            )
+        )
+
+    assert result is accepted
+    assert promote.call_args.kwargs["allow_legacy_without_job"] is True
+    assert recent[-1] == ("412648", "new-hash")
+
+
+def test_recent_hash_window_flags_same_pdf_for_another_job():
+    recent = [(str(410000 + i), f"hash-{i}") for i in range(25)]
+    assert backfill_orders._recent_duplicate_job(recent, "412648", "hash-24") == "410024"
+    assert backfill_orders._recent_duplicate_job(recent, "410024", "hash-24") == ""
+
+    backfill_orders._remember_so_hash(recent, "412648", "new-hash")
+    assert len(recent) == backfill_orders.RECENT_SO_HASH_WINDOW
+    assert recent[-1] == ("412648", "new-hash")
+
+
+def test_process_one_rejects_stale_other_job_link_before_download():
+    href = (
+        "/intranet/csi/downloaddoc.aspx?pid=CBC_SalesOrder-9797-1-LATEST"
+        "&fn=409201 - Sales Order.pdf"
+    )
+    docs = [(href, {"type": backfill_orders.SO_TYPE, "rev": 0})]
+    page = SimpleNamespace(url="https://example.invalid", wait_for_timeout=AsyncMock())
+    download = AsyncMock()
+
+    with (
+        patch("backfill_orders.open_order_detail_async", new=AsyncMock(return_value=True)),
+        patch("backfill_orders._open_matching_card_async", new=AsyncMock(return_value=True)),
+        patch("backfill_orders._collect_docs_async", new=AsyncMock(return_value=docs)),
+        patch("backfill_orders._download_sales_order_async", new=download),
+        patch("backfill_orders._close_modal_async", new=AsyncMock()),
+    ):
+        record = asyncio.run(
+            backfill_orders.process_one_async(page, object(), "408844", "", 1, 1, [])
+        )
+
+    assert record["status"] == "error"
+    assert record["so_validation"] == "DOWNLOAD_FAILED"
+    download.assert_not_awaited()
+
+
 def test_serial_pass_reopens_a_broken_search_page_and_retries_same_job():
     page = SimpleNamespace(close=AsyncMock())
     fresh_page = SimpleNamespace(close=AsyncMock())

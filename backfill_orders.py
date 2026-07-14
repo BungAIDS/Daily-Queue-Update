@@ -69,10 +69,13 @@ import line_items
 from process_lock import cbc_fetch_lock, data_file_lock
 from sales_order_validation import (
     DOCUMENT_KIND_ORDER_VERIFICATION,
+    DOCUMENT_KIND_SALES_ORDER,
+    LEGACY_UNVERIFIABLE_STATUS,
     accept_existing,
     failed_acceptance,
     finalize_candidate,
     modal_text_matches_job,
+    sales_order_sha256,
     staging_path,
     validate_sales_order_pdf,
 )
@@ -92,6 +95,7 @@ REQUIRED_MISS_ATTEMPTS = 2
 # 400xxx orders need the separate legacy lookup path, which is not implemented.
 DEFAULT_CBC_SEARCH_MIN_JOB = 401000
 DEFAULT_PUBLISH_EVERY = 25
+RECENT_SO_HASH_WINDOW = 25
 _EXCEL_ILLEGAL_CHARS = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
 
 
@@ -112,6 +116,44 @@ def _attempt_count(rec: Dict[str, Any]) -> int:
         return max(0, int(rec.get("backfill_attempts") or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _recent_duplicate_job(
+    recent: List[tuple[str, str]], job: str, digest: str
+) -> str:
+    for prior_job, prior_digest in reversed(recent):
+        if prior_job != job and prior_digest == digest:
+            return prior_job
+    return ""
+
+
+def _remember_so_hash(
+    recent: List[tuple[str, str]], job: str, digest: str
+) -> None:
+    if not digest:
+        return
+    recent.append((job, digest))
+    del recent[:-RECENT_SO_HASH_WINDOW]
+
+
+def _seed_recent_so_hashes(
+    records: Dict[str, Dict[str, Any]], limit: int = RECENT_SO_HASH_WINDOW
+) -> List[tuple[str, str]]:
+    candidates = sorted(
+        (
+            (str(rec.get("scanned_at") or ""), str(job), str(rec.get("so_pdf") or ""))
+            for job, rec in records.items()
+            if rec.get("status") == "ok" and rec.get("so_pdf")
+        ),
+        reverse=True,
+    )[:limit]
+    recent: List[tuple[str, str]] = []
+    for _scanned_at, job, pdf in reversed(candidates):
+        try:
+            _remember_so_hash(recent, job, sales_order_sha256(pdf))
+        except OSError:
+            continue
+    return recent
 
 
 # --------------------------------------------------------------------------- #
@@ -631,9 +673,15 @@ async def _download_sales_order_async(
     destination: Path,
     job: str,
     required_document_kind: str | None = None,
+    recent_so_hashes: Optional[List[tuple[str, str]]] = None,
 ):
+    recent = recent_so_hashes if recent_so_hashes is not None else []
     existing = accept_existing(destination, job, required_document_kind)
     if existing and existing.path:
+        try:
+            _remember_so_hash(recent, job, sales_order_sha256(existing.path))
+        except OSError:
+            pass
         return existing
     if existing:
         log.warning(
@@ -647,9 +695,43 @@ async def _download_sales_order_async(
     downloaded = await _download_async(context, page_url, href, staged)
     if not downloaded:
         return failed_acceptance(job, f"download failed for {destination.name}")
-    accepted = finalize_candidate(
-        downloaded, destination, job, required_document_kind
+    validation = validate_sales_order_pdf(
+        downloaded, job, required_document_kind
     )
+    try:
+        digest = sales_order_sha256(downloaded)
+    except OSError:
+        digest = ""
+    duplicate_job = _recent_duplicate_job(recent, job, digest)
+    legacy_without_job = bool(
+        validation.status == LEGACY_UNVERIFIABLE_STATUS
+        and validation.document_kind == DOCUMENT_KIND_SALES_ORDER
+        and modal_text_matches_job(href, job)
+        and digest
+        and not duplicate_job
+    )
+    if validation.status == LEGACY_UNVERIFIABLE_STATUS and duplicate_job:
+        log.warning(
+            "  %s: downloaded PDF is byte-identical to recent job %s; treating it "
+            "as a stale Sales Order response.",
+            job, duplicate_job,
+        )
+    accepted = finalize_candidate(
+        downloaded,
+        destination,
+        job,
+        required_document_kind,
+        allow_legacy_without_job=legacy_without_job,
+    )
+    if validation.document_kind == DOCUMENT_KIND_SALES_ORDER:
+        _remember_so_hash(recent, job, digest)
+    if accepted.path and legacy_without_job:
+        log.info(
+            "  %s: accepted legacy Sales Order: correct job link, valid SO format, "
+            "and unique against the last %d job(s).",
+            job,
+            RECENT_SO_HASH_WINDOW,
+        )
     if not accepted.path:
         log.warning(
             "  %s: rejected downloaded Sales Order internal=%s status=%s -> %s",
@@ -693,7 +775,9 @@ async def _close_modal_async(page) -> None:
 
 async def process_one_async(page, context, job: str, folder: str = "",
                             search_timeout_s: float = 75.0,
-                            doc_timeout_ms: int = 120000) -> Dict[str, Any]:
+                            doc_timeout_ms: int = 120000,
+                            recent_so_hashes: Optional[List[tuple[str, str]]] = None
+                            ) -> Dict[str, Any]:
     rec: Dict[str, Any] = {
         "job": job,
         "status": "",
@@ -731,24 +815,52 @@ async def process_one_async(page, context, job: str, folder: str = "",
             # which can lag the modal: the first fetch after switching orders
             # can return the PREVIOUS order's SO (stripping stale modal links
             # didn't cure it — the wrong doc comes from the SERVER). Validation
-            # catches it before anything is saved, so on a MISMATCH re-open the
-            # detail (a fresh loadDetail re-points the server) and retry.
+            # catches it before anything is saved. Legacy PDFs that omit the job
+            # number are checked against recent jobs' hashes instead.
             accepted = None
             doc: Dict[str, Any] = {}
             for so_attempt in (1, 2, 3):
                 href, doc = so
-                accepted = await _download_sales_order_async(
-                    context,
-                    page.url,
-                    href,
-                    SALES_ORDER_DIR / job / _so_filename(job, doc["rev"]),
-                    job,
-                    _required_so_document_kind(doc),
+                if not modal_text_matches_job(href, job):
+                    accepted = failed_acceptance(
+                        job, f"stale Sales Order link for another job: {href}"
+                    )
+                    log.warning(
+                        "  %s: attempt %d exposed another job's Sales Order link "
+                        "(%s); re-opening the detail without downloading it.",
+                        job, so_attempt, href,
+                    )
+                else:
+                    accepted = await _download_sales_order_async(
+                        context,
+                        page.url,
+                        href,
+                        SALES_ORDER_DIR / job / _so_filename(job, doc["rev"]),
+                        job,
+                        _required_so_document_kind(doc),
+                        recent_so_hashes,
+                    )
+                status = accepted.validation.status
+                stale_link = status == "DOWNLOAD_FAILED" and "stale Sales Order link" in (
+                    accepted.validation.error or ""
                 )
-                if accepted.path or accepted.validation.status != "MISMATCH":
+                if accepted.path or (
+                    not stale_link
+                    and status not in {"MISMATCH", LEGACY_UNVERIFIABLE_STATUS}
+                ):
                     break
-                log.warning("  %s: attempt %d fetched another order's SO (href=%s) — "
-                            "re-opening the detail and retrying.", job, so_attempt, href)
+                if status == LEGACY_UNVERIFIABLE_STATUS:
+                    log.warning(
+                        "  %s: attempt %d could not safely identify the legacy Sales "
+                        "Order; re-opening the detail and retrying (href=%s).",
+                        job, so_attempt, href,
+                    )
+                elif not stale_link:
+                    log.warning(
+                        "  %s: attempt %d fetched another order's SO (href=%s) - "
+                        "re-opening the detail and retrying.",
+                        job, so_attempt, href,
+                    )
                 await _close_modal_async(page)
                 await asyncio.sleep(2.0)
                 reopened = False
@@ -906,6 +1018,10 @@ async def _run_serial_pass(context, jobs: List[str],
     page = await _open_backfill_page(context)
     completed = 0
     recent_misses: List[str] = []
+    recent_so_hashes = run_state.get("recent_so_hashes")
+    if not isinstance(recent_so_hashes, list):
+        recent_so_hashes = _seed_recent_so_hashes(records)
+        run_state["recent_so_hashes"] = recent_so_hashes
     try:
         for index, job in enumerate(jobs, start=1):
             rec: Dict[str, Any] | None = None
@@ -926,6 +1042,7 @@ async def _run_serial_pass(context, jobs: List[str],
                             dwg.get(job, {}).get("folder", ""),
                             search_timeout_s=search_timeout_s,
                             doc_timeout_ms=doc_timeout_ms,
+                            recent_so_hashes=recent_so_hashes,
                         )
                 except SearchPageError as e:
                     log.warning(
@@ -944,6 +1061,7 @@ async def _run_serial_pass(context, jobs: List[str],
                             dwg.get(job, {}).get("folder", ""),
                             search_timeout_s=search_timeout_s,
                             doc_timeout_ms=doc_timeout_ms,
+                            recent_so_hashes=recent_so_hashes,
                         )
                 _commit_line_items(job, rec)
             except SearchPageError as e:
