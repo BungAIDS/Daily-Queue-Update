@@ -3386,9 +3386,14 @@ def _canonical_component_attrs(item: Dict[str, Any], primary: str, norm_blob: st
 
     if re.match(r"^PERCENT\s+WIDTH\b", primary):
         claim("PERCENT WIDTH")
-        m = re.search(r"(\d{1,3})\s*%", blob)
+        m = re.search(r"(\d{1,3}(?:\.\d+)?)\s*%", blob)
         if m:
             attrs.setdefault("pct_width_customer", f"{m.group(1)}%")
+            # CBC builds to the nearest 5% — a customer value that rounds to the
+            # same 5% step is the same construction. Round half up (values are +).
+            val = float(m.group(1))
+            rounded = int(val / 5.0 + 0.5) * 5
+            attrs.setdefault("pct_width_rounded", f"{rounded}%")
 
     if re.search(r"\bSHRINK\s*WRAP\b", norm_blob):
         claim("SHRINK WRAP")

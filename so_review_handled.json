@@ -31,11 +31,6 @@
       "handled_at": "2026-07-14T20:45:35"
     },
     {
-      "id": 10,
-      "resolution": "Item 11 now component=PERCENT WIDTH with pct_width_customer=85%. (Value-rounded needs CBC's standard % increments \u2014 tell me the table and I'll add pct_width_rounded.)",
-      "handled_at": "2026-07-14T20:45:35"
-    },
-    {
       "id": 11,
       "resolution": "Item 13 now component=SHRINK WRAP with shrink_wrap_range='21\" to 36-1/2\"'.",
       "handled_at": "2026-07-14T20:45:35"
@@ -54,6 +49,11 @@
       "id": 3,
       "resolution": "Confirmed \u2014 that IVC info is captured (handle location now an explicit attribute).",
       "handled_at": "2026-07-14T20:45:47"
+    },
+    {
+      "id": 10,
+      "resolution": "Item 11 -> component=PERCENT WIDTH with pct_width_customer=85% AND pct_width_rounded=85% (rounds to nearest 5%; e.g. 83->85, 82->80 \u2014 same rounded value = same construction).",
+      "handled_at": "2026-07-14T21:00:30"
     }
   ]
 }

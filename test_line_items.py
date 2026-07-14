@@ -969,6 +969,11 @@ def test_canonical_component_names_from_prose():
     pct = li.extract_items(["Percent Width (85%) L 1,252.00"])[0]
     assert pct["attributes"]["component"] == "PERCENT WIDTH"
     assert pct["attributes"]["pct_width_customer"] == "85%"
+    assert pct["attributes"]["pct_width_rounded"] == "85%"
+    # CBC builds to the nearest 5%: a customer value rounds to that step (a lower
+    # value that rounds the same is the same construction).
+    assert li.extract_items(["Percent Width (83%) L 1.00"])[0]["attributes"]["pct_width_rounded"] == "85%"
+    assert li.extract_items(["Percent Width (82%) L 1.00"])[0]["attributes"]["pct_width_rounded"] == "80%"
 
     shrink = li.extract_items(['Shrink wrap, Wheel Dia. 21" to 36-1/2" L 278.00'])[0]
     assert shrink["attributes"]["component"] == "SHRINK WRAP"
