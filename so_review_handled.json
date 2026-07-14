@@ -9,6 +9,51 @@
       "id": 12,
       "resolution": "The two Outlet lines (10 punched, 15 unpunched) now merge into ONE [OUTLET] component; the flange_type disagreement is flagged as CONFLICTING flange_type. General rule now in place: same-component lines in an order merge into one, and conflicting single-valued attributes are flagged.",
       "handled_at": "2026-07-14T20:34:06"
+    },
+    {
+      "id": 1,
+      "resolution": "[DOOR LOCATION] now an attribute: Access Door lines get component=ACCESS DOOR with door_location=<clock> (e.g. 9:00) lifted from the 'Door Location: @9:00' detail.",
+      "handled_at": "2026-07-14T20:45:34"
+    },
+    {
+      "id": 2,
+      "resolution": "[HANDLE LOCATION] now an attribute on IVC lines: handle_location (clock or direction) + handle_location_standard (YES/NO from 'Non-standard').",
+      "handled_at": "2026-07-14T20:45:34"
+    },
+    {
+      "id": 4,
+      "resolution": "[HANDLE LOCATION] captured as attribute (see #2).",
+      "handled_at": "2026-07-14T20:45:35"
+    },
+    {
+      "id": 8,
+      "resolution": "Item 9 now component=MECHANICAL RUN TEST.",
+      "handled_at": "2026-07-14T20:45:35"
+    },
+    {
+      "id": 10,
+      "resolution": "Item 11 now component=PERCENT WIDTH with pct_width_customer=85%. (Value-rounded needs CBC's standard % increments \u2014 tell me the table and I'll add pct_width_rounded.)",
+      "handled_at": "2026-07-14T20:45:35"
+    },
+    {
+      "id": 11,
+      "resolution": "Item 13 now component=SHRINK WRAP with shrink_wrap_range='21\" to 36-1/2\"'.",
+      "handled_at": "2026-07-14T20:45:35"
+    },
+    {
+      "id": 13,
+      "resolution": "Item 16 now component=SHIP WITH with referenced_po=23971.",
+      "handled_at": "2026-07-14T20:45:35"
+    },
+    {
+      "id": 14,
+      "resolution": "Item 18 (Run Test) now merges into the ONE [MECHANICAL RUN TEST] component with item 9 (synonym canonicalized); their status difference STANDARD|REQUIRED is flagged.",
+      "handled_at": "2026-07-14T20:45:35"
+    },
+    {
+      "id": 3,
+      "resolution": "Confirmed \u2014 that IVC info is captured (handle location now an explicit attribute).",
+      "handled_at": "2026-07-14T20:45:47"
     }
   ]
 }

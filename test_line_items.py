@@ -958,6 +958,49 @@ def test_unpunched_flange_is_not_punched():
     assert punched["attributes"]["flange_type"] == "PUNCHED"
 
 
+def test_canonical_component_names_from_prose():
+    # Lines the SO names only in prose now carry a canonical `component`, so two
+    # lines for the same thing merge (so_hierarchy) instead of standing as two.
+    door = li.extract_items(["Access Door, Quick Clamp L 525.00",
+                             "Door Location: @9:00"])[0]
+    assert door["attributes"]["component"] == "ACCESS DOOR"
+    assert door["attributes"]["door_location"] == "9:00"
+
+    pct = li.extract_items(["Percent Width (85%) L 1,252.00"])[0]
+    assert pct["attributes"]["component"] == "PERCENT WIDTH"
+    assert pct["attributes"]["pct_width_customer"] == "85%"
+
+    shrink = li.extract_items(['Shrink wrap, Wheel Dia. 21" to 36-1/2" L 278.00'])[0]
+    assert shrink["attributes"]["component"] == "SHRINK WRAP"
+    assert shrink["attributes"]["shrink_wrap_range"] == '21" to 36-1/2"'
+
+    ship = li.extract_items(["SHIP WITH FANS REFERENCED BY CUSTOMER PO(s) 23971 L STD"])[0]
+    assert ship["attributes"]["component"] == "SHIP WITH"
+    assert ship["attributes"]["referenced_po"] == "23971"
+
+    outlet = li.extract_items(["Outlet, Flanged, Punched L STD"])[0]
+    assert outlet["attributes"]["component"] == "OUTLET"
+
+    # Run test and mechanical run test are the ONE mechanical run test: same
+    # component, and the bare "Run Test" synonym is canonicalized so two such
+    # lines don't false-conflict on testing_type when they merge.
+    mrt = li.extract_items(["Mechanical Run Test, Standard L STD"])[0]
+    assert mrt["attributes"]["component"] == "MECHANICAL RUN TEST"
+    # An unpriced "Run Test - Required" parses only inside a feature section.
+    section = li.extract_items(["Additional Features / Notes:", "Run Test - Required"])
+    run = next(i for i in section if "RUN TEST" in i["norm"])
+    assert run["attributes"]["component"] == "MECHANICAL RUN TEST"
+    assert run["attributes"]["testing_type"] == "MECHANICAL RUN TEST"   # synonym canonicalized
+
+    # A line already tied to a component (the IVC, via used_on) is NOT renamed —
+    # but its handle location is still lifted to an attribute.
+    handle = li.extract_items(["Inlet Volume Control Handle Location, Non-standard L 1,014.00",
+                               "IVC handle location for Discharge"])[0]
+    assert handle["attributes"].get("used_on") == "IVC"
+    assert handle["attributes"]["handle_location"] == "DISCHARGE"
+    assert handle["attributes"]["handle_location_standard"] == "NO"
+
+
 def test_housing_modified_flange_and_length_attributes():
     thickness = li.extract_items(['Housing Flange Thickness, 2-7/8", Inquiry Num: L 250.00'])[0]
     assert {"FLANGE", "HOUSING"} <= set(thickness["tags"])

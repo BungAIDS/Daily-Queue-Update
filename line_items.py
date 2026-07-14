@@ -3353,6 +3353,77 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
     return sorted(tags)
 
 
+def _canonical_component_attrs(item: Dict[str, Any], primary: str, norm_blob: str,
+                               blob: str, tags: set[str], attrs: Dict[str, str]) -> None:
+    """Give lines the type-specific handlers named only in prose a canonical
+    `component`, so two lines describing the SAME thing merge into one component
+    (so_hierarchy) and any attribute they disagree on is flagged — never left as
+    two look-alikes with one of them wrong. Also lifts a few in-prose facts
+    (door / handle clock position, the shrink-wrap range, the referenced PO) to
+    real attributes. Fills only what isn't already set: a specific handler that
+    named the component, or a `used_on` tie, always wins."""
+    tied = bool(attrs.get("component") or attrs.get("used_on"))
+
+    def claim(name: str) -> None:
+        if not tied:
+            attrs.setdefault("component", name)
+
+    # A run test (mechanical run test / run test) is the one mechanical run test.
+    if "RUN TEST" in str(attrs.get("testing_type") or "").upper():
+        claim("MECHANICAL RUN TEST")
+        # "Run Test" and "Mechanical Run Test" are the same test — canonicalize
+        # the bare synonym so two run-test lines merging don't FALSE-conflict on
+        # testing_type (a real difference, e.g. status, still flags).
+        if str(attrs.get("testing_type") or "").strip().upper() == "RUN TEST":
+            attrs["testing_type"] = "MECHANICAL RUN TEST"
+
+    # A standalone outlet / inlet flange -> that location is the component, so two
+    # "Outlet, Flanged, ..." lines can't sit as two components (one punched, one
+    # unpunched) — they merge and the flange_type disagreement is flagged.
+    scope = str(attrs.get("flange_scope") or "").strip().upper()
+    if scope in ("OUTLET", "INLET"):
+        claim(scope)
+
+    if re.match(r"^PERCENT\s+WIDTH\b", primary):
+        claim("PERCENT WIDTH")
+        m = re.search(r"(\d{1,3})\s*%", blob)
+        if m:
+            attrs.setdefault("pct_width_customer", f"{m.group(1)}%")
+
+    if re.search(r"\bSHRINK\s*WRAP\b", norm_blob):
+        claim("SHRINK WRAP")
+        m = re.search(r"Wheel\s+Dia\.?\s*(.+?)\s*(?:[LCN]\s+[\d,]+\.\d{2}|$)", blob, re.I)
+        if m and m.group(1).strip():
+            attrs.setdefault("shrink_wrap_range", m.group(1).strip())
+
+    if re.search(r"\bSHIP\s+WITH\b.*\bFANS?\b", norm_blob):
+        claim("SHIP WITH")
+        pos = re.findall(r"P\.?\s*O\.?\s*\(?s?\)?\s*#?\s*([0-9]{3,})", blob, re.I)
+        if pos:
+            attrs.setdefault("referenced_po", ", ".join(dict.fromkeys(pos)))
+
+    if "ACCESS DOOR" in tags or re.search(r"\bACCESS\s+DOOR\b", norm_blob):
+        claim("ACCESS DOOR")
+        m = re.search(r"Door\s+Location\s*:?\s*@?\s*(\d{1,2}(?::\d{2})?)", blob, re.I)
+        if m:
+            attrs.setdefault("door_location", m.group(1))
+
+    # Handle location (e.g. the IVC's) is an attribute wherever it's mentioned —
+    # its clock position (or the direction it faces) plus whether it's standard.
+    if re.search(r"HANDLE\s+LOCATION", norm_blob):
+        if re.search(r"NON[\s-]*STANDARD", norm_blob):
+            attrs.setdefault("handle_location_standard", "NO")
+        elif re.search(r"\bSTANDARD\b", norm_blob):
+            attrs.setdefault("handle_location_standard", "YES")
+        m = re.search(r"@?\s*(\d{1,2}:\d{2})", blob)
+        if m:
+            attrs.setdefault("handle_location", m.group(1))
+        else:
+            m = re.search(r"handle\s+location\s+for\s+([A-Za-z]+)", blob, re.I)
+            if m:
+                attrs.setdefault("handle_location", m.group(1).upper())
+
+
 def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Dict[str, str]:
     """Structured fan-component details pulled from raw text + detail lines."""
     rules = rules or load_rules()
@@ -3508,6 +3579,8 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
 
         for key, value in _drive_table_attributes(item).items():
             attrs.setdefault(key, value)
+
+    _canonical_component_attrs(item, primary, norm_blob, blob, tags, attrs)
 
     return attrs
 
