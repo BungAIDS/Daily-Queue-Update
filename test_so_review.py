@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import sys
 import tempfile
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
 
 import so_review as sr
@@ -400,6 +402,54 @@ def test_sync_upgrades_legacy_browse_without_pending_notes(tmp: Path):
     ]
     rebuilt.close()
     assert headers == sr.BROWSE_HEADERS
+
+
+def test_refresh_reports_notes_safe_when_workbook_rewrite_fails(tmp: Path):
+    from types import SimpleNamespace
+
+    from openpyxl import load_workbook
+
+    line_items = _line_items_store()
+    wb = tmp / "review.xlsx"
+    queue = tmp / "so_review_notes.json"
+    sr.write_workbook(wb, line_items, {"notes": []})
+    book = load_workbook(str(wb), data_only=False)
+    notes = book[sr.NOTES_SHEET]
+    item_col = sr.HEADERS.index("Item") + 1
+    note_col = sr.HEADERS.index("Note") + 1
+    row = next(
+        row_no for row_no in range(2, notes.max_row + 1)
+        if str(notes.cell(row_no, item_col).value) == "2"
+    )
+    notes.cell(row, note_col).value = "keep this even if Excel is open"
+    book.save(str(wb))
+    book.close()
+
+    old_store_path = sr.REVIEW_STORE_PATH
+    old_loader = sr._load_line_items
+    old_writer = sr.write_workbook
+    sr.REVIEW_STORE_PATH = queue
+    sr._load_line_items = lambda: line_items
+
+    def blocked_writer(*_args, **_kwargs):
+        raise RuntimeError("Could not write review.xlsx because Excel has it open.")
+
+    sr.write_workbook = blocked_writer
+    error = StringIO()
+    try:
+        with redirect_stderr(error):
+            assert sr._run(sr._cmd_refresh, SimpleNamespace(out=str(wb))) == 1
+    finally:
+        sr.REVIEW_STORE_PATH = old_store_path
+        sr._load_line_items = old_loader
+        sr.write_workbook = old_writer
+
+    message = error.getvalue()
+    assert "All 1 workbook note(s) are safely recorded" in message
+    assert "workbook refresh could not finish" in message
+    stored = sr.load_store(queue)
+    assert len(stored["notes"]) == 1
+    assert stored["notes"][0]["note"] == "keep this even if Excel is open"
 
 
 def main() -> int:

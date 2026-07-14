@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -461,7 +462,12 @@ def _browse_layout_needs_upgrade(path: Path) -> bool:
     """Whether an existing review workbook predates the Add Note column."""
     from openpyxl import load_workbook
 
-    wb = load_workbook(str(path), read_only=True, data_only=False)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Data Validation extension is not supported and will be removed",
+        )
+        wb = load_workbook(str(path), read_only=True, data_only=False)
     try:
         if BROWSE_SHEET not in wb.sheetnames:
             return False
@@ -484,7 +490,12 @@ def read_edits(path: Path) -> List[Dict[str, Any]]:
     """Read canonical Notes plus temporary Sales Order Add Note inputs."""
     from openpyxl import load_workbook
 
-    wb = load_workbook(str(path), data_only=False)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Data Validation extension is not supported and will be removed",
+        )
+        wb = load_workbook(str(path), data_only=False)
     try:
         notes = _notes_sheet(wb)
         header = [_excel_text(c.value) for c in notes[1]]
@@ -650,13 +661,37 @@ def _cmd_refresh(args) -> int:
     every still-open note in place."""
     path = Path(args.out)
     store = load_store()
+    edits: List[Dict[str, Any]] = []
     added = 0
     if path.exists():
-        added = ingest_edits(store, read_edits(path))   # don't lose un-synced typing
+        edits = read_edits(path)
+        added = ingest_edits(store, edits)              # don't lose un-synced typing
+    workbook_note_count = len({
+        (str(e.get("order", "")), str(e.get("item_no", "")), str(e.get("note", "")))
+        for e in edits
+        if str(e.get("order", "")).strip()
+        and str(e.get("item_no", "")).strip()
+        and str(e.get("note", "")).strip()
+    })
     closed = apply_handled_marks(store)                 # Claude's resolutions
     save_store(store)
-    n = write_workbook(path, _load_line_items(), store)
-    print(f"Updated {path} ({n} rows). Captured {added} new note(s); "
+    try:
+        n = write_workbook(path, _load_line_items(), store)
+    except RuntimeError as exc:
+        if workbook_note_count:
+            safe = (
+                f"All {workbook_note_count} workbook note(s) are safely recorded in "
+                f"{REVIEW_STORE_PATH} ({added} new this run). "
+            )
+        else:
+            safe = f"The note queue was safely saved to {REVIEW_STORE_PATH}. "
+        raise RuntimeError(
+            f"{safe}The workbook refresh could not finish. {exc}"
+        ) from None
+    already = ""
+    if workbook_note_count and added == 0:
+        already = f"; all {workbook_note_count} workbook note(s) were already recorded"
+    print(f"Updated {path} ({n} rows). Captured {added} new note(s){already}; "
           f"removed {len(closed)} handled note(s); {len(open_notes(store))} still open.")
     for c in closed:
         print(f"  handled #{c['id']} (order {c['order']} item {c['item_no']}): "
