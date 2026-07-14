@@ -53,29 +53,28 @@ def test_three_lines_one_component():
     c = comps[0]
     assert c["name"] == "IVC" and c["keyed"]
     assert c["price"] == 6104.0
-    # Facts accumulate from every contributing line...
-    assert c["facts"]["operation"] == "Automatic"
-    assert c["facts"]["leakage_class"] == "LOW LEAKAGE"
+    # Attributes accumulate from every contributing line...
+    assert c["attributes"]["operation"] == "Automatic"
+    assert c["attributes"]["leakage_class"] == "LOW LEAKAGE"
     # ...collection keys union quietly (three different subcategories is
     # expected, not a conflict).
-    assert c["facts"]["ivc_subcategory"] == "IVC ACTUATOR, IVC, IVC INLET FLANGE"
+    assert c["attributes"]["ivc_subcategory"] == "IVC ACTUATOR, IVC, IVC INLET FLANGE"
     assert c["review"] == []
-    # Details from every line, in merge order.
-    assert "IVC handle location for Discharge" in c["details"]
     # Sources: the priciest line is the component's own (primary), the rest in
-    # capture order — all cross-referenced to the flat table's item #s.
+    # capture order, retaining their verbatim details and flat-table item #s.
     assert [s["item_no"] for s in c["sources"]] == [2, 1, 3]
     assert c["sources"][0]["primary"] and not c["sources"][1]["primary"]
+    assert c["sources"][1]["details"] == ["IVC handle location for Discharge"]
 
 
-def test_tree_rows_component_facts_sources():
+def test_tree_rows_component_attributes_sources():
     main, handle, flange = _ivc_items()
     rows = soh.tree_rows([handle, main, flange])
     assert rows[0]["kind"] == soh.KIND_COMPONENT
     assert rows[0]["text"] == "[IVC] — 3 lines"
     assert rows[0]["price"] == "6,104.00" and rows[0]["item_no"] == ""
-    facts = [r["text"] for r in rows if r["kind"] == soh.KIND_FACT]
-    assert "operation: Automatic" in facts       # keys prettified for reading
+    attributes = [r["text"] for r in rows if r["kind"] == soh.KIND_ATTRIBUTE]
+    assert "operation: Automatic" in attributes  # keys prettified for reading
     srcs = [r for r in rows if r["kind"] == soh.KIND_SOURCE]
     assert srcs[0]["text"].startswith("Inlet Volume Control, Low Leak")
     assert srcs[0]["item_no"] == 2
@@ -83,14 +82,14 @@ def test_tree_rows_component_facts_sources():
     assert all(r["depth"] == 1 for r in rows[1:])
 
 
-def test_conflicting_single_valued_fact_is_kept_and_flagged():
+def test_conflicting_single_valued_attribute_is_kept_and_flagged():
     a = _item("IVC, Manual L 100.00", "100.00", used_on="IVC",
               attrs={"operation": "Manual"})
     b = _item("IVC Actuator L 50.00", "50.00", used_on="IVC",
               attrs={"operation": "Automatic"})
     c = soh.components([a, b])[0]
-    assert c["facts"]["operation"] == "Manual | Automatic"   # both kept...
-    assert any("CONFLICTING operation" in r for r in c["review"])  # ...and flagged
+    assert c["attributes"]["operation"] == "Manual | Automatic"  # both kept...
+    assert any("CONFLICTING operation" in r["text"] for r in c["review"])
     rows = soh.tree_rows([a, b])
     assert any(r["kind"] == soh.KIND_REVIEW and "CONFLICTING" in r["text"]
                for r in rows)
@@ -117,8 +116,9 @@ def test_component_attr_groups_without_used_on():
                  attrs={"component": "MOTOR", "motor_base": "SLIDE BASE"})
     comps = soh.components([motor, base])
     assert len(comps) == 1 and comps[0]["name"] == "MOTOR"
-    assert comps[0]["facts"]["vendor"] == "Baldor"
-    assert comps[0]["facts"]["motor_base"] == "SLIDE BASE"
+    assert comps[0]["attributes"]["vendor"] == "Baldor"
+    assert comps[0]["attributes"]["motor_base"] == "SLIDE BASE"
+    assert "component" not in comps[0]["attributes"]
 
 
 def test_no_merge_on_loose_tag_overlap():
@@ -131,13 +131,30 @@ def test_no_merge_on_loose_tag_overlap():
     assert len(soh.components([inlet, outlet])) == 2
 
 
-def test_review_flags_and_review_keys_stay_off_facts():
+def test_review_flags_and_review_keys_stay_off_attributes():
     it = _item("Motor C 3,194.37", "3,194.37",
                attrs={"vendor": "Baldor", "used_on_review": "INCONCLUSIVE"},
                flags=["UNTAGGED"])
     c = soh.components([it])[0]
-    assert "used_on_review" not in c["facts"]
-    assert c["review"] == ["UNTAGGED"]
+    assert "used_on_review" not in c["attributes"]
+    assert c["review"] == [{"text": "UNTAGGED", "item_no": 1}]
+
+
+def test_unclassified_detail_is_review_tied_to_source_item():
+    it = _item("Motor C 3,194.37", "3,194.37",
+               details=["Odd winding instruction"],
+               attrs={"component": "MOTOR"},
+               flags=["UNCLASSIFIED DETAIL: Odd winding instruction"])
+    rows = soh.tree_rows([it])
+    reviews = [row for row in rows if row["kind"] == soh.KIND_REVIEW]
+    assert reviews == [{
+        "depth": 1,
+        "kind": soh.KIND_REVIEW,
+        "text": "UNCLASSIFIED DETAIL: Odd winding instruction",
+        "price": "",
+        "item_no": 1,
+    }]
+    assert all(row["kind"] != "DETAIL" for row in rows)
 
 
 def test_component_sits_where_first_evidence_appeared():

@@ -801,8 +801,8 @@ SO_SUMMARY_COLUMNS = [
 ]
 # The component-hierarchy block (see so_hierarchy.tree_rows): the rolled-up
 # tree the tab shows beside the flat capture table. Item # cross-references
-# the flat table's '#' column; Kind says where each row lives in the store
-# (FAMILY/LINE/FACTS/DETAIL/REVIEW).
+# the flat table's '#' column; Kind identifies the row's role
+# (COMPONENT/ATTRIBUTE/REVIEW/SOURCE).
 SO_TREE_HEADERS = ["Hierarchy", "Price", "Kind", "Item #"]
 # SO Data column geometry (1-based), shared by both builders so the visible
 # tab's formulas always aim at the right data columns: the line-item block
@@ -969,8 +969,8 @@ def sales_order_sheet(n_data_rows: int, n_orders: int) -> Sheet:
     sh.blank()
 
     # Line items, two synchronized views: the component HIERARCHY on the left
-    # (so_hierarchy's rollup — one [FAMILY] per component, its facts, details
-    # and satellite charges beneath it) and the flat CAPTURE table on the right
+    # (so_hierarchy's rollup — one group per component, its attributes, review
+    # flags and source lines beneath it) and the flat CAPTURE table on the right
     # (one row per stored item, exactly as parsed). The tree's 'Item #' column
     # matches the flat table's '#' column, so a funky tree row can be traced
     # straight to the captured line that produced it.

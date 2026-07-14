@@ -10,13 +10,12 @@ not become three IVCs. One is sufficient to know an IVC exists; every other
 line may (or may not) add information about it.
 
 `components()` builds that knowledge: ONE record per real thing, accumulating
-every contributing line's facts, details and review flags, with the lines kept
-underneath as its sources:
+every contributing line's attributes and review flags, with the printed lines
+and their verbatim continuation details kept underneath as sources:
 
     [IVC]  (3 lines, 6,104.00)                COMPONENT  one thing, not three
-      leakage class: LOW LEAKAGE              FACT       merged from any line
-      operation: Automatic                    FACT
-      · Actuator Manufacturer: By Others      DETAIL     stored sub-line
+      leakage class: LOW LEAKAGE              ATTRIBUTE  merged from any line
+      operation: Automatic                    ATTRIBUTE
       Inlet Volume Control, Low Leak, Auto…   SOURCE     the evidence lines
       + Inlet Volume Control Handle Location… SOURCE
       + Inlet, Flanged, Punched (with IVC)    SOURCE
@@ -28,7 +27,7 @@ already tied them to the same thing:
     the `component` attribute (a line that IS the thing, e.g. MOTOR). Never
     on loose tag overlap: two lines tagged FLANGE are usually two flanges.
   - A line with neither stands as its own component, named by its text.
-  - When merged lines disagree on a fact (same key, different values) BOTH
+  - When merged lines disagree on an attribute (same key, different values) BOTH
     values are kept ('A | B') and the conflict lands in the component's
     review list — surfaced, never silently resolved.
   - The priciest line is the component's own line (shown first, un-prefixed);
@@ -49,14 +48,14 @@ from line_items import split_lead, split_price_tail, split_type_tail
 
 # Row kinds — where each tree row comes from.
 KIND_COMPONENT = "COMPONENT"  # one real thing we know the job has
-KIND_FACT = "FACT"            # one merged attribute of it (derived)
-KIND_DETAIL = "DETAIL"        # a stored unpriced sub-line of a source
-KIND_REVIEW = "REVIEW"        # parser review flags + fact conflicts
+KIND_ATTRIBUTE = "ATTRIBUTE"  # one merged, parser-derived attribute of it
+KIND_REVIEW = "REVIEW"        # parser review flags + attribute conflicts
 KIND_SOURCE = "SOURCE"        # a printed SO line that contributed
 
-# Attribute keys that never render as FACT rows: used_on names the component
-# itself, and *_review keys surface through review_flags/REVIEW instead.
-_NON_FACT_KEYS = {"used_on"}
+# Structural keys that never render as ATTRIBUTE rows: used_on/component build
+# the grouping itself, vfd_context only records that the VFD wording belongs to
+# the motor, and *_review keys surface through review_flags/REVIEW instead.
+_NON_ATTRIBUTE_KEYS = {"used_on", "component", "vfd_context"}
 
 # Keys the extractors themselves build as ", "-joined collections (features,
 # scopes, subcategories, ...). Across merged lines these UNION quietly — three
@@ -107,8 +106,8 @@ def components(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """One record per real thing, in SO print order (a merged component sits
     where its first evidence line appeared):
 
-        {name, keyed, facts {k: v}, details [..], review [..],
-         sources [{item_no, text, price, primary}], price (summed float)}
+        {name, keyed, attributes {k: v}, review [{text, item_no}],
+         sources [{item_no, text, details, price, primary}], price (summed float)}
 
     `keyed` says the name came from a used_on/component link (rendered
     [BRACKETED]); an un-keyed record is a lone line named by its own text."""
@@ -120,59 +119,58 @@ def components(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for key, idxs in groups.items():           # insertion order = SO print order
         keyed = not key.startswith("\x00")
         primary = max(idxs, key=lambda i: parse_price(items[i].get("price")))
-        facts: Dict[str, Any] = {}
+        attributes: Dict[str, Any] = {}
         conflict_keys: List[str] = []
-        details: List[str] = []
-        review: List[str] = []
+        review: List[Dict[str, Any]] = []
         sources: List[Dict[str, Any]] = []
         for i in [primary] + [i for i in idxs if i != primary]:
             it = items[i]
             sources.append({"item_no": i + 1, "text": line_text(it),
+                            "details": [str(d) for d in it.get("details") or []],
                             "price": it.get("price") or "", "primary": i == primary})
             for k in sorted(_attrs(it)):
                 v = _attrs(it)[k]
-                if not v or k in _NON_FACT_KEYS or k.endswith("_review"):
+                if not v or k in _NON_ATTRIBUTE_KEYS or k.endswith("_review"):
                     continue
-                have = facts.get(k)
+                have = attributes.get(k)
                 if have is None:
-                    facts[k] = v
+                    attributes[k] = v
                     continue
                 seen = [x.strip() for x in re.split(r"[|,]", str(have))]
                 for part in (str(v).split(", ") if _accumulative(k) else [str(v)]):
                     if part.strip() in seen:
                         continue
                     if _accumulative(k):        # collection key -> union quietly
-                        facts[k] = f"{facts[k]}, {part}"
+                        attributes[k] = f"{attributes[k]}, {part}"
                     else:                       # single-valued key -> keep both, flag
-                        facts[k] = f"{facts[k]} | {part}"
+                        attributes[k] = f"{attributes[k]} | {part}"
                         if k not in conflict_keys:
                             conflict_keys.append(k)
                     seen.append(part.strip())
-            for d in it.get("details") or []:
-                if str(d) not in details:
-                    details.append(str(d))
             for f in it.get("review_flags") or []:
-                if str(f) not in review:
-                    review.append(str(f))
-        conflicts = [f"CONFLICTING {k}: {facts[k]}" for k in conflict_keys]
+                entry = {"text": str(f), "item_no": i + 1}
+                if entry not in review:
+                    review.append(entry)
+        conflicts = [{"text": f"CONFLICTING {k}: {attributes[k]}", "item_no": ""}
+                     for k in conflict_keys]
         total = sum(parse_price(items[i].get("price")) for i in idxs)
         out.append({"name": key if keyed else (line_text(items[idxs[0]]) or "?"),
                     "keyed": keyed,
-                    "facts": facts, "details": details,
+                    "attributes": attributes,
                     "review": review + conflicts, "sources": sources,
                     "price": total})
     return out
 
 
-def _fact_text(key: str, value: Any) -> str:
+def _attribute_text(key: str, value: Any) -> str:
     return f"{str(key).replace('_', ' ')}: {value}"
 
 
 def tree_rows(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """The job's knowledge as flat render rows, each
     {depth, kind, text, price, item_no}. Per component: its COMPONENT row, one
-    FACT row per merged attribute, the stored DETAIL sub-lines, a REVIEW row
-    when flagged, then the SOURCE lines (skipped for a lone line — the
+    ATTRIBUTE row per merged attribute, individual REVIEW rows when flagged,
+    then the SOURCE lines (skipped for a lone line — the
     component row IS the line, and carries its item # directly)."""
     rows: List[Dict[str, Any]] = []
     for c in components(items):
@@ -187,15 +185,14 @@ def tree_rows(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         rows.append({"depth": 0, "kind": KIND_COMPONENT, "text": name,
                      "price": price,
                      "item_no": "" if multi else c["sources"][0]["item_no"]})
-        for k, v in c["facts"].items():
-            rows.append({"depth": 1, "kind": KIND_FACT, "text": _fact_text(k, v),
+        for k, v in c["attributes"].items():
+            rows.append({"depth": 1, "kind": KIND_ATTRIBUTE,
+                         "text": _attribute_text(k, v),
                          "price": "", "item_no": ""})
-        for d in c["details"]:
-            rows.append({"depth": 1, "kind": KIND_DETAIL, "text": "· " + d,
-                         "price": "", "item_no": ""})
-        if c["review"]:
+        for review in c["review"]:
             rows.append({"depth": 1, "kind": KIND_REVIEW,
-                         "text": "; ".join(c["review"]), "price": "", "item_no": ""})
+                         "text": review["text"], "price": "",
+                         "item_no": review["item_no"]})
         if multi:
             for s in c["sources"]:
                 rows.append({"depth": 1, "kind": KIND_SOURCE,

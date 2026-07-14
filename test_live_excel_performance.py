@@ -13,7 +13,7 @@ import time
 from unittest import mock
 
 import live_excel
-from live_sheets import Cell, Sheet
+from live_sheets import Cell, Sheet, sales_order_sheet
 
 
 def _clear_render_state() -> None:
@@ -185,6 +185,38 @@ def test_timed_out_writer_blocks_overlap_until_it_finishes():
             time.sleep(0.01)
         assert live_excel._excel_write_active[0] is None
         assert live_excel._run_excel_guarded("test", lambda: "third", "bad") == "third"
+
+
+def test_sales_order_component_palette_is_distinct_lighter_and_readable():
+    palette = live_excel._SO_HIERARCHY_PALETTE
+    assert len(palette) == live_excel._SO_COMPONENT_COLOR_COUNT == 80
+    assert len({base for base, _child, _text in palette}) == len(palette)
+
+    for base, child, text in palette:
+        base_lum = live_excel._relative_luminance(base)
+        child_lum = live_excel._relative_luminance(child)
+        text_lum = live_excel._relative_luminance(text)
+        contrast = ((max(base_lum, text_lum) + 0.05)
+                    / (min(base_lum, text_lum) + 0.05))
+        assert child_lum > base_lum
+        assert contrast >= 4.5
+
+
+def test_sales_order_hierarchy_rules_follow_dynamic_spill_and_child_kinds():
+    sheet = sales_order_sheet(n_data_rows=20, n_orders=1)
+    first_row = live_excel._sales_order_tree_first_row(sheet)
+    assert first_row == 9
+
+    specs = live_excel._sales_order_hierarchy_cf_specs(first_row, ",")
+    assert len(specs) == 2 * live_excel._SO_COMPONENT_COLOR_COUNT + 3
+    assert 'COUNTIF($C$9:$C9,"COMPONENT")' in specs[0]["formula"]
+    assert '$C9="COMPONENT"' in specs[0]["formula"]
+    assert '$C9<>"COMPONENT"' in specs[1]["formula"]
+    assert specs[0]["fill"] != specs[1]["fill"]
+    assert '$C9="ATTRIBUTE"' in specs[-3]["formula"]
+    assert [spec["font_color"] for spec in specs[-3:]] == [
+        "344054", "667085", "B42318",
+    ]
 
 
 def main() -> int:

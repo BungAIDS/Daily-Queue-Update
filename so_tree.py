@@ -12,8 +12,9 @@ deep-troubleshooting companion to the live workbook's Sales Order tab.
 The tree (see so_hierarchy) shows what we KNOW about the job, not what the SO
 printed: ONE COMPONENT per real thing — lines the extractors tied together
 (shared used_on / component attribute, e.g. the three IVC charges) merge into
-it — with every merged FACT, stored DETAIL sub-line and REVIEW flag (including
-fact conflicts) beneath it, and the contributing SOURCE lines at the bottom.
+it — with every merged ATTRIBUTE and REVIEW flag (including uncategorized
+continuation text and attribute conflicts) beneath it, and the contributing
+SOURCE lines at the bottom. Verbatim continuation text remains in --flat.
 A wrong tree therefore means a wrong capture or attribute — use --flat to see
 the stored items exactly as captured, and --lines to replay the extractor over
 the PDF's text when the problem is a line that was skipped or merged before it

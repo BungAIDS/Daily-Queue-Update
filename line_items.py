@@ -13,11 +13,13 @@ captured line is kept several ways:
              collapsed, known abbreviations expanded (W/ -> WITH, SS ->
              STAINLESS STEEL, IVD -> INLET VANE DAMPER, ...) so spelling
              variants of the same option converge
-    details  the unpriced continuation lines printed under the item (vendor,
-             motor HP/enclosure, "Product: Damper", ...) — searchable, and
-             they contribute to the item's tags
+    details  the verbatim unpriced continuation lines printed under the item
+             (vendor, motor HP/enclosure, "Product: Damper", ...)
     tags     canonical feature tags matched by the rules table (SHAFT SEAL,
              SPARK RESISTANT, COATING, ...) — the lookup vocabulary
+    attributes normalized component information derived from raw + details
+    review_flags parser uncertainty and detail text that produced neither a
+             tag nor an attribute and still needs categorization
 
 CBC Sales-Order anatomy (fitted against real dumps, jobs 421314/421473): the
 item table lists "<description> <L|C|N> <Price Freight Markup Net Comm.>" —
@@ -33,7 +35,8 @@ BACKLOG_DIR/line_items.json), keyed by job:
 
     {"jobs":    {"421314": {"customer": ..., "co_number": 1, "so_pdf": ...,
                             "scanned_at": ..., "items": [{raw, norm, qty,
-                            price, ptype, section, details, tags}, ...]}},
+                            price, ptype, section, details, tags, attributes,
+                            review_flags}, ...]}},
      "ai_tags": {"<norm>": ["TAG", ...]}}   # cached Claude classifications
 
 The store is fed three ways: the daily run (sales_orders.py) records every
@@ -1248,6 +1251,181 @@ def _warranty_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
     return attrs
 
 
+def _motor_attributes(item: Dict[str, Any], primary: str, norm_blob: str,
+                      tags: set[str]) -> Dict[str, str]:
+    """Core motor nameplate/spec attributes from the item and its detail block."""
+    if "MOTOR" not in tags and not re.match(r"^MOTOR\b", primary, re.I):
+        return {}
+
+    attrs: Dict[str, str] = {"component": "MOTOR"}
+    raw_blob = _item_blob(item)
+
+    hp_values: List[str] = []
+    for match in re.finditer(
+        r"(?<![A-Z0-9])((?:\d+\s*/\s*\d+)|(?:\d+(?:\.\d+)?))\s*H\.?\s*P\.?(?![A-Z])",
+        raw_blob,
+        re.I,
+    ):
+        _add_unique(hp_values, re.sub(r"\s+", "", match.group(1)))
+    if hp_values:
+        attrs["motor_hp"] = ", ".join(hp_values)
+
+    rpm_values: List[str] = []
+    for match in re.finditer(r"\b(\d{2,5})\s*R\.?\s*P\.?\s*M\.?(?![A-Z])", raw_blob, re.I):
+        _add_unique(rpm_values, match.group(1))
+    if rpm_values:
+        attrs["motor_rpm"] = ", ".join(rpm_values)
+
+    frame = re.search(r"\b(\d{2,3}(?:T(?:S|C)?|C|M|S|L))\b", norm_blob)
+    if frame:
+        attrs["motor_frame"] = frame.group(1).upper()
+
+    electrical = re.search(
+        r"(?<!\d)([13])\s*/\s*(50|60)\s*/\s*(\d{3,4}(?:\s*/\s*\d{3,4})*)",
+        raw_blob,
+        re.I,
+    )
+    if electrical:
+        attrs["motor_phase"] = electrical.group(1)
+        attrs["motor_frequency_hz"] = electrical.group(2)
+        attrs["motor_voltage"] = re.sub(r"\s+", "", electrical.group(3))
+    else:
+        phase = re.search(r"\b([13])\s*PH(?:ASE)?\b", norm_blob)
+        frequency = re.search(r"\b(50|60)\s*HZ\b", norm_blob)
+        voltage = re.search(
+            r"\b(\d{3,4}(?:\s*/\s*\d{3,4})*)\s*V(?:OLT(?:S)?)?\b",
+            raw_blob,
+            re.I,
+        )
+        if phase:
+            attrs["motor_phase"] = phase.group(1)
+        if frequency:
+            attrs["motor_frequency_hz"] = frequency.group(1)
+        if voltage:
+            attrs["motor_voltage"] = re.sub(r"\s+", "", voltage.group(1))
+
+    poles = re.search(r"\b(\d{1,2})\s*P(?:OLE(?:S)?)?\b", norm_blob)
+    if poles:
+        attrs["motor_poles"] = poles.group(1)
+
+    service_factor = re.search(
+        r"\b(?:SERVICE\s+FACTOR\s*:?[ ]*)?(\d+(?:\.\d+)?)\s*S\.?\s*F\.?(?![A-Z])",
+        raw_blob,
+        re.I,
+    )
+    if service_factor:
+        attrs["motor_service_factor"] = service_factor.group(1)
+
+    conduit = re.search(r"\b(F[12]|RF)\b", norm_blob)
+    if conduit:
+        attrs["motor_conduit_box_location"] = conduit.group(1).upper()
+
+    enclosure_choice = bool(
+        re.search(r"\bTEFC\s+(?:OR\s+)?ODP\b", norm_blob)
+        and "ENCLOSURE" not in norm_blob
+    )
+    if not enclosure_choice:
+        if re.search(r"\bEXPLOSION\s+PROOF\b", norm_blob):
+            attrs["motor_enclosure"] = "EXPLOSION PROOF"
+        elif "TEFC" in norm_blob:
+            if re.search(r"\bSEVERE\s+DUTY\b", norm_blob):
+                attrs["motor_enclosure"] = "TEFC SEVERE DUTY"
+            elif re.search(r"\bPREM(?:IUM)?\s+EFF(?:ICIENT|ICIENCY)?\b", norm_blob):
+                attrs["motor_enclosure"] = "TEFC PREMIUM EFFICIENT"
+            elif "PREMIUM" in norm_blob:
+                attrs["motor_enclosure"] = "TEFC PREMIUM"
+            elif "EPACT" in norm_blob:
+                attrs["motor_enclosure"] = "TEFC EPACT"
+            else:
+                attrs["motor_enclosure"] = "TEFC"
+        else:
+            for enclosure in ("TEAO", "TENV", "ODP", "WPII", "WPI"):
+                if re.search(rf"\b{enclosure}\b", norm_blob):
+                    attrs["motor_enclosure"] = enclosure
+                    break
+
+    duties: List[str] = []
+    for value, pattern in (
+        ("SEVERE DUTY", r"\bSEVERE\s+DUTY\b"),
+        ("INVERTER DUTY", r"\bINVERTER\s+DUTY\b"),
+        ("IEEE 841", r"\bIEEE\s*841\b"),
+        ("CONTINUOUS DUTY", r"\bCONTINUOUS\s+DUTY\b"),
+        ("WASHDOWN DUTY", r"\bWASH\s*DOWN\s+DUTY\b"),
+        ("MILL AND CHEMICAL DUTY", r"\bMILL\s+(?:AND|&)\s+CHEMICAL\s+DUTY\b"),
+    ):
+        if re.search(pattern, norm_blob):
+            _add_unique(duties, value)
+    if duties:
+        attrs["motor_duty"] = ", ".join(duties)
+
+    efficiencies: List[str] = []
+    for match in re.finditer(r"\bIE([234])\b", norm_blob):
+        _add_unique(efficiencies, f"IE{match.group(1)}")
+    for value, pattern in (
+        ("NEMA PREMIUM", r"\bNEMA\s+PREMIUM\b"),
+        ("PREMIUM EFFICIENT", r"\bPREM(?:IUM)?\s+EFF(?:ICIENT|ICIENCY)?\b"),
+        ("EPACT", r"\bEPACT\b"),
+    ):
+        if re.search(pattern, norm_blob):
+            _add_unique(efficiencies, value)
+    if efficiencies:
+        attrs["motor_efficiency"] = ", ".join(efficiencies)
+
+    protection = re.search(r"\bIP\s*([0-9]{2})\b", norm_blob)
+    if protection:
+        attrs["motor_protection"] = f"IP{protection.group(1)}"
+
+    for value, pattern in (
+        ("CAST ALUMINUM", r"\bCAST\s+ALUMINUM\b"),
+        ("CAST IRON", r"\bCAST\s+IRON\b"),
+        ("ROLLED STEEL", r"\bROLLED\s+STEEL\b"),
+    ):
+        if re.search(pattern, norm_blob):
+            attrs["motor_frame_material"] = value
+            break
+
+    model = re.search(
+        r"\bMODEL(?:\s*(?:NO|NUM(?:BER)?|#))?\s*:?\s*([A-Z0-9][A-Z0-9./\\_-]*)",
+        raw_blob,
+        re.I,
+    )
+    if model and model.group(1).upper() not in {"C", "L", "N"}:
+        attrs["motor_model"] = model.group(1).upper()
+    part = re.search(
+        r"\b(?:P\s*/\s*N|PN|PART\s+(?:NO|NUM(?:BER)?|#))\s*:?\s*([A-Z0-9][A-Z0-9./-]*)",
+        raw_blob,
+        re.I,
+    )
+    if part:
+        attrs["motor_part_number"] = part.group(1).upper()
+    catalog = re.search(
+        r"\bCAT(?:ALOG)?\s*(?:NO|NUM(?:BER)?|#)\s*:?\s*([A-Z0-9][A-Z0-9./-]*)",
+        raw_blob,
+        re.I,
+    )
+    if catalog:
+        attrs["motor_catalog_number"] = catalog.group(1).upper()
+    quote = re.search(
+        r"\bQUOTE\s*(?:NO|NUM(?:BER)?|#)\s*:?\s*([A-Z0-9-]+)",
+        raw_blob,
+        re.I,
+    )
+    if quote:
+        attrs["motor_vendor_quote_number"] = quote.group(1).upper()
+
+    if re.search(r"\b(?:CUSTOMER\s+(?:PROVIDED|FURNISHED|SUPPLIED)|MOTOR\s+BY\s+CUSTOMER)\b", norm_blob):
+        attrs["motor_supplied_by"] = "CUSTOMER"
+    elif re.search(r"\b(?:MOTOR\s+(?:PROVIDED|FURNISHED|SUPPLIED)?\s*BY\s+OTHERS|SUPPLIED\s+AND\s+MOUNTED\s+BY\s+OTHERS)\b", norm_blob):
+        attrs["motor_supplied_by"] = "OTHERS"
+    if re.search(r"\b(?:MOUNTED|MOUNTING)\s+BY\s+OTHERS\b", norm_blob):
+        attrs["motor_mounted_by"] = "OTHERS"
+
+    orientation = re.search(r"\b(VERTICAL|HORIZONTAL)\s+SHAFT(?:\s+(UP|DOWN))?\b", norm_blob)
+    if orientation:
+        attrs["motor_orientation"] = " ".join(x for x in orientation.groups() if x)
+    return attrs
+
+
 def _motor_insulation_attributes(norm_blob: str, tags: set[str], raw_tags: set[str]) -> Dict[str, str]:
     if "MOTOR" not in tags and "MOTOR" not in raw_tags and not re.search(r"\bMOTOR\b", norm_blob):
         return {}
@@ -1258,16 +1436,16 @@ def _motor_insulation_attributes(norm_blob: str, tags: set[str], raw_tags: set[s
     if classes:
         attrs["motor_insulation_class"] = ", ".join(classes)
 
-    if re.search(r"\b(DUAL\s+INSULATED\s+BEARINGS?|INSULATED\s+BEARINGS?\b.*\bDE\b.*\bNDE\b)", norm_blob):
+    if re.search(r"\b(DUAL\s+(?:INSULATED|ISOLATED)\s+BEARINGS?|(?:INSULATED|ISOLATED)\s+BEARINGS?\b.*\bDE\b.*\bNDE\b)", norm_blob):
         attrs["motor_insulated_bearing"] = "DE AND NDE"
-    elif re.search(r"\b(NDE\s+INSULATED\s+BEARING|INSULATED\s+NDE\s+BEARING|INSULATED\s+BEARINGS?\s*\(?NDE)\b", norm_blob):
+    elif re.search(r"\b(NDE\s+(?:INSULATED|ISOLATED)\s+BEARING|(?:INSULATED|ISOLATED)\s+NDE\s+BEARING|(?:INSULATED|ISOLATED)\s+BEARINGS?\s*\(?NDE)\b", norm_blob):
         attrs["motor_insulated_bearing"] = "NDE"
-    elif re.search(r"\b(DE\s+INSULATED\s+BEARING|INSULATED\s+DE\s+BEARING|INSULATED\s+BEARINGS?\s*\(?DE)\b", norm_blob):
+    elif re.search(r"\b(DE\s+(?:INSULATED|ISOLATED)\s+BEARING|(?:INSULATED|ISOLATED)\s+DE\s+BEARING|(?:INSULATED|ISOLATED)\s+BEARINGS?\s*\(?DE)\b", norm_blob):
         attrs["motor_insulated_bearing"] = "DE"
-    elif re.search(r"\bINSULATED\s+BEARINGS?\b", norm_blob):
+    elif re.search(r"\b(?:INSULATED|ISOLATED)\s+BEARINGS?\b", norm_blob):
         attrs["motor_insulated_bearing"] = "YES"
 
-    if re.search(r"\bAEGIS\s+RING\b", norm_blob):
+    if re.search(r"\bAEGIS(?:\s+(?:INTERNAL|BEARING|SHAFT|PROTECTION))*\s+RING\b", norm_blob):
         attrs["motor_shaft_grounding"] = "AEGIS RING"
     elif re.search(r"\bSHAFT\s+GROUNDING\s+BRUSH\b", norm_blob):
         attrs["motor_shaft_grounding"] = "SHAFT GROUNDING BRUSH"
@@ -1932,17 +2110,24 @@ def _vfd_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, s
     if "VFD" not in tags:
         return {}
     attrs: Dict[str, str] = {}
-    if "MOTOR" in tags or re.search(r"\b(MOTOR|INVERTER\s+DUTY|VFD\s+SUITAB|VFD\s+OPERATION)\b", norm_blob):
+    if "MOTOR" in tags or re.search(
+        r"\b(MOTOR|INVERTER\s+DUTY|VFD\s+(?:SUITAB|OPERATION|CONTROLLED|RATED|COMPATIB))\b",
+        norm_blob,
+    ):
         attrs["component"] = "MOTOR"
         attrs["vfd_context"] = "MOTOR"
     if re.search(r"\bVFD\s+BY\s+OTHERS\b", norm_blob):
         attrs["vfd_supplied_by"] = "OTHERS"
-    if re.search(r"\bVFD\s+SUITAB(?:LE|ILITY)\b", norm_blob):
-        attrs["motor_vfd_suitability"] = "VFD SUITABLE"
-    if re.search(r"\bINVERTER\s+DUTY\b", norm_blob):
+    if re.search(r"\b(?:NOT\s+VFD\s+SUITAB(?:LE|ILITY)|NOT\s+(?:FOR|SUITABLE\s+FOR)\s+VFD)\b", norm_blob):
+        attrs["motor_vfd_suitability"] = "NOT VFD SUITABLE"
+    elif re.search(r"\bINVERTER\s+DUTY\b", norm_blob):
         attrs["motor_vfd_suitability"] = "INVERTER DUTY"
+    elif re.search(r"\bVFD\s+(?:SUITAB(?:LE|ILITY)|COMPATIBLE|RATED)\b", norm_blob):
+        attrs["motor_vfd_suitability"] = "VFD SUITABLE"
     if re.search(r"\bDOL\s+OR\s+VFD\s+OPERATION\b", norm_blob):
         attrs["motor_vfd_operation"] = "DOL OR VFD"
+    elif re.search(r"\bVFD\s+CONTROLLED\b", norm_blob):
+        attrs["motor_vfd_operation"] = "VFD CONTROLLED"
     ratios = re.findall(r"\b\d+\s*(?::|\s)\s*1\s+(?:CT|VT)\b", norm_blob)
     if ratios:
         attrs["motor_vfd_speed_range"] = ", ".join(
@@ -3191,6 +3376,7 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_special_construction_attributes(primary, norm_blob, tags))
     attrs.update(_wheel_attributes(primary, norm_blob, tags, blob))
     attrs.update(_unitary_base_attributes(primary, norm_blob, tags))
+    attrs.update(_motor_attributes(item, primary, norm_blob, tags))
     attrs.update(_vfd_attributes(primary, norm_blob, tags))
     attrs.update(_vibration_isolation_attributes(primary, norm_blob, tags, blob))
     attrs.update(_flange_attributes(primary, norm_blob, tags, raw_tags))
@@ -3326,7 +3512,62 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     return attrs
 
 
-def _review_flags(tags: List[str], attrs: Dict[str, Any]) -> List[str]:
+_UNCLASSIFIED_DETAIL_PREFIX = "UNCLASSIFIED DETAIL: "
+
+
+def _semantic_signature(tags: List[str], attrs: Dict[str, Any]) -> Tuple[Any, ...]:
+    return (
+        tuple(sorted(str(tag) for tag in tags)),
+        tuple(sorted((str(key), repr(value)) for key, value in attrs.items())),
+    )
+
+
+def _detail_review_flags(item: Dict[str, Any], rules: Dict[str, Any],
+                         final_tags: List[str], final_attrs: Dict[str, Any]) -> List[str]:
+    """Flag continuation lines that add no tag or normalized attribute.
+
+    Details are added in document order and the semantic result is compared at
+    each step. Once a new rule understands a detail, renormalization changes the
+    signature and automatically removes it from the review queue.
+    """
+    details = [str(detail).strip() for detail in item.get("details") or []
+               if str(detail).strip()]
+    if not details:
+        return []
+
+    probe = dict(item)
+    probe["details"] = []
+    baseline = _semantic_signature(
+        _final_tags(probe, rules), component_attributes(probe, rules)
+    )
+    previous = baseline
+    accumulated: List[str] = []
+    flags: List[str] = []
+    for index, detail in enumerate(details):
+        accumulated.append(detail)
+        if index == len(details) - 1:
+            current = _semantic_signature(final_tags, final_attrs)
+        else:
+            probe["details"] = list(accumulated)
+            current = _semantic_signature(
+                _final_tags(probe, rules), component_attributes(probe, rules)
+            )
+        if current == previous:
+            # A repeated known spec may add nothing because an earlier detail
+            # already supplied the same value. Check it alone against the raw
+            # item before deciding it is uncategorized.
+            probe["details"] = [detail]
+            alone = _semantic_signature(
+                _final_tags(probe, rules), component_attributes(probe, rules)
+            )
+            if alone == baseline:
+                flags.append(_UNCLASSIFIED_DETAIL_PREFIX + detail)
+        previous = current
+    return flags
+
+
+def _review_flags(tags: List[str], attrs: Dict[str, Any],
+                  detail_flags: List[str] | None = None) -> List[str]:
     flags: List[str] = []
     if not tags:
         flags.append("UNTAGGED")
@@ -3336,11 +3577,20 @@ def _review_flags(tags: List[str], attrs: Dict[str, Any]) -> List[str]:
                 continue
             label = str(key).replace("_", " ").upper()
             flags.append(f"{label}: {value}")
+    for flag in detail_flags or []:
+        if flag not in flags:
+            flags.append(flag)
     return flags
 
 
-def _apply_review_flags(item: Dict[str, Any]) -> None:
-    flags = _review_flags(list(item.get("tags") or []), item.get("attributes") or {})
+def _apply_review_flags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> None:
+    rules = rules or load_rules()
+    parser_tags = _final_tags(item, rules)
+    parser_attrs = component_attributes(item, rules)
+    tags = list(item.get("tags") or parser_tags)
+    attrs = item.get("attributes") or parser_attrs
+    detail_flags = _detail_review_flags(item, rules, parser_tags, parser_attrs)
+    flags = _review_flags(tags, attrs, detail_flags)
     if flags:
         item["review_flags"] = flags
     else:
@@ -3358,8 +3608,10 @@ def derive_item_fields(item: Dict[str, Any], rules: Dict[str, Any] | None = None
     probe["norm"] = norm
     tags = _final_tags(probe, rules)
     attrs = component_attributes(probe, rules)
+    detail_flags = _detail_review_flags(probe, rules, tags, attrs)
     return {"norm": norm, "qty": qty, "price": price or mark, "ptype": ptype,
-            "tags": tags, "attributes": attrs, "review_flags": _review_flags(tags, attrs)}
+            "tags": tags, "attributes": attrs,
+            "review_flags": _review_flags(tags, attrs, detail_flags)}
 
 
 # --------------------------------------------------------------------------- #
@@ -3462,7 +3714,8 @@ def extract_items(lines: Iterable[str], rules: Dict[str, Any] | None = None) -> 
     "Accessories", ...) is an item even unpriced. Unpriced lines under an item
     become its `details`. Duplicate lines (same normalized form) collapse to
     one. Items come back as {raw, norm, qty, price, ptype, section, details,
-    tags} — tags consider the details too."""
+    tags, attributes, review_flags}; tags and attributes consider details, and
+    uncategorized details become review flags."""
     rules = rules or load_rules()
     by_norm: Dict[str, Dict[str, Any]] = {}
     last: Dict[str, Any] | None = None
@@ -3510,7 +3763,7 @@ def extract_items(lines: Iterable[str], rules: Dict[str, Any] | None = None) -> 
     for it in items:
         it["tags"] = _final_tags(it, rules)
         it["attributes"] = component_attributes(it, rules)
-        _apply_review_flags(it)
+        _apply_review_flags(it, rules)
     return items
 
 
@@ -3893,10 +4146,10 @@ def ai_classify_unknowns(store: Dict[str, Any], batch_size: int = 60) -> int:
 
 
 def renormalize_store(store: Dict[str, Any]) -> int:
-    """Re-derive every stored item's norm + tags from its verbatim raw text
-    (and details) using the CURRENT rules + the AI cache. Run after editing
-    the rules file — nothing is re-downloaded or re-parsed. Returns the item
-    count."""
+    """Re-derive every stored item's norm, tags, attributes and review flags
+    from its verbatim raw text/details using the CURRENT rules + AI cache. Run
+    after editing the rules; nothing is re-downloaded or re-parsed. Returns the
+    item count."""
     rules = load_rules(refresh=True)
     n = 0
     for rec in (store.get("jobs") or {}).values():

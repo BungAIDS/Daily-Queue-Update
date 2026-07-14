@@ -21,6 +21,7 @@ poll cycle carries on (state + notifications still happen).
 from __future__ import annotations
 
 import contextlib
+import colorsys
 import logging
 import os
 import threading
@@ -30,7 +31,7 @@ from typing import Any, Dict, List, Optional
 
 from openpyxl.utils import get_column_letter
 
-from live_sheets import Sheet
+from live_sheets import SALES_ORDER_TAB, SO_TREE_HEADERS, Sheet
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +81,63 @@ _FONT = {
     "red": ("C00000", True, False, None),
     "note": ("808080", False, False, None),   # muted gray (e.g. the 'last updated' stamp)
 }
+
+# The Sales Order hierarchy can be surprisingly deep: the current queue reaches
+# 43 top-level components and the backlog reaches the mid-70s. A golden-angle
+# palette keeps neighboring component bands far apart in hue; varied chroma and
+# lightness keep later colors distinct without turning the sheet neon. Each
+# component also gets a pale child tint, while the top band chooses black/white
+# text by contrast so every label remains readable.
+_SO_COMPONENT_COLOR_COUNT = 80
+# The largest hierarchy in the 13K-order bank is currently 250 rows. A 400-row
+# range leaves generous growth room without making Excel evaluate these rules
+# against thousands of permanently empty cells on every picker change.
+_SO_TREE_ROW_CAP = 400
+
+
+def _rgb_hex(red: float, green: float, blue: float) -> str:
+    return "".join(f"{max(0, min(255, round(channel * 255))):02X}"
+                   for channel in (red, green, blue))
+
+
+def _tint(rgb_hex: str, white: float = 0.78) -> str:
+    channels = [int(rgb_hex[i:i + 2], 16) for i in (0, 2, 4)]
+    return "".join(f"{round(channel * (1.0 - white) + 255 * white):02X}"
+                   for channel in channels)
+
+
+def _relative_luminance(rgb_hex: str) -> float:
+    def linear(channel: int) -> float:
+        value = channel / 255.0
+        return value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+
+    red, green, blue = (linear(int(rgb_hex[i:i + 2], 16)) for i in (0, 2, 4))
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+
+def _contrast_text(rgb_hex: str) -> str:
+    luminance = _relative_luminance(rgb_hex)
+    white_ratio = 1.05 / (luminance + 0.05)
+    black_ratio = (luminance + 0.05) / 0.05
+    return "FFFFFF" if white_ratio >= black_ratio else "000000"
+
+
+def _sales_order_palette(count: int = _SO_COMPONENT_COLOR_COUNT) -> List[tuple[str, str, str]]:
+    """Return (component fill, child tint, readable text) color families."""
+    palette = []
+    golden = 0.6180339887498949
+    saturations = (0.58, 0.70, 0.78, 0.64)
+    lightnesses = (0.32, 0.40, 0.28, 0.36, 0.44)
+    for index in range(count):
+        hue = (0.57 + index * golden) % 1.0
+        saturation = saturations[index % len(saturations)]
+        lightness = lightnesses[(index // len(saturations)) % len(lightnesses)]
+        base = _rgb_hex(*colorsys.hls_to_rgb(hue, lightness, saturation))
+        palette.append((base, _tint(base), _contrast_text(base)))
+    return palette
+
+
+_SO_HIERARCHY_PALETTE = _sales_order_palette()
 
 # "History" is a RESERVED worksheet name in Excel (shared-workbook change
 # tracking), so the archived-orders tab is "Order History".
@@ -512,6 +570,9 @@ def render_sheet(app, wb, sheet: Sheet) -> None:
         except Exception:  # noqa: BLE001
             pass
 
+    if sheet.name == SALES_ORDER_TAB:
+        _apply_sales_order_hierarchy_style(ws, sheet)
+
     # Honor the model's visibility both ways, so a sheet that was hidden in an
     # earlier build resurfaces when its model stops being hidden.
     with contextlib.suppress(Exception):
@@ -676,6 +737,97 @@ def _cf_separators(ws) -> List[str]:
     if "," not in seps:
         seps.append(",")
     return seps
+
+
+def _sales_order_tree_first_row(sheet: Sheet) -> int | None:
+    """First dynamic hierarchy row, found from its visible header."""
+    for row_no, row in enumerate(sheet.grid, start=1):
+        if [cell.value for cell in row[:len(SO_TREE_HEADERS)]] == SO_TREE_HEADERS:
+            return row_no + 1
+    return None
+
+
+def _sales_order_hierarchy_cf_specs(first_row: int, sep: str) -> List[Dict[str, Any]]:
+    """Conditional-format specs for component families and semantic child rows."""
+    count = len(_SO_HIERARCHY_PALETTE)
+    component_count = f'COUNTIF($C${first_row}:$C{first_row}{sep}"COMPONENT")'
+    specs: List[Dict[str, Any]] = []
+    for slot, (base, child, text_color) in enumerate(_SO_HIERARCHY_PALETTE):
+        family = f'MOD({component_count}-1{sep}{count})={slot}'
+        specs.append({
+            "formula": (f'=AND($A{first_row}<>""{sep}$C{first_row}="COMPONENT"'
+                        f'{sep}{family})'),
+            "fill": base,
+            "font_color": text_color,
+            "bold": True,
+        })
+        specs.append({
+            "formula": (f'=AND($A{first_row}<>""{sep}$C{first_row}<>""'
+                        f'{sep}$C{first_row}<>"COMPONENT"{sep}{family})'),
+            "fill": child,
+        })
+
+    # Child rows share their component's pale family tint. Typography then makes
+    # the evidence layers scan differently without adding another 240 fill rules.
+    for kind, color, bold, italic in (
+        ("ATTRIBUTE", "344054", True, False),
+        ("SOURCE", "667085", False, False),
+        ("REVIEW", "B42318", True, False),
+    ):
+        specs.append({
+            "formula": f'=AND($A{first_row}<>""{sep}$C{first_row}="{kind}")',
+            "font_color": color,
+            "bold": bold,
+            "italic": italic,
+        })
+    return specs
+
+
+def _apply_sales_order_hierarchy_style(ws, sheet: Sheet) -> bool:
+    """Color the picker-driven hierarchy without disturbing its spill formulas."""
+    first_row = _sales_order_tree_first_row(sheet)
+    if first_row is None:
+        return False
+    last_row = first_row + _SO_TREE_ROW_CAP - 1
+    rng = ws.Range(ws.Cells(first_row, 1), ws.Cells(last_row, len(SO_TREE_HEADERS)))
+    last_error = None
+    for sep in _cf_separators(ws):
+        try:
+            rng.FormatConditions.Delete()
+            for spec in _sales_order_hierarchy_cf_specs(first_row, sep):
+                rule = rng.FormatConditions.Add(
+                    _XL_EXPRESSION, _XL_EQUAL, spec["formula"]
+                )
+                if spec.get("fill"):
+                    rule.Interior.Color = _bgr(spec["fill"])
+                if spec.get("font_color"):
+                    rule.Font.Color = _bgr(spec["font_color"])
+                if "bold" in spec:
+                    rule.Font.Bold = bool(spec["bold"])
+                if "italic" in spec:
+                    rule.Font.Italic = bool(spec["italic"])
+                with contextlib.suppress(Exception):
+                    rule.StopIfTrue = False
+            break
+        except Exception as exc:  # noqa: BLE001 - retry with Excel's other separator
+            last_error = exc
+            with contextlib.suppress(Exception):
+                rng.FormatConditions.Delete()
+    else:
+        log.warning("Sales Order hierarchy color formatting failed (%s)", last_error)
+        return False
+
+    # Keep the hierarchy compact and visually separate from the flat evidence
+    # table. These widths run after AutoFit so long component names stay readable
+    # while Price / Kind / Item # remain quick to scan.
+    for column, width in ((1, 52), (2, 14), (3, 12), (4, 9), (5, 3)):
+        with contextlib.suppress(Exception):
+            ws.Columns(column).ColumnWidth = width
+    with contextlib.suppress(Exception):
+        ws.Range(ws.Cells(first_row, 2), ws.Cells(last_row, 2)).HorizontalAlignment = _XL_RIGHT
+    with contextlib.suppress(Exception):
+        ws.Range(ws.Cells(first_row, 3), ws.Cells(last_row, 4)).HorizontalAlignment = _XL_CENTER
+    return True
 
 
 def _apply_search_cf(ws, key_col: int, ncols: int, first_data_row: int,

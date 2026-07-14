@@ -17,7 +17,7 @@ these are how the capture/normalize rules get fitted to the real documents):
                                                # by which rule. Paste a few of
                                                # these back to tune the rules.
     python line_items_scan.py --renorm         # re-derive every stored item's
-                                               # normalized form + tags from
+                                               # norm/tags/attributes/reviews from
                                                # its verbatim raw text with the
                                                # CURRENT rules (after editing
                                                # the LINE_ITEM_RULES file) —
@@ -40,6 +40,7 @@ from typing import List, Optional, Tuple
 
 from config import SALES_ORDER_DIR
 import line_items as li
+from process_lock import data_file_lock
 from sales_order_validation import (
     DOCUMENT_KIND_SALES_ORDER,
     accept_existing,
@@ -211,7 +212,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--dump", action="store_true",
                     help="Print the per-line capture view for the given jobs/PDFs (no store writes).")
     ap.add_argument("--renorm", action="store_true",
-                    help="Re-derive every stored item's norm/tags from raw with the current rules.")
+                    help="Re-derive every stored item's norm/tags/attributes/reviews from raw with the current rules.")
     ap.add_argument("--ai", action="store_true",
                     help="Classify still-untagged unique items with Claude (cached forever).")
     ap.add_argument("--rescan", action="store_true", help="Re-parse jobs already in the store.")
@@ -233,9 +234,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     if args.renorm:
-        store = li.load_store()
-        n = li.renormalize_store(store)
-        li.save_store(store)
+        with data_file_lock(li.store_path(), label="line-items renormalization"):
+            store = li.load_store()
+            n = li.renormalize_store(store)
+            li.save_store(store)
         log.info("Re-normalized %d item(s) across %d job(s) with the current rules.",
                  n, len(store["jobs"]))
         return 0

@@ -471,14 +471,22 @@ def test_renormalize_uses_current_rules():
         {"raw": "Prints:", "norm": "PRINTS", "qty": "", "price": "",
          "ptype": "", "section": "", "details": [], "tags": ["DRAWINGS"], "attributes": {}}
     )
+    store["jobs"]["421314"]["items"].extend(li.extract_items([
+        "Motor C 254.83",
+        "3 HP, 3600 RPM, Enclosure: TEFC Premium",
+    ]))
     # Sabotage the stored derived fields; renormalize must rebuild from raw.
     for it in store["jobs"]["421314"]["items"]:
         it["norm"], it["tags"] = "WRONG", ["BOGUS"]
+        it["attributes"], it["review_flags"] = {"bad": "value"}, ["STALE"]
     n = li.renormalize_store(store)
     assert n >= len(store["jobs"]["421314"]["items"])
     norms = [it["norm"] for it in store["jobs"]["421314"]["items"]]
     assert "STAINLESS STEEL SHAFT SLEEVE" in norms, norms
     assert "PRINTS" not in norms
+    motor = next(it for it in store["jobs"]["421314"]["items"] if it["norm"] == "MOTOR")
+    assert motor["attributes"]["motor_hp"] == "3"
+    assert "STALE" not in (motor.get("review_flags") or [])
 
 
 def test_audit_untagged_uses_current_rules():
@@ -580,6 +588,9 @@ def test_vfd_attributes_are_motor_details():
     ])[0]
     assert {"MOTOR", "VFD"} <= set(motor["tags"])
     assert motor["attributes"]["component"] == "MOTOR"
+    assert motor["attributes"]["motor_hp"] == "3"
+    assert motor["attributes"]["motor_rpm"] == "3600"
+    assert motor["attributes"]["motor_enclosure"] == "TEFC PREMIUM"
     assert motor["attributes"]["vfd_context"] == "MOTOR"
     assert motor["attributes"]["motor_vfd_suitability"] == "VFD SUITABLE"
 
@@ -599,6 +610,50 @@ def test_vfd_attributes_are_motor_details():
     assert "VFD" in by_others["tags"]
     assert by_others["attributes"]["component"] == "MOTOR"
     assert by_others["attributes"]["vfd_supplied_by"] == "OTHERS"
+
+    not_suitable = li.extract_items([
+        "Motor C 254.83",
+        "Not VFD Suitable",
+        "VFD Controlled",
+    ])[0]
+    assert not_suitable["attributes"]["motor_vfd_suitability"] == "NOT VFD SUITABLE"
+    assert not_suitable["attributes"]["motor_vfd_operation"] == "VFD CONTROLLED"
+
+
+def test_motor_core_attributes_and_unclassified_detail_review():
+    motor = li.extract_items([
+        "Motor (Model ECP84407TR-5 complete with : C 11,435.83",
+        "Vendor: Baldor/Reliance",
+        "200 HP, 1800 RPM, Enclosure: TEFC Severe",
+        "Duty",
+        "447T, Cast Iron, Foot Mounted, 3/60/575, F1,",
+        "1.15 SF",
+        "PN 06-6-0020-01",
+        "Mounted by Others",
+        "Special winding instruction we have not categorized",
+    ])[0]
+    attrs = motor["attributes"]
+    assert attrs["component"] == "MOTOR"
+    assert attrs["vendor"] == "Baldor/Reliance"
+    assert attrs["motor_hp"] == "200"
+    assert attrs["motor_rpm"] == "1800"
+    assert attrs["motor_enclosure"] == "TEFC SEVERE DUTY"
+    assert attrs["motor_duty"] == "SEVERE DUTY"
+    assert attrs["motor_frame"] == "447T"
+    assert attrs["motor_frame_material"] == "CAST IRON"
+    assert attrs["motor_mounting"] == "FOOT MOUNTED"
+    assert attrs["motor_phase"] == "3"
+    assert attrs["motor_frequency_hz"] == "60"
+    assert attrs["motor_voltage"] == "575"
+    assert attrs["motor_conduit_box_location"] == "F1"
+    assert attrs["motor_service_factor"] == "1.15"
+    assert attrs["motor_model"] == "ECP84407TR-5"
+    assert attrs["motor_part_number"] == "06-6-0020-01"
+    assert attrs["motor_mounted_by"] == "OTHERS"
+
+    assert motor.get("review_flags") == [
+        "UNCLASSIFIED DETAIL: Special winding instruction we have not categorized"
+    ]
 
 
 def test_selected_drive_table_attributes():
@@ -1597,6 +1652,15 @@ def test_insulation_splits_motor_details_from_fan_insulation():
     assert motor["attributes"]["motor_insulated_bearing"] == "NDE"
     assert motor["attributes"]["motor_shaft_grounding"] == "AEGIS RING"
 
+    variants = li.extract_items([
+        "Motor C 1,000.00",
+        "M2F Add isolated bearings for NEMA 400 to 500",
+        "M39B 10 Internal AEGIS bearing protection ring",
+    ])[0]
+    assert variants["attributes"]["motor_insulated_bearing"] == "YES"
+    assert variants["attributes"]["motor_shaft_grounding"] == "AEGIS RING"
+    assert "review_flags" not in variants
+
     plug_panel = li.extract_items([
         "Plug Panel, Insulation 8\" L 531.00",
         "Insulated By: CBC",
@@ -1743,6 +1807,7 @@ def test_weather_cover_attributes_and_reference_cleanup():
     ])[0]
     assert {"MOTOR", "WEATHER COVER"} <= set(motor["tags"])
     assert motor["attributes"]["component"] == "MOTOR"
+    assert "motor_enclosure" not in motor["attributes"]
     assert motor["attributes"]["weather_cover_type"] == "DRIP COVER"
     assert motor["attributes"]["weather_cover_scope"] == "MOTOR"
 
