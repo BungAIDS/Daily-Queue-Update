@@ -551,7 +551,7 @@ def base_actions() -> list[LauncherAction]:
         ),
         LauncherAction(
             "so_review_open",
-            "Tools",
+            "Sales Order Review",
             "Open SO Review",
             "Opens the Sales-Order review workbook in Excel (builds it from the "
             "line-items store first if it's missing). Filter the Order column to "
@@ -562,7 +562,7 @@ def base_actions() -> list[LauncherAction]:
         ),
         LauncherAction(
             "so_review_read",
-            "Tools",
+            "Sales Order Review",
             "Read SO Notes",
             "Reads the notes you typed into the review workbook back into the note "
             "queue (published with the other data so Claude can read them). Safe to "
@@ -572,7 +572,7 @@ def base_actions() -> list[LauncherAction]:
         ),
         LauncherAction(
             "so_review_update",
-            "Tools",
+            "Sales Order Review",
             "Update SO Review",
             "Refreshes the review workbook: captures anything you've typed, applies "
             "Claude's handled-marks (a note Claude resolved drops off the sheet), and "
@@ -614,6 +614,7 @@ class LauncherApp(tk.Tk):
         "Live Watch",
         "Scans / Backfill",
         "Search / Inspect",
+        "Sales Order Review",
         "Transmittals",
         "Tools",
         "Developer",
