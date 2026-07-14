@@ -708,6 +708,22 @@ def _cmd_refresh(args) -> int:
     return 0
 
 
+def _cmd_reparse(args) -> int:
+    """The 'Re-parse + Refresh SO Review' action: re-derive EVERY stored order's
+    components/attributes with the current parser (this is what applies the
+    latest SO-parser changes to the whole backlog), then rebuild the sheet so you
+    see the result. Run it right after a Git Update that changed the parser."""
+    import line_items
+    from process_lock import data_file_lock
+    with data_file_lock(line_items.store_path(), label="line-items renormalization"):
+        store_li = line_items.load_store()
+        n = line_items.renormalize_store(store_li)
+        line_items.save_store(store_li)
+    print(f"Re-parsed {n} item(s) across {len(store_li.get('jobs') or {})} order(s) "
+          f"with the current parser; rebuilding the review sheet...")
+    return _cmd_refresh(args)
+
+
 def _cmd_list(args) -> int:
     store = load_store()
     rows = open_notes(store) if not args.all else store["notes"]
@@ -766,6 +782,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     r = sub.add_parser("refresh", help="capture notes + apply handled-marks + rewrite the sheet")
     r.add_argument("--out", default=str(DEFAULT_WORKBOOK))
     r.set_defaults(func=_cmd_refresh)
+
+    rp = sub.add_parser("reparse", help="re-derive all stored orders with the current parser, then refresh")
+    rp.add_argument("--out", default=str(DEFAULT_WORKBOOK))
+    rp.set_defaults(func=_cmd_reparse)
 
     ls_ = sub.add_parser("list", help="show open notes (--all for handled too)")
     ls_.add_argument("--all", action="store_true")

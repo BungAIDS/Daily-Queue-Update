@@ -582,6 +582,28 @@ def base_actions() -> list[LauncherAction]:
             default_args=("refresh",),
         ),
         LauncherAction(
+            "so_review_reparse",
+            "Sales Order Review",
+            "Re-parse + Refresh SO Review",
+            "Applies the latest Sales-Order parser to the WHOLE backlog: re-derives "
+            "every stored order's components and attributes with the current rules, "
+            "then rebuilds the review sheet so you see the result. Run this once "
+            "after a Git Update that changed the parser (takes a minute or two on "
+            "the full store).",
+            "so_review.py",
+            default_args=("reparse",),
+        ),
+        LauncherAction(
+            "so_review_tree",
+            "Sales Order Review",
+            "View One Order's Hierarchy",
+            "Prints one order's component hierarchy to the log — the quick way to "
+            "spot-check a parser change on a single order without rebuilding the "
+            "whole workbook. Enter an order number.",
+            "so_tree.py",
+            options=(option("job", "Order number", "The order to show, e.g. 421967.", positional=True),),
+        ),
+        LauncherAction(
             "custom_script",
             "Tools",
             "Run Any Python Script",
