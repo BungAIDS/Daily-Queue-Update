@@ -22,8 +22,10 @@ from config import BACKLOG_DIR, SALES_ORDER_DIR, SNAPSHOT_DIR
 from process_lock import data_file_lock
 from sales_order_validation import (
     DOCUMENT_KIND_ORDER_VERIFICATION,
+    DOCUMENT_KIND_SALES_ORDER,
     clear_sales_order_data,
     is_order_verification_record,
+    is_true_sales_order_record,
     normalize_order,
     quarantine_candidate,
     validate_sales_order_pdf,
@@ -61,13 +63,24 @@ def _metadata_says_report(record: Dict[str, Any]) -> bool:
     return is_order_verification_record(record)
 
 
+def _metadata_says_verified_sales_order(record: Dict[str, Any]) -> bool:
+    return (
+        is_true_sales_order_record(record)
+        and str(record.get("so_validation") or "").upper() == "MATCH"
+        and bool(str(record.get("so_verified_at") or "").strip())
+    )
+
+
 def _record_is_report_backed(record: Dict[str, Any], report_paths: set[str]) -> bool:
     pdf = _path_key(record.get("so_pdf") or "")
     return _metadata_says_report(record) or bool(pdf and pdf in report_paths)
 
 
 def _collect_metadata_paths(
-    value: Any, found: set[str], report_jobs: set[str]
+    value: Any,
+    found: set[str],
+    report_jobs: set[str],
+    trusted_sales_order_paths: set[str] | None = None,
 ) -> None:
     if isinstance(value, dict):
         if _metadata_says_report(value):
@@ -77,11 +90,19 @@ def _collect_metadata_paths(
             job = normalize_order(value.get("job") or "")
             if job:
                 report_jobs.add(job)
+        elif _metadata_says_verified_sales_order(value):
+            path = _path_key(value.get("so_pdf") or "")
+            if path and trusted_sales_order_paths is not None:
+                trusted_sales_order_paths.add(path)
         for child in value.values():
-            _collect_metadata_paths(child, found, report_jobs)
+            _collect_metadata_paths(
+                child, found, report_jobs, trusted_sales_order_paths
+            )
     elif isinstance(value, list):
         for child in value:
-            _collect_metadata_paths(child, found, report_jobs)
+            _collect_metadata_paths(
+                child, found, report_jobs, trusted_sales_order_paths
+            )
 
 
 def _source_json_paths() -> list[Path]:
@@ -156,7 +177,7 @@ def quarantine_active_reports(
     max_workers: int = 8,
     known_report_paths: set[str] | None = None,
 ) -> Dict[str, Dict[str, str]]:
-    """Move every readable Order Verification Report out of the active bank."""
+    """Move active reports while allowing a corrected Sales Order at an old path."""
     root = Path(root or SALES_ORDER_DIR)
     rows = _active_pdf_rows(root)
     if not rows:
@@ -170,7 +191,13 @@ def quarantine_active_reports(
     reports = []
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for (path, job), validation in pool.map(classify, rows):
-            known = _path_key(path) in (known_report_paths or set())
+            path_key = _path_key(path)
+            # Current PDF contents outrank stale quarantine history. CBC reuses
+            # the same destination name when a true Sales Order replaces a
+            # report, so path history alone must never quarantine that repair.
+            if validation.document_kind == DOCUMENT_KIND_SALES_ORDER:
+                continue
+            known = path_key in (known_report_paths or set())
             named = "orderverificationreportviewer" in path.name.casefold()
             if (
                 validation.document_kind == DOCUMENT_KIND_ORDER_VERIFICATION
@@ -318,8 +345,14 @@ def run(max_workers: int = 8) -> Dict[str, int]:
         source_paths = _source_json_paths()
         report_paths: set[str] = set()
         report_jobs: set[str] = set()
+        trusted_sales_order_paths: set[str] = set()
         for path in source_paths:
-            _collect_metadata_paths(_read_json(path), report_paths, report_jobs)
+            _collect_metadata_paths(
+                _read_json(path),
+                report_paths,
+                report_jobs,
+                trusted_sales_order_paths,
+            )
 
         quarantined_paths, quarantined_jobs = _quarantined_report_evidence(
             Path(SALES_ORDER_DIR)
@@ -331,6 +364,10 @@ def run(max_workers: int = 8) -> Dict[str, int]:
             max_workers=max_workers,
             known_report_paths=report_paths,
         )
+        # A successful later fetch supersedes stale path-only evidence from an
+        # old report receipt. Actual reports found in the bank are added last,
+        # so current PDF contents always win in either direction.
+        report_paths.difference_update(trusted_sales_order_paths)
         report_paths.update(moved)
         report_jobs.update(row["job"] for row in moved.values())
         when = datetime.now().isoformat(timespec="seconds")
