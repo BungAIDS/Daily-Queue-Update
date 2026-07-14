@@ -366,6 +366,42 @@ def test_legacy_sales_order_formula_overwrite_is_recovered(tmp: Path):
     assert recovered[0]["note"] == "recover this old note"
 
 
+def test_sync_upgrades_legacy_browse_without_pending_notes(tmp: Path):
+    from types import SimpleNamespace
+
+    from openpyxl import load_workbook
+
+    line_items = _line_items_store()
+    wb = tmp / "review.xlsx"
+    queue = tmp / "so_review_notes.json"
+    sr.write_workbook(wb, line_items, {"notes": []})
+    book = load_workbook(str(wb), data_only=False)
+    browse = book[sr.BROWSE_SHEET]
+    browse.cell(sr.BROWSE_HEADER_ROW, 5).value = "Note"
+    browse.delete_cols(6, 1)
+    book.save(str(wb))
+    book.close()
+    assert sr._browse_layout_needs_upgrade(wb)
+
+    old_store_path = sr.REVIEW_STORE_PATH
+    old_loader = sr._load_line_items
+    sr.REVIEW_STORE_PATH = queue
+    sr._load_line_items = lambda: line_items
+    try:
+        assert sr._cmd_sync(SimpleNamespace(out=str(wb))) == 0
+    finally:
+        sr.REVIEW_STORE_PATH = old_store_path
+        sr._load_line_items = old_loader
+
+    rebuilt = load_workbook(str(wb), data_only=False)
+    headers = [
+        rebuilt[sr.BROWSE_SHEET].cell(sr.BROWSE_HEADER_ROW, col).value
+        for col in range(1, len(sr.BROWSE_HEADERS) + 1)
+    ]
+    rebuilt.close()
+    assert headers == sr.BROWSE_HEADERS
+
+
 def main() -> int:
     passed = 0
     for name, fn in sorted(globals().items()):

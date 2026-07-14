@@ -457,6 +457,20 @@ def _notes_sheet(wb):
     return wb.active
 
 
+def _browse_layout_needs_upgrade(path: Path) -> bool:
+    """Whether an existing review workbook predates the Add Note column."""
+    from openpyxl import load_workbook
+
+    wb = load_workbook(str(path), read_only=True, data_only=False)
+    try:
+        if BROWSE_SHEET not in wb.sheetnames:
+            return False
+        header = [_excel_text(c.value) for c in wb[BROWSE_SHEET][BROWSE_HEADER_ROW]]
+        return BROWSE_ADD_NOTE not in header
+    finally:
+        wb.close()
+
+
 def _excel_text(value: Any) -> str:
     """Normalize common Excel scalar values without turning 2 into '2.0'."""
     if value is None:
@@ -608,22 +622,24 @@ def _cmd_sync(args) -> int:
     if not path.exists():
         print(f"{path} not found — 'Open SO Review' builds it first.", file=sys.stderr)
         return 1
+    needs_upgrade = _browse_layout_needs_upgrade(path)
     edits = read_edits(path)
     browse_edits = [e for e in edits if e.get("source") == "sales_order"]
     store = load_store()
     added = ingest_edits(store, edits)
     save_store(store)
-    if browse_edits:
+    if browse_edits or needs_upgrade:
         try:
             write_workbook(path, _load_line_items(), store)
         except RuntimeError as exc:
             raise RuntimeError(
-                f"Recorded {added} new note(s), but could not clear the Sales Order "
-                f"Add Note cells. {exc} Re-run Read SO Notes after closing Excel; "
+                f"Recorded {added} new note(s), but could not refresh the Sales Order "
+                f"review workbook. {exc} Re-run Read SO Notes after closing Excel; "
                 f"the notes will not duplicate."
             ) from None
     cleared = f" Cleared {len(browse_edits)} Sales Order input cell(s)." if browse_edits else ""
-    print(f"Recorded {added} new note(s).{cleared} {len(open_notes(store))} open in the "
+    upgraded = " Upgraded the Sales Order note-entry layout." if needs_upgrade else ""
+    print(f"Recorded {added} new note(s).{cleared}{upgraded} {len(open_notes(store))} open in the "
           f"queue ({REVIEW_STORE_PATH}).")
     return 0
 
