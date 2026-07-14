@@ -67,6 +67,14 @@ STATUS_HANDLED = "handled"
 HEADERS = ["Order", "Item", "Kind", "Hierarchy", "Price", "Note", "Status", "Resolution"]
 _COL = {h: i for i, h in enumerate(HEADERS)}
 
+# Two tabs, like the live GL Queue workbook's Sales Order view: BROWSE_SHEET is
+# a picker (pick an order -> its hierarchy spills, read-only, easy to read);
+# NOTES_SHEET is the flat grid you TYPE notes into (and that sync reads back).
+# ORDERS_SHEET is a hidden one-column list feeding the picker's dropdown.
+BROWSE_SHEET = "Sales Order"
+NOTES_SHEET = "Notes"
+ORDERS_SHEET = "Orders"
+
 
 # --------------------------------------------------------------------------- #
 # Note queue store                                                             #
@@ -244,57 +252,121 @@ def ingest_edits(review_store: Dict[str, Any],
 # --------------------------------------------------------------------------- #
 # Excel I/O (lazy openpyxl)                                                     #
 # --------------------------------------------------------------------------- #
+def _unique_orders(rows: List[Dict[str, Any]]) -> List[str]:
+    seen, out = set(), []
+    for r in rows:
+        if r["order"] not in seen:
+            seen.add(r["order"])
+            out.append(r["order"])
+    return out
+
+
 def write_workbook(path: Path, line_items_store: Dict[str, Any],
                    review_store: Dict[str, Any]) -> int:
-    """Write the standalone review workbook. Returns the row count.
+    """Write the two-tab review workbook. Returns the data-row count.
 
-    Values are bulk-appended and the only visual cues are applied as a handful
-    of workbook-level rules (header style + one conditional-format fill on the
-    Note column). Styling cell-by-cell across the ~16K rows was the whole cost
-    of this build (~30s, so the launcher button looked hung); the rules make it
-    ~1s."""
+    Colour and grouping are applied as a handful of workbook-level conditional-
+    format rules (O(1) each), never cell-by-cell — styling every one of the
+    ~16K rows was what made the build take ~30s (and the launcher button look
+    hung); this stays ~1-2s.
+
+    Tabs (like the live GL Queue Sales Order view):
+      - 'Sales Order' — a picker: choose an order and its hierarchy spills below
+        (read-only), easy to read one order at a time.
+      - 'Notes' — the flat grid you type notes into; sync reads it back."""
     from openpyxl import Workbook
     from openpyxl.formatting.rule import FormulaRule
     from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.datavalidation import DataValidation
 
     header_fill = PatternFill("solid", fgColor="305496")
     header_font = Font(color="FFFFFF", bold=True)
     note_fill = PatternFill("solid", fgColor="FFF2CC")      # invites typing
+    band_fill = PatternFill("solid", fgColor="F2F2F2")      # alternating orders
+    comp_fill = PatternFill("solid", fgColor="DDEBF7")      # component header rows
+    comp_font = Font(bold=True)
+    review_font = Font(color="C00000", bold=True)           # parser review rows
+    picker_fill = PatternFill("solid", fgColor="FFF2CC")
 
     rows = review_rows(line_items_store, review_store)
+    orders = _unique_orders(rows)
+    ncols = len(HEADERS)
     wb = Workbook()
-    ws = wb.active
-    ws.title = "Line Items"
 
-    # One bulk append of every row — the fast path. No per-cell styling.
-    ws.append(HEADERS)
+    # --- Notes tab: the data + input grid ------------------------------------
+    notes = wb.active
+    notes.title = NOTES_SHEET
+    band_col = ncols + 1                                    # hidden parity helper
+    notes.append(HEADERS + ["_band"])
+    parity = 0
     for r in rows:
-        ws.append([r["order"], r["item_no"], r["kind"], r["hierarchy"], r["price"],
-                   r["note"], r["status"], r["resolution"]])
+        if r["group_start"]:
+            parity ^= 1                                     # flip per order group
+        notes.append([r["order"], r["item_no"], r["kind"], r["hierarchy"], r["price"],
+                      r["note"], r["status"], r["resolution"], parity])
+    last = notes.max_row
+    for c in range(1, ncols + 1):
+        notes.cell(1, c).fill = header_fill
+        notes.cell(1, c).font = header_font
+    notes.column_dimensions[get_column_letter(band_col)].hidden = True
 
-    for c in range(1, len(HEADERS) + 1):                    # header row only
-        cell = ws.cell(row=1, column=c)
-        cell.fill = header_fill
-        cell.font = header_font
-
-    last = ws.max_row
-    note_col = get_column_letter(_COL["Note"] + 1)
     if last >= 2:
-        # Tint the whole Note column via a SINGLE conditional-format rule (O(1)
-        # to write) instead of filling thousands of cells one at a time. Type on
-        # the rows that show an Item # — the others (component/attribute rows)
-        # aren't line items and are ignored on read.
-        ws.conditional_formatting.add(
-            f"{note_col}2:{note_col}{last}",
-            FormulaRule(formula=["TRUE"], fill=note_fill, stopIfTrue=False))
+        full = f"A2:{get_column_letter(ncols)}{last}"
+        bandL, kindL = get_column_letter(band_col), get_column_letter(_COL["Kind"] + 1)
+        noteL = get_column_letter(_COL["Note"] + 1)
+        # Order banding (fill only) + Kind cues (font only) coexist: each rule
+        # sets only the properties it needs, so they layer without fighting.
+        notes.conditional_formatting.add(full, FormulaRule(formula=[f"${bandL}2=1"], fill=band_fill))
+        notes.conditional_formatting.add(full, FormulaRule(formula=[f'${kindL}2="COMPONENT"'], fill=comp_fill, font=comp_font))
+        notes.conditional_formatting.add(full, FormulaRule(formula=[f'${kindL}2="REVIEW"'], font=review_font))
+        notes.conditional_formatting.add(f"{noteL}2:{noteL}{last}",
+                                         FormulaRule(formula=["TRUE"], fill=note_fill, stopIfTrue=False))
+    notes.freeze_panes = "A2"
+    notes.auto_filter.ref = f"A1:{get_column_letter(ncols)}{last}"
+    for h, w in {"Order": 10, "Item": 6, "Kind": 11, "Hierarchy": 60, "Price": 12,
+                 "Note": 45, "Status": 10, "Resolution": 45}.items():
+        notes.column_dimensions[get_column_letter(_COL[h] + 1)].width = w
 
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:{get_column_letter(len(HEADERS))}{last}"
-    widths = {"Order": 10, "Item": 6, "Kind": 11, "Hierarchy": 60, "Price": 12,
-              "Note": 45, "Status": 10, "Resolution": 45}
-    for h, w in widths.items():
-        ws.column_dimensions[get_column_letter(_COL[h] + 1)].width = w
+    # --- Orders tab (hidden): the picker's dropdown list ---------------------
+    osheet = wb.create_sheet(ORDERS_SHEET)
+    for o in orders:
+        osheet.append([o])
+    osheet.sheet_state = "hidden"
+
+    # --- Sales Order tab (first): pick an order -> its hierarchy spills -------
+    browse = wb.create_sheet(BROWSE_SHEET, 0)
+    browse["A1"] = "Order:"
+    browse["A1"].font = Font(bold=True)
+    browse["B1"].fill = picker_fill
+    browse["B1"].font = Font(bold=True)
+    browse["C1"] = "← pick an order to read its line items (type notes on the Notes tab)"
+    browse["C1"].font = Font(italic=True, color="808080")
+    if orders:
+        dv = DataValidation(type="list", formula1=f"={ORDERS_SHEET}!$A$1:$A${len(orders)}",
+                            allow_blank=True)
+        dv.showErrorMessage = False                        # free typing allowed too
+        browse.add_data_validation(dv)
+        dv.add(browse["B1"])
+    browse_headers = ["Item", "Kind", "Hierarchy", "Price", "Note"]
+    for i, h in enumerate(browse_headers, start=1):
+        browse.cell(3, i).value = h
+        browse.cell(3, i).fill = header_fill
+        browse.cell(3, i).font = header_font
+    # Spill the picked order's rows (Notes B:F = Item..Note); blank while the
+    # picker is empty, a friendly message when the order isn't found.
+    d = NOTES_SHEET
+    browse["A4"] = (f'=IF($B$1&""="","",IFERROR(FILTER({d}!$B$2:$F${last},'
+                    f'({d}!$A$2:$A${last}&"")=($B$1&""),'
+                    f'"no line items for that order # yet"),""))')
+    bmax = 4 + 4000                                         # CF window for the spill
+    bkindL = get_column_letter(2)                           # Kind is the 2nd browse col (B)
+    browse.conditional_formatting.add(f"A4:E{bmax}", FormulaRule(formula=[f'${bkindL}4="COMPONENT"'], fill=comp_fill, font=comp_font))
+    browse.conditional_formatting.add(f"A4:E{bmax}", FormulaRule(formula=[f'${bkindL}4="REVIEW"'], font=review_font))
+    browse.freeze_panes = "A4"
+    for i, w in enumerate((6, 11, 70, 12, 45), start=1):
+        browse.column_dimensions[get_column_letter(i)].width = w
+    wb.active = 0                                           # open on the browse tab
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -307,13 +379,26 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
     return len(rows)
 
 
+def _notes_sheet(wb):
+    """The sheet holding the note grid: NOTES_SHEET, else the legacy 'Line Items'
+    name, else the first sheet whose header row carries Order + Note."""
+    for name in (NOTES_SHEET, "Line Items"):
+        if name in wb.sheetnames:
+            return wb[name]
+    for ws in wb.worksheets:
+        header = {str(c.value or "") for c in ws[1]}
+        if {"Order", "Note"} <= header:
+            return ws
+    return wb.active
+
+
 def read_edits(path: Path) -> List[Dict[str, Any]]:
     """Read the Note column back out of the workbook. Returns one dict per row
     that has an Order, an Item # and a non-empty Note."""
     from openpyxl import load_workbook
 
     wb = load_workbook(str(path), data_only=True)
-    ws = wb["Line Items"] if "Line Items" in wb.sheetnames else wb.active
+    ws = _notes_sheet(wb)
     header = [str(c.value or "") for c in ws[1]]
     idx = {h: header.index(h) for h in HEADERS if h in header}
     edits: List[Dict[str, Any]] = []

@@ -161,7 +161,7 @@ def test_workbook_write_read_and_sync_roundtrip(tmp: Path):
     # SOURCE row, then reading it back.
     from openpyxl import load_workbook
     book = load_workbook(str(wb))
-    ws = book["Line Items"]
+    ws = book[sr.NOTES_SHEET]
     note_col = sr.HEADERS.index("Note") + 1
     item_col = sr.HEADERS.index("Item") + 1
     typed = False
@@ -181,12 +181,33 @@ def test_workbook_write_read_and_sync_roundtrip(tmp: Path):
     # Rebuild with the note recorded -> it shows on the sheet, marked open.
     sr.write_workbook(wb, li, store)
     book2 = load_workbook(str(wb))
-    ws2 = book2["Line Items"]
+    ws2 = book2[sr.NOTES_SHEET]
     status_col = sr.HEADERS.index("Status") + 1
     found = [i for i in range(2, ws2.max_row + 1)
              if str(ws2.cell(row=i, column=item_col).value) == "2"
              and ws2.cell(row=i, column=note_col).value]
     assert found and str(ws2.cell(row=found[0], column=status_col).value) == sr.STATUS_OPEN
+
+
+def test_workbook_has_browse_and_notes_tabs(tmp: Path):
+    from openpyxl import load_workbook
+    wb = tmp / "review.xlsx"
+    sr.write_workbook(wb, _line_items_store(), {"notes": []})
+    book = load_workbook(str(wb))
+    # Two visible tabs like the live Sales Order view, plus a hidden dropdown
+    # source; the browse (picker) tab opens first.
+    assert book.sheetnames[:2] == [sr.BROWSE_SHEET, sr.NOTES_SHEET]
+    assert book[sr.ORDERS_SHEET].sheet_state == "hidden"
+    assert book.active.title == sr.BROWSE_SHEET
+    browse = book[sr.BROWSE_SHEET]
+    # Picker dropdown on B1 and a FILTER spill that reads the Notes tab.
+    assert len(browse.data_validations.dataValidation) == 1
+    f = browse["A4"].value
+    assert f.startswith("=IF($B$1") and f"FILTER({sr.NOTES_SHEET}!" in f
+    # The hidden Orders list holds each order once (dropdown source).
+    assert book[sr.ORDERS_SHEET].cell(1, 1).value == "421966"
+    # Colour cues are conditional-format rules (fast), not per-cell styling.
+    assert book[sr.NOTES_SHEET].conditional_formatting._cf_rules
 
 
 def main() -> int:
