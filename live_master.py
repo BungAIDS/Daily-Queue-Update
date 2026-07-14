@@ -155,8 +155,11 @@ def tracked_values(job: Dict[str, Any]) -> Dict[str, str]:
     """The watched fields of an order as comparable strings, including the derived
     CO#, the custom-Drawings set, and the line-item Features set."""
     vals = {label: _norm(job.get(key)) for key, label in _TRACKED}
+    # A missing key means the Sales Order is unknown/invalidated, not CO#0.
+    # Keeping that distinction lets _diffs() skip the first trusted SO parse
+    # while still logging a genuine, previously-known CO#0 -> CO#1 advance.
     co = job.get("co_number")
-    vals["CO#"] = str(int(co)) if co else "0"
+    vals["CO#"] = "" if "co_number" not in job or co is None else str(int(co or 0))
     de = job.get("dwg_extras") or {}
     vals["Drawings"] = ", ".join("-" + s for s in sorted(de, key=_suffix_sort))
     tags = sorted({t for it in (job.get("line_items") or []) for t in (it.get("tags") or [])})

@@ -147,6 +147,24 @@ def test_update_tracks_co_and_skips_initial_population():
     assert any(x["field"] == "Size" and x["old"] == "M2" and x["new"] == "M3" for x in ev3)
 
 
+def test_update_does_not_treat_restored_unknown_co_as_today_change():
+    m = {"orders": {}}
+    # Cleanup/invalidation deliberately removes co_number while a trusted Sales
+    # Order is being recovered. Restoring its existing revision is enrichment,
+    # not evidence that the change order landed during this poll.
+    lm.update(m, [_job("100")], T0)
+    ev = lm.update(m, [_job("100", co_number=2, so_pdf="Z:/SO/100/CO#2.pdf")], T1)
+    assert not any(x["field"] == "CO#" for x in ev)
+    assert m["orders"]["100"]["job"]["co_number"] == 2
+
+    # An explicit, trusted original Sales Order remains distinct from unknown,
+    # so a later CO#0 -> CO#1 advance is still a real change event.
+    m2 = {"orders": {}}
+    lm.update(m2, [_job("200", co_number=0, so_pdf="Z:/SO/200/original.pdf")], T0)
+    ev2 = lm.update(m2, [_job("200", co_number=1, so_pdf="Z:/SO/200/CO#1.pdf")], T1)
+    assert [(x["old"], x["new"]) for x in ev2 if x["field"] == "CO#"] == [("0", "1")]
+
+
 def test_sparse_source_keeps_unknown_fields_and_logs_no_blanks():
     # A job dict with NO KEY for a field (a board-only seed from a raw morning
     # snapshot folding over a backfill-enriched entry) must neither wipe the
