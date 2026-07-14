@@ -715,10 +715,12 @@ def run_watch(ignore_window: bool = False) -> int:
     try:
         import order_verification_cleanup
 
-        # lock_timeout=0: if another process (backfill / line-items scan / an
-        # earlier watcher) is mid-sweep, skip instead of blocking startup — one
+        # startup_check: the repair sweep runs only until a pass comes back
+        # clean on this machine (new documents are validated at fetch time, so
+        # a startup sweep proves nothing about them). lock_timeout=0: if
+        # another process is already mid-sweep, skip instead of blocking — one
         # runner is enough, and the stores it fixes are shared anyway.
-        cleanup_counts = order_verification_cleanup.run(lock_timeout=0)
+        cleanup_counts = order_verification_cleanup.startup_check(lock_timeout=0)
         if order_verification_cleanup.changed(cleanup_counts):
             _publish_data()
     except TimeoutError:
@@ -863,7 +865,7 @@ def main() -> int:
         try:
             import order_verification_cleanup
 
-            cleanup_counts = order_verification_cleanup.run(lock_timeout=0)
+            cleanup_counts = order_verification_cleanup.startup_check(lock_timeout=0)
             if order_verification_cleanup.changed(cleanup_counts):
                 _publish_data()
         except TimeoutError:

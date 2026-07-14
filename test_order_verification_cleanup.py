@@ -97,18 +97,22 @@ def test_cleanup_quarantines_reports_and_removes_every_derived_record(tmp: Path)
     }), encoding="utf-8")
     queue_path.write_text(json.dumps([dict(report_data)]), encoding="utf-8")
 
+    marker_path = backlog / "clean_marker.json"
+    marker_path.write_text("{}", encoding="utf-8")   # stale marker must be revoked
     with (
         patch.object(cleanup, "SALES_ORDER_DIR", active),
         patch.object(cleanup, "SNAPSHOT_DIR", snapshots),
         patch.object(cleanup, "PROGRESS_PATH", progress_path),
         patch.object(cleanup, "CLEANUP_AUDIT_PATH", audit_path),
         patch.object(cleanup, "SCAN_CACHE_PATH", backlog / "scan_cache.json"),
+        patch.object(cleanup, "CLEAN_MARKER_PATH", marker_path),
         patch.object(live_master, "MASTER_PATH", master_path),
         patch("line_items.store_path", return_value=main_items_path),
         patch("line_items.backfill_store_path", return_value=overlay_path),
     ):
         counts = cleanup.run(max_workers=1)
 
+    assert not marker_path.exists()      # a dirty pass revokes the clean marker
     assert counts == {
         "reports_quarantined": 1,
         "progress_invalidated": 1,
@@ -185,6 +189,26 @@ def test_scan_cache_skips_unchanged_clean_pdfs(tmp: Path):
     assert len(cache) == 1                         # the clean survivor is cached
 
 
+def test_startup_check_sweeps_only_until_a_clean_pass(tmp: Path):
+    # The watcher's gate: while no pass has come back clean, startup_check
+    # runs the full sweep; once the clean marker exists it skips entirely —
+    # new documents are validated at fetch time, so a startup sweep proves
+    # nothing about them.
+    marker_path = tmp / "backlog" / "clean_marker.json"
+    marker_path.parent.mkdir(parents=True, exist_ok=True)
+    sentinel = {"reports_quarantined": 0}
+    with (
+        patch.object(cleanup, "CLEAN_MARKER_PATH", marker_path),
+        patch.object(cleanup, "run", return_value=sentinel) as full_run,
+    ):
+        assert cleanup.startup_check() is sentinel        # no marker -> sweeps
+        assert full_run.call_count == 1
+        marker_path.write_text(json.dumps({"clean_at": "2026-07-14"}), encoding="utf-8")
+        assert cleanup.startup_check() is None            # marker -> skipped
+        assert full_run.call_count == 1
+    assert cleanup.changed(None) is False                 # skipped run publishes nothing
+
+
 def test_run_with_zero_lock_timeout_raises_instead_of_waiting(tmp: Path):
     # The watcher passes lock_timeout=0: when another process is mid-cleanup it
     # must get TimeoutError immediately (and skip), never sit on the lock.
@@ -259,18 +283,21 @@ def test_cleanup_preserves_verified_sales_order_reusing_historical_report_path(t
         },
     }), encoding="utf-8")
 
+    marker_path = backlog / "clean_marker.json"
     with (
         patch.object(cleanup, "SALES_ORDER_DIR", active),
         patch.object(cleanup, "SNAPSHOT_DIR", snapshots),
         patch.object(cleanup, "PROGRESS_PATH", progress_path),
         patch.object(cleanup, "CLEANUP_AUDIT_PATH", audit_path),
         patch.object(cleanup, "SCAN_CACHE_PATH", backlog / "scan_cache.json"),
+        patch.object(cleanup, "CLEAN_MARKER_PATH", marker_path),
         patch.object(live_master, "MASTER_PATH", master_path),
         patch("line_items.store_path", return_value=main_items_path),
         patch("line_items.backfill_store_path", return_value=overlay_path),
     ):
         counts = cleanup.run(max_workers=1)
 
+    assert marker_path.exists()          # a clean pass records the migration as done
     assert counts == {
         "reports_quarantined": 0,
         "progress_invalidated": 0,

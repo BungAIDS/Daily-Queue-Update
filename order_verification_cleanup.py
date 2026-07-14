@@ -41,6 +41,13 @@ CLEANUP_AUDIT_PATH = BACKLOG_DIR / "order_verification_cleanup.json"
 # bank; later passes touch just new/changed files. Deliberately not published
 # by data_push — it's local file-state, meaningless on another machine.
 SCAN_CACHE_PATH = BACKLOG_DIR / "order_verification_scan_cache.json"
+# Written when a full pass finishes with NOTHING to fix, removed when a pass
+# finds work: the signal that the historical repair (the migration this module
+# exists for) is complete on this machine. startup_check() skips the sweep
+# while it exists — a NEW document never needs a database sweep to be trusted,
+# because every fetch validates its own PDF (sales_order_validation) before
+# saving/parsing it.
+CLEAN_MARKER_PATH = BACKLOG_DIR / "order_verification_clean_marker.json"
 _JOB_FOLDER_RE = re.compile(r"^[0-9]{4,7}[A-Za-z]?$")
 
 
@@ -477,8 +484,33 @@ def run(max_workers: int = 8, lock_timeout: float = 900.0) -> Dict[str, int]:
                 counts["master_invalidated"],
                 counts["states_invalidated"] + counts["snapshots_invalidated"],
             )
+            # Work was found — the repair isn't provably done; the next
+            # startup sweeps again until a pass comes back clean.
+            try:
+                CLEAN_MARKER_PATH.unlink(missing_ok=True)
+            except OSError:
+                pass
+        else:
+            _save_json_unlocked(CLEAN_MARKER_PATH, {"clean_at": when})
         return counts
 
 
-def changed(counts: Dict[str, int]) -> bool:
-    return any(int(value or 0) for value in counts.values())
+def startup_check(max_workers: int = 8, lock_timeout: float = 0):
+    """The interactive-tool gate (the watcher calls this, not run()): sweep
+    only while there may be repair work left — i.e. no pass has come back
+    clean yet on this machine, or the last pass found something. Once a pass
+    ends clean, startups skip entirely: a NEW document doesn't need a database
+    sweep to be trusted (every fetch validates its own PDF and quarantines a
+    verification report before anything parses it); the overnight batch tools
+    keep running the full run() as the periodic safety net. Returns run()'s
+    counts, or None when skipped."""
+    if isinstance(_read_json(CLEAN_MARKER_PATH), dict):
+        log.debug("Order Verification cleanup already completed a clean pass; "
+                  "skipping the startup sweep (fetch-time validation guards "
+                  "new documents).")
+        return None
+    return run(max_workers=max_workers, lock_timeout=lock_timeout)
+
+
+def changed(counts: "Dict[str, int] | None") -> bool:
+    return any(int(value or 0) for value in (counts or {}).values())
