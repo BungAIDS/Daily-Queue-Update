@@ -669,13 +669,13 @@ def test_refresh_reports_notes_safe_when_workbook_rewrite_fails(tmp: Path):
     sr.write_workbook(wb, line_items, {"notes": []})
     book = load_workbook(str(wb), data_only=False)
     notes = book[sr.NOTES_SHEET]
-    item_col = sr.HEADERS.index("Item") + 1
+    kind_col = sr.HEADERS.index("Kind") + 1
     note_col = sr.HEADERS.index(sr.NOTES_ADD_NOTE) + 1
     row = next(
         row_no for row_no in range(2, notes.max_row + 1)
-        if str(notes.cell(row_no, item_col).value) == "2"
+        if str(notes.cell(row_no, kind_col).value) == sr.so_hierarchy.KIND_ATTRIBUTE
     )
-    notes.cell(row, note_col).value = "keep this even if Excel is open"
+    notes.cell(row, note_col).value = "keep derived-row note even if Excel is open"
     book.save(str(wb))
     book.close()
 
@@ -703,7 +703,7 @@ def test_refresh_reports_notes_safe_when_workbook_rewrite_fails(tmp: Path):
     assert "workbook refresh could not finish" in message
     stored = sr.load_store(queue)
     assert len(stored["notes"]) == 1
-    assert stored["notes"][0]["note"] == "keep this even if Excel is open"
+    assert stored["notes"][0]["note"] == "keep derived-row note even if Excel is open"
 
 
 def main() -> int:

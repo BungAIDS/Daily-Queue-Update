@@ -809,10 +809,13 @@ def _cmd_refresh(args) -> int:
         edits = read_edits(path)
         added = ingest_edits(store, edits)              # don't lose un-synced typing
     workbook_note_count = len({
-        (str(e.get("order", "")), str(e.get("item_no", "")), str(e.get("note", "")))
+        (str(e.get("order", "")),
+         str(e.get("row_key") or e.get("item_no") or e.get("item_text") or ""),
+         str(e.get("note", "")))
         for e in edits
         if str(e.get("order", "")).strip()
-        and str(e.get("item_no", "")).strip()
+        and (str(e.get("item_no", "")).strip()
+             or str(e.get("item_text", "")).strip())
         and str(e.get("note", "")).strip()
     })
     closed = apply_handled_marks(store)                 # Claude's resolutions
