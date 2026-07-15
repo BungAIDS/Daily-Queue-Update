@@ -46,6 +46,20 @@ def test_record_note_appends_and_dedups():
     assert sr.record_note(store, "421966", 1, "Base Fan", "   ") is None
     assert sr.record_note(store, "", 1, "x", "note") is None
 
+    # A pre-row-key derived note dedups by its hierarchy text, without
+    # suppressing the same wording on a different derived row.
+    legacy = sr.record_note(store, "421966", "", "    motor_hp: 10", "REDUNDANT")
+    assert legacy and "row_key" not in legacy
+    assert sr.record_note(
+        store, "421966", "", "    motor_hp: 10", "REDUNDANT",
+        row_key="attribute|motor|motor_hp: 10",
+    ) is None
+    distinct = sr.record_note(
+        store, "421966", "", "    motor_rpm: 1800", "REDUNDANT",
+        row_key="attribute|motor|motor_rpm: 1800",
+    )
+    assert distinct and distinct["id"] == 4
+
 
 def test_mark_handled_and_open_filter():
     store = {"notes": []}
@@ -65,12 +79,11 @@ def test_review_rows_attach_notes_to_line_items_only():
     # A note on item #2 (the IVC's primary source line).
     sr.record_note(store, "421966", 2, "Inlet Volume Control…", "grouping looks right")
     rows = sr.review_rows(li, store)
-    # Derived rows (component headers, merged attributes) carry no item # and are
-    # NOT annotatable — a note there would have no stable line to anchor to.
+    # Derived rows carry no item number but remain annotatable by hierarchy text.
     comp = [r for r in rows if r["kind"] == sr.so_hierarchy.KIND_COMPONENT]
     assert comp and all(c["order"] == "421966" for c in comp)
     attrs = [r for r in rows if r["kind"] == sr.so_hierarchy.KIND_ATTRIBUTE]
-    assert attrs and all(not a["annotatable"] and a["note"] == "" for a in attrs)
+    assert attrs and all(a["annotatable"] and a["note"] == "" for a in attrs)
     # The SOURCE row for item #2 carries the recorded note and is annotatable.
     src2 = [r for r in rows if r["kind"] == sr.so_hierarchy.KIND_SOURCE
             and str(r["item_no"]) == "2"]
@@ -100,16 +113,18 @@ def test_multiple_notes_on_one_item_remain_visible_and_readable(tmp: Path):
     assert sr.read_edits(wb) == []
 
 
-def test_ingest_edits_records_only_line_item_notes():
+def test_ingest_edits_records_source_and_derived_row_notes():
     store = {"notes": []}
     edits = [
         {"order": "421966", "item_no": "2", "item_text": "IVC", "note": "good"},
-        {"order": "421966", "item_no": "", "item_text": "[IVC] — 3 lines", "note": "ignored"},  # not a line item
+        {"order": "421966", "item_no": "", "item_text": "[IVC] — 3 lines", "note": "component note"},
+        {"order": "421966", "item_no": "", "item_text": "    used on: IVC", "note": "component note"},
         {"order": "421966", "item_no": "1", "item_text": "Base Fan", "note": ""},   # empty note
     ]
     added = sr.ingest_edits(store, edits)
-    assert added == 1
-    assert store["notes"][0]["item_no"] == "2" and store["notes"][0]["note"] == "good"
+    assert added == 3
+    assert [(n["item_no"], n["note"]) for n in store["notes"]] == [
+        ("2", "good"), ("", "component note"), ("", "component note")]
     # Re-ingesting the same edits adds nothing (dedup).
     assert sr.ingest_edits(store, edits) == 0
 
@@ -226,6 +241,80 @@ def test_workbook_write_read_and_sync_roundtrip(tmp: Path):
              and ws2.cell(row=i, column=note_col).value]
     assert found and str(ws2.cell(row=found[0], column=status_col).value) == sr.STATUS_OPEN
     assert ws2.cell(found[0], note_col).value == "#1: parsed IVC grouping is correct"
+
+
+def test_current_note_column_override_on_derived_row_is_recovered(tmp: Path):
+    from openpyxl import load_workbook
+
+    line_items = _line_items_store()
+    target = next(
+        row for row in sr.review_rows(line_items, {"notes": []})
+        if row["kind"] == sr.so_hierarchy.KIND_ATTRIBUTE
+    )
+    assert target["item_no"] == ""
+
+    wb = tmp / "review.xlsx"
+    sr.write_workbook(wb, line_items, {"notes": []})
+    book = load_workbook(str(wb), data_only=False)
+    notes = book[sr.NOTES_SHEET]
+    hierarchy_col = sr.HEADERS.index("Hierarchy") + 1
+    note_col = sr.HEADERS.index("Note") + 1
+    row_no = next(
+        row for row in range(2, notes.max_row + 1)
+        if notes.cell(row, hierarchy_col).value == target["hierarchy"]
+    )
+    notes.cell(row_no, note_col).value = "rename this attribute"
+    book.save(str(wb))
+    book.close()
+
+    edits = sr.read_edits(wb)
+    assert len(edits) == 1
+    assert edits[0]["item_no"] == ""
+    assert edits[0]["item_text"] == target["hierarchy"].strip()
+    assert edits[0]["note"] == "rename this attribute"
+
+    store = {"notes": []}
+    assert sr.ingest_edits(store, edits) == 1
+    attached = next(row for row in sr.review_rows(line_items, store)
+                    if row["hierarchy"] == target["hierarchy"])
+    assert attached["note"] == "#1: rename this attribute"
+    sr.write_workbook(wb, line_items, store)
+    assert sr.read_edits(wb) == []
+
+
+def test_legacy_duplicate_attribute_labels_keep_separate_parent_targets(tmp: Path):
+    from openpyxl import load_workbook
+
+    line_items = {"jobs": {"421959": {"items": [
+        {"raw": "Replacement Shaft L 1.00", "norm": "REPLACEMENT SHAFT",
+         "price": "1.00", "details": [], "tags": ["SPARE PARTS"],
+         "attributes": {"component": "REPLACEMENT SHAFT", "shared": "X"}},
+        {"raw": "Replacement Wheel L 1.00", "norm": "REPLACEMENT WHEEL",
+         "price": "1.00", "details": [], "tags": ["SPARE PARTS"],
+         "attributes": {"component": "REPLACEMENT WHEEL", "shared": "X"}},
+    ]}}}
+    wb = tmp / "review.xlsx"
+    sr.write_workbook(wb, line_items, {"notes": []})
+    book = load_workbook(str(wb), data_only=False)
+    notes = book[sr.NOTES_SHEET]
+    # Simulate the workbook saved before hidden row keys existed.
+    row_key_col = next(cell.column for cell in notes[1] if cell.value == sr.ROW_KEY_HEADER)
+    notes.delete_cols(row_key_col)
+    hierarchy_col = sr.HEADERS.index("Hierarchy") + 1
+    note_col = sr.HEADERS.index("Note") + 1
+    targets = [row for row in range(2, notes.max_row + 1)
+               if notes.cell(row, hierarchy_col).value == "    shared: X"]
+    assert len(targets) == 2
+    for row in targets:
+        notes.cell(row, note_col).value = "REDUNDANT"
+    book.save(str(wb))
+    book.close()
+
+    edits = sr.read_edits(wb)
+    assert len(edits) == 2
+    assert len({edit["row_key"] for edit in edits}) == 2
+    store = {"notes": []}
+    assert sr.ingest_edits(store, edits) == 2
 
 
 def test_legacy_notes_column_is_imported_once(tmp: Path):
@@ -365,6 +454,38 @@ def test_sales_order_add_note_is_read_back(tmp: Path):
     assert added[0]["item_no"] == "2"
     assert added[0]["note"] == "parsed IVC grouping is correct"
     assert "Inlet Volume Control" in added[0]["item_text"]
+
+
+def test_sales_order_accepts_note_on_derived_row(tmp: Path):
+    from openpyxl import load_workbook
+
+    wb = tmp / "review.xlsx"
+    sr.write_workbook(wb, _line_items_store(), {"notes": []})
+    book = load_workbook(str(wb), data_only=False)
+    browse = book[sr.BROWSE_SHEET]
+    notes = book[sr.NOTES_SHEET]
+    orders = book[sr.ORDERS_SHEET]
+    browse["B1"] = "421966"
+    _, start_row, row_count = next(
+        row for row in orders.iter_rows(min_row=1, max_col=3, values_only=True)
+        if str(row[0]) == "421966"
+    )
+    item_col = sr.HEADERS.index("Item") + 1
+    kind_col = sr.HEADERS.index("Kind") + 1
+    offset = next(
+        n for n in range(int(row_count))
+        if not notes.cell(int(start_row) + n, item_col).value
+        and notes.cell(int(start_row) + n, kind_col).value == sr.so_hierarchy.KIND_ATTRIBUTE
+    )
+    add_note_col = sr.BROWSE_HEADERS.index(sr.BROWSE_ADD_NOTE) + 1
+    browse.cell(sr.BROWSE_FIRST_ROW + offset, add_note_col).value = "derived-row note"
+    book.save(str(wb))
+    book.close()
+
+    edits = [e for e in sr.read_edits(wb) if e.get("source") == "sales_order"]
+    assert len(edits) == 1
+    assert edits[0]["item_no"] == ""
+    assert edits[0]["note"] == "derived-row note"
 
 
 def test_sync_moves_sales_order_input_to_notes_and_clears_it(tmp: Path):

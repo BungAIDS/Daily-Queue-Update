@@ -96,7 +96,7 @@ DEFAULT_RULES: Dict[str, Any] = {
     # separately as co_history). Fitted against real CBC SO dumps.
     "skip_patterns": [
         r"^\s*c\s*/?\s*o\s*#?\s*\d",                  # CO#1 ... change-order notes
-        r"^chicago\s+blower\b",                       # page header / (cont.) header
+        r"^chicago\s+blower\s+corporation\b.*\bsales\s+order\b",
         r"^v\d+\.\d+",                                # "v1.8.1.5 -1-" version footer
         r"^(sub\s*)?total\b", r"total\s+(billing|price|order|commission)",
         r"^amount\s+due", r"^list\s+total\b", r"deduction",
@@ -124,7 +124,7 @@ DEFAULT_RULES: Dict[str, Any] = {
         r"^additional\s+shipping\s+notes?\b", r"^traffic\s+note\b",
         r"shipping\s+barcode", r"^(?!.*\bdrawings?\b).*do\s+not\s+stack", r"no\s+metal\s+banding",
         r"^order\s+is\s+shipping\s+overseas\b", r"^customer\s+broker\b",
-        r"^standard\s+address\b", r"^https?\b", r"^ispm\s+wood\b",
+        r"^standard\s+address\b", r"^https?\b",
         r"^(last\s+choice\s+)?(fedex|ups)\b", r"^please\s+send\b",
         r"^if\s+the\s+shipment\b", r"^lbs\.?\s+contact\b",
         r"^above\s+email\s+after\b", r"^as\s+well\b",
@@ -231,8 +231,7 @@ DEFAULT_RULES: Dict[str, Any] = {
         "LABEL": [r"\blabel\b", r"\bmark\s+all\s+items\b", r"\bmarked\s+with\s+this\s+information\b"],
         "NAMEPLATE": [r"nameplate"],
         "PACKAGING": [r"\bcrate\b", r"\bcrating\b", r"shrink\s*wrap",
-                      r"\bskid\b", r"ispm\s*(?:wood\s*)?(?:inspection\s*)?(?:stamp|stamping)",
-                      r"ispm\s*wood", r"do\s*not\s*stack",
+                      r"\bskid\b", r"\bISPM\b", r"do\s*not\s*stack",
                       r"metal\s*banding"],
         "SHIPPING": [r"\bship(?:ped|ping|ments?)?\b", r"freight", r"\bBOL\b",
                      r"\bUPS\s+ground\b"],
@@ -245,8 +244,7 @@ DEFAULT_RULES: Dict[str, Any] = {
                                  r"\bconduit\b", r"\boverhang\b",
                                  r"effective\s*diameter", r"threaded\s*plug",
                                  r"hole\s*diameters?", r"earthing\s*boss"],
-        "INSPECTION": [r"\binspection\b",
-                       r"ispm\s*(?:wood\s*)?(?:inspection\s*)?(?:stamp|stamping)",
+        "INSPECTION": [r"\binspection\b", r"\bISPM\b",
                        r"mill\s*certifications?"],
         "DRAWINGS": [r"\bcertified\s*drawings?\b", r"\bprints?\b",
                      r"\bdrawings?\b"],
@@ -369,6 +367,7 @@ _TYPE_TAIL = re.compile(r"\s+(?P<ptype>[LCN])\s*$")
 _LEAD = re.compile(r"^\s*(?:ITEM\s*)?\(?(?P<num>\d{1,3})\)?\s*(?:[.):]|-(?=\s))?\s+", re.I)
 _NONDECIMAL_DOT = re.compile(r"(?<!\d)\.|\.(?!\d)")
 _DIGITS_SS = re.compile(r"^T?(\d{3}L?)(SST?|SS)$", re.I)
+_SS_DIGITS = re.compile(r"^(?:SST?|STAINLESS)(304L?|316L?)$", re.I)
 
 
 def split_price_tail(text: str) -> Tuple[str, str]:
@@ -427,6 +426,10 @@ def normalize_text(raw: str, rules: Dict[str, Any] | None = None) -> str:
             out.append(abbrev[t])
             continue
         m = _DIGITS_SS.match(t)  # "316SS"/"304SST" -> "316 STAINLESS STEEL"
+        if m:
+            out.append(f"{m.group(1)} STAINLESS STEEL")
+            continue
+        m = _SS_DIGITS.match(t)  # "SS316"/"SST304L" -> "316 STAINLESS STEEL"
         if m:
             out.append(f"{m.group(1)} STAINLESS STEEL")
             continue
@@ -529,6 +532,10 @@ def inquiry_numbers(item: Dict[str, Any]) -> List[str]:
 def _used_on(norm_blob: str) -> str:
     if _is_without_ivc(norm_blob):
         return ""
+    # "Inlet, Flanged ... (with IVC)" describes the inlet construction. The
+    # parenthetical does not make that inlet line an IVC component.
+    if re.match(r"^INLET\b", norm_blob) and re.search(r"\bWITH\s+IVC\b", norm_blob):
+        return ""
     component_context = ("DAMPER" in norm_blob or "ACTUATOR" in norm_blob
                          or "VOLUME CONTROL" in norm_blob)
     if not component_context and "IVC" not in norm_blob:
@@ -579,7 +586,7 @@ def _is_ship_via_note(primary: str, norm_blob: str) -> bool:
 
 def _is_inspection_line(primary: str, norm_blob: str) -> bool:
     inspection_patterns = [
-        r"\bISPM\b.*\b(STAMP|STAMPING|INSPECTION)\b",
+        r"\bISPM\b",
         r"\bORDER\s+IS\s+SHIPPING\s+OVERSEAS\b.*\bINSPECTION\s*/?\s*CRATE\s+REPORT\b",
         r"\bCUSTOMER\s+FINAL\s+INSPECTION\b",
         r"\bUNWITNESSED\s+DIMENSIONAL\s+INSPECTION\b",
@@ -778,6 +785,11 @@ def _drawing_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[st
     if re.search(r"\bCUSTOMER\s+DRAWINGS?\b", norm_blob):
         add_scope("CUSTOMER DRAWING")
 
+    # A plain 3D STEP request is already fully described by its component name.
+    # Keep attributes only when the row adds a less-obvious drawing scope/type.
+    if types == ["3D STEP DRAWINGS"] and set(scopes) <= {"3D FILE"}:
+        return {"component": "3D STEP DRAWINGS"}
+
     attrs["drawing_type"] = ", ".join(types)
     if scopes:
         attrs["drawing_scope"] = ", ".join(scopes)
@@ -857,6 +869,14 @@ def _is_without_ivc(norm_blob: str) -> bool:
     return bool(
         re.search(r"\b(WITHOUT|LESS|NO)\s+IVC\b", norm_blob)
         or re.search(r"\bWITHOUT\s+INLET\s+VOLUME\s+CONTROL\b", norm_blob)
+    )
+
+
+def _is_inlet_feature_with_ivc(primary: str, norm_blob: str) -> bool:
+    return bool(
+        re.match(r"^INLET\b", primary)
+        and re.search(r"\bWITH\s+IVC\b", norm_blob)
+        and re.search(r"\b(FLANGED|PUNCHED|UNPUNCHED|OPEN|SLIP|BELL|TUBE)\b", norm_blob)
     )
 
 
@@ -1051,8 +1071,6 @@ def _inlet_attributes(primary: str, norm_blob: str, tags: set[str], raw_blob: st
         add_feature("WELDED")
     if re.search(r"\bWITHOUT\s+IVC\b", primary):
         attrs["ivc_relation"] = "WITHOUT IVC"
-    elif re.search(r"\bWITH\s+IVC\b", primary):
-        attrs["ivc_relation"] = "WITH IVC"
 
     if "INLET DIRECTION" in primary:
         add_subcategory("DIRECTION")
@@ -1137,25 +1155,13 @@ def _inlet_vane_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict
     if "INLET VANES" not in tags:
         return {}
     attrs: Dict[str, str] = {}
-    subcategories: List[str] = []
     features: List[str] = []
-
-    def add_subcategory(value: str) -> None:
-        _add_unique(subcategories, value)
 
     def add_feature(value: str) -> None:
         _add_unique(features, value)
 
-    if _is_ivc_actuator_context(norm_blob, tags):
-        add_subcategory("IVC ACTUATOR")
-        attrs["ivc_component"] = "ACTUATOR"
     if "INLET VANE DAMPER" in norm_blob or re.search(r"\bIVD\b", norm_blob):
-        add_subcategory("INLET VANE DAMPER")
         attrs["damper_subcategory"] = "INLET VANE DAMPER"
-    if re.search(r"\bINLET\b.*\bFLANGED\b.*\bPUNCHED\b.*\bWITH\s+IVC\b", norm_blob):
-        add_subcategory("IVC INLET FLANGE")
-    if not subcategories:
-        add_subcategory("IVC")
 
     if re.search(r"\bAUTOMATIC\b", norm_blob):
         attrs["operation"] = "Automatic"
@@ -1173,8 +1179,6 @@ def _inlet_vane_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict
     if m:
         attrs["ivc_arm_position"] = f"{m.group(1)} O'CLOCK"
 
-    if subcategories:
-        attrs["ivc_subcategory"] = ", ".join(subcategories)
     if features:
         attrs["ivc_feature"] = ", ".join(features)
     attrs.setdefault("used_on", "IVC")
@@ -1184,9 +1188,13 @@ def _inlet_vane_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict
 def _inspection_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
     if "INSPECTION" not in tags:
         return {}
-    attrs: Dict[str, str] = {}
+    attrs: Dict[str, str] = {"component": "INSPECTION"}
     if re.search(r"\bISPM\b.*\b(STAMP|STAMPING|INSPECTION)\b", norm_blob):
         attrs["inspection_subcategory"] = "ISPM WOOD STAMP"
+        if "PACKAGING" in tags:
+            attrs["inspection_scope"] = "PACKAGING"
+    elif re.search(r"\bISPM\b", norm_blob):
+        attrs["inspection_subcategory"] = "ISPM REQUIREMENTS"
         if "PACKAGING" in tags:
             attrs["inspection_scope"] = "PACKAGING"
     elif re.search(r"\bORDER\s+IS\s+SHIPPING\s+OVERSEAS\b", norm_blob):
@@ -1604,8 +1612,6 @@ def _nameplate_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[
             attrs["nameplate_mounting"] = "RIVETED"
     else:
         attrs["component"] = "NAMEPLATE"
-        if "STAINLESS STEEL" in tags or "STAINLESS STEEL" in norm_blob:
-            attrs["nameplate_type"] = "STAINLESS STEEL"
     return attrs
 
 
@@ -1614,7 +1620,6 @@ def _lifting_lug_attributes(tags: set[str]) -> Dict[str, str]:
         return {}
     return {
         "component": "HOUSING",
-        "housing_feature": "LIFTING LUGS",
         "lifting_lugs": "YES",
     }
 
@@ -1869,6 +1874,9 @@ def _shipping_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
     if re.search(r"\bSHIP\s+WITH\s+FANS?\b", norm_blob):
         add_instruction("SHIP WITH REFERENCED FANS")
         add_scope("FAN")
+        if re.search(r"\bSLIGHTLY\s+DIFFERENT\s+CBC\s+FANS?\b.*\bSINGLE\s+PURCHASE\s+ORDER\b",
+                     norm_blob):
+            attrs["shipping_note"] = "TWO SLIGHTLY DIFFERENT CBC FANS ON SINGLE PURCHASE ORDER"
     if re.search(r"\bALL\s+AUXILIARY\s+ITEMS\s+EXCEPT\s+MOTOR\b", norm_blob):
         add_instruction("SHIP AUXILIARY ITEMS LOOSE")
         add_scope("AUXILIARY ITEMS EXCEPT MOTOR")
@@ -2018,38 +2026,79 @@ def _spark_resistant_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str
     return attrs
 
 
-def _spare_parts_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+def _spare_parts_attributes(item: Dict[str, Any], primary: str, norm_blob: str,
+                            tags: set[str]) -> Dict[str, str]:
     if "SPARE PARTS" not in tags:
         return {}
     attrs: Dict[str, str] = {}
+    part_type = ""
     if re.match(r"^SPARE\b", primary):
-        attrs["spare_part_type"] = "SPARE"
+        part_type = "SPARE"
     elif re.match(r"^(?:NPO\s+)?REPAIR\b", primary):
-        attrs["spare_part_type"] = "REPAIR"
+        part_type = "REPAIR"
     elif re.match(r"^(?:NPO\s+)?REPLACEMENT\b", primary):
-        attrs["spare_part_type"] = "REPLACEMENT"
+        part_type = "REPLACEMENT"
 
     component = ""
-    if "BEARINGS" in tags:
+    if re.search(r"\bBEARINGS?\b", primary):
         component = "BEARINGS"
-    elif "DRIVE COMPONENTS" in tags:
+    elif re.search(r"\b(?:V[ -]?BELT\s+)?DRIVE(?:\s+SET)?\b", primary):
         component = "DRIVE COMPONENTS"
-    elif "WHEEL" in tags:
-        component = "WHEEL"
-    elif "INLET VANES" in tags:
-        component = "IVC"
-    elif "INLET" in tags or "INLET CONE" in norm_blob:
-        component = "INLET CONE"
-    elif re.search(r"\bROTOR\s+ASSEMBLY\b", norm_blob):
+    elif re.search(r"\bMOTOR\b", primary):
+        component = "MOTOR"
+    elif re.search(r"\bROTOR\s+ASSEMBLY\b", primary):
         component = "ROTOR ASSEMBLY"
-    elif re.search(r"\bSHAFT\b", norm_blob):
+    elif re.search(r"\bROTOR\b", primary):
+        component = "ROTOR"
+    elif re.search(r"\bWHEEL\b", primary):
+        component = "WHEEL"
+    elif re.search(r"\bACTUATOR\b", primary):
+        component = "ACTUATOR"
+    elif re.search(r"\b(?:IVC|INLET\s+VOLUME\s+CONTROL)\b", primary):
+        component = "IVC"
+    elif re.search(r"\bINLET\s+CONE\b", primary):
+        component = "INLET CONE"
+    elif re.search(r"\bISOLATORS?\b", primary):
+        component = "ISOLATORS"
+    elif re.search(r"\bSHAFT\b", primary):
         component = "SHAFT"
-    elif re.search(r"\bFAN\s+KIT\b", norm_blob):
+    elif re.search(r"\bFAN\s+KIT\b", primary):
         component = "FAN KIT"
-    elif re.search(r"\bFAN\b", norm_blob):
+    elif re.search(r"\b(FAN|BLOWER)\b", primary):
         component = "FAN"
-    if component:
-        attrs["spare_part_component"] = component
+    if not component:
+        product = _label_value(item, "Product").upper()
+        has_motor_specs = bool(
+            re.search(r"\b\d+(?:\.\d+)?\s*H\.?\s*P\.?\b", norm_blob)
+            and re.search(r"\b\d{3,4}\s*R\.?\s*P\.?\s*M\.?\b", norm_blob)
+        )
+        if product == "MOTOR" or has_motor_specs:
+            component = "MOTOR"
+    if part_type and component:
+        component_name = "DRIVE SET" if component == "DRIVE COMPONENTS" else component
+        attrs["component"] = f"{part_type} {component_name}"
+    elif part_type:
+        attrs["spare_part_review"] = (
+            "UNCATEGORIZED REPAIR/SPARE PART - DEFINE COMPONENT"
+        )
+
+    applies_to = _used_on(norm_blob)
+    if applies_to:
+        attrs["applies_to"] = applies_to
+
+    description, _qty = split_lead(str(item.get("raw") or ""))
+    description, _price = split_price_tail(description)
+    description, _ptype, _mark = split_type_tail(description)
+    description_parts = [description] + [str(d) for d in item.get("details") or []]
+    description_blob = " ".join(re.sub(r"\s+", " ", part).strip()
+                                for part in description_parts if str(part).strip())
+    manufactured_by = re.search(
+        r"\bMANUFACTURED\s+BY\s+(.+?)(?=\s*\(\s*QTY\b|\s*,?\s*INQUIRY\b|$)",
+        description_blob,
+        re.I,
+    )
+    if manufactured_by:
+        attrs["manufacturer"] = manufactured_by.group(1).strip()
     return attrs
 
 
@@ -2302,10 +2351,9 @@ def _testing_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[st
     def add_measurement(value: str) -> None:
         _add_unique(measurements, value)
 
-    if re.search(r"\bMECHANICAL\s+RUN\s+TEST\b", norm_blob):
-        add_type("MECHANICAL RUN TEST")
-    elif re.search(r"\bRUN\s+TEST\b", norm_blob):
-        add_type("RUN TEST")
+    primary_run_test = bool(re.search(r"\b(?:MECHANICAL\s+)?RUN\s+TEST\b", primary))
+    if primary_run_test:
+        attrs["component"] = "MECHANICAL RUN TEST"
     if re.search(r"\bSOAP\s+BUBBLE\s+PRESSURE\s+TEST\b", norm_blob):
         add_type("SOAP BUBBLE PRESSURE TEST")
     if re.search(r"\bOVERSPEED\s+TEST\b", norm_blob):
@@ -2320,13 +2368,6 @@ def _testing_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[st
     if re.search(r"\bRUN\s+TEST\s+REPORTS?\b|\bTEST\s+REPORTS?\b", norm_blob):
         add_type("TEST REPORT")
 
-    # "Standard" describes which run test CBC will perform; "Required" says
-    # whether the order calls for it.  They are compatible facts, not two
-    # opposing values of one status field.
-    if re.search(r"\bSTANDARD\b", primary):
-        attrs["testing_standard"] = "YES"
-    if re.search(r"\b(REQUIRED|CUSTOMER\s+WITNESS)\b", norm_blob):
-        attrs["testing_required"] = "YES"
     if re.search(r"\bNOT\s+AVAILABLE\b", norm_blob):
         add_status("NOT AVAILABLE")
     if re.search(r"\bN\s*/?\s*A\b", norm_blob):
@@ -2343,6 +2384,8 @@ def _testing_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[st
     voltages = re.findall(r"\b\d{3,4}\s*V\b", norm_blob)
     if voltages:
         attrs["testing_voltage"] = ", ".join(dict.fromkeys(v.replace(" ", "") for v in voltages))
+    # The component name already says "Mechanical Run Test". Keep a type only
+    # for additional or genuinely different tests/reports on the same row.
     if types:
         attrs["testing_type"] = ", ".join(types)
     if statuses:
@@ -3033,6 +3076,10 @@ def _is_admin_note(primary: str) -> bool:
     return bool(re.search(r"\b(SLOW\s+PAY\s+ADDITION|PAYMODE[-\s]*X|FEE|CHARGE)\b", primary, re.I))
 
 
+def _is_customer_responsibility_note(primary: str) -> bool:
+    return bool(re.match(r"^CUSTOMER\s+ASSUMES\s+RESPONSIBILITY\b", primary, re.I))
+
+
 def _is_weather_cover_reference_only(primary: str, norm_blob: str) -> bool:
     if not re.search(r"\b(RAIN\s*HOOD|RAINHOOD|WEATHER\s+COVER|WEATHER\s+HOOD|DRIP\s*COVER|DRIPCOVER|INLET\s+HOOD)\b", norm_blob):
         return False
@@ -3249,6 +3296,8 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
     norm_blob = normalize_text(_item_blob(item), rules)
     if _is_admin_note(primary):
         return [_MISC_NOTE_TAG]
+    if _is_customer_responsibility_note(primary):
+        return [_MISC_NOTE_TAG]
     if "WARRANTY" in tags and not re.search(r"\bWARRANTY\b", primary, re.I):
         tags = [t for t in tags if t != "WARRANTY"]
     if "WARRANTY" in tags:
@@ -3294,6 +3343,8 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
             tags = [t for t in tags if t != "HOUSING"]
     if _is_without_ivc(norm_blob):
         tags = [t for t in tags if t != "INLET VANES"]
+    if _is_inlet_feature_with_ivc(primary, norm_blob):
+        tags = [t for t in tags if t not in {"DAMPER", "INLET VANES"}]
     if _is_ivc_actuator_context(norm_blob, set(tags)):
         _add_unique(tags, "DAMPER")
     if _is_inlet_cone_width_without_wheel(norm_blob):
@@ -3383,13 +3434,8 @@ def _canonical_component_attrs(item: Dict[str, Any], primary: str, norm_blob: st
             attrs.setdefault("component", name)
 
     # A run test (mechanical run test / run test) is the one mechanical run test.
-    if "RUN TEST" in str(attrs.get("testing_type") or "").upper():
+    if re.search(r"\b(?:MECHANICAL\s+)?RUN\s+TEST\b", primary):
         claim("MECHANICAL RUN TEST")
-        # "Run Test" and "Mechanical Run Test" are the same test — canonicalize
-        # the bare synonym so two run-test lines merging don't FALSE-conflict on
-        # testing_type (a real difference, e.g. status, still flags).
-        if str(attrs.get("testing_type") or "").strip().upper() == "RUN TEST":
-            attrs["testing_type"] = "MECHANICAL RUN TEST"
 
     # A standalone outlet / inlet flange -> that location is the component, so two
     # "Outlet, Flanged, ..." lines can't sit as two components (one punched, one
@@ -3397,6 +3443,8 @@ def _canonical_component_attrs(item: Dict[str, Any], primary: str, norm_blob: st
     scope = str(attrs.get("flange_scope") or "").strip().upper()
     if scope in ("OUTLET", "INLET"):
         claim(scope)
+        if not tied:
+            attrs.pop("flange_scope", None)
 
     if re.match(r"^PERCENT\s+WIDTH\b", primary):
         claim("PERCENT WIDTH")
@@ -3417,34 +3465,45 @@ def _canonical_component_attrs(item: Dict[str, Any], primary: str, norm_blob: st
 
     if re.search(r"\bSHIP\s+WITH\b.*\bFANS?\b", norm_blob):
         claim("SHIP WITH")
+        if str(attrs.get("shipping_scope") or "").strip().upper() == "FAN":
+            attrs.pop("shipping_scope", None)
         pos = re.findall(r"P\.?\s*O\.?\s*\(?s?\)?\s*#?\s*([0-9]{3,})", blob, re.I)
         if pos:
             attrs.setdefault("referenced_po", ", ".join(dict.fromkeys(pos)))
 
     if "ACCESS DOOR" in tags or re.search(r"\bACCESS\s+DOOR\b", norm_blob):
         claim("ACCESS DOOR")
+        for pattern, value in (
+            (r"\bQUICK\s+CLAMP\b", "QUICK CLAMP"),
+            (r"\bBOLT[ -]?ON\b|\bBOLTED\b", "BOLT-ON"),
+            (r"\bRAISED\b", "RAISED"),
+        ):
+            if re.search(pattern, norm_blob):
+                attrs.setdefault("door_type", value)
+                break
         m = re.search(r"Door\s+Location\s*:?\s*@?\s*(\d{1,2}(?::\d{2})?)", blob, re.I)
         if m:
             attrs.setdefault("door_location", m.group(1))
 
-    # Handle location (e.g. the IVC's) is an attribute wherever it's mentioned —
-    # its clock position (or the direction it faces) plus whether it's standard.
+    # Handle location is one attribute. A clock value and STD/NON-STD status can
+    # coexist as "3:00 (NON-STD)"; prose such as "for Discharge" is not itself
+    # a location and is deliberately not inferred into a separate fact.
     if re.search(r"HANDLE\s+LOCATION", norm_blob):
+        standard = ""
         if re.search(r"NON[\s-]*STANDARD", norm_blob):
-            attrs.setdefault("handle_location_standard", "NO")
+            standard = "NON-STD"
         elif re.search(r"\bSTANDARD\b", norm_blob):
-            attrs.setdefault("handle_location_standard", "YES")
+            standard = "STD"
         m = re.search(r"@?\s*(\d{1,2}:\d{2})", blob)
         if m:
-            attrs.setdefault("handle_location", m.group(1))
-        else:
-            m = re.search(r"handle\s+location\s+for\s+([A-Za-z]+)", blob, re.I)
-            if m:
-                # "for Discharge" is the orientation/reference used to define
-                # the location; a separate detail may carry the actual @clock
-                # value. Keeping them in separate slots prevents a false
-                # DISCHARGE-vs-3:00 conflict on one IVC.
-                attrs.setdefault("handle_location_reference", m.group(1).upper())
+            clock = m.group(1)
+            attrs["handle_location"] = f"{clock} ({standard})" if standard else clock
+        elif standard:
+            attrs["handle_location"] = standard
+
+    if str(attrs.get("component") or "").upper() == "NAMEPLATE":
+        if str(attrs.get("material_scope") or "").strip().upper() == "NAMEPLATE":
+            attrs.pop("material_scope", None)
 
 
 def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Dict[str, str]:
@@ -3509,7 +3568,7 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
         attrs["product"] = product
     attrs.update(_silencer_attributes(primary, norm_blob, tags, product, blob))
     attrs.update(_spark_resistant_attributes(norm_blob, tags))
-    attrs.update(_spare_parts_attributes(primary, norm_blob, tags))
+    attrs.update(_spare_parts_attributes(item, primary, norm_blob, tags))
     admin_note = _is_admin_note(primary)
     if admin_note:
         attrs["note_type"] = "ADMIN"
@@ -3526,7 +3585,17 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
 
     material_attrs = _material_attributes(norm_blob)
     material_owner = _component_material_owner(item, material_attrs, rules)
-    if material_owner:
+    section = str(item.get("section") or "").upper()
+    whole_fan_construction = bool(
+        material_attrs
+        and re.match(r"^CONSTRUCTION\b", primary)
+        and re.search(r"\b(FEATURES?|NOTES?)\b", section)
+    )
+    if whole_fan_construction:
+        attrs.update(material_attrs)
+        attrs["component"] = "BASE FAN"
+        attrs["material_scope"] = "WHOLE FAN"
+    elif material_owner:
         attrs.setdefault("component", material_owner)
         for key, val in _component_material_attributes(material_owner, material_attrs).items():
             attrs[f"component_{key}"] = val
@@ -3537,8 +3606,10 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_bearing_attributes(blob, norm_blob))
 
     used_on = "" if _is_ship_via_note(primary, norm_blob) else _used_on(norm_blob)
-    if used_on:
+    if used_on and "SPARE PARTS" not in tags:
         attrs["used_on"] = used_on
+    if "SPARE PARTS" in tags:
+        attrs.pop("used_on", None)
 
     if "ACTUATOR" in tags or "ACTUATOR" in norm_blob:
         attrs["component"] = "ACTUATOR"
@@ -3546,8 +3617,10 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
             ("Actuator Manufacturer", "manufacturer"),
             ("Actuator Supplied By", "supplied_by"),
             ("Actuator Mounting", "mounting"),
-            ("Fail Position Upon Loss of Supply/Air/Power", "fail_power"),
-            ("Fail Position Upon Loss of Signal", "fail_signal"),
+            ("Fail Position Upon Loss of Supply/Air/Power",
+             "fail_position_upon_loss_of_power"),
+            ("Fail Position Upon Loss of Signal",
+             "fail_position_upon_loss_of_signal"),
             ("Operation", "operation"),
         ):
             val = _label_value(item, label)
@@ -3611,6 +3684,12 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
 _UNCLASSIFIED_DETAIL_PREFIX = "UNCLASSIFIED DETAIL: "
 
 
+def _known_non_fact_detail(detail: str) -> bool:
+    """Source context we intentionally retain without turning into a fact."""
+    return bool(re.match(r"^IVC\s+HANDLE\s+LOCATION\s+FOR\s+DISCHARGE\s*$",
+                         normalize_text(detail), re.I))
+
+
 def _semantic_signature(tags: List[str], attrs: Dict[str, Any]) -> Tuple[Any, ...]:
     return (
         tuple(sorted(str(tag) for tag in tags)),
@@ -3648,7 +3727,7 @@ def _detail_review_flags(item: Dict[str, Any], rules: Dict[str, Any],
             current = _semantic_signature(
                 _final_tags(probe, rules), component_attributes(probe, rules)
             )
-        if current == previous:
+        if current == previous and not _known_non_fact_detail(detail):
             # Some CBC labels put their value on the next physical PDF line:
             # "Handle Location:" / "@3:00" and "Fail Position ...:" /
             # "Will Advise".  If the pair adds meaning but the value alone
@@ -3720,6 +3799,32 @@ def _document_fact_fields(item: Dict[str, Any]) -> Dict[str, Any] | None:
     if not fact:
         return None
     attrs = dict(item.get("document_attributes") or {})
+    if fact == "MARK":
+        attrs.pop("rep_reference", None)
+    elif fact == "SHIP TO":
+        legacy_address = [
+            (int(match.group(1)), str(value).strip())
+            for key, value in list(attrs.items())
+            if (match := re.fullmatch(r"ship_to_address_(\d+)", str(key)))
+            and str(value).strip()
+        ]
+        legacy_instructions = [
+            (int(match.group(1)), str(value).strip())
+            for key, value in list(attrs.items())
+            if (match := re.fullmatch(r"ship_to_instruction_(\d+)", str(key)))
+            and str(value).strip()
+        ]
+        for key in list(attrs):
+            if re.fullmatch(r"ship_to_(?:address|instruction)_\d+", str(key)):
+                attrs.pop(key, None)
+        if legacy_address and not attrs.get("ship_to_address"):
+            attrs["ship_to_address"] = " | ".join(
+                value for _index, value in sorted(legacy_address)
+            )
+        if legacy_instructions and not attrs.get("ship_to_instruction"):
+            attrs["ship_to_instruction"] = " | ".join(
+                value for _index, value in sorted(legacy_instructions)
+            )
     attrs["component"] = fact
     return {
         "norm": f"DOCUMENT FACT {fact}",
@@ -3839,14 +3944,12 @@ def document_fact_items_from_tables(tables: Iterable[Any],
                                     recon_lines: Iterable[str]) -> List[Dict[str, Any]]:
     """Extract the explicit MARK and SHIP TO cells from an SO's page tables.
 
-    They are document facts, not accessory rows.  The related Rep Ref. text is
-    retained with MARK because it is the wording repeated in continuation-page
-    headers and was previously mistaken for item detail.
+    They are document facts, not accessory rows. MARK is retained verbatim;
+    SHIP TO keeps company, address, country, and post-address instructions apart.
     """
     recon_text = "\n".join(str(line) for line in recon_lines)
     mark: List[str] = []
     ship_to: List[str] = []
-    rep_ref: List[str] = []
     for cell in _table_cells(tables):
         lines = _table_cell_lines(cell, recon_text)
         if not lines:
@@ -3856,16 +3959,11 @@ def document_fact_items_from_tables(tables: Iterable[Any],
             mark = _after_cell_label(lines, r"Mark\s*\(\s*shipping\s+documents\s*\)")
         elif not ship_to and key.startswith("shipto"):
             ship_to = _after_cell_label(lines, r"Ship\s+To")
-        elif not rep_ref and key.startswith("repref"):
-            rep_ref = _after_cell_label(lines, r"Rep\s*Ref\.?\s*#?")
 
     out: List[Dict[str, Any]] = []
     if mark:
         attrs = {"mark_text": " | ".join(mark)}
         details = list(mark)
-        if rep_ref:
-            attrs["rep_reference"] = " ".join(rep_ref)
-            details.append("Rep Ref.: " + " ".join(rep_ref))
         out.append(document_fact_item("MARK", attrs, details))
 
     if ship_to:
@@ -3874,12 +3972,13 @@ def document_fact_items_from_tables(tables: Iterable[Any],
         country_at = next((i for i, value in enumerate(remaining)
                            if _SHIP_TO_COUNTRY.search(value)), None)
         address = remaining if country_at is None else remaining[:country_at]
-        for i, value in enumerate(address, start=1):
-            attrs[f"ship_to_address_{i}"] = value
+        if address:
+            attrs["ship_to_address"] = " | ".join(address)
         if country_at is not None:
             attrs["ship_to_country"] = remaining[country_at]
-            for i, value in enumerate(remaining[country_at + 1:], start=1):
-                attrs[f"ship_to_instruction_{i}"] = value
+            instructions = remaining[country_at + 1:]
+            if instructions:
+                attrs["ship_to_instruction"] = " | ".join(instructions)
         out.append(document_fact_item("SHIP TO", attrs, ship_to))
     return out
 
@@ -3975,6 +4074,7 @@ def _detail_worthy(s: str) -> bool:
 
 _CLOCK_DETAIL = re.compile(r"^@?(?:[1-9]|1[0-2]):[0-5]\d$")
 _DIGIT_DETAIL = re.compile(r"^\d{2,10}\)?$")
+_ALNUM_DETAIL = re.compile(r"^[A-Z0-9][A-Z0-9-]{1,15}\)?$", re.I)
 
 
 def _contextual_numeric_detail(s: str, context: List[str]) -> bool:
@@ -3985,6 +4085,11 @@ def _contextual_numeric_detail(s: str, context: List[str]) -> bool:
             re.search(r"\b(?:HANDLE|DOOR)\s+LOCATION\b", line, re.I)
             for line in context[-2:]):
         return True
+    if _ALNUM_DETAIL.fullmatch(s):
+        recent = " ".join(context[-2:]).strip()
+        if re.search(r"\bINQUIRY\s*(?:NUM(?:BER)?|#)\s*:?", recent, re.I):
+            if recent.rstrip().endswith(("-", ":")) or re.fullmatch(_INQUIRY_NUM, s, re.I):
+                return True
     if _DIGIT_DETAIL.fullmatch(s):
         body, _qty = split_lead(context[0])
         body, _price = split_price_tail(body)
@@ -3995,6 +4100,18 @@ def _contextual_numeric_detail(s: str, context: List[str]) -> bool:
                 and body.rstrip().endswith("-"):
             return True
     return False
+
+
+def _section_wrapped_detail(s: str, context: List[str]) -> bool:
+    """Known wrapped prose that a feature section would otherwise split."""
+    if not context:
+        return False
+    primary = normalize_text(context[0])
+    current = normalize_text(s)
+    return bool(
+        re.match(r"^SHIP WITH\b", primary)
+        and re.match(r"^SINGLE PURCHASE ORDER\b", current)
+    )
 
 
 MAX_DETAILS = 10  # per item — continuation blocks run ~7 lines (motors)
@@ -4021,6 +4138,11 @@ def iter_classified(lines: Iterable[str], rules: Dict[str, Any] | None = None,
             section, have_item, detail_context = detail, False, []
         elif kind == "section-end":
             section, have_item, detail_context = "", False, []
+        elif (kind == "item-section" and have_item and n_details < MAX_DETAILS
+              and _section_wrapped_detail(s, detail_context)):
+            kind = "detail"
+            n_details += 1
+            detail_context.append(s)
         elif kind in ("item-priced", "item-section"):
             have_item, n_details = True, 0
             detail_context = [s]
@@ -4087,6 +4209,11 @@ def extract_items(lines: Iterable[str], rules: Dict[str, Any] | None = None) -> 
     # Tags consider the details too — "Product: Damper" under an "IVD" row is
     # what identifies it.
     items = list(by_norm.values())
+    # Some repair orders print a terse "SERIAL NUMBER UNKNOWN" row immediately
+    # before the complete customer-responsibility note that already contains
+    # that fact. Keep the complete note and suppress only the exact duplicate.
+    if any(_is_customer_responsibility_note(_primary_norm(it, rules)) for it in items):
+        items = [it for it in items if _primary_norm(it, rules) != "SERIAL NUMBER UNKNOWN"]
     for it in items:
         it["tags"] = _final_tags(it, rules)
         it["attributes"] = component_attributes(it, rules)
@@ -4488,6 +4615,16 @@ def renormalize_store(store: Dict[str, Any]) -> int:
             it["norm"] = derived["norm"]
             it["tags"] = derived["tags"]
             it["attributes"] = derived["attributes"]
+            if it.get("document_fact"):
+                it["document_attributes"] = {
+                    key: value for key, value in derived["attributes"].items()
+                    if key != "component"
+                }
+                if str(it.get("document_fact")).upper() == "MARK":
+                    it["details"] = [
+                        detail for detail in it.get("details") or []
+                        if not re.match(r"^Rep\s+Ref\s*\.:?", str(detail), re.I)
+                    ]
             if derived.get("review_flags"):
                 it["review_flags"] = derived["review_flags"]
             else:

@@ -127,6 +127,34 @@ def _derived_component(a: Dict[str, Any]) -> str:
     return scope if scope in _LOCATION_COMPONENTS else ""
 
 
+_HANDLE_LOCATION_VALUE = re.compile(
+    r"^(?:(?P<clock>\d{1,2}:\d{2})(?:\s*\((?P<clock_status>STD|NON-STD)\))?"
+    r"|(?P<status>STD|NON-STD))$",
+    re.I,
+)
+
+
+def _merged_handle_location(first: Any, second: Any) -> str:
+    """Combine a clock row and its separate STD/NON-STD row without conflict."""
+    clocks: List[str] = []
+    statuses: List[str] = []
+    for value in (first, second):
+        match = _HANDLE_LOCATION_VALUE.fullmatch(str(value).strip())
+        if not match:
+            return ""
+        clock = match.group("clock")
+        status = match.group("clock_status") or match.group("status")
+        if clock and clock not in clocks:
+            clocks.append(clock)
+        if status and status.upper() not in statuses:
+            statuses.append(status.upper())
+    if len(clocks) > 1 or len(statuses) > 1:
+        return ""
+    if clocks:
+        return f"{clocks[0]} ({statuses[0]})" if statuses else clocks[0]
+    return statuses[0] if statuses else ""
+
+
 def group_key(item: Dict[str, Any]) -> str:
     """The thing this line is evidence of: its `used_on` attribute (an explicit
     'this line belongs to that component' link), else its `component` attribute
@@ -173,6 +201,11 @@ def components(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 if have is None:
                     attributes[k] = v
                     continue
+                if k == "handle_location":
+                    merged = _merged_handle_location(have, v)
+                    if merged:
+                        attributes[k] = merged
+                        continue
                 seen = [x.strip() for x in re.split(r"[|,]", str(have))]
                 for part in (str(v).split(", ") if _accumulative(k) else [str(v)]):
                     if part.strip() in seen:

@@ -6,8 +6,8 @@ No pytest — run directly:
 
     python test_so_hierarchy.py
 
-Fitted against the real 421966 shape: one physical option (the IVC) sold as
-three separate printed charges that share a used_on attribute.
+Fitted against the real 421967 shape: two printed IVC charges roll up together,
+while the separately sold inlet flange remains its own inlet component.
 """
 from __future__ import annotations
 
@@ -34,52 +34,52 @@ def _ivc_items():
     main = _item("Inlet Volume Control, Low Leak, Automatic L 3,531.00",
                  "3,531.00", used_on="IVC",
                  attrs={"operation": "Automatic", "leakage_class": "LOW LEAKAGE",
-                        "ivc_subcategory": "IVC ACTUATOR"},
+                        "handle_location": "3:00"},
                  details=["Actuator Manufacturer: By Others"])
     handle = _item("Inlet Volume Control Handle Location, Non-standard L 1,014.00",
                    "1,014.00", used_on="IVC",
-                   attrs={"ivc_subcategory": "IVC"},
+                   attrs={"handle_location": "NON-STD"},
                    details=["IVC handle location for Discharge"])
     flange = _item("Inlet, Flanged, Punched (with IVC) L 1,559.00",
-                   "1,559.00", used_on="IVC",
-                   attrs={"ivc_subcategory": "IVC INLET FLANGE"})
+                   "1,559.00",
+                   attrs={"component": "INLET", "flange_type": "PUNCHED"})
     return main, handle, flange
 
 
-def test_three_lines_one_component():
+def test_ivc_lines_merge_while_inlet_stays_separate():
     main, handle, flange = _ivc_items()
     comps = soh.components([handle, main, flange])
-    assert len(comps) == 1                       # one IVC, not three
+    assert len(comps) == 2
     c = comps[0]
     assert c["name"] == "IVC" and c["keyed"]
-    assert c["price"] == 6104.0
+    assert c["price"] == 4545.0
     # Attributes accumulate from every contributing line...
     assert c["attributes"]["operation"] == "Automatic"
     assert c["attributes"]["leakage_class"] == "LOW LEAKAGE"
-    # ...collection keys union quietly (three different subcategories is
-    # expected, not a conflict).
-    assert c["attributes"]["ivc_subcategory"] == "IVC ACTUATOR, IVC, IVC INLET FLANGE"
+    assert c["attributes"]["handle_location"] == "3:00 (NON-STD)"
     assert c["review"] == []
     # Sources: the priciest line is the component's own (primary), the rest in
     # capture order, retaining their verbatim details and flat-table item #s.
-    assert [s["item_no"] for s in c["sources"]] == [2, 1, 3]
+    assert [s["item_no"] for s in c["sources"]] == [2, 1]
     assert c["sources"][0]["primary"] and not c["sources"][1]["primary"]
     assert c["sources"][1]["details"] == ["IVC handle location for Discharge"]
+    assert comps[1]["name"] == "INLET"
 
 
 def test_tree_rows_component_attributes_sources():
     main, handle, flange = _ivc_items()
     rows = soh.tree_rows([handle, main, flange])
     assert rows[0]["kind"] == soh.KIND_COMPONENT
-    assert rows[0]["text"] == "[IVC] — 3 lines"
-    assert rows[0]["price"] == "6,104.00" and rows[0]["item_no"] == ""
+    assert rows[0]["text"] == "[IVC] — 2 lines"
+    assert rows[0]["price"] == "4,545.00" and rows[0]["item_no"] == ""
     attributes = [r["text"] for r in rows if r["kind"] == soh.KIND_ATTRIBUTE]
     assert "operation: Automatic" in attributes  # keys prettified for reading
+    assert "handle location: 3:00 (NON-STD)" in attributes
     srcs = [r for r in rows if r["kind"] == soh.KIND_SOURCE]
     assert srcs[0]["text"].startswith("Inlet Volume Control, Low Leak")
     assert srcs[0]["item_no"] == 2
-    assert srcs[1]["text"].startswith("+ ") and srcs[2]["text"].startswith("+ ")
-    assert all(r["depth"] == 1 for r in rows[1:])
+    assert srcs[1]["text"].startswith("+ ")
+    assert any(r["kind"] == soh.KIND_COMPONENT and r["text"] == "[INLET]" for r in rows)
 
 
 def test_conflicting_single_valued_attribute_is_kept_and_flagged():
@@ -101,7 +101,7 @@ def test_lone_line_stays_its_own_component():
     _m, _h, flange = _ivc_items()
     rows = soh.tree_rows([flange])
     assert rows[0]["kind"] == soh.KIND_COMPONENT
-    assert rows[0]["text"] == "[IVC]" and rows[0]["item_no"] == 1
+    assert rows[0]["text"] == "[INLET]" and rows[0]["item_no"] == 1
     assert all(r["kind"] != soh.KIND_SOURCE for r in rows)
     std = _item("Lifting Lugs L STD", "STD")
     r = soh.tree_rows([std])[0]
@@ -136,11 +136,10 @@ def test_paid_inquiry_flange_change_supersedes_std_base_value():
     assert len(comps) == 1 and comps[0]["name"] == "OUTLET" and comps[0]["keyed"]
     assert comps[0]["attributes"]["flange_type"] == "UNPUNCHED"
     assert not any("CONFLICTING flange_type" in r["text"] for r in comps[0]["review"])
-    # A line already tied to another component keeps that tie — an inlet flange
-    # that is part of the IVC stays under IVC, it does not become its own INLET.
+    # "with IVC" is context, not ownership: the flange is still the inlet.
     ivc_flange = _item("Inlet, Flanged, Punched (with IVC) L 1,559.00", "1,559.00",
-                       used_on="IVC", attrs={"flange_scope": "INLET"})
-    assert soh.group_key(ivc_flange) == "IVC"
+                       attrs={"component": "INLET", "flange_type": "PUNCHED"})
+    assert soh.group_key(ivc_flange) == "INLET"
 
 
 def test_no_merge_on_loose_tag_overlap():

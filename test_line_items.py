@@ -214,7 +214,7 @@ def test_real_so_ivd_and_buyout_tagging():
     assert "DAMPER" in ivd["tags"] and "INLET VANES" in ivd["tags"], ivd
     assert any("Ruskin" in d for d in ivd["details"]), ivd["details"]
     assert ivd["attributes"]["used_on"] == "INLET VANE DAMPER"
-    assert ivd["attributes"]["ivc_subcategory"] == "INLET VANE DAMPER"
+    assert ivd["attributes"]["damper_subcategory"] == "INLET VANE DAMPER"
     # The flanged expansion-joint buyouts tag FLEX CONNECTOR via "Product:".
     items473 = {it["norm"]: it for it in li.extract_items(REAL_LINES_473)}
     assert "FLEX CONNECTOR" in items473["INLET FLANGED"]["tags"]
@@ -532,8 +532,7 @@ def test_actuator_attributes():
     assert "MOUNTING" not in actuator["tags"]
     assert attrs["component"] == "ACTUATOR"
     assert attrs["used_on"] == "IVC"
-    assert attrs["ivc_subcategory"] == "IVC ACTUATOR"
-    assert attrs["ivc_component"] == "ACTUATOR"
+    assert "ivc_subcategory" not in attrs and "ivc_component" not in attrs
     assert attrs["vendor"] == "Novaspect"
     assert attrs["product"] == "Actuator"
     assert attrs["manufacturer"] == "Bettis RPD"
@@ -542,8 +541,8 @@ def test_actuator_attributes():
     assert attrs["operation"] == "Automatic"
     assert attrs["supplied_by"] == "CBC (Mounted)"
     assert attrs["mounting"] == "Bracket and actuator"
-    assert attrs["fail_power"] == "In Place"
-    assert attrs["fail_signal"] == "Closed"
+    assert attrs["fail_position_upon_loss_of_power"] == "In Place"
+    assert attrs["fail_position_upon_loss_of_signal"] == "Closed"
 
 
 def test_drive_attributes():
@@ -844,8 +843,8 @@ def test_inquiry_number_attributes():
     drawing_attrs = items["3D DRAWINGS INQUIRYNUM 333 25 1622"]["attributes"]
     assert "3D STEP DRAWINGS" in items["3D DRAWINGS INQUIRYNUM 333 25 1622"]["tags"]
     assert drawing_attrs["inquiry_num"] == "333-25-1622"
-    assert drawing_attrs["drawing_type"] == "3D STEP DRAWINGS"
-    assert drawing_attrs["drawing_scope"] == "3D FILE"
+    assert drawing_attrs["component"] == "3D STEP DRAWINGS"
+    assert "drawing_type" not in drawing_attrs and "drawing_scope" not in drawing_attrs
     assert items["ACCESS DOOR QUICK CLAMP 10 30 POSITION INQUIRY"]["attributes"]["inquiry_num"] == "352-23-2696"
     assert items["BASE FAN BASE FAN SUITABLE FOR 3600RPM MOTOR"]["attributes"]["inquiry_num"] == "317-26-1510"
 
@@ -861,7 +860,7 @@ def test_numeric_continuations_capture_clock_and_split_inquiry():
     ])[0]
     assert "@3:00" in actuator["details"]
     assert actuator["attributes"]["handle_location"] == "3:00"
-    assert actuator["attributes"]["fail_power"] == "Will Advise"
+    assert actuator["attributes"]["fail_position_upon_loss_of_power"] == "Will Advise"
     flags = actuator.get("review_flags") or []
     assert not any("Handle Location" in flag or "Fail Position" in flag for flag in flags)
 
@@ -871,6 +870,121 @@ def test_numeric_continuations_capture_clock_and_split_inquiry():
     ])[0]
     assert outlet["details"] == ["2440"]
     assert outlet["attributes"]["inquiry_num"] == "361-26-2440"
+
+
+def test_421967_review_notes_are_general_parser_rules():
+    items = li.extract_items([
+        "Access Door, Quick Clamp L 525.00",
+        "Door Location: @9:00",
+        "Include 3D STEP Drawings L NC",
+        "Inlet Volume Control Handle Location, Non-standard L 1,014.00",
+        "IVC handle location for Discharge",
+        "Inlet Volume Control, Low Leak, Automatic L 3,531.00",
+        "Handle Location (viewed from inlet side):",
+        "@3:00",
+        "Actuator Manufacturer: By Others",
+        "Fail Position Upon Loss of Supply/Air/Power:",
+        "Will Advise",
+        "Fail Position Upon Loss of Signal: Will Advise",
+        "Inlet, Flanged, Punched (with IVC) L 1,559.00",
+        "Lifting Lugs L STD",
+        "Mechanical Run Test, Standard L STD",
+        "Outlet, Flanged, Punched L STD",
+        "Stainless steel nameplate L 88.00",
+        "Outlet, Flanged, Unpunched, Inquiry Num: 361-26- L 250.00",
+        "2440",
+        "Additional Features / Notes:",
+        "SHIP WITH FANS REFERENCED BY CUSTOMER PO(s) 23971 (nOTE THERE ARE TWO SLIGHTLY DIFFERENT CBC FAN ON THIS",
+        "SINGLE PURCHASE ORDER(",
+        "Run Test - Required",
+        "Fan Drawings:",
+    ])
+    by_component = {item.get("attributes", {}).get("component"): item for item in items
+                    if item.get("attributes", {}).get("component")}
+
+    door = by_component["ACCESS DOOR"]
+    assert door["attributes"]["door_type"] == "QUICK CLAMP"
+    assert door["attributes"]["door_location"] == "9:00"
+    assert by_component["3D STEP DRAWINGS"]["attributes"] == {
+        "component": "3D STEP DRAWINGS"
+    }
+
+    ivc_lines = [item for item in items if item.get("attributes", {}).get("used_on") == "IVC"]
+    assert len(ivc_lines) == 2
+    handle = next(item for item in ivc_lines if "HANDLE LOCATION" in item["norm"])
+    actuator = next(item for item in ivc_lines if "LOW LEAK" in item["norm"])
+    assert handle["attributes"]["handle_location"] == "NON-STD"
+    assert "handle_location_reference" not in handle["attributes"]
+    assert actuator["attributes"]["fail_position_upon_loss_of_power"] == "Will Advise"
+    assert actuator["attributes"]["fail_position_upon_loss_of_signal"] == "Will Advise"
+    assert "ivc_subcategory" not in actuator["attributes"]
+
+    inlet = by_component["INLET"]
+    assert inlet["tags"] == ["FLANGE", "INLET"]
+    assert inlet["attributes"]["flange_type"] == "PUNCHED"
+    assert "used_on" not in inlet["attributes"] and "ivc_relation" not in inlet["attributes"]
+    assert "flange_scope" not in inlet["attributes"]
+
+    lugs = by_component["HOUSING"]
+    assert lugs["attributes"] == {"component": "HOUSING", "lifting_lugs": "YES"}
+    run_tests = [item for item in items
+                 if item.get("attributes", {}).get("component") == "MECHANICAL RUN TEST"]
+    assert len(run_tests) == 2
+    assert all(item["attributes"] == {"component": "MECHANICAL RUN TEST"}
+               for item in run_tests)
+    outlet_lines = [item for item in items
+                    if item.get("attributes", {}).get("component") == "OUTLET"]
+    assert len(outlet_lines) == 2 and all(
+        "flange_scope" not in item["attributes"] for item in outlet_lines)
+    assert by_component["NAMEPLATE"]["attributes"] == {
+        "component": "NAMEPLATE", "material": "STAINLESS STEEL"
+    }
+    ship_with = by_component["SHIP WITH"]
+    assert ship_with["details"] == ["SINGLE PURCHASE ORDER("]
+    assert "shipping_scope" not in ship_with["attributes"]
+    assert not any(item["norm"] == "SINGLE PURCHASE ORDER" for item in items)
+    assert not any(item.get("review_flags") for item in items)
+
+
+def test_421959_repair_order_wrapping_material_and_ispm():
+    items = li.extract_items([
+        "Chicago Blower Corporation Sales Order For Repair Parts",
+        "Replacement Shaft for fan manufactured by Chicago N 9,123.00 1,825.00",
+        "Blower Oceania (Qty: 1), Inquiry Num: 990-26-",
+        "1764RP",
+        "Replacement Wheel for fan manufactured by N 15,318.00 3,064.00",
+        "Chicago Blower Oceania (Qty: 1), Inquiry Num:",
+        "990-26-1764RP",
+        "ISPM Wood Inspection Stamp L INC",
+        "Additional Features / Notes:",
+        "Construction SS316",
+        "SERIAL NUMBER UNKNOWN",
+        "Customer assumes responsibility for fit-up and suitability of part(s) due to unknown serial number",
+        "Special Invoicing:",
+    ])
+    assert len(items) == 5
+    by_component = {item.get("attributes", {}).get("component"): item for item in items
+                    if item.get("attributes", {}).get("component")}
+
+    for component in ("REPLACEMENT SHAFT", "REPLACEMENT WHEEL"):
+        part = by_component[component]
+        assert part["attributes"]["manufacturer"] == "Chicago Blower Oceania"
+        assert part["attributes"]["inquiry_num"] == "990-26-1764RP"
+        assert "spare_part_type" not in part["attributes"]
+        assert "spare_part_component" not in part["attributes"]
+        assert not part.get("review_flags")
+    assert by_component["REPLACEMENT SHAFT"]["details"][-1] == "1764RP"
+    assert by_component["REPLACEMENT WHEEL"]["details"][-1] == "990-26-1764RP"
+
+    inspection = by_component["INSPECTION"]
+    assert inspection["attributes"]["inspection_subcategory"] == "ISPM WOOD STAMP"
+    fan = by_component["BASE FAN"]
+    assert fan["attributes"]["material"] == "STAINLESS STEEL"
+    assert fan["attributes"]["material_grade"] == "316 SS"
+    assert fan["attributes"]["material_scope"] == "WHOLE FAN"
+    assert not any(item["norm"] == "SERIAL NUMBER UNKNOWN" for item in items)
+    responsibility = next(item for item in items if "ASSUMES RESPONSIBILITY" in item["norm"])
+    assert responsibility["tags"] == ["MISC NOTE"]
 
 
 def test_document_mark_ship_to_and_continuation_metadata():
@@ -906,16 +1020,40 @@ def test_document_mark_ship_to_and_continuation_metadata():
     assert mark["attributes"]["mark_text"] == (
         "FD FAN for BOILER No 1 - NATIONWIDE BOILERP.O. PO 23971"
     )
-    assert mark["attributes"]["rep_reference"] == (
-        "NATIONWIDE BOILER - For DARLENE INGREDIENTS - FAN For BOILER NO 1"
-    )
+    assert "rep_reference" not in mark["attributes"]
     ship = facts["SHIP TO"]
     assert ship["attributes"]["ship_to_company"] == "DARLINGING INREDIENTS COMPANY"
-    assert ship["attributes"]["ship_to_address_1"] == "11946 CARPENTER ROAD"
-    assert ship["attributes"]["ship_to_address_2"] == "CROWS LANDING, CA 95313"
+    assert ship["attributes"]["ship_to_address"] == (
+        "11946 CARPENTER ROAD | CROWS LANDING, CA 95313"
+    )
     assert ship["attributes"]["ship_to_country"] == "UNITED STATES OF AMERICA"
-    assert ship["attributes"]["ship_to_instruction_1"] == "TRAFFIC SEE BELOW"
+    assert ship["attributes"]["ship_to_instruction"] == "TRAFFIC SEE BELOW"
     assert li.derive_item_fields(ship)["attributes"] == ship["attributes"]
+
+    legacy_mark = li.document_fact_item(
+        "MARK", {"mark_text": "KEEP ME", "rep_reference": "REMOVE ME"},
+        ["KEEP ME", "Rep Ref.: REMOVE ME"],
+    )
+    legacy_ship = li.document_fact_item(
+        "SHIP TO", {
+            "ship_to_company": "ACME",
+            "ship_to_address_1": "1 MAIN ST",
+            "ship_to_address_2": "CHICAGO, IL 60601",
+            "ship_to_instruction_1": "CALL AHEAD",
+        },
+        ["ACME", "1 MAIN ST", "CHICAGO, IL 60601", "CALL AHEAD"],
+    )
+    store = {"jobs": {"1": {"items": [legacy_mark, legacy_ship]}}, "ai_tags": {}}
+    li.renormalize_store(store)
+    clean_mark, clean_ship = store["jobs"]["1"]["items"]
+    assert clean_mark["document_attributes"] == {"mark_text": "KEEP ME"}
+    assert clean_mark["details"] == ["KEEP ME"]
+    assert clean_ship["document_attributes"]["ship_to_address"] == (
+        "1 MAIN ST | CHICAGO, IL 60601"
+    )
+    assert clean_ship["document_attributes"]["ship_to_instruction"] == "CALL AHEAD"
+    assert not any(key.endswith("_1") or key.endswith("_2")
+                   for key in clean_ship["document_attributes"])
 
     continuation_lines = [
         "Inlet, Flanged, Punched (with IVC) L 1,559.00",
@@ -1053,6 +1191,7 @@ def test_canonical_component_names_from_prose():
                              "Door Location: @9:00"])[0]
     assert door["attributes"]["component"] == "ACCESS DOOR"
     assert door["attributes"]["door_location"] == "9:00"
+    assert door["attributes"]["door_type"] == "QUICK CLAMP"
 
     pct = li.extract_items(["Percent Width (85%) L 1,252.00"])[0]
     assert pct["attributes"]["component"] == "PERCENT WIDTH"
@@ -1083,15 +1222,17 @@ def test_canonical_component_names_from_prose():
     section = li.extract_items(["Additional Features / Notes:", "Run Test - Required"])
     run = next(i for i in section if "RUN TEST" in i["norm"])
     assert run["attributes"]["component"] == "MECHANICAL RUN TEST"
-    assert run["attributes"]["testing_type"] == "MECHANICAL RUN TEST"   # synonym canonicalized
+    assert not any(k in run["attributes"] for k in
+                   ("testing_type", "testing_standard", "testing_required"))
 
     # A line already tied to a component (the IVC, via used_on) is NOT renamed —
     # but its handle location is still lifted to an attribute.
     handle = li.extract_items(["Inlet Volume Control Handle Location, Non-standard L 1,014.00",
                                "IVC handle location for Discharge"])[0]
     assert handle["attributes"].get("used_on") == "IVC"
-    assert handle["attributes"]["handle_location_reference"] == "DISCHARGE"
-    assert handle["attributes"]["handle_location_standard"] == "NO"
+    assert handle["attributes"]["handle_location"] == "NON-STD"
+    assert "handle_location_reference" not in handle["attributes"]
+    assert not handle.get("review_flags")
 
 
 def test_housing_modified_flange_and_length_attributes():
@@ -1313,7 +1454,7 @@ def test_low_leakage_and_extreme_temperature_attributes():
     assert {"INLET VANES", "LOW LEAKAGE"} <= set(low_leak["tags"])
     assert low_leak["attributes"]["leakage_class"] == "LOW LEAKAGE"
     assert low_leak["attributes"]["used_on"] == "IVC"
-    assert low_leak["attributes"]["ivc_subcategory"] == "IVC"
+    assert "ivc_subcategory" not in low_leak["attributes"]
     assert low_leak["attributes"]["operation"] == "Automatic"
     assert low_leak["attributes"]["ivc_size"] == "4014"
     assert low_leak["attributes"]["ivc_feature"] == "ROTATING RING ARM"
@@ -1359,7 +1500,7 @@ def test_inlet_vane_manual_locking_quadrant_attributes():
         "Handle Location (viewed from inlet side):",
     ])[0]
     assert {"DAMPER", "INLET VANES"} <= set(manual["tags"])
-    assert manual["attributes"]["ivc_subcategory"] == "IVC"
+    assert "ivc_subcategory" not in manual["attributes"]
     assert manual["attributes"]["operation"] == "Manual"
     assert manual["attributes"]["ivc_feature"] == "LOCKING QUADRANT"
     assert manual["attributes"]["used_on"] == "IVC"
@@ -1706,9 +1847,10 @@ def test_inlet_flange_direction_and_box_attributes():
     assert punched["attributes"]["ivc_relation"] == "WITHOUT IVC"
 
     with_ivc = li.extract_items(["Inlet, Flanged, Punched (with IVC) L 1,453.00"])[0]
-    assert {"INLET", "INLET VANES"} <= set(with_ivc["tags"])
-    assert with_ivc["attributes"]["ivc_relation"] == "WITH IVC"
-    assert with_ivc["attributes"]["used_on"] == "IVC"
+    assert with_ivc["tags"] == ["FLANGE", "INLET"]
+    assert with_ivc["attributes"]["component"] == "INLET"
+    assert "ivc_relation" not in with_ivc["attributes"]
+    assert "used_on" not in with_ivc["attributes"]
 
     bolted = li.extract_items(['Inlet, Flanged, Standard Bolted (Inlet Dia 10") N STD'])[0]
     assert bolted["attributes"]["inlet_subcategory"] == "FLANGED"
@@ -1758,6 +1900,15 @@ def test_inspection_subcategories_keep_ispm_and_overseas_crate():
     assert {"INSPECTION", "PACKAGING"} <= set(ispm["tags"])
     assert ispm["attributes"]["inspection_subcategory"] == "ISPM WOOD STAMP"
     assert ispm["attributes"]["inspection_scope"] == "PACKAGING"
+
+    requirement = li.derive_item_fields({
+        "raw": "All international shipments are to be packaged using suitable materials meeting IPPC (or) ISPM code requirements or equivalent (pest",
+        "details": [],
+    })
+    assert {"INSPECTION", "PACKAGING", "SHIPPING"} <= set(requirement["tags"])
+    assert requirement["attributes"]["component"] == "INSPECTION"
+    assert requirement["attributes"]["inspection_subcategory"] == "ISPM REQUIREMENTS"
+    assert requirement["attributes"]["inspection_scope"] == "PACKAGING"
 
     overseas = li.derive_item_fields({
         "raw": "Order is shipping overseas; verify order is complete. For parts orders verify counts and sign off on inspection/crate report.",
@@ -1865,7 +2016,7 @@ def test_lifting_lugs_and_lining_attributes():
     lugs = li.extract_items(["Lifting Lugs @12:00, Inquiry Num: 374-26-320 L 463.00"])[0]
     assert "LIFTING LUGS" in lugs["tags"]
     assert lugs["attributes"]["component"] == "HOUSING"
-    assert lugs["attributes"]["housing_feature"] == "LIFTING LUGS"
+    assert "housing_feature" not in lugs["attributes"]
     assert lugs["attributes"]["lifting_lugs"] == "YES"
     assert "lug_position" not in lugs["attributes"]
 
@@ -2020,6 +2171,7 @@ def test_silencer_spare_parts_and_spark_resistant_attributes():
     })
     assert ispm["tags"] == ["INSPECTION", "PACKAGING"]
     assert ispm["attributes"] == {
+        "component": "INSPECTION",
         "inspection_subcategory": "ISPM WOOD STAMP",
         "inspection_scope": "PACKAGING",
     }
@@ -2028,16 +2180,55 @@ def test_silencer_spare_parts_and_spark_resistant_attributes():
         "Repair Shaft (Qty: 1), Inquiry Num: 340-25-943RP N 768.00",
     ])[0]
     assert "SPARE PARTS" in repair["tags"]
-    assert repair["attributes"]["spare_part_type"] == "REPAIR"
-    assert repair["attributes"]["spare_part_component"] == "SHAFT"
+    assert repair["attributes"]["component"] == "REPAIR SHAFT"
+    assert "spare_part_type" not in repair["attributes"]
+    assert "spare_part_component" not in repair["attributes"]
 
     replacement = li.extract_items([
         "Replacement Drive Set (Ship Direct) (Qty: 1), N 692.00",
     ])[0]
     assert {"DRIVE COMPONENTS", "SPARE PARTS", "SHIPPING"} <= set(replacement["tags"])
     assert "V-BELT DRIVE" not in replacement["tags"]
-    assert replacement["attributes"]["spare_part_type"] == "REPLACEMENT"
-    assert replacement["attributes"]["spare_part_component"] == "DRIVE COMPONENTS"
+    assert replacement["attributes"]["component"] == "REPLACEMENT DRIVE SET"
+
+    replacement_bearings = li.extract_items([
+        'Replacement Bearings, 2 7/16" Bore (Pair) (Qty: 1), N 1,166.00',
+    ])[0]
+    assert replacement_bearings["attributes"]["component"] == "REPLACEMENT BEARINGS"
+
+    spare_motor = li.extract_items([
+        "Spare Motor C 1,700.00",
+        "304 SS Shaft",
+        "Product: Motor",
+    ])[0]
+    assert spare_motor["attributes"]["component"] == "SPARE MOTOR"
+
+    vendor_named_spare_motor = li.extract_items([
+        "Spare WEG or equivalent C 619.07",
+        "3 HP, 3600 RPM, Enclosure: Premium Explosion Proof",
+        "182T, Cast Iron, Foot Mounted, 3/60/230/460, F1, 1.15 SF",
+    ])[0]
+    assert vendor_named_spare_motor["attributes"]["component"] == "SPARE MOTOR"
+    assert "spare_part_review" not in vendor_named_spare_motor["attributes"]
+
+    replacement_isolators = li.extract_items([
+        "Replacement Isolators (SHIP DIRECT) (Qty: 1), N 736.00",
+    ])[0]
+    assert replacement_isolators["attributes"]["component"] == "REPLACEMENT ISOLATORS"
+
+    unknown_part = li.extract_items([
+        "Replacement Thermocouple, Type J, (Pair) (Qty: 1), N 2,659.00",
+    ])[0]
+    assert "component" not in unknown_part["attributes"]
+    assert any("UNCATEGORIZED REPAIR/SPARE PART" in flag
+               for flag in unknown_part.get("review_flags") or [])
+
+    repair_ivc = li.extract_items([
+        "Repair IVC Linkage (Qty: 1), Inquiry Num: 373-24-1000RP N 1,622.00",
+    ])[0]
+    assert repair_ivc["attributes"]["component"] == "REPAIR IVC"
+    assert repair_ivc["attributes"]["applies_to"] == "IVC"
+    assert "used_on" not in repair_ivc["attributes"]
 
     support_lugs = li.extract_items([
         "Support Lugs, Fan Inlet and Outlet, Inquiry Num: L 898.00",
@@ -2113,7 +2304,8 @@ def test_special_construction_stainless_and_testing_attributes():
         "Customer witness",
     ])[0]
     assert "TESTING" in run_test["tags"]
-    assert run_test["attributes"]["testing_type"] == "MECHANICAL RUN TEST"
+    assert run_test["attributes"]["component"] == "MECHANICAL RUN TEST"
+    assert "testing_type" not in run_test["attributes"]
     assert run_test["attributes"]["testing_duration"] == "2 HOUR"
     assert run_test["attributes"]["testing_measurements"] == "VIBRATION READINGS"
     assert run_test["attributes"]["witnessed"] == "CUSTOMER"

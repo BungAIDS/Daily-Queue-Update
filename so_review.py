@@ -28,10 +28,10 @@ The loop:
      row is ready for another note. Resolved notes remain in the JSON queue and
      the workbook's Resolved tab as history.
 
-Notes anchor to a LINE ITEM (order #, item #) — the SOURCE / single-line
-COMPONENT rows that carry an item #; a note on such a line covers its facts and
-details. The item's raw text is stored alongside for context and to re-attach a
-note if item numbers shift on a re-parse.
+Notes may anchor to any displayed hierarchy row. Source rows use their stable
+order + item number; component, attribute, and review rows use their displayed
+hierarchy text. That text is retained as context if a later re-parse removes or
+renames the row.
 
 Pure logic (store + rows) is import-light and unit-tested; the two Excel
 functions lazy-import openpyxl so the rest of the module loads without it.
@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import warnings
 from datetime import datetime
@@ -82,6 +83,7 @@ ORDERS_SHEET = "Orders"
 BROWSE_HEADERS = ["Item", "Kind", "Hierarchy", "Price", "Existing Note", "Add Note"]
 BROWSE_ADD_NOTE = "Add Note"
 RESOLVED_HEADERS = ["Order", "Item", "Line", "Note", "Resolution", "Resolved"]
+ROW_KEY_HEADER = "_row_key"
 BROWSE_HEADER_ROW = 3
 BROWSE_FIRST_ROW = 4
 
@@ -119,22 +121,38 @@ def _next_id(store: Dict[str, Any]) -> int:
 
 
 def record_note(store: Dict[str, Any], order: str, item_no: Any, item_text: str,
-                note: str, when: Optional[str] = None) -> Optional[Dict[str, Any]]:
+                note: str, when: Optional[str] = None,
+                row_key: str = "") -> Optional[Dict[str, Any]]:
     """Append a note for (order, item). Idempotent on exact text: if a note with
     the same order + item + text already exists (any status), nothing is added
     and None is returned — so re-syncing the same workbook never duplicates."""
     order, note = str(order).strip(), str(note).strip()
     item = str(item_no).strip()
+    target_text = str(item_text or "").strip()
+    target_key = str(row_key or "").strip()
     if not order or not note:
         return None
     for n in store["notes"]:
-        if (str(n.get("order")) == order and str(n.get("item_no")) == item
+        existing_item = str(n.get("item_no", "")).strip()
+        existing_key = str(n.get("row_key", "")).strip()
+        if target_key and existing_key:
+            same_target = existing_key == target_key
+        elif item or existing_item:
+            same_target = existing_item == item
+        else:
+            same_target = (
+                str(n.get("item_text", "")).strip().casefold()
+                == target_text.casefold()
+            )
+        if (str(n.get("order")) == order and same_target
                 and str(n.get("note")) == note):
             return None
     entry = {"id": _next_id(store), "order": order, "item_no": item,
-             "item_text": str(item_text or ""), "note": note,
+             "item_text": target_text, "note": note,
              "status": STATUS_OPEN, "created_at": when or _now(),
              "handled_at": None, "resolution": None}
+    if target_key:
+        entry["row_key"] = target_key
     store["notes"].append(entry)
     return entry
 
@@ -201,6 +219,26 @@ def _job_sort_key(job: str) -> tuple:
     return (0, int(job), job) if str(job).isdigit() else (1, 0, str(job))
 
 
+def _hierarchy_row_keys(rows: List[Dict[str, Any]]) -> List[str]:
+    """Stable keys for source and derived rows, including component context."""
+    parent = ""
+    counts: Dict[str, int] = {}
+    keys: List[str] = []
+    for row in rows:
+        kind = str(row.get("kind", "")).strip()
+        hierarchy = str(row.get("hierarchy", "")).strip()
+        item = str(row.get("item_no", "")).strip()
+        if kind == so_hierarchy.KIND_COMPONENT:
+            parent = hierarchy
+        if item:
+            base = f"item:{item}"
+        else:
+            base = f"{kind.casefold()}|{parent.casefold()}|{hierarchy.casefold()}"
+        counts[base] = counts.get(base, 0) + 1
+        keys.append(base if counts[base] == 1 else f"{base}|{counts[base]}")
+    return keys
+
+
 def _order_notes(review_store: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
     """order# -> open notes for the active review views, in queue order."""
     out: Dict[str, List[Dict[str, Any]]] = {}
@@ -215,10 +253,10 @@ def review_rows(line_items_store: Dict[str, Any],
     """One display row per hierarchy row across every order, newest job first,
     with open notes shown on their lines. Handled notes are intentionally absent
     so the line is ready for another note; their history is retained separately.
-    An open note anchors to its line item's row (which, after a merge, sits under
-    its parent [component]); if that line no longer exists in the parse, it
-    re-anchors to the order's first row (the job). `group_start` marks the first
-    row of each order. Pure — no Excel."""
+    A source note anchors by item number; a component/attribute/review note
+    anchors by its displayed hierarchy text. If that target no longer exists,
+    it re-anchors to the order's first row. `group_start` marks the first row of
+    each order. Pure — no Excel."""
     by_order = _order_notes(review_store)
     jobs = (line_items_store.get("jobs") or {})
     rows: List[Dict[str, Any]] = []
@@ -227,15 +265,35 @@ def review_rows(line_items_store: Dict[str, Any],
         tree = so_hierarchy.tree_rows(items)
         if not tree:
             continue
+        display_rows = [{
+            "kind": tr["kind"],
+            "hierarchy": so_hierarchy.indent_text(tr),
+            "item_no": tr.get("item_no", ""),
+        } for tr in tree]
+        row_keys = _hierarchy_row_keys(display_rows)
         # item # -> the tree row index that carries it (a SOURCE row under a
         # component, or a single-line COMPONENT row).
         item_to_idx = {str(tr["item_no"]): i for i, tr in enumerate(tree)
                        if tr.get("item_no") != ""}
-        # Attach each note to a row: its line item if that still exists, else the
-        # order's first row (the job) — never dropped.
+        text_to_idx: Dict[str, int] = {}
+        key_to_idx = {key: i for i, key in enumerate(row_keys)}
+        for i, tr in enumerate(tree):
+            key = so_hierarchy.indent_text(tr).strip().casefold()
+            if key:
+                text_to_idx.setdefault(key, i)
+        # Attach by stable item number when available, otherwise by the exact
+        # displayed hierarchy text. The order's first row is the safe fallback.
         per_row: Dict[int, List[Dict[str, Any]]] = {}
         for n in by_order.get(str(jn), []):
-            idx = item_to_idx.get(str(n.get("item_no")), 0)   # 0 = job/first row
+            stored_key = str(n.get("row_key", "")).strip()
+            item = str(n.get("item_no", "")).strip()
+            if stored_key and stored_key in key_to_idx:
+                idx = key_to_idx[stored_key]
+            elif item:
+                idx = item_to_idx.get(item, 0)
+            else:
+                key = str(n.get("item_text", "")).strip().casefold()
+                idx = text_to_idx.get(key, 0)
             per_row.setdefault(idx, []).append(n)
         for i, tr in enumerate(tree):
             here = per_row.get(i, [])
@@ -252,7 +310,8 @@ def review_rows(line_items_store: Dict[str, Any],
                 "note": note_txt,
                 "status": STATUS_OPEN if here else "",
                 "resolution": "",
-                "annotatable": item_no != "",   # only line-item rows take a NEW note
+                "annotatable": True,
+                "row_key": row_keys[i],
                 "group_start": i == 0,
             })
     return rows
@@ -261,15 +320,14 @@ def review_rows(line_items_store: Dict[str, Any],
 def ingest_edits(review_store: Dict[str, Any],
                  edits: List[Dict[str, Any]], when: Optional[str] = None) -> int:
     """Fold rows read back from the workbook into the queue. Each edit is
-    {order, item_no, item_text, note}; only rows with an order, an item # and a
-    non-empty note are recorded (record_note dedups exact repeats). Returns how
-    many NEW notes were added."""
+    {order, item_no, item_text, note}. Source rows carry an item number; derived
+    rows intentionally leave it blank and anchor by item_text. record_note dedups
+    exact repeats. Returns how many NEW notes were added."""
     added = 0
     for e in edits:
-        if str(e.get("item_no", "")).strip() == "":
-            continue
         if record_note(review_store, e.get("order", ""), e.get("item_no", ""),
-                        e.get("item_text", ""), e.get("note", ""), when=when):
+                        e.get("item_text", ""), e.get("note", ""), when=when,
+                        row_key=e.get("row_key", "")):
             added += 1
     return added
 
@@ -329,34 +387,36 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
     notes = wb.active
     notes.title = NOTES_SHEET
     band_col = ncols + 1                                    # hidden parity helper
-    notes.append(HEADERS + ["_band"])
+    row_key_col = ncols + 2
+    notes.append(HEADERS + ["_band", ROW_KEY_HEADER])
     parity = 0
     for r in rows:
         if r["group_start"]:
             parity ^= 1                                     # flip per order group
         notes.append([r["order"], r["item_no"], r["kind"], r["hierarchy"], r["price"],
-                      r["note"], "", r["status"], r["resolution"], parity])
+                      r["note"], "", r["status"], r["resolution"], parity, r["row_key"]])
     last = notes.max_row
     for c in range(1, ncols + 1):
         notes.cell(1, c).fill = header_fill
         notes.cell(1, c).font = header_font
     notes.column_dimensions[get_column_letter(band_col)].hidden = True
+    notes.column_dimensions[get_column_letter(row_key_col)].hidden = True
 
     if last >= 2:
         full = f"A2:{get_column_letter(ncols)}{last}"
         bandL, kindL = get_column_letter(band_col), get_column_letter(_COL["Kind"] + 1)
         add_noteL = get_column_letter(_COL[NOTES_ADD_NOTE] + 1)
-        itemL = get_column_letter(_COL["Item"] + 1)
+        hierarchyL = get_column_letter(_COL["Hierarchy"] + 1)
         # Order banding (fill only) + Kind cues (font only) coexist: each rule
         # sets only the properties it needs, so they layer without fighting.
         notes.conditional_formatting.add(full, FormulaRule(formula=[f"${bandL}2=1"], fill=band_fill))
         notes.conditional_formatting.add(full, FormulaRule(formula=[f'${kindL}2="COMPONENT"'], fill=comp_fill, font=comp_font))
         notes.conditional_formatting.add(full, FormulaRule(formula=[f'${kindL}2="REVIEW"'], font=review_font))
-        # Only Add Note is an input, and only numbered source rows have a stable
-        # item anchor. Resolved notes leave this active grid.
+        # Every displayed hierarchy row can take a note. Resolved notes leave
+        # this active grid.
         notes.conditional_formatting.add(
             f"{add_noteL}2:{add_noteL}{last}",
-            FormulaRule(formula=[f'${itemL}2<>""'], fill=note_fill),
+            FormulaRule(formula=[f'${hierarchyL}2<>""'], fill=note_fill),
         )
     notes.freeze_panes = "A2"
     notes.auto_filter.ref = f"A1:{get_column_letter(ncols)}{last}"
@@ -454,16 +514,16 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
     add_note_range = f"F{BROWSE_FIRST_ROW}:F{bmax}"
     browse.conditional_formatting.add(
         add_note_range,
-        FormulaRule(formula=[f'$A{BROWSE_FIRST_ROW}<>""'], fill=note_fill),
+        FormulaRule(formula=[f'$C{BROWSE_FIRST_ROW}<>""'], fill=note_fill),
     )
     add_note_validation = DataValidation(
         type="custom",
-        formula1=f'=$A{BROWSE_FIRST_ROW}<>""',
+        formula1=f'=$C{BROWSE_FIRST_ROW}<>""',
         allow_blank=True,
     )
     add_note_validation.showErrorMessage = True
-    add_note_validation.errorTitle = "Choose a line item"
-    add_note_validation.error = "Notes can only be added beside a numbered line item."
+    add_note_validation.errorTitle = "Choose a review row"
+    add_note_validation.error = "Notes can only be added beside a displayed hierarchy row."
     add_note_validation.showInputMessage = True
     add_note_validation.promptTitle = "Add Note"
     add_note_validation.prompt = "Save and close Excel, then run Read SO Notes."
@@ -541,8 +601,14 @@ def _note_parts(value: Any) -> List[str]:
     return [part.strip() for part in _excel_text(value).split(NOTE_SEPARATOR) if part.strip()]
 
 
+def _manual_note_parts(value: Any) -> List[str]:
+    """Return human-entered text while ignoring rendered ``#id: note`` history."""
+    return [part for part in _note_parts(value)
+            if not re.match(r"^#\d+\s*:\s*", part)]
+
+
 def read_edits(path: Path) -> List[Dict[str, Any]]:
-    """Read only dedicated inputs, with a one-time legacy Note-column fallback."""
+    """Read dedicated inputs and recover manual overrides in rendered Note cells."""
     from openpyxl import load_workbook
 
     with warnings.catch_warnings():
@@ -555,23 +621,42 @@ def read_edits(path: Path) -> List[Dict[str, Any]]:
         notes = _notes_sheet(wb)
         header = [_excel_text(c.value) for c in notes[1]]
         idx = {h: header.index(h) for h in HEADERS if h in header}
-        notes_input = NOTES_ADD_NOTE if NOTES_ADD_NOTE in header else "Note"
+        row_key_index = header.index(ROW_KEY_HEADER) if ROW_KEY_HEADER in header else None
 
         def notes_value(row: tuple, heading: str) -> str:
             i = idx.get(heading)
             return "" if i is None or i >= len(row) else _excel_text(row[i])
 
         edits: List[Dict[str, Any]] = []
-        for row in notes.iter_rows(min_row=2, values_only=True):
+        workbook_rows: List[Dict[str, Any]] = []
+        raw_rows = list(notes.iter_rows(min_row=2, values_only=True))
+        for row in raw_rows:
+            workbook_rows.append({
+                "kind": notes_value(row, "Kind"),
+                "hierarchy": notes_value(row, "Hierarchy"),
+                "item_no": notes_value(row, "Item"),
+            })
+        derived_row_keys = _hierarchy_row_keys(workbook_rows)
+        notes_row_keys: Dict[int, str] = {}
+        for sheet_row, (row, derived_key) in enumerate(zip(raw_rows, derived_row_keys), start=2):
             order = notes_value(row, "Order")
             item_no = notes_value(row, "Item")
-            if order and item_no:
-                for note in _note_parts(notes_value(row, notes_input)):
+            stored_key = ""
+            if row_key_index is not None and row_key_index < len(row):
+                stored_key = _excel_text(row[row_key_index])
+            row_key = stored_key or derived_key
+            notes_row_keys[sheet_row] = row_key
+            if order:
+                typed = _manual_note_parts(notes_value(row, "Note"))
+                if NOTES_ADD_NOTE in header:
+                    typed.extend(_note_parts(notes_value(row, NOTES_ADD_NOTE)))
+                for note in typed:
                     edits.append({
                         "order": order,
                         "item_no": item_no,
                         "item_text": notes_value(row, "Hierarchy"),
                         "note": note,
+                        "row_key": row_key,
                         "source": "notes",
                     })
 
@@ -633,16 +718,18 @@ def read_edits(path: Path) -> List[Dict[str, Any]]:
             source_row = start_row + offset
             source_order = _excel_text(notes.cell(source_row, idx["Order"] + 1).value)
             item_no = _excel_text(notes.cell(source_row, idx["Item"] + 1).value)
-            if source_order != selected_order or not item_no:
+            hierarchy = _excel_text(notes.cell(source_row, idx["Hierarchy"] + 1).value)
+            if source_order != selected_order or not hierarchy:
                 raise RuntimeError(
-                    f"Sales Order row {output_row} is not a numbered line item for "
+                    f"Sales Order row {output_row} is not a review row for "
                     f"order {selected_order}; its Add Note entry was not imported."
                 )
             edits.append({
                 "order": source_order,
                 "item_no": item_no,
-                "item_text": _excel_text(notes.cell(source_row, idx["Hierarchy"] + 1).value),
+                "item_text": hierarchy,
                 "note": note,
+                "row_key": notes_row_keys.get(source_row, ""),
                 "source": "sales_order",
             })
         return edits
