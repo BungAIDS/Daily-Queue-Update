@@ -61,6 +61,21 @@ def test_record_note_appends_and_dedups():
     assert distinct and distinct["id"] == 4
 
 
+def test_legacy_row_key_counts_reset_for_each_order():
+    rows = [
+        {"order": "421900", "kind": "COMPONENT", "hierarchy": "[MOTOR]", "item_no": "1"},
+        {"order": "421900", "kind": "ATTRIBUTE", "hierarchy": "    motor_hp: 10", "item_no": ""},
+        {"order": "421901", "kind": "COMPONENT", "hierarchy": "[MOTOR]", "item_no": "1"},
+        {"order": "421901", "kind": "ATTRIBUTE", "hierarchy": "    motor_hp: 10", "item_no": ""},
+    ]
+    assert sr._hierarchy_row_keys(rows) == [
+        "item:1",
+        "attribute|[motor]|motor_hp: 10",
+        "item:1",
+        "attribute|[motor]|motor_hp: 10",
+    ]
+
+
 def test_mark_handled_and_open_filter():
     store = {"notes": []}
     n = sr.record_note(store, "421966", 2, "IVC", "these 3 should be one component")

@@ -224,7 +224,13 @@ def _hierarchy_row_keys(rows: List[Dict[str, Any]]) -> List[str]:
     parent = ""
     counts: Dict[str, int] = {}
     keys: List[str] = []
+    current_order = ""
     for row in rows:
+        order = str(row.get("order", "")).strip()
+        if order and order != current_order:
+            current_order = order
+            parent = ""
+            counts = {}
         kind = str(row.get("kind", "")).strip()
         hierarchy = str(row.get("hierarchy", "")).strip()
         item = str(row.get("item_no", "")).strip()
@@ -632,6 +638,7 @@ def read_edits(path: Path) -> List[Dict[str, Any]]:
         raw_rows = list(notes.iter_rows(min_row=2, values_only=True))
         for row in raw_rows:
             workbook_rows.append({
+                "order": notes_value(row, "Order"),
                 "kind": notes_value(row, "Kind"),
                 "hierarchy": notes_value(row, "Hierarchy"),
                 "item_no": notes_value(row, "Item"),
