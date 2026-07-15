@@ -1206,6 +1206,39 @@ def test_order_context_survives_store_renormalization():
                for item in legacy["items"])
 
 
+def test_line_item_rescan_uses_atomic_order_context_records():
+    import line_items_scan as scanner
+    import sales_orders
+
+    captured = []
+    original_load = scanner.li.load_store
+    original_record = scanner.li.record_jobs_atomic
+    original_parse = sales_orders.parse_sales_order_pdf
+    scanner.li.load_store = lambda: {"jobs": {}, "ai_tags": {}}
+    scanner.li.record_jobs_atomic = lambda rows: (
+        captured.extend(dict(row) for row in rows) or len(rows)
+    )
+    sales_orders.parse_sales_order_pdf = lambda _path: {
+        "line_items": [{"raw": "Extended Grease Fittings", "tags": ["BEARINGS"]}],
+        "arrangement": "A/9S",
+        "parts_only": False,
+        "job_number": "MJ26-821",
+    }
+    try:
+        assert scanner.scan([("422004", Path("422004.pdf"), 2)], True, 0) == 0
+    finally:
+        scanner.li.load_store = original_load
+        scanner.li.record_jobs_atomic = original_record
+        sales_orders.parse_sales_order_pdf = original_parse
+
+    assert len(captured) == 1
+    assert captured[0]["job"] == "422004"
+    assert captured[0]["co_number"] == 2
+    assert captured[0]["arrangement"] == "A/9S"
+    assert captured[0]["parts_only"] is False
+    assert captured[0]["job_number"] == "MJ26-821"
+
+
 def test_document_mark_ship_to_and_continuation_metadata():
     recon = [
         "Order # Rep Ref. # Customer P.O. # Fan Serial Number:",

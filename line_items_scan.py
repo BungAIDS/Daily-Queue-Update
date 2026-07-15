@@ -191,20 +191,32 @@ def scan(targets: List[Tuple[str, Path, int]], rescan: bool, limit: int) -> int:
         raise SystemExit("pdfplumber isn't installed yet. Run:  pip install pdfplumber")
     from sales_orders import parse_sales_order_pdf
     store = li.load_store()
+    known_jobs = set(store.get("jobs") or {})
+    pending: List[Dict[str, Any]] = []
     done = 0
     for job, pdf, co in targets:
         if limit and done >= limit:
             break
-        if not rescan and job in store["jobs"]:
+        if not rescan and job in known_jobs:
             continue
-        items = parse_sales_order_pdf(pdf).get("line_items") or []
-        li.apply_ai_cache(items, store)
-        li.record_job(store, job, items, co_number=co, so_pdf=str(pdf))
+        parsed = parse_sales_order_pdf(pdf)
+        items = parsed.get("line_items") or []
+        pending.append({
+            "job": job,
+            "items": items,
+            "co_number": co,
+            "so_pdf": str(pdf),
+            "arrangement": parsed.get("arrangement", ""),
+            "parts_only": bool(parsed.get("parts_only", False)),
+            "job_number": parsed.get("job_number", ""),
+        })
         done += 1
         log.info("  %d  %s -> %d item(s)", done, job, len(items))
-        if done % 50 == 0:
-            li.save_store(store)
-    li.save_store(store)
+        if len(pending) >= 50:
+            li.record_jobs_atomic(pending)
+            pending.clear()
+    li.record_jobs_atomic(pending)
+    store = li.load_store()
     log.info("Scanned %d order(s) this run; store now holds %d job(s) -> %s",
              done, len(store["jobs"]), li.store_path())
     return 0
