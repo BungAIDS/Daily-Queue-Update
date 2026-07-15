@@ -601,6 +601,8 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
                     path,
                 )
                 return res
+            page_tables = [page.extract_tables() for page in pdf.pages]
+            page_recon = [_recon_lines(page) for page in pdf.pages]
             for ln in page_texts[0].splitlines()[:8]:
                 if res["header_co"] is None:
                     m = re.search(r"CO\s*#\s*(\d+)", ln)
@@ -612,10 +614,10 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
             # The Qty/Design/Size/Arrangement spec row is normally on page 1, but
             # a long Tag (nameplate) section can push it onto a later page — so
             # scan every page until the spec row turns up.
-            for page in pdf.pages:
-                spec = _spec_from_tables(page.extract_tables())
+            for tables, recon_lines in zip(page_tables, page_recon):
+                spec = _spec_from_tables(tables)
                 if spec.get("Size") or spec.get("Arrangement"):
-                    recon = "\n".join(_recon_lines(page))
+                    recon = "\n".join(recon_lines)
                     res["size"] = _respace_value(spec.get("Size", ""), recon)
                     res["arrangement"] = _respace_value(spec.get("Arrangement", "") or "N/A", recon)
                     # These six are short codes (DB, CCW, BI, 100, …) — take them
@@ -636,13 +638,16 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
                 if not res.get(key) and value:
                     res[key] = value
             recon_all: List[str] = []
-            for page in pdf.pages:
-                recon_all.extend(_recon_lines(page))
+            document_facts: Dict[str, Dict[str, Any]] = {}
+            for tables, recon_lines in zip(page_tables, page_recon):
+                for fact in line_items.document_fact_items_from_tables(tables, recon_lines):
+                    document_facts.setdefault(str(fact.get("document_fact") or ""), fact)
+                recon_all.extend(line_items.strip_continuation_metadata(recon_lines, tables))
             res["co_history"] = _co_history_from_lines(recon_all)
             # Every line item on the order — the priced item/accessory rows and
             # the "Additional Features"-style lines — normalized + tagged so
             # orders can be looked up by what's on them (see line_items.py).
-            res["line_items"] = line_items.extract_items(recon_all)
+            res["line_items"] = line_items.extract_items(recon_all) + list(document_facts.values())
             # Transmittal fields off the same reconstructed text: recipient emails
             # (Additional Features / Notes -> "E-Mail Prints to:"), the customer
             # P.O. #, and the released-for-production status.

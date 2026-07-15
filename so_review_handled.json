@@ -7,8 +7,8 @@
     },
     {
       "id": 12,
-      "resolution": "The two Outlet lines (10 punched, 15 unpunched) now merge into ONE [OUTLET] component; the flange_type disagreement is flagged as CONFLICTING flange_type. General rule now in place: same-component lines in an order merge into one, and conflicting single-valued attributes are flagged.",
-      "handled_at": "2026-07-14T20:34:06"
+      "resolution": "The two Outlet lines now merge into one [OUTLET]. Paid inquiry 361-26-2440 supersedes the no-charge STD base wording, so the current flange_type is UNPUNCHED with no false PUNCHED conflict.",
+      "handled_at": "2026-07-15T07:27:00"
     },
     {
       "id": 1,
@@ -17,13 +17,13 @@
     },
     {
       "id": 2,
-      "resolution": "[HANDLE LOCATION] now an attribute on IVC lines: handle_location (clock or direction) + handle_location_standard (YES/NO from 'Non-standard').",
-      "handled_at": "2026-07-14T20:45:34"
+      "resolution": "[HANDLE LOCATION] now captures the actual clock value on item 6 as handle_location=3:00. The same IVC retains handle_location_standard=NO and handle_location_reference=DISCHARGE separately, without a false conflict.",
+      "handled_at": "2026-07-15T07:27:00"
     },
     {
       "id": 4,
-      "resolution": "[HANDLE LOCATION] captured as attribute (see #2).",
-      "handled_at": "2026-07-14T20:45:35"
+      "resolution": "The IVC wording is retained as handle_location_reference=DISCHARGE with handle_location_standard=NO; the separate item 6 clock detail supplies handle_location=3:00.",
+      "handled_at": "2026-07-15T07:27:00"
     },
     {
       "id": 8,
@@ -42,18 +42,33 @@
     },
     {
       "id": 14,
-      "resolution": "Item 18 (Run Test) now merges into the ONE [MECHANICAL RUN TEST] component with item 9 (synonym canonicalized); their status difference STANDARD|REQUIRED is flagged.",
-      "handled_at": "2026-07-14T20:45:35"
+      "resolution": "Item 18 (Run Test) merges with item 9 under one [MECHANICAL RUN TEST]. testing_standard=YES and testing_required=YES are separate compatible attributes, so there is no false STANDARD-versus-REQUIRED conflict.",
+      "handled_at": "2026-07-15T07:27:00"
     },
     {
       "id": 3,
-      "resolution": "Confirmed \u2014 that IVC info is captured (handle location now an explicit attribute).",
-      "handled_at": "2026-07-14T20:45:47"
+      "resolution": "Confirmed: item 6 captures fail_power=Will Advise and fail_signal=Will Advise. Split label/value lines are understood together and no longer produce a false review row.",
+      "handled_at": "2026-07-15T07:27:00"
     },
     {
       "id": 10,
       "resolution": "Item 11 -> component=PERCENT WIDTH with pct_width_customer=85% AND pct_width_rounded=85% (rounds to nearest 5%; e.g. 83->85, 82->80 \u2014 same rounded value = same construction).",
       "handled_at": "2026-07-14T21:00:30"
+    },
+    {
+      "id": 5,
+      "resolution": "The repeated Rep Ref text is no longer attached to item 7. The actual Sales Order Mark cell is stored verbatim under [MARK] as mark_text, with its full related wording retained as rep_reference.",
+      "handled_at": "2026-07-15T07:27:00"
+    },
+    {
+      "id": 6,
+      "resolution": "The repeated page-header fragment is no longer item detail. The actual [SHIP TO] table cell is captured with company, address lines, country, and shipping instruction in separate attributes.",
+      "handled_at": "2026-07-15T07:27:00"
+    },
+    {
+      "id": 7,
+      "resolution": "[MARK] now preserves the actual mark_text and full related rep_reference verbatim; the wrapped continuation-page fragments are removed from item 7.",
+      "handled_at": "2026-07-15T07:27:00"
     }
   ]
 }

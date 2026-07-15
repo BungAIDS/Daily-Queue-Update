@@ -159,15 +159,20 @@ def dump(targets: List[Tuple[str, Path, int]]) -> None:
     for job, pdf, _co in targets:
         print(f"\n{'=' * 72}\n{job}: {pdf}\n{'=' * 72}")
         lines: List[str] = []
+        document_facts = {}
         with pdfplumber.open(str(pdf)) as doc:
             for page in doc.pages:
-                lines.extend(_recon_lines(page))
+                recon = _recon_lines(page)
+                tables = page.extract_tables()
+                lines.extend(li.strip_continuation_metadata(recon, tables))
+                for fact in li.document_fact_items_from_tables(tables, recon):
+                    document_facts.setdefault(str(fact.get("document_fact") or ""), fact)
         for kind, detail, s in li.iter_classified(lines, rules):
             if kind == "blank":
                 continue
             note = f"   [{detail}]" if kind in ("skip", "item-priced") and detail else ""
             print(f"  {_DUMP_MARKS[kind]}  {s}{note}")
-        items = li.extract_items(lines, rules)
+        items = li.extract_items(lines, rules) + list(document_facts.values())
         print(f"\n  CAPTURED {len(items)} item(s):")
         for it in items:
             tags = ", ".join(it["tags"]) or "(no tag yet)"

@@ -74,7 +74,7 @@ def test_review_rows_attach_notes_to_line_items_only():
     # The SOURCE row for item #2 carries the recorded note and is annotatable.
     src2 = [r for r in rows if r["kind"] == sr.so_hierarchy.KIND_SOURCE
             and str(r["item_no"]) == "2"]
-    assert src2 and src2[0]["annotatable"] and src2[0]["note"] == "grouping looks right"
+    assert src2 and src2[0]["annotatable"] and src2[0]["note"] == "#1: grouping looks right"
     # Every row names its order, so the sheet is self-identifying.
     assert all(r["order"] == "421966" for r in rows)
     assert rows[0]["group_start"] and not rows[1]["group_start"]
@@ -96,12 +96,8 @@ def test_multiple_notes_on_one_item_remain_visible_and_readable(tmp: Path):
 
     wb = tmp / "review.xlsx"
     sr.write_workbook(wb, li, store)
-    edits = sr.read_edits(wb)
-    notes = {
-        edit["note"] for edit in edits
-        if edit["order"] == "421966" and edit["item_no"] == "2"
-    }
-    assert notes == {"first note for item 2", "second note for item 2"}
+    # Rendered history is not re-imported as new typing in the current layout.
+    assert sr.read_edits(wb) == []
 
 
 def test_ingest_edits_records_only_line_item_notes():
@@ -139,12 +135,12 @@ def test_handled_notes_stay_visible_with_resolution():
     # A resolved note does NOT vanish — it stays on its line, flagged handled,
     # with the resolution shown, so the work is never "forgotten".
     r1 = next(r for r in rows if str(r["item_no"]) == "1")
-    assert r1["note"] == "handled one" and r1["status"] == sr.STATUS_HANDLED
-    assert r1["resolution"] == "did the thing"
+    assert r1["note"] == "#1: handled one" and r1["status"] == sr.STATUS_HANDLED
+    assert r1["resolution"] == "#1: did the thing"
     # An open note still shows, flagged open (needs attention).
     r2 = next(r for r in rows if str(r["item_no"]) == "2"
               and r["kind"] == sr.so_hierarchy.KIND_SOURCE)
-    assert r2["note"] == "still open" and r2["status"] == sr.STATUS_OPEN
+    assert r2["note"] == "#2: still open" and r2["status"] == sr.STATUS_OPEN
     assert r2["resolution"] == ""
 
 
@@ -155,8 +151,8 @@ def test_orphaned_note_reanchors_to_the_job_row():
     # re-anchors to the order's first row instead of being dropped.
     sr.record_note(store, "421966", 99, "a line that got reparsed away", "keep me")
     rows = [r for r in sr.review_rows(li, store) if r["order"] == "421966"]
-    assert rows[0]["note"] == "keep me"                # landed on the job/first row
-    assert not any(r["note"] == "keep me" for r in rows[1:])
+    assert rows[0]["note"] == "#1: keep me"            # landed on the job/first row
+    assert not any(r["note"] == "#1: keep me" for r in rows[1:])
 
 
 def test_handled_marks_ledger_roundtrip(tmp: Path):
@@ -197,17 +193,18 @@ def test_workbook_write_read_and_sync_roundtrip(tmp: Path):
     n = sr.write_workbook(wb, li, store)
     assert n > 0 and wb.exists()
 
-    # Simulate the human typing a note by editing the Note cell on item #2's
+    # Simulate the human typing a note in Add Note on item #2's
     # SOURCE row, then reading it back.
     from openpyxl import load_workbook
     book = load_workbook(str(wb))
     ws = book[sr.NOTES_SHEET]
     note_col = sr.HEADERS.index("Note") + 1
+    add_note_col = sr.HEADERS.index(sr.NOTES_ADD_NOTE) + 1
     item_col = sr.HEADERS.index("Item") + 1
     typed = False
     for i in range(2, ws.max_row + 1):
         if str(ws.cell(row=i, column=item_col).value) == "2":
-            ws.cell(row=i, column=note_col).value = "parsed IVC grouping is correct"
+            ws.cell(row=i, column=add_note_col).value = "parsed IVC grouping is correct"
             typed = True
             break
     assert typed
@@ -227,6 +224,30 @@ def test_workbook_write_read_and_sync_roundtrip(tmp: Path):
              if str(ws2.cell(row=i, column=item_col).value) == "2"
              and ws2.cell(row=i, column=note_col).value]
     assert found and str(ws2.cell(row=found[0], column=status_col).value) == sr.STATUS_OPEN
+    assert ws2.cell(found[0], note_col).value == "#1: parsed IVC grouping is correct"
+
+
+def test_legacy_notes_column_is_imported_once(tmp: Path):
+    from openpyxl import load_workbook
+
+    wb = tmp / "review.xlsx"
+    sr.write_workbook(wb, _line_items_store(), {"notes": []})
+    book = load_workbook(str(wb), data_only=False)
+    notes = book[sr.NOTES_SHEET]
+    notes.delete_cols(sr.HEADERS.index(sr.NOTES_ADD_NOTE) + 1, 1)
+    item_col = sr.HEADERS.index("Item") + 1
+    note_col = sr.HEADERS.index("Note") + 1
+    row = next(row for row in range(2, notes.max_row + 1)
+               if str(notes.cell(row, item_col).value) == "2")
+    notes.cell(row, note_col).value = "recover legacy Notes-tab typing"
+    book.save(str(wb))
+    book.close()
+
+    edits = [edit for edit in sr.read_edits(wb) if edit.get("source") == "notes"]
+    assert len(edits) == 1
+    assert edits[0]["order"] == "421966" and edits[0]["item_no"] == "2"
+    assert edits[0]["note"] == "recover legacy Notes-tab typing"
+    assert sr._browse_layout_needs_upgrade(wb)
 
 
 def test_workbook_has_browse_and_notes_tabs(tmp: Path):
@@ -240,6 +261,8 @@ def test_workbook_has_browse_and_notes_tabs(tmp: Path):
     assert book[sr.ORDERS_SHEET].sheet_state == "hidden"
     assert book.active.title == sr.BROWSE_SHEET
     browse = book[sr.BROWSE_SHEET]
+    notes = book[sr.NOTES_SHEET]
+    assert [notes.cell(1, c).value for c in range(1, len(sr.HEADERS) + 1)] == sr.HEADERS
     # Picker dropdown plus line-item-only Add Note validation, and compatible
     # INDEX formulas that read Notes.
     # A normal FILTER formula makes Excel repair and discard Sales Order!A4
@@ -272,7 +295,7 @@ def test_workbook_has_browse_and_notes_tabs(tmp: Path):
     assert book[sr.ORDERS_SHEET].cell(1, 2).value == 2
     assert book[sr.ORDERS_SHEET].cell(1, 3).value > 1
     # Colour cues are conditional-format rules (fast), not per-cell styling.
-    assert book[sr.NOTES_SHEET].conditional_formatting._cf_rules
+    assert notes.conditional_formatting._cf_rules
 
 
 def test_sales_order_add_note_is_read_back(tmp: Path):
@@ -365,7 +388,7 @@ def test_sync_moves_sales_order_input_to_notes_and_clears_it(tmp: Path):
     note_col = sr.HEADERS.index("Note") + 1
     assert any(
         str(rebuilt_notes.cell(row, item_col).value) == "2"
-        and rebuilt_notes.cell(row, note_col).value == "sync this note"
+        and rebuilt_notes.cell(row, note_col).value == "#1: sync this note"
         for row in range(2, rebuilt_notes.max_row + 1)
     )
     rebuilt.close()
@@ -454,7 +477,7 @@ def test_refresh_reports_notes_safe_when_workbook_rewrite_fails(tmp: Path):
     book = load_workbook(str(wb), data_only=False)
     notes = book[sr.NOTES_SHEET]
     item_col = sr.HEADERS.index("Item") + 1
-    note_col = sr.HEADERS.index("Note") + 1
+    note_col = sr.HEADERS.index(sr.NOTES_ADD_NOTE) + 1
     row = next(
         row_no for row_no in range(2, notes.max_row + 1)
         if str(notes.cell(row_no, item_col).value) == "2"

@@ -494,7 +494,17 @@ def inquiry_numbers(item: Dict[str, Any]) -> List[str]:
     "InquiryNum:333-25-1622", or "Inquiry L 645.00" followed by
     "Num: 352-23-2696" on the detail line.
     """
-    parts = [re.sub(r"\s+", " ", str(item.get("raw", ""))).strip()]
+    raw = re.sub(r"\s+", " ", str(item.get("raw", ""))).strip()
+    # Use the description without its CBC price/type columns.  An inquiry can
+    # wrap immediately after its final dash ("361-26-" / "2440"); retaining
+    # "L 250.00" between those pieces makes that otherwise-valid number
+    # impossible to reconstruct.
+    primary, _qty = split_lead(raw)
+    primary, _price = split_price_tail(primary)
+    type_tail = _TYPE_PRICE_TAIL.search(primary) or _TYPE_TAIL.search(primary)
+    if type_tail:
+        primary = primary[:type_tail.start()].rstrip(" ,;:")
+    parts = [primary]
     parts += [re.sub(r"\s+", " ", str(d)).strip() for d in item.get("details") or []]
     patterns = [
         re.compile(rf"\bInquiry\s*(?:Num(?:ber)?|#)\s*:?\s*({_INQUIRY_NUM})", re.I),
@@ -504,7 +514,8 @@ def inquiry_numbers(item: Dict[str, Any]) -> List[str]:
     for i, part in enumerate(parts):
         candidates = [part]
         if "inquiry" in part.lower() and i + 1 < len(parts):
-            candidates.append(f"{part} {parts[i + 1]}")
+            joiner = "" if part.rstrip().endswith("-") else " "
+            candidates.append(f"{part}{joiner}{parts[i + 1]}")
         for text in candidates:
             for pat in patterns:
                 for m in pat.finditer(text):
@@ -2309,10 +2320,13 @@ def _testing_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[st
     if re.search(r"\bRUN\s+TEST\s+REPORTS?\b|\bTEST\s+REPORTS?\b", norm_blob):
         add_type("TEST REPORT")
 
+    # "Standard" describes which run test CBC will perform; "Required" says
+    # whether the order calls for it.  They are compatible facts, not two
+    # opposing values of one status field.
     if re.search(r"\bSTANDARD\b", primary):
-        add_status("STANDARD")
+        attrs["testing_standard"] = "YES"
     if re.search(r"\b(REQUIRED|CUSTOMER\s+WITNESS)\b", norm_blob):
-        add_status("REQUIRED")
+        attrs["testing_required"] = "YES"
     if re.search(r"\bNOT\s+AVAILABLE\b", norm_blob):
         add_status("NOT AVAILABLE")
     if re.search(r"\bN\s*/?\s*A\b", norm_blob):
@@ -3426,7 +3440,11 @@ def _canonical_component_attrs(item: Dict[str, Any], primary: str, norm_blob: st
         else:
             m = re.search(r"handle\s+location\s+for\s+([A-Za-z]+)", blob, re.I)
             if m:
-                attrs.setdefault("handle_location", m.group(1).upper())
+                # "for Discharge" is the orientation/reference used to define
+                # the location; a separate detail may carry the actual @clock
+                # value. Keeping them in separate slots prevents a false
+                # DISCHARGE-vs-3:00 conflict on one IVC.
+                attrs.setdefault("handle_location_reference", m.group(1).upper())
 
 
 def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Dict[str, str]:
@@ -3631,6 +3649,22 @@ def _detail_review_flags(item: Dict[str, Any], rules: Dict[str, Any],
                 _final_tags(probe, rules), component_attributes(probe, rules)
             )
         if current == previous:
+            # Some CBC labels put their value on the next physical PDF line:
+            # "Handle Location:" / "@3:00" and "Fail Position ...:" /
+            # "Will Advise".  If the pair adds meaning but the value alone
+            # does not, the header is understood and must not be called an
+            # unclassified detail.
+            paired_with_next = False
+            if index + 1 < len(details):
+                probe["details"] = accumulated + [details[index + 1]]
+                paired = _semantic_signature(
+                    _final_tags(probe, rules), component_attributes(probe, rules)
+                )
+                probe["details"] = [details[index + 1]]
+                next_alone = _semantic_signature(
+                    _final_tags(probe, rules), component_attributes(probe, rules)
+                )
+                paired_with_next = paired != current and next_alone == baseline
             # A repeated known spec may add nothing because an earlier detail
             # already supplied the same value. Check it alone against the raw
             # item before deciding it is uncategorized.
@@ -3638,7 +3672,7 @@ def _detail_review_flags(item: Dict[str, Any], rules: Dict[str, Any],
             alone = _semantic_signature(
                 _final_tags(probe, rules), component_attributes(probe, rules)
             )
-            if alone == baseline:
+            if alone == baseline and not paired_with_next:
                 flags.append(_UNCLASSIFIED_DETAIL_PREFIX + detail)
         previous = current
     return flags
@@ -3675,8 +3709,34 @@ def _apply_review_flags(item: Dict[str, Any], rules: Dict[str, Any] | None = Non
         item.pop("review_flags", None)
 
 
+def _document_fact_fields(item: Dict[str, Any]) -> Dict[str, Any] | None:
+    """Re-derive a structured order-level fact stored beside ordinary items.
+
+    These records originate in labeled PDF table cells (MARK / SHIP TO), so
+    their structured values are source data rather than parser guesses.  Keep a
+    copy under ``document_attributes`` so a later --renorm cannot erase them.
+    """
+    fact = str(item.get("document_fact") or "").strip().upper()
+    if not fact:
+        return None
+    attrs = dict(item.get("document_attributes") or {})
+    attrs["component"] = fact
+    return {
+        "norm": f"DOCUMENT FACT {fact}",
+        "qty": "",
+        "price": "",
+        "ptype": "",
+        "tags": [fact],
+        "attributes": attrs,
+        "review_flags": [],
+    }
+
+
 def derive_item_fields(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Dict[str, Any]:
     """Re-derive normalized fields for a stored item without mutating it."""
+    document = _document_fact_fields(item)
+    if document is not None:
+        return document
     rules = rules or load_rules()
     body, qty = split_lead(item.get("raw", ""))
     body, price = split_price_tail(body)
@@ -3695,6 +3755,167 @@ def derive_item_fields(item: Dict[str, Any], rules: Dict[str, Any] | None = None
 # --------------------------------------------------------------------------- #
 # Extraction from a Sales Order's text lines                                  #
 # --------------------------------------------------------------------------- #
+def _table_cell_lines(cell: Any, recon_text: str) -> List[str]:
+    """Readable physical lines from one pdfplumber table cell.
+
+    Table extraction often glues words together.  The position-based page
+    reconstruction has the spaces, so map each de-spaced cell line back to its
+    readable span without changing its wording.
+    """
+    values = [re.sub(r"\s+", " ", part).strip()
+              for part in str(cell or "").splitlines() if str(part).strip()]
+    if not values or not recon_text:
+        return values
+    chars: List[str] = []
+    idxmap: List[int] = []
+    for i, ch in enumerate(recon_text):
+        if not ch.isspace():
+            chars.append(ch)
+            idxmap.append(i)
+    compact = "".join(chars)
+    out: List[str] = []
+    for value in values:
+        needle = "".join(value.split())
+        pos = compact.find(needle)
+        if pos < 0 or not needle:
+            out.append(value)
+            continue
+        start = idxmap[pos]
+        end = idxmap[pos + len(needle) - 1] + 1
+        out.append(re.sub(r"\s+", " ", recon_text[start:end]).strip())
+    return out
+
+
+def _table_cells(tables: Iterable[Any]) -> Iterator[Any]:
+    for table in tables or []:
+        for row in table or []:
+            for cell in row or []:
+                if cell not in (None, ""):
+                    yield cell
+
+
+def _after_cell_label(lines: List[str], pattern: str) -> List[str]:
+    if not lines:
+        return []
+    m = re.match(pattern + r"\s*:?[ \t]*(.*)$", lines[0], re.I)
+    if not m:
+        return []
+    tail = m.group(1).strip()
+    return ([tail] if tail else []) + lines[1:]
+
+
+_SHIP_TO_COUNTRY = re.compile(
+    r"\b(?:UNITED STATES(?: OF AMERICA)?|USA|CANADA|MEXICO|BRAZIL|"
+    r"UNITED KINGDOM|GERMANY|FRANCE|AUSTRALIA|INDIA|CHINA)\b",
+    re.I,
+)
+
+
+def document_fact_item(component: str, attributes: Dict[str, str],
+                       details: Iterable[str]) -> Dict[str, Any]:
+    """Build one durable order-level fact in the same store as line items."""
+    fact = str(component).strip().upper()
+    source = [str(value).strip() for value in details if str(value).strip()]
+    values = {str(k): str(v).strip() for k, v in attributes.items()
+              if str(k).strip() and str(v).strip()}
+    values["component"] = fact
+    item = {
+        "raw": f"Document Fact: {fact}",
+        "norm": f"DOCUMENT FACT {fact}",
+        "qty": "",
+        "price": "",
+        "ptype": "",
+        "section": "DOCUMENT FACTS",
+        "details": source,
+        "tags": [fact],
+        "attributes": values,
+        "document_fact": fact,
+        "document_attributes": {k: v for k, v in values.items() if k != "component"},
+    }
+    return item
+
+
+def document_fact_items_from_tables(tables: Iterable[Any],
+                                    recon_lines: Iterable[str]) -> List[Dict[str, Any]]:
+    """Extract the explicit MARK and SHIP TO cells from an SO's page tables.
+
+    They are document facts, not accessory rows.  The related Rep Ref. text is
+    retained with MARK because it is the wording repeated in continuation-page
+    headers and was previously mistaken for item detail.
+    """
+    recon_text = "\n".join(str(line) for line in recon_lines)
+    mark: List[str] = []
+    ship_to: List[str] = []
+    rep_ref: List[str] = []
+    for cell in _table_cells(tables):
+        lines = _table_cell_lines(cell, recon_text)
+        if not lines:
+            continue
+        key = re.sub(r"[^a-z0-9]", "", lines[0].casefold())
+        if not mark and key.startswith("markshippingdocuments"):
+            mark = _after_cell_label(lines, r"Mark\s*\(\s*shipping\s+documents\s*\)")
+        elif not ship_to and key.startswith("shipto"):
+            ship_to = _after_cell_label(lines, r"Ship\s+To")
+        elif not rep_ref and key.startswith("repref"):
+            rep_ref = _after_cell_label(lines, r"Rep\s*Ref\.?\s*#?")
+
+    out: List[Dict[str, Any]] = []
+    if mark:
+        attrs = {"mark_text": " | ".join(mark)}
+        details = list(mark)
+        if rep_ref:
+            attrs["rep_reference"] = " ".join(rep_ref)
+            details.append("Rep Ref.: " + " ".join(rep_ref))
+        out.append(document_fact_item("MARK", attrs, details))
+
+    if ship_to:
+        attrs = {"ship_to_company": ship_to[0]}
+        remaining = ship_to[1:]
+        country_at = next((i for i, value in enumerate(remaining)
+                           if _SHIP_TO_COUNTRY.search(value)), None)
+        address = remaining if country_at is None else remaining[:country_at]
+        for i, value in enumerate(address, start=1):
+            attrs[f"ship_to_address_{i}"] = value
+        if country_at is not None:
+            attrs["ship_to_country"] = remaining[country_at]
+            for i, value in enumerate(remaining[country_at + 1:], start=1):
+                attrs[f"ship_to_instruction_{i}"] = value
+        out.append(document_fact_item("SHIP TO", attrs, ship_to))
+    return out
+
+
+def strip_continuation_metadata(lines: Iterable[str],
+                                tables: Iterable[Any]) -> List[str]:
+    """Drop only the wrapped data row under a continuation-page Order header.
+
+    pdfplumber's table preserves how many physical lines the Rep Ref. cell
+    occupies.  Using that count avoids swallowing legitimate item details while
+    preventing the repeated order/PO/description row from attaching to the
+    final item on the previous page.
+    """
+    value_rows = 0
+    for table in tables or []:
+        for row in table or []:
+            cells = [str(cell or "") for cell in row or []]
+            header = " ".join(cell.splitlines()[0] if cell.splitlines() else ""
+                              for cell in cells)
+            compact_header = re.sub(r"[^A-Z0-9]", "", header.upper())
+            if "ORDER" in compact_header and "PAGE" in compact_header:
+                value_rows = max((max(0, len([p for p in cell.splitlines() if p.strip()]) - 1)
+                                  for cell in cells), default=0)
+                break
+        if value_rows:
+            break
+    values = list(lines)
+    if not value_rows:
+        return values
+    for index, line in enumerate(values):
+        if (re.match(r"^\s*Order\s*#", str(line), re.I)
+                and re.search(r"\bPage\s*(?:#|\d+\s+of\s+\d+)", str(line), re.I)):
+            return values[:index + 1] + values[index + 1 + value_rows:]
+    return values
+
+
 def classify_line(line: str, section: str, rules: Dict[str, Any]) -> Tuple[str, str]:
     """How one reconstructed text line is treated (stateless part — the
     item-vs-detail decision needs the running state in iter_classified).
@@ -3752,6 +3973,30 @@ def _detail_worthy(s: str) -> bool:
     return True
 
 
+_CLOCK_DETAIL = re.compile(r"^@?(?:[1-9]|1[0-2]):[0-5]\d$")
+_DIGIT_DETAIL = re.compile(r"^\d{2,10}\)?$")
+
+
+def _contextual_numeric_detail(s: str, context: List[str]) -> bool:
+    """Numeric-only continuations that are meaningful in their local label."""
+    if not context:
+        return False
+    if _CLOCK_DETAIL.fullmatch(s) and any(
+            re.search(r"\b(?:HANDLE|DOOR)\s+LOCATION\b", line, re.I)
+            for line in context[-2:]):
+        return True
+    if _DIGIT_DETAIL.fullmatch(s):
+        body, _qty = split_lead(context[0])
+        body, _price = split_price_tail(body)
+        type_tail = _TYPE_PRICE_TAIL.search(body) or _TYPE_TAIL.search(body)
+        if type_tail:
+            body = body[:type_tail.start()].rstrip(" ,;:")
+        if re.search(r"\bINQUIRY\s*(?:NUM(?:BER)?|#)\b", body, re.I) \
+                and body.rstrip().endswith("-"):
+            return True
+    return False
+
+
 MAX_DETAILS = 10  # per item — continuation blocks run ~7 lines (motors)
 
 
@@ -3768,18 +4013,22 @@ def iter_classified(lines: Iterable[str], rules: Dict[str, Any] | None = None,
     section = ""
     have_item = False
     n_details = 0
+    detail_context: List[str] = []
     for line in lines:
         s = re.sub(r"\s+", " ", str(line)).strip()
         kind, detail = classify_line(s, section, rules)
         if kind == "section-start":
-            section, have_item = detail, False
+            section, have_item, detail_context = detail, False, []
         elif kind == "section-end":
-            section, have_item = "", False
+            section, have_item, detail_context = "", False, []
         elif kind in ("item-priced", "item-section"):
             have_item, n_details = True, 0
-        elif kind == "text" and have_item and n_details < MAX_DETAILS and _detail_worthy(s):
-            kind = "detail"
-            n_details += 1
+            detail_context = [s]
+        elif kind == "text" and have_item and n_details < MAX_DETAILS:
+            if _detail_worthy(s) or _contextual_numeric_detail(s, detail_context):
+                kind = "detail"
+                n_details += 1
+                detail_context.append(s)
         yield kind, detail, s
 
 

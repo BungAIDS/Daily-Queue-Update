@@ -77,6 +77,22 @@ def parse_price(p: Any) -> float:
     return float(s) if re.fullmatch(r"\d+(\.\d+)?", s) else 0.0
 
 
+def _paid_inquiry_override(key: str, primary: Dict[str, Any], other: Dict[str, Any]) -> bool:
+    """Whether a later quoted modification supersedes a no-charge base fact.
+
+    CBC prints the original STD outlet and a paid Inquiry line for its changed
+    construction on the same CO.  For single-valued flange type, that paid
+    inquiry is the final construction; keeping both values would knowingly
+    report the obsolete base value as current.
+    """
+    if key != "flange_type":
+        return False
+    return (parse_price(primary.get("price")) > 0
+            and bool(_attrs(primary).get("inquiry_num"))
+            and parse_price(other.get("price")) == 0
+            and not _attrs(other).get("inquiry_num"))
+
+
 def line_text(item: Dict[str, Any]) -> str:
     """The item as a readable description: the raw line with the leading
     item-number/qty and the trailing price columns / L-C-N letter stripped
@@ -160,6 +176,8 @@ def components(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 seen = [x.strip() for x in re.split(r"[|,]", str(have))]
                 for part in (str(v).split(", ") if _accumulative(k) else [str(v)]):
                     if part.strip() in seen:
+                        continue
+                    if i != primary and _paid_inquiry_override(k, items[primary], it):
                         continue
                     if _accumulative(k):        # collection key -> union quietly
                         attributes[k] = f"{attributes[k]}, {part}"

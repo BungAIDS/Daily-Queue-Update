@@ -58,18 +58,20 @@ DEFAULT_WORKBOOK = BACKLOG_DIR / "sales_order_review.xlsx"
 # with the other published stores (data_push), but that push is one-way, so
 # Claude records each note it resolves in this small TRACKED ledger at the repo
 # root. It rides down to the user's machine on the normal Git Update, and the
-# "Update SO Review" action applies it — marking those notes handled locally so
-# they drop off the sheet. Append-only {handled: [{id, resolution, handled_at}]}
-# so it can never merge-conflict.
+# "Update SO Review" action applies it. Handled notes remain visible beside
+# their resolutions. Append-only {handled: [{id, resolution, handled_at}]} so
+# it can never merge-conflict.
 HANDLED_MARKS_PATH = Path(__file__).resolve().parent / "so_review_handled.json"
 
 STATUS_OPEN = "open"
 STATUS_HANDLED = "handled"
 NOTE_SEPARATOR = "\n\n---\n\n"
 
-# Workbook columns (also the read-back contract). Order + Item + Note are the
-# ones sync reads; the rest are context the human reads.
-HEADERS = ["Order", "Item", "Kind", "Hierarchy", "Price", "Note", "Status", "Resolution"]
+# Workbook columns (also the read-back contract). ``Note`` is immutable rendered
+# history; only ``Add Note`` is read as new human input in current workbooks.
+NOTES_ADD_NOTE = "Add Note"
+HEADERS = ["Order", "Item", "Kind", "Hierarchy", "Price", "Note",
+           NOTES_ADD_NOTE, "Status", "Resolution"]
 _COL = {h: i for i, h in enumerate(HEADERS)}
 
 # Two tabs, like the live GL Queue workbook's Sales Order view: BROWSE_SHEET is
@@ -239,9 +241,11 @@ def review_rows(line_items_store: Dict[str, Any],
             opens = [n for n in here if n.get("status") != STATUS_HANDLED]
             dones = [n for n in here if n.get("status") == STATUS_HANDLED]
             note_txt = NOTE_SEPARATOR.join(
-                s for s in (str(n.get("note", "")).strip() for n in here) if s)
+                f"#{n.get('id')}: {text}" for n in here
+                if (text := str(n.get("note", "")).strip()))
             res_txt = NOTE_SEPARATOR.join(
-                s for s in (str(n.get("resolution", "")).strip() for n in dones) if s)
+                f"#{n.get('id')}: {text}" for n in dones
+                if (text := str(n.get("resolution", "")).strip()))
             item_no = tr.get("item_no")
             rows.append({
                 "order": str(jn),
@@ -337,7 +341,7 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
         if r["group_start"]:
             parity ^= 1                                     # flip per order group
         notes.append([r["order"], r["item_no"], r["kind"], r["hierarchy"], r["price"],
-                      r["note"], r["status"], r["resolution"], parity])
+                      r["note"], "", r["status"], r["resolution"], parity])
     last = notes.max_row
     for c in range(1, ncols + 1):
         notes.cell(1, c).fill = header_fill
@@ -347,7 +351,9 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
     if last >= 2:
         full = f"A2:{get_column_letter(ncols)}{last}"
         bandL, kindL = get_column_letter(band_col), get_column_letter(_COL["Kind"] + 1)
-        noteL, statusL = get_column_letter(_COL["Note"] + 1), get_column_letter(_COL["Status"] + 1)
+        add_noteL = get_column_letter(_COL[NOTES_ADD_NOTE] + 1)
+        itemL = get_column_letter(_COL["Item"] + 1)
+        statusL = get_column_letter(_COL["Status"] + 1)
         # Order banding (fill only) + Kind cues (font only) coexist: each rule
         # sets only the properties it needs, so they layer without fighting.
         notes.conditional_formatting.add(full, FormulaRule(formula=[f"${bandL}2=1"], fill=band_fill))
@@ -357,14 +363,16 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
         # so handled work stays visible instead of vanishing.
         notes.conditional_formatting.add(full,
                                          FormulaRule(formula=[f'${statusL}2="{STATUS_HANDLED}"'], fill=handled_fill))
-        # Tint the Note column yellow to invite typing — except on a resolved row
-        # (already green), so open work and done work read differently.
-        notes.conditional_formatting.add(f"{noteL}2:{noteL}{last}",
-                                         FormulaRule(formula=[f'${statusL}2<>"{STATUS_HANDLED}"'], fill=note_fill, stopIfTrue=False))
+        # Rendered Note/Status/Resolution are history. Only Add Note is an input,
+        # and only numbered source rows have a stable item anchor.
+        notes.conditional_formatting.add(
+            f"{add_noteL}2:{add_noteL}{last}",
+            FormulaRule(formula=[f'${itemL}2<>""'], fill=note_fill),
+        )
     notes.freeze_panes = "A2"
     notes.auto_filter.ref = f"A1:{get_column_letter(ncols)}{last}"
     for h, w in {"Order": 10, "Item": 6, "Kind": 11, "Hierarchy": 60, "Price": 12,
-                 "Note": 45, "Status": 10, "Resolution": 45}.items():
+                 "Note": 50, NOTES_ADD_NOTE: 45, "Status": 10, "Resolution": 55}.items():
         notes.column_dimensions[get_column_letter(_COL[h] + 1)].width = w
 
     # --- Orders tab (hidden): dropdown plus source row windows ---------------
@@ -488,7 +496,7 @@ def _notes_sheet(wb):
 
 
 def _browse_layout_needs_upgrade(path: Path) -> bool:
-    """Whether an existing review workbook predates the Add Note column."""
+    """Whether either visible tab predates its dedicated Add Note column."""
     from openpyxl import load_workbook
 
     with warnings.catch_warnings():
@@ -498,10 +506,12 @@ def _browse_layout_needs_upgrade(path: Path) -> bool:
         )
         wb = load_workbook(str(path), read_only=True, data_only=False)
     try:
+        notes_header = [_excel_text(c.value) for c in _notes_sheet(wb)[1]]
+        notes_old = NOTES_ADD_NOTE not in notes_header
         if BROWSE_SHEET not in wb.sheetnames:
-            return False
-        header = [_excel_text(c.value) for c in wb[BROWSE_SHEET][BROWSE_HEADER_ROW]]
-        return BROWSE_ADD_NOTE not in header
+            return notes_old
+        browse_header = [_excel_text(c.value) for c in wb[BROWSE_SHEET][BROWSE_HEADER_ROW]]
+        return notes_old or BROWSE_ADD_NOTE not in browse_header
     finally:
         wb.close()
 
@@ -521,7 +531,7 @@ def _note_parts(value: Any) -> List[str]:
 
 
 def read_edits(path: Path) -> List[Dict[str, Any]]:
-    """Read canonical Notes plus temporary Sales Order Add Note inputs."""
+    """Read only dedicated inputs, with a one-time legacy Note-column fallback."""
     from openpyxl import load_workbook
 
     with warnings.catch_warnings():
@@ -534,6 +544,7 @@ def read_edits(path: Path) -> List[Dict[str, Any]]:
         notes = _notes_sheet(wb)
         header = [_excel_text(c.value) for c in notes[1]]
         idx = {h: header.index(h) for h in HEADERS if h in header}
+        notes_input = NOTES_ADD_NOTE if NOTES_ADD_NOTE in header else "Note"
 
         def notes_value(row: tuple, heading: str) -> str:
             i = idx.get(heading)
@@ -544,7 +555,7 @@ def read_edits(path: Path) -> List[Dict[str, Any]]:
             order = notes_value(row, "Order")
             item_no = notes_value(row, "Item")
             if order and item_no:
-                for note in _note_parts(notes_value(row, "Note")):
+                for note in _note_parts(notes_value(row, notes_input)):
                     edits.append({
                         "order": order,
                         "item_no": item_no,
@@ -640,7 +651,7 @@ def _cmd_build(args) -> int:
     store = load_store()
     n = write_workbook(Path(args.out), _load_line_items(), store)
     pend = len(open_notes(store))
-    print(f"Wrote {args.out} ({n} rows). {pend} open note(s) shown; "
+    print(f"Wrote {args.out} ({n} rows). Full note history shown; {pend} still open. "
           f"pick an order, type in the yellow Add Note cells, save and close, then "
           f"'Read SO Notes'.")
     return 0
@@ -691,8 +702,7 @@ def _cmd_sync(args) -> int:
 
 def _cmd_refresh(args) -> int:
     """The 'Update SO Review' action: capture anything typed, fold in Claude's
-    handled-marks (so resolved notes drop off), and rewrite the sheet — leaving
-    every still-open note in place."""
+    handled-marks, and rewrite the sheet with both open and resolved history."""
     path = Path(args.out)
     store = load_store()
     edits: List[Dict[str, Any]] = []
@@ -726,7 +736,7 @@ def _cmd_refresh(args) -> int:
     if workbook_note_count and added == 0:
         already = f"; all {workbook_note_count} workbook note(s) were already recorded"
     print(f"Updated {path} ({n} rows). Captured {added} new note(s){already}; "
-          f"removed {len(closed)} handled note(s); {len(open_notes(store))} still open.")
+          f"applied {len(closed)} handled resolution(s); {len(open_notes(store))} still open.")
     for c in closed:
         print(f"  handled #{c['id']} (order {c['order']} item {c['item_no']}): "
               f"{c.get('resolution', '')}")
@@ -756,7 +766,7 @@ def _cmd_list(args) -> int:
         print("No open notes." if not args.all else "No notes recorded.")
         return 0
     for n in sorted(rows, key=lambda x: int(x.get("id", 0))):
-        flag = "✓" if n.get("status") == STATUS_HANDLED else " "
+        flag = "x" if n.get("status") == STATUS_HANDLED else " "
         print(f"[{flag}] #{n['id']}  order {n['order']}  item {n['item_no']}")
         print(f"      line: {n.get('item_text', '')}")
         print(f"      note: {n['note']}")

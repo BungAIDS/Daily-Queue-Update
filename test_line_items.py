@@ -850,6 +850,94 @@ def test_inquiry_number_attributes():
     assert items["BASE FAN BASE FAN SUITABLE FOR 3600RPM MOTOR"]["attributes"]["inquiry_num"] == "317-26-1510"
 
 
+def test_numeric_continuations_capture_clock_and_split_inquiry():
+    actuator = li.extract_items([
+        "Inlet Volume Control, Low Leak, Automatic L 3,531.00",
+        "Handle Location (viewed from inlet side):",
+        "@3:00",
+        "Actuator Manufacturer: By Others",
+        "Fail Position Upon Loss of Supply/Air/Power:",
+        "Will Advise",
+    ])[0]
+    assert "@3:00" in actuator["details"]
+    assert actuator["attributes"]["handle_location"] == "3:00"
+    assert actuator["attributes"]["fail_power"] == "Will Advise"
+    flags = actuator.get("review_flags") or []
+    assert not any("Handle Location" in flag or "Fail Position" in flag for flag in flags)
+
+    outlet = li.extract_items([
+        "Outlet, Flanged, Unpunched, Inquiry Num: 361-26- L 250.00",
+        "2440",
+    ])[0]
+    assert outlet["details"] == ["2440"]
+    assert outlet["attributes"]["inquiry_num"] == "361-26-2440"
+
+
+def test_document_mark_ship_to_and_continuation_metadata():
+    recon = [
+        "Order # Rep Ref. # Customer P.O. # Fan Serial Number:",
+        "421967 NATIONWIDE BOILER - For DARLENE PO 23971",
+        "INGREDIENTS - FAN For BOILER NO 1",
+        "Sold To: Ship To:",
+        "NATIONWIDE BOILER, INC DARLINGING INREDIENTS COMPANY",
+        "42400 CHRISTY ST. 11946 CARPENTER ROAD",
+        "FREMONT, CA 94538 CROWS LANDING, CA 95313",
+        "UNITED STATES OF AMERICA UNITED STATES OF AMERICA",
+        "TRAFFIC SEE BELOW",
+        "Mark (shipping documents):",
+        "FD FAN for BOILER No 1 - NATIONWIDE BOILERP.O. PO 23971",
+    ]
+    tables = [[[
+        "Order#\n421967",
+        "RepRef.#\nNATIONWIDEBOILER-ForDARLENE\nINGREDIENTS-FANForBOILERNO1",
+        "CustomerP.O.#\nPO23971",
+        "FanSerialNumber:",
+    ], [
+        "SoldTo:\nNATIONWIDEBOILER,INC\n42400CHRISTYST.\nFREMONT,CA94538\nUNITEDSTATESOFAMERICA",
+        "ShipTo:\nDARLINGINGINREDIENTSCOMPANY\n11946CARPENTERROAD\nCROWSLANDING,CA95313\nUNITEDSTATESOFAMERICA\nTRAFFICSEEBELOW",
+    ], [
+        "Mark(shippingdocuments):\nFDFANforBOILERNo1-NATIONWIDEBOILERP.O.PO23971",
+    ]]]
+    facts = {item["document_fact"]: item
+             for item in li.document_fact_items_from_tables(tables, recon)}
+    assert set(facts) == {"MARK", "SHIP TO"}
+    mark = facts["MARK"]
+    assert mark["attributes"]["component"] == "MARK"
+    assert mark["attributes"]["mark_text"] == (
+        "FD FAN for BOILER No 1 - NATIONWIDE BOILERP.O. PO 23971"
+    )
+    assert mark["attributes"]["rep_reference"] == (
+        "NATIONWIDE BOILER - For DARLENE INGREDIENTS - FAN For BOILER NO 1"
+    )
+    ship = facts["SHIP TO"]
+    assert ship["attributes"]["ship_to_company"] == "DARLINGING INREDIENTS COMPANY"
+    assert ship["attributes"]["ship_to_address_1"] == "11946 CARPENTER ROAD"
+    assert ship["attributes"]["ship_to_address_2"] == "CROWS LANDING, CA 95313"
+    assert ship["attributes"]["ship_to_country"] == "UNITED STATES OF AMERICA"
+    assert ship["attributes"]["ship_to_instruction_1"] == "TRAFFIC SEE BELOW"
+    assert li.derive_item_fields(ship)["attributes"] == ship["attributes"]
+
+    continuation_lines = [
+        "Inlet, Flanged, Punched (with IVC) L 1,559.00",
+        "Chicago Blower Corporation Sales Order (cont.)",
+        "Order # Rep Ref. # Customer P.O. # Page # of #",
+        "421967 NATIONWIDE BOILER - For PO 23971",
+        "DARLENE INGREDIENTS - FAN For",
+        "BOILER NO 1",
+        "Lifting Lugs L STD",
+    ]
+    continuation_table = [[[
+        "Order #\n421967",
+        "Rep Ref. #\nNATIONWIDE BOILER - For\nDARLENE INGREDIENTS - FAN For\nBOILER NO 1",
+        "Customer P.O. #\nPO 23971",
+        "Page # of #",
+    ]]]
+    clean = li.strip_continuation_metadata(continuation_lines, continuation_table)
+    assert "421967 NATIONWIDE BOILER - For PO 23971" not in clean
+    inlet = li.extract_items(clean)[0]
+    assert inlet["details"] == []
+
+
 def test_drawing_note_attributes():
     items = li.extract_items([
         "Add COG and Weights to the fan drawing, Inquiry L",
@@ -1002,7 +1090,7 @@ def test_canonical_component_names_from_prose():
     handle = li.extract_items(["Inlet Volume Control Handle Location, Non-standard L 1,014.00",
                                "IVC handle location for Discharge"])[0]
     assert handle["attributes"].get("used_on") == "IVC"
-    assert handle["attributes"]["handle_location"] == "DISCHARGE"
+    assert handle["attributes"]["handle_location_reference"] == "DISCHARGE"
     assert handle["attributes"]["handle_location_standard"] == "NO"
 
 
