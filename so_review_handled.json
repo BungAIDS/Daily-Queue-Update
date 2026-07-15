@@ -69,6 +69,381 @@
       "id": 7,
       "resolution": "[MARK] now preserves the actual mark_text and full related rep_reference verbatim; the wrapped continuation-page fragments are removed from item 7.",
       "handled_at": "2026-07-15T07:27:00"
+    },
+    {
+      "id": 50,
+      "resolution": "Recognized customer-provided Motor rows with N/NA pricing and grouped the row plus all motor details under [MOTOR].",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 51,
+      "resolution": "Recognized customer-provided Motor rows with N/NA pricing and grouped the row plus all motor details under [MOTOR].",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 52,
+      "resolution": "Added arrangement-aware extended grease handling: A/1, A/3, A/8, and A/9 families map to [BEARINGS]; other known arrangements map to [MOTOR]; unknown arrangements retain both tags and a review flag.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 53,
+      "resolution": "Normalized drains as [HOUSING DRAIN], [INLET BOX DRAIN], or [MOTOR CONDUIT BOX DRAIN] with one size attribute defaulting to STD; removed redundant plug/type attributes.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 54,
+      "resolution": "Normalized drains as [HOUSING DRAIN], [INLET BOX DRAIN], or [MOTOR CONDUIT BOX DRAIN] with one size attribute defaulting to STD; removed redundant plug/type attributes.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 55,
+      "resolution": "Normalized drains as [HOUSING DRAIN], [INLET BOX DRAIN], or [MOTOR CONDUIT BOX DRAIN] with one size attribute defaulting to STD; removed redundant plug/type attributes.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 56,
+      "resolution": "Normalized this as [HOUSING] with heavy_duty=YES and removed the redundant duty rating and housing subcategory.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 57,
+      "resolution": "Normalized this as [HOUSING] with heavy_duty=YES and removed the redundant duty rating and housing subcategory.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 58,
+      "resolution": "Normalized the line as [INLET] and retained SLIP as the inlet subcategory.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 59,
+      "resolution": "Normalized the line as [INLET] and retained SLIP as the inlet subcategory.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 60,
+      "resolution": "Standardized [INLET] and [OUTLET] construction to flanged=YES/NO and punched=YES/NO; retained only meaningful non-flange subcategories such as SLIP and removed redundant feature/IVC-relation fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 61,
+      "resolution": "Collapsed accessory finish data to one coating attribute on the accessory and removed coating category/context/scope/type fragmentation.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 62,
+      "resolution": "Collapsed accessory finish data to one coating attribute on the accessory and removed coating category/context/scope/type fragmentation.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 63,
+      "resolution": "Collapsed accessory finish data to one coating attribute on the accessory and removed coating category/context/scope/type fragmentation.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 64,
+      "resolution": "Collapsed accessory finish data to one coating attribute on the accessory and removed coating category/context/scope/type fragmentation.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 65,
+      "resolution": "Collapsed accessory finish data to one coating attribute on the accessory and removed coating category/context/scope/type fragmentation.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 66,
+      "resolution": "Split the motor product line into product plus reusable motor_mod_n10, motor_mod_n20, and motor_mod_b220 attributes.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 67,
+      "resolution": "Created the standalone [FAN DRAWING WEIGHTS] component with no attributes and removed the old drawing scope/type fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 68,
+      "resolution": "Created the standalone [FAN DRAWING WEIGHTS] component with no attributes and removed the old drawing scope/type fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 69,
+      "resolution": "Created the standalone [FAN DRAWING WEIGHTS] component with no attributes and removed the old drawing scope/type fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 70,
+      "resolution": "Normalized the fan paint line as [PAINT] and removed the redundant FAN coating-context attribute.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 71,
+      "resolution": "Normalized the fan paint line as [PAINT] and removed the redundant FAN coating-context attribute.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 72,
+      "resolution": "Normalized G2.5 as [BALANCE] with balance_grade=G2.5 and removed the redundant GRADED BALANCE type.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 73,
+      "resolution": "Normalized G2.5 as [BALANCE] with balance_grade=G2.5 and removed the redundant GRADED BALANCE type.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 74,
+      "resolution": "Normalized G2.5 as [BALANCE] with balance_grade=G2.5 and removed the redundant GRADED BALANCE type.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 75,
+      "resolution": "Normalized drains as [HOUSING DRAIN], [INLET BOX DRAIN], or [MOTOR CONDUIT BOX DRAIN] with one size attribute defaulting to STD; removed redundant plug/type attributes.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 76,
+      "resolution": "Normalized drains as [HOUSING DRAIN], [INLET BOX DRAIN], or [MOTOR CONDUIT BOX DRAIN] with one size attribute defaulting to STD; removed redundant plug/type attributes.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 77,
+      "resolution": "Normalized drains as [HOUSING DRAIN], [INLET BOX DRAIN], or [MOTOR CONDUIT BOX DRAIN] with one size attribute defaulting to STD; removed redundant plug/type attributes.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 78,
+      "resolution": "Standardized [INLET] and [OUTLET] construction to flanged=YES/NO and punched=YES/NO; retained only meaningful non-flange subcategories such as SLIP and removed redundant feature/IVC-relation fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 79,
+      "resolution": "Standardized [INLET] and [OUTLET] construction to flanged=YES/NO and punched=YES/NO; retained only meaningful non-flange subcategories such as SLIP and removed redundant feature/IVC-relation fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 80,
+      "resolution": "Standardized [INLET] and [OUTLET] construction to flanged=YES/NO and punched=YES/NO; retained only meaningful non-flange subcategories such as SLIP and removed redundant feature/IVC-relation fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 81,
+      "resolution": "Standardized [INLET] and [OUTLET] construction to flanged=YES/NO and punched=YES/NO; retained only meaningful non-flange subcategories such as SLIP and removed redundant feature/IVC-relation fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 82,
+      "resolution": "Standardized [INLET] and [OUTLET] construction to flanged=YES/NO and punched=YES/NO; retained only meaningful non-flange subcategories such as SLIP and removed redundant feature/IVC-relation fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 83,
+      "resolution": "Removed the appended line-count wording from merged component labels; source lines remain available below the component.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 84,
+      "resolution": "Recognized Expansion and misspelled Expantion Joint as [OUTLET EXPANSION JOINT], moved its coating/drawing/vendor/shipping/flange facts there, and kept [OUTLET] limited to outlet construction.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 85,
+      "resolution": "Recognized Expansion and misspelled Expantion Joint as [OUTLET EXPANSION JOINT], moved its coating/drawing/vendor/shipping/flange facts there, and kept [OUTLET] limited to outlet construction.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 86,
+      "resolution": "Recognized Expansion and misspelled Expantion Joint as [OUTLET EXPANSION JOINT], moved its coating/drawing/vendor/shipping/flange facts there, and kept [OUTLET] limited to outlet construction.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 87,
+      "resolution": "Recognized Expansion and misspelled Expantion Joint as [OUTLET EXPANSION JOINT], moved its coating/drawing/vendor/shipping/flange facts there, and kept [OUTLET] limited to outlet construction.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 88,
+      "resolution": "Recognized Expansion and misspelled Expantion Joint as [OUTLET EXPANSION JOINT], moved its coating/drawing/vendor/shipping/flange facts there, and kept [OUTLET] limited to outlet construction.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 89,
+      "resolution": "Recognized Expansion and misspelled Expantion Joint as [OUTLET EXPANSION JOINT], moved its coating/drawing/vendor/shipping/flange facts there, and kept [OUTLET] limited to outlet construction.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 90,
+      "resolution": "Recognized Expansion and misspelled Expantion Joint as [OUTLET EXPANSION JOINT], moved its coating/drawing/vendor/shipping/flange facts there, and kept [OUTLET] limited to outlet construction.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 91,
+      "resolution": "Recognized Expansion and misspelled Expantion Joint as [OUTLET EXPANSION JOINT], moved its coating/drawing/vendor/shipping/flange facts there, and kept [OUTLET] limited to outlet construction.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 92,
+      "resolution": "Recognized Expansion and misspelled Expantion Joint as [OUTLET EXPANSION JOINT], moved its coating/drawing/vendor/shipping/flange facts there, and kept [OUTLET] limited to outlet construction.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 93,
+      "resolution": "Recognized Expansion and misspelled Expantion Joint as [OUTLET EXPANSION JOINT], moved its coating/drawing/vendor/shipping/flange facts there, and kept [OUTLET] limited to outlet construction.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 94,
+      "resolution": "Recognized Expansion and misspelled Expantion Joint as [OUTLET EXPANSION JOINT], moved its coating/drawing/vendor/shipping/flange facts there, and kept [OUTLET] limited to outlet construction.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 95,
+      "resolution": "Recognized Expansion and misspelled Expantion Joint as [OUTLET EXPANSION JOINT], moved its coating/drawing/vendor/shipping/flange facts there, and kept [OUTLET] limited to outlet construction.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 96,
+      "resolution": "Recognized Expansion and misspelled Expantion Joint as [OUTLET EXPANSION JOINT], moved its coating/drawing/vendor/shipping/flange facts there, and kept [OUTLET] limited to outlet construction.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 97,
+      "resolution": "Recognized Expansion and misspelled Expantion Joint as [OUTLET EXPANSION JOINT], moved its coating/drawing/vendor/shipping/flange facts there, and kept [OUTLET] limited to outlet construction.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 98,
+      "resolution": "Captured MJ26-821 as shared job_number context for both the inlet silencer and outlet expansion joint, including wrapped THM wording.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 99,
+      "resolution": "Captured MJ26-821 as shared job_number context for both the inlet silencer and outlet expansion joint, including wrapped THM wording.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 100,
+      "resolution": "Created [THREADED PLUG FOR CONDUIT BOX OPENING] with inquiry_num as its only fact and removed redundant special-construction fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 101,
+      "resolution": "Created [THREADED PLUG FOR CONDUIT BOX OPENING] with inquiry_num as its only fact and removed redundant special-construction fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 102,
+      "resolution": "Created [THREADED PLUG FOR CONDUIT BOX OPENING] with inquiry_num as its only fact and removed redundant special-construction fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 103,
+      "resolution": "Normalized the accessory as [INLET SILENCER], retaining useful coating, drawing, shipping, vendor, model/tag, and job-number facts while removing redundant category/scope/product/used-on fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 104,
+      "resolution": "Normalized the accessory as [INLET SILENCER], retaining useful coating, drawing, shipping, vendor, model/tag, and job-number facts while removing redundant category/scope/product/used-on fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 105,
+      "resolution": "Normalized the accessory as [INLET SILENCER], retaining useful coating, drawing, shipping, vendor, model/tag, and job-number facts while removing redundant category/scope/product/used-on fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 106,
+      "resolution": "Normalized the accessory as [INLET SILENCER], retaining useful coating, drawing, shipping, vendor, model/tag, and job-number facts while removing redundant category/scope/product/used-on fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 107,
+      "resolution": "Normalized the accessory as [INLET SILENCER], retaining useful coating, drawing, shipping, vendor, model/tag, and job-number facts while removing redundant category/scope/product/used-on fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 108,
+      "resolution": "Normalized the accessory as [INLET SILENCER], retaining useful coating, drawing, shipping, vendor, model/tag, and job-number facts while removing redundant category/scope/product/used-on fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 109,
+      "resolution": "Normalized the accessory as [INLET SILENCER], retaining useful coating, drawing, shipping, vendor, model/tag, and job-number facts while removing redundant category/scope/product/used-on fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 110,
+      "resolution": "Normalized the accessory as [INLET SILENCER], retaining useful coating, drawing, shipping, vendor, model/tag, and job-number facts while removing redundant category/scope/product/used-on fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 111,
+      "resolution": "Normalized the accessory as [INLET SILENCER], retaining useful coating, drawing, shipping, vendor, model/tag, and job-number facts while removing redundant category/scope/product/used-on fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 112,
+      "resolution": "Normalized the accessory as [INLET SILENCER], retaining useful coating, drawing, shipping, vendor, model/tag, and job-number facts while removing redundant category/scope/product/used-on fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 113,
+      "resolution": "Normalized the accessory as [INLET SILENCER], retaining useful coating, drawing, shipping, vendor, model/tag, and job-number facts while removing redundant category/scope/product/used-on fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 114,
+      "resolution": "Captured the wrapped THM job number and silencer tag as structured accessory facts; Job Name no longer appears as a standalone component.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 115,
+      "resolution": "Captured the wrapped THM job number and silencer tag as structured accessory facts; Job Name no longer appears as a standalone component.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 116,
+      "resolution": "Captured the wrapped THM job number and silencer tag as structured accessory facts; Job Name no longer appears as a standalone component.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 117,
+      "resolution": "Removed Location from the component inventory.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 118,
+      "resolution": "Standardized [INLET] and [OUTLET] construction to flanged=YES/NO and punched=YES/NO; retained only meaningful non-flange subcategories such as SLIP and removed redundant feature/IVC-relation fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 119,
+      "resolution": "Standardized [INLET] and [OUTLET] construction to flanged=YES/NO and punched=YES/NO; retained only meaningful non-flange subcategories such as SLIP and removed redundant feature/IVC-relation fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 120,
+      "resolution": "Standardized [INLET] and [OUTLET] construction to flanged=YES/NO and punched=YES/NO; retained only meaningful non-flange subcategories such as SLIP and removed redundant feature/IVC-relation fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 121,
+      "resolution": "Standardized [INLET] and [OUTLET] construction to flanged=YES/NO and punched=YES/NO; retained only meaningful non-flange subcategories such as SLIP and removed redundant feature/IVC-relation fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 122,
+      "resolution": "Standardized [INLET] and [OUTLET] construction to flanged=YES/NO and punched=YES/NO; retained only meaningful non-flange subcategories such as SLIP and removed redundant feature/IVC-relation fields.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 123,
+      "resolution": "Normalized [SHIP WITH] to exactly one instruction attribute containing the verbatim source wording.",
+      "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 125,
+      "resolution": "Detected repair/parts-only Sales Orders, removed the false [BASE FAN], and stored broad construction material under [PARTS-ONLY ORDER].",
+      "handled_at": "2026-07-15T18:11:46"
     }
   ]
 }
