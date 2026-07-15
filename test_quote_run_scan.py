@@ -95,6 +95,31 @@ def test_scan_one_finds_runs_recursively(tmp: Path):
     assert eng["fields"]["Wheel Material"] == "A569 HRS"
 
 
+def test_run_files_matches_wheel_construction_names(tmp: Path):
+    # Broadened name matching (job 421959's "Cascades Wheel Construction REV 2"
+    # was missed): the wheel-construction phrase and bare "Wheel"/"Construction"
+    # docs must be caught, while a CAD file with a matching name (wrong
+    # extension), a plain non-run doc, and a superseded history copy stay out.
+    from sales_orders import _run_files_in_folder
+    job = tmp / "421959"
+    (job / "ENG REF").mkdir(parents=True)
+    (job / "history").mkdir(parents=True)
+    (job / "ENG REF" / "Cascades Wheel Construction REV 2.docx").write_text("x")
+    (job / "Wheel.txt").write_text("x")                  # bare token
+    (job / "Construction.doc").write_text("x")           # bare token
+    (job / "421959 qt run.txt").write_text("x")          # existing pattern still works
+    (job / "Wheel Assembly.dwg").write_text("x")         # name matches, but CAD ext -> out
+    (job / "shipping notes.txt").write_text("x")         # not a run
+    (job / "history" / "Wheel Construction.txt").write_text("x")  # superseded -> skipped
+    got = {p.name for p in _run_files_in_folder(job)}
+    assert got == {
+        "Cascades Wheel Construction REV 2.docx",
+        "Wheel.txt",
+        "Construction.doc",
+        "421959 qt run.txt",
+    }
+
+
 def test_scan_one_no_runs(tmp: Path):
     job = tmp / "400111"
     job.mkdir()

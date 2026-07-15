@@ -9,8 +9,10 @@ serve stale engineering data (a 2021 base run sorting ahead of its CO#1).
 Ranking, most-current first:
   1. highest CO# in the file name          (a change-order rerun supersedes)
   2. highest REV letter/number in the name (REV B > REV A > no rev)
-  3. newest file modified time             (recency when names don't say)
-  4. most fields extracted                 (richer parse breaks remaining ties)
+  3. a run that PARSED over one that didn't (a broad name pattern can sweep in a
+     stray non-run doc that pulls no fields — it must never lead a real run)
+  4. newest file modified time             (recency when names don't say)
+  5. most fields extracted                 (richer parse breaks remaining ties)
 Stable: runs that tie keep their original order. Pure stdlib, import-light.
 """
 from __future__ import annotations
@@ -38,9 +40,15 @@ def revision_key(name: str) -> Tuple[int, int]:
 
 def rank_runs(runs: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """The store's run dicts, most-current first (stable for full ties)."""
-    def key(run: Dict[str, Any]) -> Tuple[int, int, float, int]:
+    def key(run: Dict[str, Any]) -> Tuple[int, int, int, float, int]:
         co, rev = revision_key(run.get("file", ""))
-        return (co, rev, float(run.get("mtime") or 0), len(run.get("fields") or {}))
+        nfields = len(run.get("fields") or {})
+        # Among runs at the same revision level, one that actually parsed leads
+        # one that pulled nothing — so a broad-name over-grab (a stray doc like
+        # "Wheel Balance.xlsx") can't outrank and blank a real run on the order
+        # just by being edited more recently. CO#/REV still win first: a genuine
+        # change-order rerun supersedes even before it has been parsed.
+        return (co, rev, 1 if nfields else 0, float(run.get("mtime") or 0), nfields)
     return sorted(runs, key=key, reverse=True)
 
 
