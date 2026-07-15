@@ -15,8 +15,8 @@ state visible, and sync transfers the text to Notes before clearing the input.
 The loop:
   1. `python so_review.py build`  -> writes sales_order_review.xlsx from the
      line-items store: every order's component hierarchy (so_hierarchy), one
-     row per row, with an editable "Note" column and the running status of any
-     note already recorded.
+     row per row, with a dedicated "Add Note" input and any open note already
+     recorded.
   2. You either type directly on Notes, or pick one order and use Sales Order's
      Add Note cells. Save and close, then `python so_review.py sync` folds them
      into the note queue
@@ -24,11 +24,9 @@ The loop:
      Claude can read it.
   3. `python so_review.py list` shows the OPEN notes. Claude acts on each and
      `python so_review.py handle <id> "what I did"` marks it handled with a
-     resolution. The note does NOT vanish: the next build shows it green with
-     its resolution filled in (so resolved work stays visible and verifiable),
-     while open notes stay yellow — the sheet reads todo (yellow) vs done
-     (green). A note whose line item no longer exists in the parse re-anchors to
-     the order's first row (the job) so it is never lost.
+     resolution. The next refresh removes it from the active review row so that
+     row is ready for another note. Resolved notes remain in the JSON queue and
+     the workbook's Resolved tab as history.
 
 Notes anchor to a LINE ITEM (order #, item #) — the SOURCE / single-line
 COMPONENT rows that carry an item #; a note on such a line covers its facts and
@@ -58,17 +56,17 @@ DEFAULT_WORKBOOK = BACKLOG_DIR / "sales_order_review.xlsx"
 # with the other published stores (data_push), but that push is one-way, so
 # Claude records each note it resolves in this small TRACKED ledger at the repo
 # root. It rides down to the user's machine on the normal Git Update, and the
-# "Update SO Review" action applies it. Handled notes remain visible beside
-# their resolutions. Append-only {handled: [{id, resolution, handled_at}]} so
-# it can never merge-conflict.
+# "Update SO Review" action applies it. Handled notes leave the active review
+# rows but remain in the queue and the workbook's Resolved history tab.
+# Append-only {handled: [{id, resolution, handled_at}]} so it cannot conflict.
 HANDLED_MARKS_PATH = Path(__file__).resolve().parent / "so_review_handled.json"
 
 STATUS_OPEN = "open"
 STATUS_HANDLED = "handled"
 NOTE_SEPARATOR = "\n\n---\n\n"
 
-# Workbook columns (also the read-back contract). ``Note`` is immutable rendered
-# history; only ``Add Note`` is read as new human input in current workbooks.
+# Workbook columns (also the read-back contract). ``Note`` renders open notes;
+# only ``Add Note`` is read as new human input in current workbooks.
 NOTES_ADD_NOTE = "Add Note"
 HEADERS = ["Order", "Item", "Kind", "Hierarchy", "Price", "Note",
            NOTES_ADD_NOTE, "Status", "Resolution"]
@@ -79,9 +77,11 @@ _COL = {h: i for i, h in enumerate(HEADERS)}
 # note grid. ORDERS_SHEET maps each picker order to its rows in NOTES_SHEET.
 BROWSE_SHEET = "Sales Order"
 NOTES_SHEET = "Notes"
+RESOLVED_SHEET = "Resolved"
 ORDERS_SHEET = "Orders"
 BROWSE_HEADERS = ["Item", "Kind", "Hierarchy", "Price", "Existing Note", "Add Note"]
 BROWSE_ADD_NOTE = "Add Note"
+RESOLVED_HEADERS = ["Order", "Item", "Line", "Note", "Resolution", "Resolved"]
 BROWSE_HEADER_ROW = 3
 BROWSE_FIRST_ROW = 4
 
@@ -202,22 +202,23 @@ def _job_sort_key(job: str) -> tuple:
 
 
 def _order_notes(review_store: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
-    """order# -> every note for it (open AND handled), in queue order."""
+    """order# -> open notes for the active review views, in queue order."""
     out: Dict[str, List[Dict[str, Any]]] = {}
     for n in review_store["notes"]:
-        out.setdefault(str(n.get("order")), []).append(n)
+        if n.get("status") != STATUS_HANDLED:
+            out.setdefault(str(n.get("order")), []).append(n)
     return out
 
 
 def review_rows(line_items_store: Dict[str, Any],
                 review_store: Dict[str, Any]) -> List[Dict[str, Any]]:
     """One display row per hierarchy row across every order, newest job first,
-    with EVERY recorded note shown on its line — open notes flagged for action,
-    handled notes carrying Claude's resolution so a resolved item is never just
-    silently gone. A note anchors to its line item's row (which, after a merge,
-    sits under its parent [component]); if that line no longer exists in the
-    parse, it re-anchors to the order's first row (the job) so it is never lost.
-    `group_start` marks the first row of each order. Pure — no Excel."""
+    with open notes shown on their lines. Handled notes are intentionally absent
+    so the line is ready for another note; their history is retained separately.
+    An open note anchors to its line item's row (which, after a merge, sits under
+    its parent [component]); if that line no longer exists in the parse, it
+    re-anchors to the order's first row (the job). `group_start` marks the first
+    row of each order. Pure — no Excel."""
     by_order = _order_notes(review_store)
     jobs = (line_items_store.get("jobs") or {})
     rows: List[Dict[str, Any]] = []
@@ -238,14 +239,9 @@ def review_rows(line_items_store: Dict[str, Any],
             per_row.setdefault(idx, []).append(n)
         for i, tr in enumerate(tree):
             here = per_row.get(i, [])
-            opens = [n for n in here if n.get("status") != STATUS_HANDLED]
-            dones = [n for n in here if n.get("status") == STATUS_HANDLED]
             note_txt = NOTE_SEPARATOR.join(
                 f"#{n.get('id')}: {text}" for n in here
                 if (text := str(n.get("note", "")).strip()))
-            res_txt = NOTE_SEPARATOR.join(
-                f"#{n.get('id')}: {text}" for n in dones
-                if (text := str(n.get("resolution", "")).strip()))
             item_no = tr.get("item_no")
             rows.append({
                 "order": str(jn),
@@ -254,9 +250,8 @@ def review_rows(line_items_store: Dict[str, Any],
                 "hierarchy": so_hierarchy.indent_text(tr),
                 "price": tr.get("price", ""),
                 "note": note_txt,
-                # open wins the row's status (needs attention); else handled.
-                "status": STATUS_OPEN if opens else (STATUS_HANDLED if dones else ""),
-                "resolution": res_txt,
+                "status": STATUS_OPEN if here else "",
+                "resolution": "",
                 "annotatable": item_no != "",   # only line-item rows take a NEW note
                 "group_start": i == 0,
             })
@@ -317,7 +312,6 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
     comp_fill = PatternFill("solid", fgColor="DDEBF7")      # component header rows
     comp_font = Font(bold=True)
     review_font = Font(color="C00000", bold=True)           # parser review rows
-    handled_fill = PatternFill("solid", fgColor="E2EFDA")   # resolved notes (green)
     picker_fill = PatternFill("solid", fgColor="FFF2CC")
 
     rows = review_rows(line_items_store, review_store)
@@ -353,18 +347,13 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
         bandL, kindL = get_column_letter(band_col), get_column_letter(_COL["Kind"] + 1)
         add_noteL = get_column_letter(_COL[NOTES_ADD_NOTE] + 1)
         itemL = get_column_letter(_COL["Item"] + 1)
-        statusL = get_column_letter(_COL["Status"] + 1)
         # Order banding (fill only) + Kind cues (font only) coexist: each rule
         # sets only the properties it needs, so they layer without fighting.
         notes.conditional_formatting.add(full, FormulaRule(formula=[f"${bandL}2=1"], fill=band_fill))
         notes.conditional_formatting.add(full, FormulaRule(formula=[f'${kindL}2="COMPONENT"'], fill=comp_fill, font=comp_font))
         notes.conditional_formatting.add(full, FormulaRule(formula=[f'${kindL}2="REVIEW"'], font=review_font))
-        # A resolved note's whole row goes green (its resolution is filled in),
-        # so handled work stays visible instead of vanishing.
-        notes.conditional_formatting.add(full,
-                                         FormulaRule(formula=[f'${statusL}2="{STATUS_HANDLED}"'], fill=handled_fill))
-        # Rendered Note/Status/Resolution are history. Only Add Note is an input,
-        # and only numbered source rows have a stable item anchor.
+        # Only Add Note is an input, and only numbered source rows have a stable
+        # item anchor. Resolved notes leave this active grid.
         notes.conditional_formatting.add(
             f"{add_noteL}2:{add_noteL}{last}",
             FormulaRule(formula=[f'${itemL}2<>""'], fill=note_fill),
@@ -374,6 +363,28 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
     for h, w in {"Order": 10, "Item": 6, "Kind": 11, "Hierarchy": 60, "Price": 12,
                  "Note": 50, NOTES_ADD_NOTE: 45, "Status": 10, "Resolution": 55}.items():
         notes.column_dimensions[get_column_letter(_COL[h] + 1)].width = w
+
+    # --- Resolved tab: compact audit history, separate from active inputs ----
+    resolved = wb.create_sheet(RESOLVED_SHEET)
+    resolved.append(RESOLVED_HEADERS)
+    handled = sorted(
+        (n for n in review_store["notes"] if n.get("status") == STATUS_HANDLED),
+        key=lambda n: int(n.get("id", 0)),
+        reverse=True,
+    )
+    for n in handled:
+        resolved.append([
+            str(n.get("order", "")), str(n.get("item_no", "")),
+            str(n.get("item_text", "")), str(n.get("note", "")),
+            str(n.get("resolution", "") or ""), str(n.get("handled_at", "") or ""),
+        ])
+    for c in range(1, len(RESOLVED_HEADERS) + 1):
+        resolved.cell(1, c).fill = header_fill
+        resolved.cell(1, c).font = header_font
+    resolved.freeze_panes = "A2"
+    resolved.auto_filter.ref = f"A1:F{max(resolved.max_row, 1)}"
+    for c, width in enumerate((10, 7, 65, 50, 60, 20), start=1):
+        resolved.column_dimensions[get_column_letter(c)].width = width
 
     # --- Orders tab (hidden): dropdown plus source row windows ---------------
     osheet = wb.create_sheet(ORDERS_SHEET)
@@ -651,7 +662,8 @@ def _cmd_build(args) -> int:
     store = load_store()
     n = write_workbook(Path(args.out), _load_line_items(), store)
     pend = len(open_notes(store))
-    print(f"Wrote {args.out} ({n} rows). Full note history shown; {pend} still open. "
+    print(f"Wrote {args.out} ({n} rows). {pend} open note(s) shown; resolved history "
+          f"is on the {RESOLVED_SHEET} tab. "
           f"pick an order, type in the yellow Add Note cells, save and close, then "
           f"'Read SO Notes'.")
     return 0
@@ -680,11 +692,10 @@ def _cmd_sync(args) -> int:
         return 1
     needs_upgrade = _browse_layout_needs_upgrade(path)
     edits = read_edits(path)
-    browse_edits = [e for e in edits if e.get("source") == "sales_order"]
     store = load_store()
     added = ingest_edits(store, edits)
     save_store(store)
-    if browse_edits or needs_upgrade:
+    if edits or needs_upgrade:
         try:
             write_workbook(path, _load_line_items(), store)
         except RuntimeError as exc:
@@ -693,7 +704,7 @@ def _cmd_sync(args) -> int:
                 f"review workbook. {exc} Re-run Read SO Notes after closing Excel; "
                 f"the notes will not duplicate."
             ) from None
-    cleared = f" Cleared {len(browse_edits)} Sales Order input cell(s)." if browse_edits else ""
+    cleared = f" Cleared {len(edits)} Add Note input cell(s)." if edits else ""
     upgraded = " Upgraded the Sales Order note-entry layout." if needs_upgrade else ""
     print(f"Recorded {added} new note(s).{cleared}{upgraded} {len(open_notes(store))} open in the "
           f"queue ({REVIEW_STORE_PATH}).")
@@ -702,7 +713,7 @@ def _cmd_sync(args) -> int:
 
 def _cmd_refresh(args) -> int:
     """The 'Update SO Review' action: capture anything typed, fold in Claude's
-    handled-marks, and rewrite the sheet with both open and resolved history."""
+    handled-marks, and rewrite active rows plus the separate resolved history."""
     path = Path(args.out)
     store = load_store()
     edits: List[Dict[str, Any]] = []

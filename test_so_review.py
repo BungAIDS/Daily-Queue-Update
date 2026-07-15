@@ -125,18 +125,19 @@ def test_store_roundtrip(tmp: Path):
     assert sr.load_store(tmp / "nope.json") == {"notes": []}
 
 
-def test_handled_notes_stay_visible_with_resolution():
+def test_handled_notes_leave_active_rows_but_remain_in_history():
     li = _line_items_store()
     store = {"notes": []}
     sr.record_note(store, "421966", 1, "Base Fan", "handled one")       # id 1
     sr.record_note(store, "421966", 2, "IVC", "still open")             # id 2
     sr.mark_handled(store, 1, "did the thing")
     rows = sr.review_rows(li, store)
-    # A resolved note does NOT vanish — it stays on its line, flagged handled,
-    # with the resolution shown, so the work is never "forgotten".
+    # A resolved note leaves the active row so another note can be added there.
     r1 = next(r for r in rows if str(r["item_no"]) == "1")
-    assert r1["note"] == "#1: handled one" and r1["status"] == sr.STATUS_HANDLED
-    assert r1["resolution"] == "#1: did the thing"
+    assert r1["note"] == "" and r1["status"] == "" and r1["resolution"] == ""
+    # Its resolution remains in the durable queue history.
+    assert store["notes"][0]["note"] == "handled one"
+    assert store["notes"][0]["resolution"] == "did the thing"
     # An open note still shows, flagged open (needs attention).
     r2 = next(r for r in rows if str(r["item_no"]) == "2"
               and r["kind"] == sr.so_hierarchy.KIND_SOURCE)
@@ -258,6 +259,7 @@ def test_workbook_has_browse_and_notes_tabs(tmp: Path):
     # Two visible tabs like the live Sales Order view, plus a hidden dropdown
     # source; the browse (picker) tab opens first.
     assert book.sheetnames[:2] == [sr.BROWSE_SHEET, sr.NOTES_SHEET]
+    assert sr.RESOLVED_SHEET in book.sheetnames
     assert book[sr.ORDERS_SHEET].sheet_state == "hidden"
     assert book.active.title == sr.BROWSE_SHEET
     browse = book[sr.BROWSE_SHEET]
@@ -296,6 +298,34 @@ def test_workbook_has_browse_and_notes_tabs(tmp: Path):
     assert book[sr.ORDERS_SHEET].cell(1, 3).value > 1
     # Colour cues are conditional-format rules (fast), not per-cell styling.
     assert notes.conditional_formatting._cf_rules
+
+
+def test_resolved_tab_keeps_history_off_the_active_row(tmp: Path):
+    from openpyxl import load_workbook
+
+    store = {"notes": []}
+    note = sr.record_note(store, "421966", 1, "Base Fan", "fix this grouping")
+    sr.mark_handled(store, note["id"], "grouping rule corrected", when="2026-07-15T12:00:00")
+    wb = tmp / "review.xlsx"
+    sr.write_workbook(wb, _line_items_store(), store)
+
+    book = load_workbook(str(wb), data_only=False)
+    notes = book[sr.NOTES_SHEET]
+    item_col = sr.HEADERS.index("Item") + 1
+    note_col = sr.HEADERS.index("Note") + 1
+    active_row = next(
+        row for row in range(2, notes.max_row + 1)
+        if str(notes.cell(row, item_col).value) == "1"
+    )
+    assert notes.cell(active_row, note_col).value is None
+
+    resolved = book[sr.RESOLVED_SHEET]
+    assert [resolved.cell(1, c).value for c in range(1, 7)] == sr.RESOLVED_HEADERS
+    assert [resolved.cell(2, c).value for c in range(1, 7)] == [
+        "421966", "1", "Base Fan", "fix this grouping",
+        "grouping rule corrected", "2026-07-15T12:00:00",
+    ]
+    book.close()
 
 
 def test_sales_order_add_note_is_read_back(tmp: Path):
@@ -390,6 +420,48 @@ def test_sync_moves_sales_order_input_to_notes_and_clears_it(tmp: Path):
         str(rebuilt_notes.cell(row, item_col).value) == "2"
         and rebuilt_notes.cell(row, note_col).value == "#1: sync this note"
         for row in range(2, rebuilt_notes.max_row + 1)
+    )
+    rebuilt.close()
+
+
+def test_sync_clears_notes_tab_input_too(tmp: Path):
+    from types import SimpleNamespace
+
+    from openpyxl import load_workbook
+
+    line_items = _line_items_store()
+    wb = tmp / "review.xlsx"
+    queue = tmp / "so_review_notes.json"
+    sr.write_workbook(wb, line_items, {"notes": []})
+    book = load_workbook(str(wb), data_only=False)
+    notes = book[sr.NOTES_SHEET]
+    item_col = sr.HEADERS.index("Item") + 1
+    add_note_col = sr.HEADERS.index(sr.NOTES_ADD_NOTE) + 1
+    row = next(
+        row_no for row_no in range(2, notes.max_row + 1)
+        if str(notes.cell(row_no, item_col).value) == "2"
+    )
+    notes.cell(row, add_note_col).value = "clear this Notes-tab input"
+    book.save(str(wb))
+    book.close()
+
+    old_store_path = sr.REVIEW_STORE_PATH
+    old_loader = sr._load_line_items
+    sr.REVIEW_STORE_PATH = queue
+    sr._load_line_items = lambda: line_items
+    try:
+        assert sr._cmd_sync(SimpleNamespace(out=str(wb))) == 0
+    finally:
+        sr.REVIEW_STORE_PATH = old_store_path
+        sr._load_line_items = old_loader
+
+    stored = sr.load_store(queue)
+    assert [n["note"] for n in stored["notes"]] == ["clear this Notes-tab input"]
+    rebuilt = load_workbook(str(wb), data_only=False)
+    rebuilt_notes = rebuilt[sr.NOTES_SHEET]
+    assert all(
+        rebuilt_notes.cell(row_no, add_note_col).value is None
+        for row_no in range(2, rebuilt_notes.max_row + 1)
     )
     rebuilt.close()
 
