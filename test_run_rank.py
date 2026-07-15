@@ -61,6 +61,21 @@ def test_rank_runs_tiebreakers_and_stability():
     assert rank_runs([e, g])[0] is g
 
 
+def test_rank_runs_parsed_beats_unparsed_over_grab():
+    # A broad name pattern ("wheel"/"construction") can sweep in a stray non-run
+    # doc. If that doc was edited more recently than the real run, mtime alone
+    # would let it lead the order and blank its fields. A run that parsed must
+    # win over an empty match at the same revision level regardless of mtime.
+    real = {"file": "Cascades Wheel Construction REV 2.docx",
+            "fields": {"Size": "37", "Design": "16A"}, "mtime": 100}
+    stray = {"file": "Wheel Balance.xlsx", "fields": {}, "mtime": 999}  # newer, junk
+    assert rank_runs([stray, real])[0] is real
+    # But a genuine change-order rerun still supersedes even before it parsed:
+    # CO#/REV rank ahead of the parsed-over-empty tiebreak.
+    co = {"file": "Wheel Construction CO#1.pdf", "fields": {}, "mtime": 50}
+    assert rank_runs([real, co])[0] is co
+
+
 def test_rank_paths_by_name_then_disk_mtime(tmp: Path):
     old = tmp / "quote run old.txt"; old.write_text("x")
     new = tmp / "quote run new.txt"; new.write_text("x")

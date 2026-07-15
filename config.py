@@ -150,12 +150,17 @@ DRIVE_RUN_TYPES = [
 # Everything that isn't an HDX files its quote run under a generic pid type
 # (usually CBC_Inquiry), so those are recognized by FILE NAME instead — e.g.
 # "421473_909-26-1604 Qt Run.txt", "420410 qt  run.txt",
-# "421492_314-26-1647 D64 Wheel Construction (Inner...).xlsx".
+# "Cascades Wheel Construction REV 2.docx", "... D64 Wheel Construction ...".
 # Case-insensitive regexes, comma-separated; extend as new namings turn up.
+# The "wheel"/"construction" tokens are deliberately BROAD — better to grab a
+# construction doc and flag it (an over-grab that parses to nothing shows as a
+# NO FIELDS row you can eyeball) than to silently miss a real run whose name we
+# didn't anticipate. A stray over-grab can't corrupt an order's data: run_rank
+# keeps a run that actually parsed ahead of an empty match at the same revision.
 DRIVE_RUN_NAME_PATTERNS = [
     p.strip() for p in
     (os.environ.get("DRIVE_RUN_NAME_PATTERNS")
-     or r"qt\s*run,quote\s*run,d64\s+wheel\s+construction").split(",")
+     or r"qt\s*run,quote\s*run,wheel,construction").split(",")
     if p.strip()
 ]
 # How many order-detail modals to open in parallel when fetching sales orders.
