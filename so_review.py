@@ -24,8 +24,11 @@ The loop:
      Claude can read it.
   3. `python so_review.py list` shows the OPEN notes. Claude acts on each and
      `python so_review.py handle <id> "what I did"` marks it handled with a
-     resolution; the next `build` shows it as handled so the list visibly
-     burns down.
+     resolution. The note does NOT vanish: the next build shows it green with
+     its resolution filled in (so resolved work stays visible and verifiable),
+     while open notes stay yellow — the sheet reads todo (yellow) vs done
+     (green). A note whose line item no longer exists in the parse re-anchors to
+     the order's first row (the job) so it is never lost.
 
 Notes anchor to a LINE ITEM (order #, item #) — the SOURCE / single-line
 COMPONENT rows that carry an item #; a note on such a line covers its facts and
@@ -150,16 +153,6 @@ def open_notes(store: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [n for n in store["notes"] if n.get("status") != STATUS_HANDLED]
 
 
-def open_notes_by_item(store: Dict[str, Any]) -> Dict[tuple, List[Dict[str, Any]]]:
-    """(order, item#) -> every OPEN note for it, in queue order."""
-    out: Dict[tuple, List[Dict[str, Any]]] = {}
-    for n in store["notes"]:
-        if n.get("status") != STATUS_HANDLED:
-            key = (str(n.get("order")), str(n.get("item_no")))
-            out.setdefault(key, []).append(n)
-    return out
-
-
 # --------------------------------------------------------------------------- #
 # Handled-marks ledger (Claude -> user return channel)                         #
 # --------------------------------------------------------------------------- #
@@ -206,38 +199,63 @@ def _job_sort_key(job: str) -> tuple:
     return (0, int(job), job) if str(job).isdigit() else (1, 0, str(job))
 
 
+def _order_notes(review_store: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+    """order# -> every note for it (open AND handled), in queue order."""
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for n in review_store["notes"]:
+        out.setdefault(str(n.get("order")), []).append(n)
+    return out
+
+
 def review_rows(line_items_store: Dict[str, Any],
                 review_store: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """One display row per hierarchy row across every order in the line-items
-    store, newest job first, with any recorded note/status/resolution attached
-    to its line item. `group_start` marks the first row of each order (banded in
-    the sheet). Pure — no Excel."""
-    by_item = open_notes_by_item(review_store)   # handled notes drop off the sheet
+    """One display row per hierarchy row across every order, newest job first,
+    with EVERY recorded note shown on its line — open notes flagged for action,
+    handled notes carrying Claude's resolution so a resolved item is never just
+    silently gone. A note anchors to its line item's row (which, after a merge,
+    sits under its parent [component]); if that line no longer exists in the
+    parse, it re-anchors to the order's first row (the job) so it is never lost.
+    `group_start` marks the first row of each order. Pure — no Excel."""
+    by_order = _order_notes(review_store)
     jobs = (line_items_store.get("jobs") or {})
     rows: List[Dict[str, Any]] = []
     for jn in sorted(jobs, key=_job_sort_key, reverse=True):
         items = (jobs[jn] or {}).get("items") or []
-        first = True
-        for tr in so_hierarchy.tree_rows(items):
+        tree = so_hierarchy.tree_rows(items)
+        if not tree:
+            continue
+        # item # -> the tree row index that carries it (a SOURCE row under a
+        # component, or a single-line COMPONENT row).
+        item_to_idx = {str(tr["item_no"]): i for i, tr in enumerate(tree)
+                       if tr.get("item_no") != ""}
+        # Attach each note to a row: its line item if that still exists, else the
+        # order's first row (the job) — never dropped.
+        per_row: Dict[int, List[Dict[str, Any]]] = {}
+        for n in by_order.get(str(jn), []):
+            idx = item_to_idx.get(str(n.get("item_no")), 0)   # 0 = job/first row
+            per_row.setdefault(idx, []).append(n)
+        for i, tr in enumerate(tree):
+            here = per_row.get(i, [])
+            opens = [n for n in here if n.get("status") != STATUS_HANDLED]
+            dones = [n for n in here if n.get("status") == STATUS_HANDLED]
+            note_txt = NOTE_SEPARATOR.join(
+                s for s in (str(n.get("note", "")).strip() for n in here) if s)
+            res_txt = NOTE_SEPARATOR.join(
+                s for s in (str(n.get("resolution", "")).strip() for n in dones) if s)
             item_no = tr.get("item_no")
-            recs = by_item.get((str(jn), str(item_no)), []) if item_no != "" else []
             rows.append({
                 "order": str(jn),
                 "item_no": item_no if item_no != "" else "",
                 "kind": tr["kind"],
                 "hierarchy": so_hierarchy.indent_text(tr),
                 "price": tr.get("price", ""),
-                "note": NOTE_SEPARATOR.join(
-                    str(rec.get("note", "")).strip()
-                    for rec in recs
-                    if str(rec.get("note", "")).strip()
-                ),
-                "status": STATUS_OPEN if recs else "",
-                "resolution": "",
-                "annotatable": item_no != "",   # only line-item rows take a note
-                "group_start": first,
+                "note": note_txt,
+                # open wins the row's status (needs attention); else handled.
+                "status": STATUS_OPEN if opens else (STATUS_HANDLED if dones else ""),
+                "resolution": res_txt,
+                "annotatable": item_no != "",   # only line-item rows take a NEW note
+                "group_start": i == 0,
             })
-            first = False
     return rows
 
 
@@ -295,6 +313,7 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
     comp_fill = PatternFill("solid", fgColor="DDEBF7")      # component header rows
     comp_font = Font(bold=True)
     review_font = Font(color="C00000", bold=True)           # parser review rows
+    handled_fill = PatternFill("solid", fgColor="E2EFDA")   # resolved notes (green)
     picker_fill = PatternFill("solid", fgColor="FFF2CC")
 
     rows = review_rows(line_items_store, review_store)
@@ -328,14 +347,20 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
     if last >= 2:
         full = f"A2:{get_column_letter(ncols)}{last}"
         bandL, kindL = get_column_letter(band_col), get_column_letter(_COL["Kind"] + 1)
-        noteL = get_column_letter(_COL["Note"] + 1)
+        noteL, statusL = get_column_letter(_COL["Note"] + 1), get_column_letter(_COL["Status"] + 1)
         # Order banding (fill only) + Kind cues (font only) coexist: each rule
         # sets only the properties it needs, so they layer without fighting.
         notes.conditional_formatting.add(full, FormulaRule(formula=[f"${bandL}2=1"], fill=band_fill))
         notes.conditional_formatting.add(full, FormulaRule(formula=[f'${kindL}2="COMPONENT"'], fill=comp_fill, font=comp_font))
         notes.conditional_formatting.add(full, FormulaRule(formula=[f'${kindL}2="REVIEW"'], font=review_font))
+        # A resolved note's whole row goes green (its resolution is filled in),
+        # so handled work stays visible instead of vanishing.
+        notes.conditional_formatting.add(full,
+                                         FormulaRule(formula=[f'${statusL}2="{STATUS_HANDLED}"'], fill=handled_fill))
+        # Tint the Note column yellow to invite typing — except on a resolved row
+        # (already green), so open work and done work read differently.
         notes.conditional_formatting.add(f"{noteL}2:{noteL}{last}",
-                                         FormulaRule(formula=["TRUE"], fill=note_fill, stopIfTrue=False))
+                                         FormulaRule(formula=[f'${statusL}2<>"{STATUS_HANDLED}"'], fill=note_fill, stopIfTrue=False))
     notes.freeze_panes = "A2"
     notes.auto_filter.ref = f"A1:{get_column_letter(ncols)}{last}"
     for h, w in {"Order": 10, "Item": 6, "Kind": 11, "Hierarchy": 60, "Price": 12,

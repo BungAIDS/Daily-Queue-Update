@@ -129,20 +129,34 @@ def test_store_roundtrip(tmp: Path):
     assert sr.load_store(tmp / "nope.json") == {"notes": []}
 
 
-def test_handled_notes_drop_off_the_sheet_open_ones_stay():
+def test_handled_notes_stay_visible_with_resolution():
     li = _line_items_store()
     store = {"notes": []}
     sr.record_note(store, "421966", 1, "Base Fan", "handled one")       # id 1
     sr.record_note(store, "421966", 2, "IVC", "still open")             # id 2
     sr.mark_handled(store, 1, "did the thing")
     rows = sr.review_rows(li, store)
-    # The open note shows on its line item; the handled note is gone.
-    src1 = [r for r in rows if str(r["item_no"]) == "1" and r["kind"] == sr.so_hierarchy.KIND_SOURCE]
-    src2 = [r for r in rows if str(r["item_no"]) == "2" and r["kind"] == sr.so_hierarchy.KIND_SOURCE]
-    # 421966 item 1 is "Base Fan" (a lone COMPONENT, item_no on the component row).
-    comp1 = [r for r in rows if str(r["item_no"]) == "1"]
-    assert comp1 and comp1[0]["note"] == ""            # handled -> removed from sheet
-    assert src2 and src2[0]["note"] == "still open"    # open -> stays
+    # A resolved note does NOT vanish — it stays on its line, flagged handled,
+    # with the resolution shown, so the work is never "forgotten".
+    r1 = next(r for r in rows if str(r["item_no"]) == "1")
+    assert r1["note"] == "handled one" and r1["status"] == sr.STATUS_HANDLED
+    assert r1["resolution"] == "did the thing"
+    # An open note still shows, flagged open (needs attention).
+    r2 = next(r for r in rows if str(r["item_no"]) == "2"
+              and r["kind"] == sr.so_hierarchy.KIND_SOURCE)
+    assert r2["note"] == "still open" and r2["status"] == sr.STATUS_OPEN
+    assert r2["resolution"] == ""
+
+
+def test_orphaned_note_reanchors_to_the_job_row():
+    li = _line_items_store()
+    store = {"notes": []}
+    # A note whose line item no longer exists (item 99 isn't in the parse)
+    # re-anchors to the order's first row instead of being dropped.
+    sr.record_note(store, "421966", 99, "a line that got reparsed away", "keep me")
+    rows = [r for r in sr.review_rows(li, store) if r["order"] == "421966"]
+    assert rows[0]["note"] == "keep me"                # landed on the job/first row
+    assert not any(r["note"] == "keep me" for r in rows[1:])
 
 
 def test_handled_marks_ledger_roundtrip(tmp: Path):
