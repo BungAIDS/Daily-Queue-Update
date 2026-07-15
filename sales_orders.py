@@ -580,7 +580,8 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
     res = {"design_desc": "", "size": "", "arrangement": "", "motor_pos": "", "fan_class": "",
            "rotation": "", "discharge": "", "pct_width": "", "wheel_type": "", "temp": "",
            "design_temp": "", "max_temp": "", "special_temp": "0",
-           "header_co": None, "co_history": [], "line_items": [],
+           "header_co": None, "co_history": [], "line_items": [], "parts_only": False,
+           "job_number": "",
            # Transmittal fields (see transmittal_data.py): who the drawings go to,
            # the customer P.O. #, and whether the order is released for production.
            "emails": [], "customer_po": "", "released": False}
@@ -644,10 +645,18 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
                     document_facts.setdefault(str(fact.get("document_fact") or ""), fact)
                 recon_all.extend(line_items.strip_continuation_metadata(recon_lines, tables))
             res["co_history"] = _co_history_from_lines(recon_all)
+            item_context = line_items.order_context_from_lines(
+                recon_all, arrangement=res["arrangement"]
+            )
+            res["parts_only"] = item_context["parts_only"]
+            res["job_number"] = item_context["job_number"]
             # Every line item on the order — the priced item/accessory rows and
             # the "Additional Features"-style lines — normalized + tagged so
             # orders can be looked up by what's on them (see line_items.py).
-            res["line_items"] = line_items.extract_items(recon_all) + list(document_facts.values())
+            res["line_items"] = line_items.extract_items(
+                recon_all,
+                order_context=item_context,
+            ) + list(document_facts.values())
             # Transmittal fields off the same reconstructed text: recipient emails
             # (Additional Features / Notes -> "E-Mail Prints to:"), the customer
             # P.O. #, and the released-for-production status.
@@ -1228,6 +1237,9 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2,
                 "customer": j.get("customer", ""),
                 "co_number": j["co_number"],
                 "so_pdf": pdf,
+                "arrangement": parsed.get("arrangement", ""),
+                "parts_only": bool(parsed.get("parts_only", False)),
+                "job_number": parsed.get("job_number", ""),
             })
             n_items += len(items)
         j["line_items"] = items

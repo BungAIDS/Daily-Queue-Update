@@ -132,7 +132,7 @@ def test_ingest_edits_records_source_and_derived_row_notes():
     store = {"notes": []}
     edits = [
         {"order": "421966", "item_no": "2", "item_text": "IVC", "note": "good"},
-        {"order": "421966", "item_no": "", "item_text": "[IVC] — 3 lines", "note": "component note"},
+        {"order": "421966", "item_no": "", "item_text": "[IVC]", "note": "component note"},
         {"order": "421966", "item_no": "", "item_text": "    used on: IVC", "note": "component note"},
         {"order": "421966", "item_no": "1", "item_text": "Base Fan", "note": ""},   # empty note
     ]

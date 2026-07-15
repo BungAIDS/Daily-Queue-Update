@@ -85,7 +85,7 @@ def _paid_inquiry_override(key: str, primary: Dict[str, Any], other: Dict[str, A
     inquiry is the final construction; keeping both values would knowingly
     report the obsolete base value as current.
     """
-    if key != "flange_type":
+    if key not in {"flange_type", "flanged", "punched"}:
         return False
     return (parse_price(primary.get("price")) > 0
             and bool(_attrs(primary).get("inquiry_num"))
@@ -248,8 +248,6 @@ def tree_rows(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for c in components(items):
         multi = len(c["sources"]) > 1
         name = f"[{c['name']}]" if c["keyed"] else c["name"]
-        if multi:
-            name += f" — {len(c['sources'])} lines"
         # A lone line keeps its printed price mark (STD / NC stay visible, like
         # the flat table); a merged component shows the sum of its charges.
         price = (f"{c['price']:,.2f}" if c["price"] else "") if multi \

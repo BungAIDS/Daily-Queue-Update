@@ -106,7 +106,7 @@ DEFAULT_RULES: Dict[str, Any] = {
         r"^max\s+temp,\s+elevation,\s+density\b",     # fan performance table header
         r"^page\s+\d+", r"^\d+\s+of\s+\d+$",
         r"^sales\s+order\b", r"^order\s*#", r"^order\s+(no|number|date)\b",
-        r"^job\s+(no|number)\b",
+        r"^job\s+(no|number)\b", r"^job\s+name\s*:", r"^location\s*:",
         r"^sold\s+to\b", r"^ship\s+to\b", r"^bill\s+to\b",
         r"^customer\s+(po|p\.o\.|order|#|contact)", r"^p\.?\s*o\.?\s*(no|number|#)",
         r"^terms\b", r"^net\s+\d+", r"^quote\b", r"^quotation\b",
@@ -219,7 +219,7 @@ DEFAULT_RULES: Dict[str, Any] = {
                           r"\binlet\s+hood\b"],
         "SCREEN": [r"\bscreen"],
         "FLANGE": [r"flange"],
-        "FLEX CONNECTOR": [r"flex(ible)?\s*conn", r"expansion\s*joint"],
+        "FLEX CONNECTOR": [r"flex(ible)?\s*conn", r"expan(?:s|t)ion\s*joint"],
         "COUPLING": [r"flexible\s*coupling", r"steelflex",
                      r"thomas\s+series", r"\bhalf\s+coupling\b"],
         "UNITARY BASE": [r"unitary\s*base", r"structural\s*(steel\s*)?base",
@@ -248,6 +248,12 @@ DEFAULT_RULES: Dict[str, Any] = {
                        r"mill\s*certifications?"],
         "DRAWINGS": [r"\bcertified\s*drawings?\b", r"\bprints?\b",
                      r"\bdrawings?\b"],
+        "FAN DRAWING WEIGHTS": [
+            r"\b(?:fan|accessor(?:y|ies)|motor|total)\s+weights?\b.*\bfan\s+drawings?\b",
+        ],
+        "THREADED PLUG FOR CONDUIT BOX OPENING": [
+            r"\bthreaded\s+plug\b.*\bconduit\s+box\b",
+        ],
         "MOTOR": [r"\bmotor\b", r"\bc\s*[- ]?\s*flange\b"],
         "VFD": [r"\bVFD\b", r"variable\s*freq", r"inverter"],
         "EXPLOSION PROOF": [r"explosion(?:\s|;|-)*proof", r"class\s*i+\b.*div"],
@@ -361,7 +367,10 @@ _EACH_TAIL = re.compile(r"(?:^|\s)(?:EA(?:CH)?|/EA|PER\s+UNIT)\s*$", re.I)
 # STD", "<desc> L INC", or a bare trailing "<desc> L" (empty price column).
 # STD/INC only count as a price right after the type letter — never let the
 # "INC." of a company name turn an address line into an item.
-_TYPE_PRICE_TAIL = re.compile(r"\s+(?P<ptype>[LCN])\s+(?P<mark>STD|INC|INCL|INCLUDED|N/?C)\.?\s*$", re.I)
+_TYPE_PRICE_TAIL = re.compile(
+    r"\s+(?P<ptype>[LCN])\s+(?P<mark>STD|INC|INCL|INCLUDED|N/?C|N/?A)\.?\s*$",
+    re.I,
+)
 _TYPE_TAIL = re.compile(r"\s+(?P<ptype>[LCN])\s*$")
 # Leading enumeration: "1.", "(1)", "1)", "ITEM 2:", "2 -". Qty guess only.
 _LEAD = re.compile(r"^\s*(?:ITEM\s*)?\(?(?P<num>\d{1,3})\)?\s*(?:[.):]|-(?=\s))?\s+", re.I)
@@ -458,6 +467,49 @@ def _item_blob(item: Dict[str, Any]) -> str:
     parts = [str(item.get("raw", ""))]
     parts += [str(d) for d in item.get("details") or []]
     return " ".join(re.sub(r"\s+", " ", p).strip() for p in parts if str(p).strip())
+
+
+def _source_wording(item: Dict[str, Any]) -> str:
+    """Verbatim item wording without CBC's quantity/type/price columns."""
+    body, _qty = split_lead(str(item.get("raw") or ""))
+    body, _price = split_price_tail(body)
+    body, _ptype, _mark = split_type_tail(body)
+    parts = [body.strip()]
+    parts.extend(str(detail).strip() for detail in item.get("details") or [])
+    return " ".join(part for part in parts if part)
+
+
+def _is_fan_drawing_weights(norm_blob: str) -> bool:
+    return bool(
+        re.search(r"\bFAN\s+DRAWINGS?\b", norm_blob)
+        and re.search(r"\bFAN\b.*\bACCESSOR(?:Y|IES)\b.*\bMOTOR\b.*\bTOTAL\b", norm_blob)
+        and "WEIGHT" in norm_blob
+    )
+
+
+def _thm_job_number(text: str) -> str:
+    match = re.search(
+        r"\bTHM(?:\s+JOB\s+(?:NUMBER|NO\.?))?\s*:?[ ]*"
+        r"(MJ\s*\d{2}\s*-\s*\d+)\b",
+        text,
+        re.I,
+    )
+    return re.sub(r"\s+", "", match.group(1)).upper() if match else ""
+
+
+def _accessory_drawing_requirement(norm_blob: str) -> str:
+    formats: List[str] = []
+    if re.search(r"\bPDF\b", norm_blob):
+        _add_unique(formats, "PDF")
+    if re.search(r"\bAUTO\s*CAD\b|\bAUTOCAD\b", norm_blob):
+        _add_unique(formats, "AUTOCAD")
+    if re.search(r"\b3D\b", norm_blob):
+        _add_unique(formats, "3D")
+    if formats and re.search(r"\bDRAWINGS?\b", norm_blob):
+        return ", ".join(formats)
+    if re.search(r"\bDRAWINGS?\s+FOR\s+(?:THE\s+)?RECORD\b", norm_blob):
+        return "DRAWING FOR RECORD"
+    return ""
 
 
 _DETAIL_LABELS = (
@@ -703,6 +755,8 @@ def _add_unique(values: List[str], value: str) -> None:
 
 
 def _drawing_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    if _is_fan_drawing_weights(norm_blob):
+        return {"component": "FAN DRAWING WEIGHTS"}
     if not ({"DRAWINGS", "3D STEP DRAWINGS"} & tags):
         return {}
 
@@ -1031,6 +1085,22 @@ def _flange_attributes(primary: str, norm_blob: str, tags: set[str], raw_tags: s
     return attrs
 
 
+def _inlet_outlet_construction_attributes(primary: str, tags: set[str]) -> Dict[str, str]:
+    """Common boolean construction slots for standalone inlet/outlet rows."""
+    match = re.match(r"^(INLET|OUTLET)\b", primary)
+    if not match or match.group(1) not in tags:
+        return {}
+    if not re.search(r"\b(OPEN|SLIP|FLANGED|PUNCHED|UNPUNCHED)\b", primary):
+        return {}
+    return {
+        "component": match.group(1),
+        "flanged": "YES" if "FLANGED" in primary else "NO",
+        "punched": "NO" if "UNPUNCHED" in primary else (
+            "YES" if "PUNCHED" in primary else "NO"
+        ),
+    }
+
+
 def _inlet_attributes(primary: str, norm_blob: str, tags: set[str], raw_blob: str) -> Dict[str, str]:
     if "INLET" not in tags:
         return {}
@@ -1057,14 +1127,6 @@ def _inlet_attributes(primary: str, norm_blob: str, tags: set[str], raw_blob: st
     if re.search(r"\bINLET,\s*TUBE\b|\bINLET\s+TUBE\b", primary):
         add_subcategory("TUBE")
 
-    if "UNPUNCHED" in primary:          # must beat PUNCHED (its own substring)
-        add_subcategory("FLANGED/UNPUNCHED" if "FLANGED" in primary else "UNPUNCHED")
-        add_feature("UNPUNCHED")
-    elif "PUNCHED" in primary:
-        add_subcategory("FLANGED/PUNCHED" if "FLANGED" in primary else "PUNCHED")
-        add_feature("PUNCHED")
-    elif "FLANGED" in primary:
-        add_subcategory("FLANGED")
     if "STANDARD BOLTED" in primary:
         add_feature("STANDARD BOLTED")
     if re.search(r"\bWELDED\b", primary):
@@ -1431,6 +1493,26 @@ def _motor_attributes(item: Dict[str, Any], primary: str, norm_blob: str,
     )
     if quote:
         attrs["motor_vendor_quote_number"] = quote.group(1).upper()
+
+    product = _label_value(item, "Product")
+    if product:
+        first_mod = re.search(r"\b(?:W\s*/\s*)?MOD\s+[A-Z0-9]+\b", product, re.I)
+        product_code = product[:first_mod.start()].strip(" -") if first_mod else product.strip()
+        product_code = re.sub(r"\s+W\s*/\s*$", "", product_code, flags=re.I).strip()
+        if product_code:
+            attrs["product"] = product_code.upper()
+        for mod in re.finditer(
+            r"\bMOD\s+([A-Z0-9]+)\s+(.+?)"
+            r"(?=\s*(?:(?:[;,-]|\bAND\b)\s*)?MOD\s+[A-Z0-9]+\b|$)",
+            product,
+            re.I,
+        ):
+            code = re.sub(r"[^a-z0-9]+", "_", mod.group(1).lower()).strip("_")
+            value = re.sub(r"[()]", "", mod.group(2))
+            value = re.sub(r"\s*-\s*", "-", value)
+            value = re.sub(r"\s+", " ", value).strip(" -;,.").upper()
+            if code and value:
+                attrs[f"motor_mod_{code}"] = value
 
     if re.search(r"\b(?:CUSTOMER\s+(?:PROVIDED|FURNISHED|SUPPLIED)|MOTOR\s+BY\s+CUSTOMER)\b", norm_blob):
         attrs["motor_supplied_by"] = "CUSTOMER"
@@ -1952,17 +2034,15 @@ def _silencer_attributes(primary: str, norm_blob: str, tags: set[str], product: 
         _add_unique(used_on, "INLET")
     if not used_on and re.search(r"\b(OUTLET|DISCHARGE)\b", norm_blob):
         _add_unique(used_on, "OUTLET")
-    if used_on:
-        attrs["silencer_used_on"] = ", ".join(used_on)
-
     if re.search(r"\bCIRCULAR\s+DISCHARGE\s+SILENCER\b|\bCIB\b", norm_blob):
-        attrs["silencer_subcategory"] = "CIRCULAR DISCHARGE SILENCER"
+        attrs["component"] = "OUTLET SILENCER"
+        attrs["silencer_type"] = "CIRCULAR DISCHARGE SILENCER"
     elif "OUTLET" in used_on:
-        attrs["silencer_subcategory"] = "OUTLET SILENCER"
+        attrs["component"] = "OUTLET SILENCER"
     elif "INLET" in used_on:
-        attrs["silencer_subcategory"] = "INLET SILENCER"
+        attrs["component"] = "INLET SILENCER"
     else:
-        attrs["silencer_subcategory"] = "SILENCER"
+        attrs["component"] = "SILENCER"
 
     model_patterns = (
         r"\bMODEL\s*:?\s*([A-Z0-9]+(?:[-\s][A-Z0-9]+){0,3})\b",
@@ -1979,12 +2059,12 @@ def _silencer_attributes(primary: str, norm_blob: str, tags: set[str], product: 
                 "",
                 model,
             )
-            attrs["silencer_model"] = model
+            attrs["model"] = model
             break
 
     m = re.search(r"\b(\d{2,3})\s*DBA\b", norm_blob)
     if m:
-        attrs["silencer_noise_target"] = f"{m.group(1)} DBA"
+        attrs["noise_target"] = f"{m.group(1)} DBA"
     pressure_blob = re.sub(r"\s+", " ", blob or norm_blob)
     m = re.search(
         r"\b(?:Pressure\s+Drop|total\s+pressure\s+drop(?:\s+of)?)\s*:?\s*(\d+(?:\.\d+)?|\.\d+)",
@@ -2010,7 +2090,17 @@ def _silencer_attributes(primary: str, norm_blob: str, tags: set[str], product: 
         if re.search(pattern, norm_blob):
             _add_unique(features, label)
     if features:
-        attrs["silencer_feature"] = ", ".join(features)
+        attrs["feature"] = ", ".join(features)
+    drawing = _accessory_drawing_requirement(norm_blob)
+    if drawing:
+        attrs["drawing_requirement"] = drawing
+    job_number = _thm_job_number(blob or norm_blob)
+    if job_number:
+        attrs["job_number"] = job_number
+    tag = re.search(r"\bTAG\s+SILENCER\s*:?[ ]*([A-Z0-9]+(?:-[A-Z0-9]+)+)\b",
+                    blob or norm_blob, re.I)
+    if tag:
+        attrs["tag"] = tag.group(1).upper()
     return attrs
 
 
@@ -2436,8 +2526,6 @@ def _housing_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
         add_subcategory("SQUARE")
     if re.search(r"\bUNIVERSAL\s+HOUSING\b|\bHOUSING\s+UNIVERSAL\b", norm_blob):
         add_subcategory("UNIVERSAL")
-    if "HEAVY DUTY" in tags:
-        add_subcategory("HEAVY DUTY")
     if "LINING" in tags or re.search(r"\b(FIRMEX|LINERS?|LINING)\b.*\bHOUSING\b", norm_blob):
         add_subcategory("LINING")
 
@@ -2509,24 +2597,39 @@ def _motor_conduit_box_attributes(primary: str, norm_blob: str) -> Dict[str, str
 def _flex_connector_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
     if "FLEX CONNECTOR" not in tags:
         return {}
-    attrs: Dict[str, str] = {"component": "FLEX CONNECTOR"}
-    if re.search(r"\b(EXPANSION\s+JOINT|EJ)\b", norm_blob):
-        attrs["flex_connector_type"] = "EXPANSION JOINT"
+    attrs: Dict[str, str] = {}
+    expansion_joint = bool(re.search(r"\b(EXPAN(?:S|T)ION\s+JOINT|EJ)\b", norm_blob))
+    if expansion_joint:
+        if "OUTLET" in norm_blob:
+            attrs["component"] = "OUTLET EXPANSION JOINT"
+        elif "INLET" in norm_blob:
+            attrs["component"] = "INLET EXPANSION JOINT"
+        else:
+            attrs["component"] = "EXPANSION JOINT"
     elif re.search(r"\bFLEXIBLE\s+CONNECTOR\b", norm_blob):
+        attrs["component"] = "FLEX CONNECTOR"
         attrs["flex_connector_type"] = "FLEXIBLE CONNECTOR"
-    elif re.search(r"\bFLEX\s+CONNECTOR\b", norm_blob):
+    else:
+        attrs["component"] = "FLEX CONNECTOR"
+    if not expansion_joint and re.search(r"\bFLEX\s+CONNECTOR\b", norm_blob):
         attrs["flex_connector_type"] = "FLEX CONNECTOR"
     if re.search(r"\bFLOW\s+LINERS?\b", norm_blob):
-        attrs["flex_connector_feature"] = "FLOW LINER"
+        attrs["feature"] = "FLOW LINER"
     if re.search(r"\bFIBERGLASS\s+SOUND\s+PILLOW\b", norm_blob):
-        attrs["flex_connector_insulation"] = "FIBERGLASS SOUND PILLOW"
-    used_on: List[str] = []
-    if "INLET" in tags or re.search(r"\bINLET\b", norm_blob):
-        _add_unique(used_on, "INLET")
-    if "OUTLET" in tags or re.search(r"\bOUTLET\b", norm_blob):
-        _add_unique(used_on, "OUTLET")
-    if used_on:
-        attrs["used_on"] = ", ".join(used_on)
+        attrs["insulation"] = "FIBERGLASS SOUND PILLOW"
+    elif re.search(r"\bSOUND\s+PILLOW\b", norm_blob):
+        attrs["insulation"] = "SOUND PILLOW"
+    face = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:INCH(?:ES)?\s+)?F\s+F\b", norm_blob)
+    if face:
+        attrs["face_to_face"] = face.group(1) + '"'
+    if re.search(r"\bPUNCHED\s+TO\s+MATCH\s+(?:THE\s+)?(?:FAN\s+)?OUTLET\s+FLANGE\b", norm_blob):
+        attrs["punched_to_match"] = "OUTLET FLANGE"
+    drawing = _accessory_drawing_requirement(norm_blob)
+    if drawing:
+        attrs["drawing_requirement"] = drawing
+    job_number = _thm_job_number(norm_blob)
+    if job_number:
+        attrs["job_number"] = job_number
     return attrs
 
 
@@ -2671,7 +2774,7 @@ def _temperature_attributes(primary: str, norm_blob: str, tags: set[str], raw_bl
 def _heavy_duty_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
     if "HEAVY DUTY" not in tags and not re.search(r"\bHEAVY\s+DUTY\b", norm_blob):
         return {}
-    attrs = {"duty_rating": "HEAVY DUTY"}
+    attrs = {"heavy_duty": "YES"}
     if "WHEEL" in tags or re.search(r"\bWHEEL\b", norm_blob):
         attrs["component"] = "WHEEL"
     elif "HOUSING" in tags or re.search(r"\bHOUSING\b", norm_blob):
@@ -2845,17 +2948,15 @@ def _has_drive_component_detail(primary: str, norm_blob: str) -> bool:
 
 def _balance_attributes(norm_blob: str) -> Dict[str, str]:
     attrs: Dict[str, str] = {}
-    types: List[str] = []
     grades: List[str] = []
     for m in _BALANCE_GRADE.finditer(norm_blob):
         _add_unique(grades, f"G{m.group(1).upper()}")
     if grades:
-        _add_unique(types, "GRADED BALANCE")
+        attrs["component"] = "BALANCE"
         attrs["balance_grade"] = ", ".join(grades)
     if re.search(r"\bWELDED\s+BALANCE\s+WEIGHTS?\b", norm_blob):
-        _add_unique(types, "WELDED BALANCE WEIGHTS")
-    if types:
-        attrs["balance_type"] = ", ".join(types)
+        attrs["component"] = "BALANCE"
+        attrs["balance_type"] = "WELDED BALANCE WEIGHTS"
     return attrs
 
 
@@ -2888,18 +2989,26 @@ def _drain_type(primary: str, norm_blob: str) -> str:
     return "DRAIN"
 
 
-def _drain_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+def _drain_size(blob: str) -> str:
+    fraction = r"(?:\d+\s+)?\d+/\d+|\d+(?:\.\d+)?"
+    patterns = (
+        rf"\bDRAIN(?:\s+PLUG)?(?:\s+SIZE)?\s*[:,]?\s*({fraction})\s*(?:\"|INCH(?:ES)?)",
+        rf"\b({fraction})\s*(?:\"|INCH(?:ES)?)\s*(?:DIAMETER\s+)?(?:HOUSING\s+|INLET\s+BOX\s+|CONDUIT\s+BOX\s+)?DRAIN\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, blob, re.I)
+        if match:
+            return re.sub(r"\s+", "-", match.group(1).strip()) + '"'
+    return "STD"
+
+
+def _drain_attributes(primary: str, norm_blob: str, tags: set[str], blob: str) -> Dict[str, str]:
     if "DRAIN" not in tags and "DRAIN" not in norm_blob:
         return {}
     drain_type = _drain_type(primary, norm_blob)
     if not drain_type:
         return {}
-    attrs = {"drain_type": drain_type}
-    if "PLUG" in norm_blob:
-        attrs["drain_closure"] = "PLUG"
-    if "CONDENSATION DRAIN" in norm_blob or re.search(r"\bDRAIN\s+HOLES?\b", norm_blob):
-        attrs["drain_detail"] = "CONDENSATION DRAIN HOLES"
-    return attrs
+    return {"component": drain_type, "size": _drain_size(blob)}
 
 
 def _bearing_attributes(blob: str, norm_blob: str) -> Dict[str, str]:
@@ -3072,6 +3181,14 @@ def _is_assembly_note(primary: str) -> bool:
     return bool(re.match(r"^ASSEMBLY\b", primary, re.I))
 
 
+def _is_phase_balance_disclaimer(primary: str) -> bool:
+    return bool(re.match(
+        r"^ALL\s+CHICAGO\s+BLOWER\s+WHEELS\s+ARE\s+PRECISION\s+BALANCED\b",
+        primary,
+        re.I,
+    ))
+
+
 def _is_admin_note(primary: str) -> bool:
     return bool(re.search(r"\b(SLOW\s+PAY\s+ADDITION|PAYMODE[-\s]*X|FEE|CHARGE)\b", primary, re.I))
 
@@ -3113,27 +3230,49 @@ def _is_accessory_coating(primary: str, tags: set[str], norm_blob: str) -> bool:
     return bool((_ACCESSORY_COATING_TAGS & tags) and _COATING_WORD.search(norm_blob))
 
 
-def _lube_component_tags(primary: str, norm_blob: str) -> List[str]:
+def _arrangement_has_fan_bearings(arrangement: str) -> bool:
+    value = normalize_text(str(arrangement or ""))
+    match = re.search(r"(?:^|\bA\s*/?\s*)(1|3|8|9)(?:[A-Z])?\b", value)
+    return bool(match)
+
+
+def _lube_target(primary: str, norm_blob: str,
+                 context: Dict[str, Any] | None = None) -> str:
+    if not (_LUBE_ACCESSORY.search(primary) or _LUBE_ACCESSORY.search(norm_blob)):
+        return ""
+    # "Motor bearing" is a bearing inside the motor, not the fan's external
+    # shaft bearings.
+    if re.search(r"\bMOTOR\s+BEARINGS?\b", norm_blob):
+        return "MOTOR"
+    if re.search(r"\bBEARINGS?\b", norm_blob):
+        return "BEARINGS"
+    if re.search(r"\bMOTOR\b", norm_blob):
+        return "MOTOR"
+    arrangement = str((context or {}).get("arrangement") or "").strip()
+    if arrangement:
+        return "BEARINGS" if _arrangement_has_fan_bearings(arrangement) else "MOTOR"
+    return "BOTH"
+
+
+def _lube_component_tags(primary: str, norm_blob: str,
+                         context: Dict[str, Any] | None = None) -> List[str]:
     if not (_LUBE_ACCESSORY.search(primary) or _LUBE_ACCESSORY.search(norm_blob)):
         return []
-    tags: List[str] = []
-    if re.search(r"\bMOTOR\b", norm_blob, re.I):
-        _add_unique(tags, "MOTOR")
-    if re.search(r"\bBEARINGS?\b", norm_blob, re.I):
-        _add_unique(tags, "BEARINGS")
-    if not tags:
-        tags = ["BEARINGS", "MOTOR"]
-    return tags
+    target = _lube_target(primary, norm_blob, context)
+    return ["BEARINGS", "MOTOR"] if target == "BOTH" else [target]
 
 
-def _lube_review_attributes(primary: str, norm_blob: str) -> Dict[str, str]:
+def _lube_attributes(primary: str, norm_blob: str,
+                     context: Dict[str, Any] | None = None) -> Dict[str, str]:
     if not (_LUBE_ACCESSORY.search(primary) or _LUBE_ACCESSORY.search(norm_blob)):
         return {}
-    has_motor = bool(re.search(r"\bMOTOR\b", norm_blob, re.I))
-    has_bearing = bool(re.search(r"\bBEARINGS?\b", norm_blob, re.I))
-    if has_motor or has_bearing:
-        return {}
-    return {"component_review": "UNCLEAR GREASE TARGET - VERIFY MOTOR/BEARINGS/ARRANGEMENT"}
+    target = _lube_target(primary, norm_blob, context)
+    attrs = {"extended_grease_fittings": "YES"}
+    if target in {"MOTOR", "BEARINGS"}:
+        attrs["component"] = target
+    else:
+        attrs["component_review"] = "UNCLEAR GREASE TARGET - VERIFY MOTOR/BEARINGS/ARRANGEMENT"
+    return attrs
 
 
 def _guard_attributes(primary: str, norm_blob: str) -> Dict[str, str]:
@@ -3217,6 +3356,35 @@ def _coating_category(primary: str, norm_blob: str, coating_type: str | None) ->
     return coating_type or "COATING"
 
 
+def _accessory_coating_value(norm_blob: str) -> str:
+    if re.search(r"\bPAINTED\s+TO\s+MATCH\s+(?:THE\s+)?FAN\b", norm_blob):
+        return "PAINTED TO MATCH FAN"
+    if re.search(r"\bPAINTED\s+SAFETY\s+YELLOW\b", norm_blob):
+        return "PAINTED SAFETY YELLOW"
+    if re.search(r"\bPAINTED\s+BUB\b", norm_blob):
+        return "PAINTED BUB"
+    coats = re.search(r"\b(\d+)\s+COATS?\s+OF\s+PAINT\b", norm_blob)
+    if coats:
+        return f"{coats.group(1)} COATS OF PAINT"
+    ral = re.search(r"\bRAL\s+(\d{4})\b", norm_blob)
+    if ral:
+        return f"PAINTED RAL {ral.group(1)}"
+    if "UNPAINTED" in norm_blob:
+        return "UNPAINTED"
+    if "GALVANIZED" in norm_blob or "GALVANIZING" in norm_blob:
+        return "GALVANIZED"
+    if "VEGETABLE OIL" in norm_blob:
+        return "VEGETABLE OIL"
+    for value in ("PLASITE", "HERESITE", "EPOXY", "PRIMER", "ENAMEL"):
+        if value in norm_blob:
+            return value
+    if re.search(r"\bPAINT(?:ED)?\b", norm_blob):
+        return "PAINTED"
+    if re.search(r"\bCOAT(?:ED|ING|S)?\b", norm_blob):
+        return "COATED"
+    return ""
+
+
 def _coating_attributes(primary: str, norm_blob: str, tags: set[str], raw_tags: set[str] | None = None) -> Dict[str, str]:
     if not _COATING_WORD.search(norm_blob):
         return {}
@@ -3227,7 +3395,11 @@ def _coating_attributes(primary: str, norm_blob: str, tags: set[str], raw_tags: 
         or ("SILENCER" in tags and _COATING_WORD.search(norm_blob))
         or _is_belt_guard_line(primary)
     )
-    attrs["coating_context"] = "ACCESSORY" if accessory else "FAN"
+    if accessory:
+        value = _accessory_coating_value(norm_blob)
+        return {"coating": value} if value else {}
+    if _is_paint_line(primary):
+        attrs["component"] = "PAINT"
     if _is_belt_guard_line(primary):
         scope = "BELT GUARD"
     elif _is_shaft_bearing_guard_line(primary):
@@ -3294,6 +3466,15 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
     tag_set = set(tags)
     primary = _primary_norm(item, rules)
     norm_blob = normalize_text(_item_blob(item), rules)
+    context = item.get("_order_context") if isinstance(item.get("_order_context"), dict) else {}
+    if _is_fan_drawing_weights(norm_blob):
+        return ["FAN DRAWING WEIGHTS"]
+    if re.search(r"\bTHREADED\s+PLUG\b.*\bCONDUIT\s+BOX\b", norm_blob):
+        return ["THREADED PLUG FOR CONDUIT BOX OPENING"]
+    if _is_phase_balance_disclaimer(primary):
+        return [_MISC_NOTE_TAG]
+    if re.fullmatch(r"MOUNTED\s+BY\s+OTHERS", primary):
+        _add_unique(tags, "MOTOR")
     if _is_admin_note(primary):
         return [_MISC_NOTE_TAG]
     if _is_customer_responsibility_note(primary):
@@ -3351,6 +3532,9 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
         tags = [t for t in tags if t != "WHEEL"]
     if "FLEX CONNECTOR" in tags and "FLANGE" in tags and _is_flex_connector_line(norm_blob):
         tags = [t for t in tags if t != "FLANGE"]
+    if ("FLEX CONNECTOR" in tags
+            and re.search(r"\bEXPAN(?:S|T)ION\s+JOINT\b", norm_blob)):
+        tags = [t for t in tags if t not in {"INLET", "OUTLET"}]
     temp_blob = f"{norm_blob} {_item_blob(item).upper()}"
     has_extreme_temp = bool(_temperature_direction(temp_blob, _extreme_temperature_values(temp_blob)))
     if (_EXTREME_TEMPERATURE_TAG in tags or has_extreme_temp) and _is_top_level_extreme_temperature(
@@ -3409,7 +3593,10 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
     if _is_assembly_note(primary):
         tags = [t for t in tags if t not in _MISC_NOTE_COMPONENT_TAGS]
         _add_unique(tags, _MISC_NOTE_TAG)
-    for tag in _lube_component_tags(primary, norm_blob):
+    if (context.get("parts_only") and re.match(r"^CONSTRUCTION\b", primary)
+            and _material_attributes(norm_blob)):
+        _add_unique(tags, "PARTS-ONLY ORDER")
+    for tag in _lube_component_tags(primary, norm_blob, context):
         _add_unique(tags, tag)
     if _component_material_owner(item, _material_attributes(norm_blob), rules):
         tags = [t for t in tags if t not in _MATERIAL_TAGS]
@@ -3514,11 +3701,18 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     raw_tags = set(tag_item(_taggable_text(item, rules), rules))
     tags = set(_final_tags(item, rules))
     primary = _primary_norm(item, rules)
+    context = item.get("_order_context") if isinstance(item.get("_order_context"), dict) else {}
     attrs: Dict[str, str] = {}
 
     inquiries = inquiry_numbers(item)
     if inquiries:
         attrs["inquiry_num"] = ", ".join(inquiries)
+    if re.match(r"^SHIP\s+WITH\b", primary):
+        attrs.update({"component": "SHIP WITH", "instruction": _source_wording(item)})
+        return attrs
+    if re.search(r"\bTHREADED\s+PLUG\b.*\bCONDUIT\s+BOX\b", norm_blob):
+        attrs["component"] = "THREADED PLUG FOR CONDUIT BOX OPENING"
+        return attrs
     if _is_packaging_inspection_primary(primary, tags):
         attrs.update(_inspection_attributes(primary, norm_blob, tags))
         attrs.update(_shipping_attributes(norm_blob, tags))
@@ -3533,6 +3727,11 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_vfd_attributes(primary, norm_blob, tags))
     attrs.update(_vibration_isolation_attributes(primary, norm_blob, tags, blob))
     attrs.update(_flange_attributes(primary, norm_blob, tags, raw_tags))
+    location_attrs = _inlet_outlet_construction_attributes(primary, tags)
+    if location_attrs:
+        attrs.pop("flange_scope", None)
+        attrs.pop("flange_type", None)
+        attrs.update(location_attrs)
     attrs.update(_flex_connector_attributes(norm_blob, tags))
     attrs.update(_coupling_attributes(norm_blob, tags))
     attrs.update(_low_leakage_attributes(norm_blob, tags))
@@ -3563,12 +3762,14 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     product = _label_value(item, "Product")
     base_fan = _is_base_fan_line(primary)
     if vendor and not base_fan:
-        attrs["vendor"] = vendor
+        attrs.setdefault("vendor", vendor)
     if product and not base_fan:
-        attrs["product"] = product
+        attrs.setdefault("product", product)
     attrs.update(_silencer_attributes(primary, norm_blob, tags, product, blob))
     attrs.update(_spark_resistant_attributes(norm_blob, tags))
     attrs.update(_spare_parts_attributes(item, primary, norm_blob, tags))
+    if _is_phase_balance_disclaimer(primary):
+        return {"note_type": "MISC"}
     admin_note = _is_admin_note(primary)
     if admin_note:
         attrs["note_type"] = "ADMIN"
@@ -3580,18 +3781,30 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_testing_attributes(primary, norm_blob, tags))
     attrs.update(_guard_attributes(primary, norm_blob))
     attrs.update(_coating_attributes(primary, norm_blob, tags, raw_tags))
-    attrs.update(_drain_attributes(primary, norm_blob, tags))
-    attrs.update(_lube_review_attributes(primary, norm_blob))
+    attrs.update(_drain_attributes(primary, norm_blob, tags, blob))
+    attrs.update(_lube_attributes(primary, norm_blob, context))
 
     material_attrs = _material_attributes(norm_blob)
     material_owner = _component_material_owner(item, material_attrs, rules)
     section = str(item.get("section") or "").upper()
+    drain_type = _drain_type(primary, norm_blob)
     whole_fan_construction = bool(
         material_attrs
         and re.match(r"^CONSTRUCTION\b", primary)
         and re.search(r"\b(FEATURES?|NOTES?)\b", section)
+        and not context.get("parts_only")
     )
-    if whole_fan_construction:
+    if (material_attrs and context.get("parts_only")
+            and re.match(r"^CONSTRUCTION\b", primary)):
+        attrs.update(material_attrs)
+        attrs["component"] = "PARTS-ONLY ORDER"
+        attrs["parts_only"] = "YES"
+        attrs["material_scope"] = "ORDER PARTS"
+    elif material_attrs and drain_type:
+        attrs.update(material_attrs)
+        attrs["component"] = drain_type
+        attrs["material_scope"] = drain_type
+    elif whole_fan_construction:
         attrs.update(material_attrs)
         attrs["component"] = "BASE FAN"
         attrs["material_scope"] = "WHOLE FAN"
@@ -3678,6 +3891,31 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
 
     _canonical_component_attrs(item, primary, norm_blob, blob, tags, attrs)
 
+    component = str(attrs.get("component") or "").upper()
+    if component in {"INLET SILENCER", "OUTLET SILENCER", "SILENCER",
+                     "INLET EXPANSION JOINT", "OUTLET EXPANSION JOINT",
+                     "EXPANSION JOINT"}:
+        if context.get("job_number"):
+            attrs.setdefault("job_number", str(context["job_number"]))
+        if not attrs.get("drawing_requirement") and attrs.get("drawing_type"):
+            attrs["drawing_requirement"] = str(attrs["drawing_type"])
+        attrs.pop("drawing_type", None)
+        attrs.pop("drawing_scope", None)
+        attrs.pop("shipping_scope", None)
+        attrs.pop("flange_type", None)
+        attrs.pop("flange_scope", None)
+        if str(attrs.get("used_on") or "").upper() in {
+            "SILENCER", "INLET", "OUTLET", "FLEX CONNECTOR"
+        }:
+            attrs.pop("used_on", None)
+        product_value = normalize_text(str(attrs.get("product") or ""))
+        redundant_products = {
+            "SILENCER", "INLET SILENCER", "OUTLET SILENCER",
+            "EXPANSION JOINT", "INLET EXPANSION JOINT", "OUTLET EXPANSION JOINT",
+        }
+        if product_value in redundant_products:
+            attrs.pop("product", None)
+
     return attrs
 
 
@@ -3686,8 +3924,18 @@ _UNCLASSIFIED_DETAIL_PREFIX = "UNCLASSIFIED DETAIL: "
 
 def _known_non_fact_detail(detail: str) -> bool:
     """Source context we intentionally retain without turning into a fact."""
-    return bool(re.match(r"^IVC\s+HANDLE\s+LOCATION\s+FOR\s+DISCHARGE\s*$",
-                         normalize_text(detail), re.I))
+    norm = normalize_text(detail)
+    return bool(
+        re.match(r"^IVC\s+HANDLE\s+LOCATION\s+FOR\s+DISCHARGE\s*$", norm, re.I)
+        or _thm_job_number(detail)
+        or re.match(r"^TO\s+BE\s+PHASE\s+BALANCED\b", norm, re.I)
+        or re.match(r"^ARE\s+NOT\s+MOUNTED\s+BY\s+CHICAGO\s+BLOWER\b", norm, re.I)
+        or re.match(
+            r"^PRODUCT\s+(?:(?:INLET|OUTLET)\s+)?(?:SILENCER|EXPANSION\s+JOINT)$",
+            norm,
+            re.I,
+        )
+    )
 
 
 def _semantic_signature(tags: List[str], attrs: Dict[str, Any]) -> Tuple[Any, ...]:
@@ -3727,7 +3975,12 @@ def _detail_review_flags(item: Dict[str, Any], rules: Dict[str, Any],
             current = _semantic_signature(
                 _final_tags(probe, rules), component_attributes(probe, rules)
             )
-        if current == previous and not _known_non_fact_detail(detail):
+        known_context = _known_non_fact_detail(detail)
+        if index:
+            known_context = known_context or _known_non_fact_detail(
+                f"{details[index - 1]} {detail}"
+            )
+        if current == previous and not known_context:
             # Some CBC labels put their value on the next physical PDF line:
             # "Handle Location:" / "@3:00" and "Fail Position ...:" /
             # "Will Advise".  If the pair adds meaning but the value alone
@@ -4108,13 +4361,98 @@ def _section_wrapped_detail(s: str, context: List[str]) -> bool:
         return False
     primary = normalize_text(context[0])
     current = normalize_text(s)
-    return bool(
-        re.match(r"^SHIP WITH\b", primary)
-        and re.match(r"^SINGLE PURCHASE ORDER\b", current)
-    )
+    if (re.match(r"^SHIP WITH\b", primary)
+            and re.match(r"^SINGLE PURCHASE ORDER\b", current)):
+        return True
+    if (_is_phase_balance_disclaimer(primary)
+            and re.match(r"^(?:TO BE PHASE BALANCED|ARE NOT MOUNTED BY CHICAGO BLOWER)\b",
+                         current)):
+        return True
+    return False
 
 
 MAX_DETAILS = 10  # per item — continuation blocks run ~7 lines (motors)
+
+
+def _parts_only_from_lines(lines: Iterable[str]) -> bool:
+    return any(
+        re.search(r"\bSALES\s+ORDER\s+FOR\s+(?:REPAIR\s+)?PARTS\b", str(line), re.I)
+        for line in lines
+    )
+
+
+def _arrangement_from_lines(lines: Iterable[str]) -> str:
+    for line in lines:
+        match = re.search(
+            r"\bARRANGEMENT\s*:?[ ]*([A-Z]?\s*/?\s*\d+[A-Z]?)\b",
+            str(line),
+            re.I,
+        )
+        if match:
+            return re.sub(r"\s+", "", match.group(1)).upper()
+    return ""
+
+
+def _infer_parts_only_from_items(items: Iterable[Dict[str, Any]]) -> bool:
+    values = list(items)
+    has_base_fan = any(_is_base_fan_line(_primary_norm(item)) for item in values)
+    has_repair_part = any(
+        _is_spare_parts_primary(_primary_norm(item)) for item in values
+    )
+    return bool(has_repair_part and not has_base_fan)
+
+
+def _shared_job_number_from_lines(lines: Iterable[str]) -> str:
+    for line in lines:
+        if re.match(r"^\s*JOB\s+NAME\s*:", str(line), re.I):
+            value = _thm_job_number(str(line))
+            if value:
+                return value
+    return ""
+
+
+def order_context_from_lines(lines: Iterable[str], arrangement: str = "") -> Dict[str, Any]:
+    values = list(lines)
+    return {
+        "arrangement": str(arrangement or _arrangement_from_lines(values)).strip(),
+        "parts_only": _parts_only_from_lines(values),
+        "job_number": _shared_job_number_from_lines(values),
+    }
+
+
+def order_context_from_items(items: Iterable[Dict[str, Any]], arrangement: str = "",
+                             parts_only: bool | None = None,
+                             job_number: str = "") -> Dict[str, Any]:
+    values = list(items)
+    inherited_job_number = str(job_number or "").strip()
+    if not inherited_job_number:
+        for item in values:
+            attrs = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
+            inherited_job_number = str(attrs.get("job_number") or "").strip()
+            if inherited_job_number:
+                break
+    if not inherited_job_number:
+        inherited_job_number = _shared_job_number_from_lines(
+            _item_blob(item) for item in values
+        )
+    return {
+        "arrangement": str(arrangement or _arrangement_from_lines(
+            _item_blob(item) for item in values
+        )).strip(),
+        "parts_only": (_infer_parts_only_from_items(values)
+                       if parts_only is None else bool(parts_only)),
+        "job_number": inherited_job_number,
+    }
+
+
+def _skip_ends_detail_block(line: str) -> bool:
+    """Structural totals/table boundaries, unlike repeated page furniture."""
+    return bool(re.match(
+        r"^(?:LIST\s+TOTAL|LEAD\s+TIME|(?:SUB\s*)?TOTAL|TYPE\s+PRICE|"
+        r"SEE\s+(?:ADDITIONAL|SPECIAL))\b",
+        line,
+        re.I,
+    ))
 
 
 def iter_classified(lines: Iterable[str], rules: Dict[str, Any] | None = None,
@@ -4122,10 +4460,10 @@ def iter_classified(lines: Iterable[str], rules: Dict[str, Any] | None = None,
     """The full extraction state machine, yielding (kind, detail, line) for
     every line — classify_line's kinds plus "detail" (an unpriced line
     attached to the item above: vendor, motor specs, "Product: Damper", ...).
-    Skips do NOT break a detail block (page furniture interleaves one), but a
-    new item, a section event, or MAX_DETAILS does. Single source of truth for
-    extract_items AND the --dump tuning view, so the dump shows exactly what
-    the extractor does."""
+    Repeated page furniture does not break a detail block, while structural
+    totals and lead-time/table boundaries do. A new item, section event, or
+    MAX_DETAILS also closes it. Single source of truth for extract_items AND
+    the --dump tuning view, so the dump shows exactly what the extractor does."""
     rules = rules or load_rules()
     section = ""
     have_item = False
@@ -4138,6 +4476,8 @@ def iter_classified(lines: Iterable[str], rules: Dict[str, Any] | None = None,
             section, have_item, detail_context = detail, False, []
         elif kind == "section-end":
             section, have_item, detail_context = "", False, []
+        elif kind == "skip" and _skip_ends_detail_block(s):
+            have_item, n_details, detail_context = False, 0, []
         elif (kind == "item-section" and have_item and n_details < MAX_DETAILS
               and _section_wrapped_detail(s, detail_context)):
             kind = "detail"
@@ -4154,7 +4494,8 @@ def iter_classified(lines: Iterable[str], rules: Dict[str, Any] | None = None,
         yield kind, detail, s
 
 
-def extract_items(lines: Iterable[str], rules: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
+def extract_items(lines: Iterable[str], rules: Dict[str, Any] | None = None,
+                  order_context: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
     """Pull the line items out of a Sales Order's reconstructed text lines.
 
     Two capture signals, covering both ways SOs lay items out: any line ending
@@ -4166,15 +4507,27 @@ def extract_items(lines: Iterable[str], rules: Dict[str, Any] | None = None) -> 
     tags, attributes, review_flags}; tags and attributes consider details, and
     uncategorized details become review flags."""
     rules = rules or load_rules()
+    source_lines = [str(line) for line in lines]
+    detected = order_context_from_lines(
+        source_lines, arrangement=str((order_context or {}).get("arrangement") or "")
+    )
+    context = dict(order_context or {})
+    context["arrangement"] = str(context.get("arrangement") or detected["arrangement"])
+    context["parts_only"] = bool(context.get("parts_only") or detected["parts_only"])
+    context["job_number"] = str(context.get("job_number") or detected["job_number"])
+    shared_job_number = context["job_number"]
     by_norm: Dict[str, Dict[str, Any]] = {}
     last: Dict[str, Any] | None = None
     section = ""
-    for kind, detail, s in iter_classified(lines, rules):
+    for kind, detail, s in iter_classified(source_lines, rules):
         if kind == "section-start":
             section, last = detail, None
             continue
         if kind == "section-end":
             section, last = "", None
+            continue
+        if kind == "skip" and _skip_ends_detail_block(s):
+            last = None
             continue
         if kind == "detail":
             if last is not None:
@@ -4215,9 +4568,20 @@ def extract_items(lines: Iterable[str], rules: Dict[str, Any] | None = None) -> 
     if any(_is_customer_responsibility_note(_primary_norm(it, rules)) for it in items):
         items = [it for it in items if _primary_norm(it, rules) != "SERIAL NUMBER UNKNOWN"]
     for it in items:
+        it["_order_context"] = context
         it["tags"] = _final_tags(it, rules)
         it["attributes"] = component_attributes(it, rules)
         _apply_review_flags(it, rules)
+        it.pop("_order_context", None)
+    if shared_job_number:
+        shared_components = {
+            "INLET SILENCER", "OUTLET SILENCER", "SILENCER",
+            "INLET EXPANSION JOINT", "OUTLET EXPANSION JOINT", "EXPANSION JOINT",
+        }
+        for item in items:
+            attrs = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
+            if str(attrs.get("component") or "").upper() in shared_components:
+                attrs.setdefault("job_number", shared_job_number)
     return items
 
 
@@ -4366,7 +4730,9 @@ def audit_review(store: Dict[str, Any], limit: int = 50, tag: str = "") -> List[
 
 
 def record_job(store: Dict[str, Any], job: str, items: List[Dict[str, Any]],
-               customer: str = "", co_number: int | None = None, so_pdf: str = "") -> None:
+               customer: str = "", co_number: int | None = None, so_pdf: str = "",
+               arrangement: str = "", parts_only: bool | None = None,
+               job_number: str = "") -> None:
     """Record (or refresh) one job's line items. The latest parse wins, but
     metadata never regresses: a blank customer/co/pdf from a sparse source
     (e.g. the archive scan, which has no board context) keeps the old value."""
@@ -4375,6 +4741,10 @@ def record_job(store: Dict[str, Any], job: str, items: List[Dict[str, Any]],
         "customer": customer or prev.get("customer", ""),
         "co_number": co_number if co_number is not None else prev.get("co_number"),
         "so_pdf": so_pdf or prev.get("so_pdf", ""),
+        "arrangement": arrangement or prev.get("arrangement", ""),
+        "job_number": job_number or prev.get("job_number", ""),
+        "parts_only": (bool(parts_only) if parts_only is not None
+                       else bool(prev.get("parts_only", False))),
         "scanned_at": datetime.now().isoformat(timespec="seconds"),
         "items": items,
     }
@@ -4409,6 +4779,9 @@ def record_jobs_atomic(records: Iterable[Dict[str, Any]], path: Path | None = No
                 customer=str(row.get("customer") or ""),
                 co_number=row.get("co_number"),
                 so_pdf=str(row.get("so_pdf") or ""),
+                arrangement=str(row.get("arrangement") or ""),
+                parts_only=(row.get("parts_only") if "parts_only" in row else None),
+                job_number=str(row.get("job_number") or ""),
             )
             recorded += 1
         save_store(store, destination)
@@ -4607,11 +4980,24 @@ def renormalize_store(store: Dict[str, Any]) -> int:
     rules = load_rules(refresh=True)
     n = 0
     for rec in (store.get("jobs") or {}).values():
+        context = order_context_from_items(
+            rec.get("items") or [],
+            arrangement=str(rec.get("arrangement") or ""),
+            parts_only=(rec.get("parts_only") if "parts_only" in rec else None),
+            job_number=str(rec.get("job_number") or ""),
+        )
+        if context.get("arrangement"):
+            rec["arrangement"] = context["arrangement"]
+        rec["parts_only"] = bool(context.get("parts_only"))
+        if context.get("job_number"):
+            rec["job_number"] = context["job_number"]
         kept: List[Dict[str, Any]] = []
         for it in rec.get("items") or []:
             if _is_skipped_stored_item(it, rules):
                 continue
+            it["_order_context"] = context
             derived = derive_item_fields(it, rules)
+            it.pop("_order_context", None)
             it["norm"] = derived["norm"]
             it["tags"] = derived["tags"]
             it["attributes"] = derived["attributes"]

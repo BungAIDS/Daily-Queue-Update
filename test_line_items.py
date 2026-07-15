@@ -921,7 +921,9 @@ def test_421967_review_notes_are_general_parser_rules():
 
     inlet = by_component["INLET"]
     assert inlet["tags"] == ["FLANGE", "INLET"]
-    assert inlet["attributes"]["flange_type"] == "PUNCHED"
+    assert inlet["attributes"]["flanged"] == "YES"
+    assert inlet["attributes"]["punched"] == "YES"
+    assert "flange_type" not in inlet["attributes"]
     assert "used_on" not in inlet["attributes"] and "ivc_relation" not in inlet["attributes"]
     assert "flange_scope" not in inlet["attributes"]
 
@@ -936,12 +938,20 @@ def test_421967_review_notes_are_general_parser_rules():
                     if item.get("attributes", {}).get("component") == "OUTLET"]
     assert len(outlet_lines) == 2 and all(
         "flange_scope" not in item["attributes"] for item in outlet_lines)
+    assert {item["attributes"]["punched"] for item in outlet_lines} == {"YES", "NO"}
     assert by_component["NAMEPLATE"]["attributes"] == {
         "component": "NAMEPLATE", "material": "STAINLESS STEEL"
     }
     ship_with = by_component["SHIP WITH"]
     assert ship_with["details"] == ["SINGLE PURCHASE ORDER("]
-    assert "shipping_scope" not in ship_with["attributes"]
+    assert ship_with["attributes"] == {
+        "component": "SHIP WITH",
+        "instruction": (
+            "SHIP WITH FANS REFERENCED BY CUSTOMER PO(s) 23971 "
+            "(nOTE THERE ARE TWO SLIGHTLY DIFFERENT CBC FAN ON THIS "
+            "SINGLE PURCHASE ORDER("
+        ),
+    }
     assert not any(item["norm"] == "SINGLE PURCHASE ORDER" for item in items)
     assert not any(item.get("review_flags") for item in items)
 
@@ -978,13 +988,222 @@ def test_421959_repair_order_wrapping_material_and_ispm():
 
     inspection = by_component["INSPECTION"]
     assert inspection["attributes"]["inspection_subcategory"] == "ISPM WOOD STAMP"
-    fan = by_component["BASE FAN"]
-    assert fan["attributes"]["material"] == "STAINLESS STEEL"
-    assert fan["attributes"]["material_grade"] == "316 SS"
-    assert fan["attributes"]["material_scope"] == "WHOLE FAN"
+    parts_order = by_component["PARTS-ONLY ORDER"]
+    assert "PARTS-ONLY ORDER" in parts_order["tags"]
+    assert parts_order["attributes"]["parts_only"] == "YES"
+    assert parts_order["attributes"]["material"] == "STAINLESS STEEL"
+    assert parts_order["attributes"]["material_grade"] == "316 SS"
+    assert parts_order["attributes"]["material_scope"] == "ORDER PARTS"
+    assert "BASE FAN" not in by_component
     assert not any(item["norm"] == "SERIAL NUMBER UNKNOWN" for item in items)
     responsibility = next(item for item in items if "ASSUMES RESPONSIBILITY" in item["norm"])
     assert responsibility["tags"] == ["MISC NOTE"]
+
+
+def test_422004_customer_motor_and_requested_component_schemas():
+    items = li.extract_items([
+        "Base Fan L 8,000.00",
+        "Motor (Customer Provided) N NA",
+        "Vendor: Baldor",
+        "15 HP, 1800 RPM, Enclosure: TEFC Premium",
+        "254T, Cast Iron, Foot Mounted",
+        "3/60/230/460, F1, 1.15 SF",
+        "Model: EM2333T",
+        "Mounted by Others",
+        "Mounted by Others L",
+        "Extended Grease Fittings L 100.00",
+        "Housing Drain with Plug L STD",
+        "Housing, Heavy Duty L 250.00",
+        "Inlet, Slip L STD",
+        "Outlet, Flanged, Punched L STD",
+        "Belt Guard, Painted Safety Yellow L 500.00",
+        "Additional Features / Notes:",
+        "All Chicago Blower wheels are precision balanced; however when a precision balanced wheel is installed in a fan, the wheel may have",
+        "to be phase balanced to compensate for any imbalance or eccentricity in other components in the drive train. If the motor and drives",
+        "are not mounted by Chicago Blower, we cannot check the assembled rotating system for vibration, and phase balance by others may",
+        "Special Invoicing:",
+    ], order_context={"arrangement": "A/9S"})
+    by_component = {}
+    for item in items:
+        component = item.get("attributes", {}).get("component")
+        if component:
+            by_component.setdefault(component, []).append(item)
+
+    motor = by_component["MOTOR"][0]
+    assert motor["attributes"]["motor_supplied_by"] == "CUSTOMER"
+    assert motor["attributes"]["motor_hp"] == "15"
+    assert motor["attributes"]["motor_rpm"] == "1800"
+    assert motor["attributes"]["motor_model"] == "EM2333T"
+    assert motor["attributes"]["vendor"] == "Baldor"
+    assert not motor.get("review_flags")
+    mounting = next(item for item in by_component["MOTOR"] if item["norm"] == "MOUNTED BY OTHERS")
+    assert mounting["attributes"]["motor_mounted_by"] == "OTHERS"
+    assert not mounting.get("review_flags")
+
+    grease = by_component["BEARINGS"][0]
+    assert grease["attributes"]["extended_grease_fittings"] == "YES"
+    assert not grease.get("review_flags")
+    assert by_component["HOUSING DRAIN"][0]["attributes"]["size"] == "STD"
+    assert by_component["HOUSING"][0]["attributes"]["heavy_duty"] == "YES"
+    assert by_component["INLET"][0]["attributes"] == {
+        "component": "INLET", "flanged": "NO", "punched": "NO",
+        "inlet_subcategory": "SLIP",
+    }
+    assert by_component["OUTLET"][0]["attributes"] == {
+        "component": "OUTLET", "flanged": "YES", "punched": "YES",
+    }
+    guard_attrs = by_component["BELT GUARD"][0]["attributes"]
+    assert guard_attrs["coating"] == "PAINTED SAFETY YELLOW"
+    assert not any(key.startswith("coating_") for key in guard_attrs)
+    disclaimer = next(item for item in items if item["norm"].startswith(
+        "ALL CHICAGO BLOWER WHEELS ARE PRECISION BALANCED"
+    ))
+    assert disclaimer["tags"] == ["MISC NOTE"]
+    assert len(disclaimer["details"]) == 2
+    assert not disclaimer.get("review_flags")
+
+
+def test_422003_accessory_boundaries_motor_mods_and_shared_metadata():
+    items = li.extract_items([
+        "Motor C 4,000.00",
+        "Vendor: Baldor",
+        "Product: 11355340 W/ MOD N10 (NP CHANGE); MOD N20 (CUSTOMER TAG (BM- 101) AND MOD B220 (INSULATED NDE BEARING))",
+        "Paint: CBC Standard Black L STD",
+        "G2.5 Balance L 341.00",
+        "Housing Drain with Plug L STD",
+        "Inlet, Flanged, Punched without IVC L STD",
+        "Outlet, Flanged, Punched L STD",
+        "Threaded Plug for Conduit Box Opening, Inquiry Num: 333-26-1000 L 50.00",
+        "Inlet Silencer C 2,500.00",
+        "Painted to match fan",
+        "VAW to provide PDF, AutoCAD and 3D drawings",
+        "Ship direct, best way PP&A, mark with THM job",
+        "number MJ26-821.",
+        "TAG Silencer SIL-101",
+        "Vendor: VAW Systems",
+        "Product: Inlet Silencer",
+        "Outlet Expantion Joint C 3,000.00",
+        "Fiberglass Sound Pillow, 9 inch F/F",
+        "Painted BUB",
+        "Punched to match outlet flange",
+        "Ship Direct, PP&A",
+        "FlexCom drawing for the record",
+        "Mark box and drawing with THM job number MJ26-821",
+        "Vendor: FlexibleCompensators",
+        "Product: Expansion Joint",
+        "List Total 10,000.00",
+        "Lead Time for Inlet Silencer 8 weeks",
+        "RH painted to match fan",
+        "VAW drawing after approval",
+        "Additional Features / Notes:",
+        "Job Name: THM MJ26-821",
+        "Location: Howard Energy/Spitzer H-101",
+        "CBC to show fan plus accessory weight, motor weight and total weight on fan drawing",
+        "Special Invoicing:",
+    ])
+    by_component = {item.get("attributes", {}).get("component"): item for item in items
+                    if item.get("attributes", {}).get("component")}
+
+    motor = by_component["MOTOR"]
+    assert motor["attributes"]["product"] == "11355340"
+    assert motor["attributes"]["motor_mod_n10"] == "NP CHANGE"
+    assert motor["attributes"]["motor_mod_n20"] == "CUSTOMER TAG BM-101"
+    assert motor["attributes"]["motor_mod_b220"] == "INSULATED NDE BEARING"
+
+    assert by_component["PAINT"]["attributes"]["component"] == "PAINT"
+    balance = by_component["BALANCE"]["attributes"]
+    assert balance["balance_grade"] == "G2.5" and "balance_type" not in balance
+    assert by_component["HOUSING DRAIN"]["attributes"]["size"] == "STD"
+    threaded = by_component["THREADED PLUG FOR CONDUIT BOX OPENING"]
+    assert threaded["attributes"] == {
+        "inquiry_num": "333-26-1000",
+        "component": "THREADED PLUG FOR CONDUIT BOX OPENING",
+    }
+
+    silencer = by_component["INLET SILENCER"]
+    assert silencer["attributes"]["coating"] == "PAINTED TO MATCH FAN"
+    assert silencer["attributes"]["drawing_requirement"] == "PDF, AUTOCAD, 3D"
+    assert silencer["attributes"]["shipping_method"] == "SHIP DIRECT"
+    assert silencer["attributes"]["job_number"] == "MJ26-821"
+    assert silencer["attributes"]["tag"] == "SIL-101"
+    assert silencer["attributes"]["vendor"] == "VAW Systems"
+    assert "product" not in silencer["attributes"]
+    assert not silencer.get("review_flags")
+
+    expansion = by_component["OUTLET EXPANSION JOINT"]
+    assert expansion["attributes"]["insulation"] == "FIBERGLASS SOUND PILLOW"
+    assert expansion["attributes"]["face_to_face"] == '9"'
+    assert expansion["attributes"]["coating"] == "PAINTED BUB"
+    assert expansion["attributes"]["punched_to_match"] == "OUTLET FLANGE"
+    assert expansion["attributes"]["drawing_requirement"] == "DRAWING FOR RECORD"
+    assert expansion["attributes"]["shipping_method"] == "SHIP DIRECT"
+    assert expansion["attributes"]["job_number"] == "MJ26-821"
+    assert expansion["attributes"]["vendor"] == "FlexibleCompensators"
+    assert "product" not in expansion["attributes"]
+    assert all("RH painted" not in detail and "VAW drawing after" not in detail
+               for detail in expansion["details"])
+    assert not expansion.get("review_flags")
+
+    weights = by_component["FAN DRAWING WEIGHTS"]
+    assert weights["attributes"] == {"component": "FAN DRAWING WEIGHTS"}
+    assert not any(item["norm"].startswith("JOB NAME") or item["norm"].startswith("LOCATION")
+                   for item in items)
+
+
+def test_order_context_survives_store_renormalization():
+    items = li.extract_items([
+        "Inlet Silencer C 1,000.00",
+        "Product: Inlet Silencer",
+        "Outlet Expansion Joint C 1,000.00",
+        "Product: Expansion Joint",
+        "Extended Grease Fittings L 100.00",
+        "Additional Features / Notes:",
+        "Job Name: THM MJ26-821",
+        "Special Invoicing:",
+    ], order_context={"arrangement": "A/9S"})
+    store = {"jobs": {}, "ai_tags": {}}
+    li.record_job(store, "422003", items, arrangement="A/9S", job_number="MJ26-821")
+    li.renormalize_store(store)
+    record = store["jobs"]["422003"]
+    assert record["arrangement"] == "A/9S"
+    assert record["job_number"] == "MJ26-821"
+    by_component = {item.get("attributes", {}).get("component"): item
+                    for item in record["items"]}
+    assert by_component["BEARINGS"]["attributes"]["extended_grease_fittings"] == "YES"
+    assert by_component["INLET SILENCER"]["attributes"]["job_number"] == "MJ26-821"
+    assert by_component["OUTLET EXPANSION JOINT"]["attributes"]["job_number"] == "MJ26-821"
+
+    legacy_items = li.extract_items([
+        "Inlet Silencer C 1,000.00",
+        "Product: Inlet Silencer",
+    ])
+    legacy_items.append({
+        "raw": "Job Name: THM MJ26-822",
+        "norm": "JOB NAME THM MJ26 822",
+        "tags": ["MISC NOTE"],
+        "attributes": {},
+        "details": [],
+    })
+    legacy_store = {"jobs": {"422005": {"items": legacy_items}}, "ai_tags": {}}
+    li.renormalize_store(legacy_store)
+    legacy_record = legacy_store["jobs"]["422005"]
+    assert legacy_record["job_number"] == "MJ26-822"
+    assert len(legacy_record["items"]) == 1
+    assert legacy_record["items"][0]["attributes"]["job_number"] == "MJ26-822"
+
+    repair_items = li.extract_items([
+        "Chicago Blower Corporation Sales Order For Repair Parts",
+        "Replacement Shaft N 500.00",
+        "Additional Features / Notes:",
+        "Construction SS316",
+        "Special Invoicing:",
+    ])
+    legacy_store = {"jobs": {"421959": {"items": repair_items}}, "ai_tags": {}}
+    li.renormalize_store(legacy_store)
+    legacy = legacy_store["jobs"]["421959"]
+    assert legacy["parts_only"] is True
+    assert any(item.get("attributes", {}).get("component") == "PARTS-ONLY ORDER"
+               for item in legacy["items"])
 
 
 def test_document_mark_ship_to_and_continuation_metadata():
@@ -1104,7 +1323,11 @@ def test_drawing_note_attributes():
     assert by_raw["ADD CG TO FAN DRAWING"]["attributes"]["drawing_type"] == "WEIGHTS/COG/LOADS"
     assert by_raw["SHOW GROUNDING LUGS ON FAN DRAWING"]["attributes"]["drawing_type"] == "GROUNDING/LUGS"
     assert by_raw["Please update the fan / drawing to show the inlet box rotated 270 degrees from the motor side to the 9 o'clock position."]["attributes"]["drawing_type"] == "ORIENTATION/ARRANGEMENT"
-    assert by_raw["Add tag to be included on the expansion joint drawing: 1A-EXJ-AXS812"]["attributes"]["drawing_type"] == "TAG/MARKING"
+    expansion_drawing = by_raw[
+        "Add tag to be included on the expansion joint drawing: 1A-EXJ-AXS812"
+    ]["attributes"]
+    assert expansion_drawing["component"] == "EXPANSION JOINT"
+    assert expansion_drawing["drawing_requirement"] == "TAG/MARKING"
     assert by_raw["Should add DO NOT STACK and ISPM Stamping to drawing."]["attributes"]["drawing_type"] == "PACKAGING/MARKING"
     assert by_raw["Change Subject line on Drawing Transmittal to include tag information as it appears on the order face, Inquiry Num: 364-20-200"]["attributes"]["drawing_type"] == "TAG/MARKING, DRAWING TRANSMITTAL"
     assert by_raw["Only change on drawings are for CAT purposes added a 1E2999 Symbols"]["attributes"]["drawing_type"] == "CUSTOMER SYMBOLS/NOTES"
@@ -1172,16 +1395,18 @@ def test_flange_scope_motor_and_non_wheel_end():
 
 def test_unpunched_flange_is_not_punched():
     # 421966 item 15: "Unpunched" contains "Punched", and the substring check
-    # used to stamp flange_type=PUNCHED on it.
+    # used to stamp punched=YES on it.
     outlet = li.extract_items(["Outlet, Flanged, Unpunched, Inquiry Num: 361-26- L 250.00"])[0]
-    assert outlet["attributes"]["flange_type"] == "UNPUNCHED"
+    assert outlet["attributes"]["flanged"] == "YES"
+    assert outlet["attributes"]["punched"] == "NO"
     inlet = li.extract_items(["Inlet, Flanged, Unpunched L 100.00"])[0]
-    assert inlet["attributes"]["flange_type"] == "UNPUNCHED"
-    assert inlet["attributes"]["inlet_subcategory"] == "FLANGED/UNPUNCHED"
-    assert "UNPUNCHED" in inlet["attributes"]["inlet_feature"]
+    assert inlet["attributes"]["flanged"] == "YES"
+    assert inlet["attributes"]["punched"] == "NO"
+    assert "flange_type" not in inlet["attributes"]
+    assert "inlet_subcategory" not in inlet["attributes"]
     # The punched wording keeps its original attributes.
     punched = li.extract_items(["Outlet, Flanged, Punched L STD"])[0]
-    assert punched["attributes"]["flange_type"] == "PUNCHED"
+    assert punched["attributes"]["punched"] == "YES"
 
 
 def test_canonical_component_names_from_prose():
@@ -1207,8 +1432,10 @@ def test_canonical_component_names_from_prose():
     assert shrink["attributes"]["shrink_wrap_range"] == '21" to 36-1/2"'
 
     ship = li.extract_items(["SHIP WITH FANS REFERENCED BY CUSTOMER PO(s) 23971 L STD"])[0]
-    assert ship["attributes"]["component"] == "SHIP WITH"
-    assert ship["attributes"]["referenced_po"] == "23971"
+    assert ship["attributes"] == {
+        "component": "SHIP WITH",
+        "instruction": "SHIP WITH FANS REFERENCED BY CUSTOMER PO(s) 23971",
+    }
 
     outlet = li.extract_items(["Outlet, Flanged, Punched L STD"])[0]
     assert outlet["attributes"]["component"] == "OUTLET"
@@ -1324,10 +1551,12 @@ def test_flex_connector_flange_scope_and_attrs():
     ])[0]
     assert "FLEX CONNECTOR" in flex["tags"]
     assert "FLANGE" not in flex["tags"]
-    assert flex["attributes"]["component"] == "FLEX CONNECTOR"
-    assert flex["attributes"]["flex_connector_type"] == "EXPANSION JOINT"
-    assert flex["attributes"]["used_on"] == "INLET"
-    assert flex["attributes"]["flange_scope"] == "FLEX CONNECTOR, INLET"
+    assert flex["attributes"]["component"] == "INLET EXPANSION JOINT"
+    assert flex["attributes"]["vendor"] == "FlexCom"
+    assert "product" not in flex["attributes"]
+    assert "flex_connector_type" not in flex["attributes"]
+    assert "used_on" not in flex["attributes"]
+    assert "flange_scope" not in flex["attributes"]
 
 
 def test_flexible_coupling_is_coupling_subcategory():
@@ -1391,16 +1620,24 @@ def test_material_attributes():
     assert attrs["material_grade"] == "304 SS"
     assert attrs["material_scope"] == "BASE FAN, AIRSTREAM"
 
-    base_with_motor_detail = li.extract_items([
+    base_with_motor, customer_motor = li.extract_items([
         "Base Fan L 3,684.00",
         "Motor (Customer Provided) N NA",
         "Vendor: CBC Option",
         "5 HP, 1800 RPM, Enclosure: TEFC",
         "184T, Cast Iron, 3/60/230/460, F1, 1.15 SF",
         "Mounted by Others",
-    ])[0]
-    assert base_with_motor_detail["tags"] == ["BASE FAN"]
-    assert "vendor" not in base_with_motor_detail["attributes"]
+    ])
+    assert base_with_motor["tags"] == ["BASE FAN"]
+    assert "vendor" not in base_with_motor["attributes"]
+    assert customer_motor["price"] == "NA"
+    assert customer_motor["tags"] == ["MOTOR"]
+    assert customer_motor["attributes"]["component"] == "MOTOR"
+    assert customer_motor["attributes"]["motor_supplied_by"] == "CUSTOMER"
+    assert customer_motor["attributes"]["motor_hp"] == "5"
+    assert customer_motor["attributes"]["motor_rpm"] == "1800"
+    assert customer_motor["attributes"]["vendor"] == "CBC Option"
+    assert not customer_motor.get("review_flags")
 
     alum = li.extract_items(["Wheel, Aluminum (AMCA B) L INC"])[0]
     attrs = alum["attributes"]
@@ -1425,7 +1662,8 @@ def test_material_scope_requires_material():
 def test_balance_attributes():
     g25 = li.extract_items(["G2.5 Balance L 341.00"])[0]
     assert "BALANCE" in g25["tags"]
-    assert g25["attributes"]["balance_type"] == "GRADED BALANCE"
+    assert g25["attributes"]["component"] == "BALANCE"
+    assert "balance_type" not in g25["attributes"]
     assert g25["attributes"]["balance_grade"] == "G2.5"
 
     g10 = li.extract_items([
@@ -1434,7 +1672,7 @@ def test_balance_attributes():
         "clearance fit arbor, Inquiry Num: 410-13-237)",
     ])[0]
     assert {"BALANCE", "WHEEL"} <= set(g10["tags"])
-    assert g10["attributes"]["balance_type"] == "GRADED BALANCE"
+    assert "balance_type" not in g10["attributes"]
     assert g10["attributes"]["balance_grade"] == "G1.0"
 
     welded = li.extract_items([
@@ -1510,16 +1748,16 @@ def test_heavy_duty_component_attributes():
     wheel = li.extract_items(["Wheel, Heavy Duty L 302.00"])[0]
     assert {"HEAVY DUTY", "WHEEL"} <= set(wheel["tags"])
     assert wheel["attributes"]["component"] == "WHEEL"
-    assert wheel["attributes"]["duty_rating"] == "HEAVY DUTY"
+    assert wheel["attributes"]["heavy_duty"] == "YES"
 
     housing = li.extract_items(["Housing, Heavy Duty L 4,754.00"])[0]
     assert {"HEAVY DUTY", "HOUSING"} <= set(housing["tags"])
     assert housing["attributes"]["component"] == "HOUSING"
-    assert housing["attributes"]["duty_rating"] == "HEAVY DUTY"
+    assert housing["attributes"]["heavy_duty"] == "YES"
 
     severe_motor = li.extract_items(["Motor TEFC Severe Duty C 1,200.00"])[0]
     assert "HEAVY DUTY" not in severe_motor["tags"]
-    assert "duty_rating" not in severe_motor["attributes"]
+    assert "heavy_duty" not in severe_motor["attributes"]
 
 
 def test_bearing_attributes():
@@ -1566,6 +1804,7 @@ def test_lube_accessories_map_to_bearing_or_motor():
 
     unknown = li.extract_items(["Extended Lube Lines with Zerk Fittings L 100.00"])[0]
     assert {"BEARINGS", "MOTOR"} <= set(unknown["tags"])
+    assert unknown["attributes"]["extended_grease_fittings"] == "YES"
     assert unknown["attributes"]["component_review"] == "UNCLEAR GREASE TARGET - VERIFY MOTOR/BEARINGS/ARRANGEMENT"
     assert any("UNCLEAR GREASE TARGET" in flag for flag in unknown["review_flags"])
 
@@ -1573,15 +1812,34 @@ def test_lube_accessories_map_to_bearing_or_motor():
     assert "MOTOR" in motor["tags"]
     assert "BEARINGS" not in motor["tags"]
     assert "review_flags" not in motor
+    assert motor["attributes"]["extended_grease_fittings"] == "YES"
 
     bearing = li.extract_items(["Extended Grease Leads to Fan Bearings L 100.00"])[0]
     assert "BEARINGS" in bearing["tags"]
     assert "MOTOR" not in bearing["tags"]
     assert "review_flags" not in bearing
+    assert bearing["attributes"]["component"] == "BEARINGS"
 
-    both = li.extract_items(["Motor Bearing Grease Fittings L 100.00"])[0]
-    assert {"BEARINGS", "MOTOR"} <= set(both["tags"])
-    assert "review_flags" not in both
+    motor_bearing = li.extract_items(["Motor Bearing Grease Fittings L 100.00"])[0]
+    assert motor_bearing["tags"] == ["MOTOR"]
+    assert motor_bearing["attributes"]["component"] == "MOTOR"
+    assert "review_flags" not in motor_bearing
+
+    arrangement_9 = li.extract_items(
+        ["Extended Grease Fittings L 100.00"],
+        order_context={"arrangement": "A/9S"},
+    )[0]
+    assert arrangement_9["tags"] == ["BEARINGS"]
+    assert arrangement_9["attributes"]["component"] == "BEARINGS"
+    assert not arrangement_9.get("review_flags")
+
+    arrangement_4 = li.extract_items(
+        ["Extended Grease Fittings L 100.00"],
+        order_context={"arrangement": "A/4"},
+    )[0]
+    assert arrangement_4["tags"] == ["MOTOR"]
+    assert arrangement_4["attributes"]["component"] == "MOTOR"
+    assert not arrangement_4.get("review_flags")
 
     items = {it["norm"]: it for it in li.extract_items([
         "Motor C 1,000.00",
@@ -1605,13 +1863,14 @@ def test_assembly_note_is_misc_note_not_component():
     assert assembly["attributes"]["note_type"] == "ASSEMBLY"
 
 
-def test_paint_line_does_not_become_component_tags():
+def test_paint_line_is_canonical_fan_paint_component():
     paint = li.extract_items([
         "Paint: Interior, Wheel, Exterior, Motor Base, L 983.00",
         "Channel Base and Bearing Base",
     ])[0]
     assert paint["tags"] == ["COATING"]
-    assert paint["attributes"]["coating_context"] == "FAN"
+    assert paint["attributes"]["component"] == "PAINT"
+    assert "coating_context" not in paint["attributes"]
     assert paint["attributes"]["coating_category"] == "PAINT"
     assert "WHEEL" not in paint["tags"]
 
@@ -1664,9 +1923,8 @@ def test_accessory_coating_is_attribute_not_fan_coating():
     assert belt["tags"] == ["BELT GUARD"]
     attrs = belt["attributes"]
     assert attrs["component"] == "BELT GUARD"
-    assert attrs["coating_context"] == "ACCESSORY"
-    assert attrs["coating_scope"] == "BELT GUARD"
-    assert attrs["coating_color"] == "SAFETY YELLOW"
+    assert attrs["coating"] == "PAINTED SAFETY YELLOW"
+    assert not any(key.startswith("coating_") for key in attrs)
     assert attrs["mounting"] == "CBC MOUNT"
     assert attrs["tach_hole"] == "WITH PLUG"
     assert attrs["tach_hole_location"] == "FAN END, MOTOR END"
@@ -1674,7 +1932,7 @@ def test_accessory_coating_is_attribute_not_fan_coating():
     shaft_guard = li.extract_items(["Shaft and Bearing Guard, Painted Safety Yellow L 949.00"])[0]
     assert "SHAFT/BEARING/COUPLING GUARD" in shaft_guard["tags"]
     assert "COATING" not in shaft_guard["tags"]
-    assert shaft_guard["attributes"]["coating_context"] == "ACCESSORY"
+    assert shaft_guard["attributes"]["coating"] == "PAINTED SAFETY YELLOW"
 
 
 def test_passivation_is_stainless_treatment_not_coating():
@@ -1699,8 +1957,8 @@ def test_accessory_coating_does_not_make_silencer_fan_coating():
     ])[0]
     assert "SILENCER" in silencer["tags"]
     assert "COATING" not in silencer["tags"]
-    assert silencer["attributes"]["coating_context"] == "ACCESSORY"
-    assert silencer["attributes"]["coating_scope"] == "SILENCER"
+    assert silencer["attributes"]["coating"] == "2 COATS OF PAINT"
+    assert not any(key.startswith("coating_") for key in silencer["attributes"])
 
 
 def test_admin_notes_are_misc_notes():
@@ -1842,18 +2100,23 @@ def test_inlet_subcategory_attributes():
 
 def test_inlet_flange_direction_and_box_attributes():
     punched = li.extract_items(["Inlet, Flanged, Punched (without IVC) L 468.00"])[0]
-    assert punched["attributes"]["inlet_subcategory"] == "FLANGED/PUNCHED"
-    assert punched["attributes"]["inlet_feature"] == "PUNCHED"
+    assert punched["attributes"]["component"] == "INLET"
+    assert punched["attributes"]["flanged"] == "YES"
+    assert punched["attributes"]["punched"] == "YES"
+    assert "inlet_subcategory" not in punched["attributes"]
     assert punched["attributes"]["ivc_relation"] == "WITHOUT IVC"
 
     with_ivc = li.extract_items(["Inlet, Flanged, Punched (with IVC) L 1,453.00"])[0]
     assert with_ivc["tags"] == ["FLANGE", "INLET"]
     assert with_ivc["attributes"]["component"] == "INLET"
+    assert with_ivc["attributes"]["flanged"] == "YES"
+    assert with_ivc["attributes"]["punched"] == "YES"
     assert "ivc_relation" not in with_ivc["attributes"]
     assert "used_on" not in with_ivc["attributes"]
 
     bolted = li.extract_items(['Inlet, Flanged, Standard Bolted (Inlet Dia 10") N STD'])[0]
-    assert bolted["attributes"]["inlet_subcategory"] == "FLANGED"
+    assert bolted["attributes"]["flanged"] == "YES"
+    assert bolted["attributes"]["punched"] == "NO"
     assert bolted["attributes"]["inlet_feature"] == "STANDARD BOLTED"
 
     direction = li.extract_items(["Inlet Direction: Vertical Inlet Down L STD"])[0]
@@ -2048,7 +2311,8 @@ def test_lifting_lugs_and_lining_attributes():
     ])[0]
     assert "FLEX CONNECTOR" in flex["tags"]
     assert "LINING" not in flex["tags"]
-    assert flex["attributes"]["flex_connector_feature"] == "FLOW LINER"
+    assert flex["attributes"]["component"] == "OUTLET EXPANSION JOINT"
+    assert flex["attributes"]["feature"] == "FLOW LINER"
 
 
 def test_screen_and_shaft_cooler_attributes():
@@ -2072,9 +2336,9 @@ def test_screen_and_shaft_cooler_attributes():
         "Product: Inlet Silencer",
     ])[0]
     assert {"SCREEN", "SILENCER"} <= set(silencer["tags"])
-    assert "component" not in silencer["attributes"]
+    assert silencer["attributes"]["component"] == "INLET SILENCER"
     assert silencer["attributes"]["screen_subcategory"] == "TRASH SCREEN"
-    assert silencer["attributes"]["used_on"] == "SILENCER"
+    assert "used_on" not in silencer["attributes"]
 
     shaft = li.extract_items(["Shaft Cooler, Cast Aluminum Construction L 271.00"])[0]
     attrs = shaft["attributes"]
@@ -2140,17 +2404,17 @@ def test_silencer_spare_parts_and_spark_resistant_attributes():
     ])[0]
     attrs = silencer["attributes"]
     assert {"SILENCER", "SHIPPING", "WEATHER COVER"} <= set(silencer["tags"])
-    assert attrs["silencer_subcategory"] == "INLET SILENCER"
-    assert attrs["silencer_used_on"] == "INLET"
-    assert attrs["silencer_model"] == "12VRSB-S81"
-    assert attrs["silencer_noise_target"] == "85 DBA"
+    assert attrs["component"] == "INLET SILENCER"
+    assert attrs["model"] == "12VRSB-S81"
+    assert attrs["noise_target"] == "85 DBA"
     assert attrs["pressure_drop"] == ".19"
-    assert "RAIN HOOD" in attrs["silencer_feature"]
+    assert "RAIN HOOD" in attrs["feature"]
     assert attrs["weather_cover_type"] == "RAINHOOD"
     assert attrs["weather_cover_model"] == "VWH1-16X18"
     assert attrs["weather_cover_feature"] == "GALVANIZED SCREEN"
     assert attrs["shipping_method"] == "SHIP DIRECT"
-    assert attrs["coating_context"] == "ACCESSORY"
+    assert attrs["coating"] == "GALVANIZED"
+    assert "product" not in attrs
 
     discharge = li.extract_items([
         "CIB - Circular Discharge silencer C 1,616.00",
@@ -2161,9 +2425,9 @@ def test_silencer_spare_parts_and_spark_resistant_attributes():
     ])[0]
     attrs = discharge["attributes"]
     assert "SILENCER" in discharge["tags"]
-    assert attrs["silencer_subcategory"] == "CIRCULAR DISCHARGE SILENCER"
-    assert attrs["silencer_used_on"] == "OUTLET"
-    assert attrs["silencer_model"] == "06VCIB-V99-SN4400"
+    assert attrs["component"] == "OUTLET SILENCER"
+    assert attrs["silencer_type"] == "CIRCULAR DISCHARGE SILENCER"
+    assert attrs["model"] == "06VCIB-V99-SN4400"
 
     ispm = li.derive_item_fields({
         "raw": "ISPM Wood Inspection Stamp L INC",
@@ -2403,35 +2667,37 @@ def test_drain_attributes():
     housing = li.extract_items(["Housing Drain with Plug, 304 SS Construction L 328.00"])[0]
     attrs = housing["attributes"]
     assert "HOUSING" not in housing["tags"]
-    assert attrs["drain_type"] == "HOUSING DRAIN"
-    assert attrs["drain_closure"] == "PLUG"
+    assert attrs["component"] == "HOUSING DRAIN"
+    assert attrs["size"] == "STD"
+    assert "drain_type" not in attrs and "drain_closure" not in attrs
     assert attrs["material"] == "STAINLESS STEEL"
     assert attrs["material_grade"] == "304 SS"
     assert attrs["material_scope"] == "HOUSING DRAIN"
 
     housing_plural = li.extract_items(["Housing Drains with Plugs, Inquiry Num: 333-26-1234 L 252.00"])[0]
     assert housing_plural["tags"] == ["DRAIN"]
-    assert housing_plural["attributes"]["drain_type"] == "HOUSING DRAIN"
+    assert housing_plural["attributes"]["component"] == "HOUSING DRAIN"
+    assert housing_plural["attributes"]["size"] == "STD"
 
     inlet = li.extract_items(['Inlet Box, Drain Plug 3/4" Diameter L 51.00'])[0]
     assert "INLET" not in inlet["tags"]
-    assert inlet["attributes"]["drain_type"] == "INLET BOX DRAIN"
-    assert inlet["attributes"]["drain_closure"] == "PLUG"
+    assert inlet["attributes"]["component"] == "INLET BOX DRAIN"
+    assert inlet["attributes"]["size"] == '3/4"'
 
     motor = li.extract_items([
         "Motor (CEM3711T-10hp motor C 618.96 25.00",
         "M7A Add Condensation Drain Holes - Vertical Shaft",
         "Down)",
     ])[0]
-    assert motor["attributes"]["drain_type"] == "MOTOR CONDUIT BOX DRAIN"
-    assert motor["attributes"]["drain_detail"] == "CONDENSATION DRAIN HOLES"
+    assert motor["attributes"]["component"] == "MOTOR CONDUIT BOX DRAIN"
+    assert motor["attributes"]["size"] == "STD"
 
     motor_ss = li.extract_items(["Motor (Conduit Box Drain, 304 SS Construction C 100.00"])[0]
     attrs = motor_ss["attributes"]
-    assert attrs["drain_type"] == "MOTOR CONDUIT BOX DRAIN"
-    assert attrs["component_material"] == "STAINLESS STEEL"
-    assert attrs["component_material_grade"] == "304 SS"
-    assert attrs["component_material_scope"] == "MOTOR CONDUIT BOX DRAIN"
+    assert attrs["component"] == "MOTOR CONDUIT BOX DRAIN"
+    assert attrs["material"] == "STAINLESS STEEL"
+    assert attrs["material_grade"] == "304 SS"
+    assert attrs["material_scope"] == "MOTOR CONDUIT BOX DRAIN"
 
 
 def test_standalone_actuator_used_on_review():

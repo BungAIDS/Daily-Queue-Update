@@ -42,7 +42,7 @@ def _ivc_items():
                    details=["IVC handle location for Discharge"])
     flange = _item("Inlet, Flanged, Punched (with IVC) L 1,559.00",
                    "1,559.00",
-                   attrs={"component": "INLET", "flange_type": "PUNCHED"})
+                   attrs={"component": "INLET", "flanged": "YES", "punched": "YES"})
     return main, handle, flange
 
 
@@ -70,7 +70,7 @@ def test_tree_rows_component_attributes_sources():
     main, handle, flange = _ivc_items()
     rows = soh.tree_rows([handle, main, flange])
     assert rows[0]["kind"] == soh.KIND_COMPONENT
-    assert rows[0]["text"] == "[IVC] — 2 lines"
+    assert rows[0]["text"] == "[IVC]"
     assert rows[0]["price"] == "4,545.00" and rows[0]["item_no"] == ""
     attributes = [r["text"] for r in rows if r["kind"] == soh.KIND_ATTRIBUTE]
     assert "operation: Automatic" in attributes  # keys prettified for reading
@@ -128,17 +128,17 @@ def test_paid_inquiry_flange_change_supersedes_std_base_value():
     # change-order construction, so its UNPUNCHED value supersedes the obsolete
     # no-charge STD base wording.
     punched = _item("Outlet, Flanged, Punched L STD", "STD",
-                    attrs={"flange_scope": "OUTLET", "flange_type": "PUNCHED"})
+                    attrs={"component": "OUTLET", "flanged": "YES", "punched": "YES"})
     unpunched = _item("Outlet, Flanged, Unpunched L 250.00", "250.00",
-                      attrs={"flange_scope": "OUTLET", "flange_type": "UNPUNCHED",
+                      attrs={"component": "OUTLET", "flanged": "YES", "punched": "NO",
                              "inquiry_num": "361-26-2440"})
     comps = soh.components([punched, unpunched])
     assert len(comps) == 1 and comps[0]["name"] == "OUTLET" and comps[0]["keyed"]
-    assert comps[0]["attributes"]["flange_type"] == "UNPUNCHED"
-    assert not any("CONFLICTING flange_type" in r["text"] for r in comps[0]["review"])
+    assert comps[0]["attributes"]["punched"] == "NO"
+    assert not any("CONFLICTING punched" in r["text"] for r in comps[0]["review"])
     # "with IVC" is context, not ownership: the flange is still the inlet.
     ivc_flange = _item("Inlet, Flanged, Punched (with IVC) L 1,559.00", "1,559.00",
-                       attrs={"component": "INLET", "flange_type": "PUNCHED"})
+                       attrs={"component": "INLET", "flanged": "YES", "punched": "YES"})
     assert soh.group_key(ivc_flange) == "INLET"
 
 
@@ -182,7 +182,7 @@ def test_component_sits_where_first_evidence_appeared():
     main, handle, _f = _ivc_items()
     solo = _item("Base Fan L 16,649.00", "16,649.00")
     rows = soh.tree_rows([handle, solo, main])
-    assert rows[0]["text"] == "[IVC] — 2 lines"   # first member was line 1
+    assert rows[0]["text"] == "[IVC]"   # first member was line 1
     base = next(r for r in rows if "Base Fan" in r["text"])
     assert base["kind"] == soh.KIND_COMPONENT and base["item_no"] == 2
 
