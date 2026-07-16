@@ -600,7 +600,7 @@ def base_actions() -> list[LauncherAction]:
             "quote-run scan store first if it's missing). Every run unrolls into "
             "rows — the file, each extracted field, vision complaints, and lines "
             "we haven't captured. Filter to what you want, type in the yellow "
-            "Add Note cells, then save and close Excel.",
+            "Note cells, then save and close Excel.",
             "quote_run_review.py",
             default_args=("open",),
         ),

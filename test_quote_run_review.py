@@ -211,10 +211,10 @@ def test_workbook_write_read_and_sync_roundtrip(tmp: Path):
     n = qr.write_workbook(path, _records(), store, field_order=FIELD_ORDER)
     assert n > 0
 
-    # Type into the Add Note cell of 421572's CFM row, as a user would.
+    # Type into the Note cell of 421572's CFM row, as a user would.
     wb = load_workbook(str(path))
     ws = wb[qr.REVIEW_SHEET]
-    add_col = qr.HEADERS.index(qr.ADD_NOTE) + 1
+    note_col = qr.HEADERS.index("Note") + 1
     target = None
     for row in range(2, ws.max_row + 1):
         if (str(ws.cell(row, 1).value) == "421572"
@@ -222,7 +222,7 @@ def test_workbook_write_read_and_sync_roundtrip(tmp: Path):
             target = row
             break
     assert target
-    ws.cell(target, add_col).value = "confirm CFM against the customer spec"
+    ws.cell(target, note_col).value = "confirm CFM against the customer spec"
     wb.save(str(path))
     wb.close()
 
@@ -235,14 +235,13 @@ def test_workbook_write_read_and_sync_roundtrip(tmp: Path):
     # Re-reading the same workbook adds nothing (dedup).
     assert qr.ingest_edits(store, qr.read_edits(path)) == 0
 
-    # Rebuild: the note renders in Note, Add Note is cleared, status is open.
+    # Rebuild: the note renders as "#id:" history in Note; no Add Note column.
     qr.write_workbook(path, _records(), store, field_order=FIELD_ORDER)
     wb = load_workbook(str(path))
     ws = wb[qr.REVIEW_SHEET]
-    note_col = qr.HEADERS.index("Note") + 1
     rendered = str(ws.cell(target, note_col).value or "")
     assert "confirm CFM against the customer spec" in rendered
-    assert not ws.cell(target, add_col).value
+    assert qr.ADD_NOTE not in [cell.value for cell in ws[1]]
     wb.close()
 
     # A manual override typed straight into the rendered Note cell is recovered,
@@ -255,6 +254,55 @@ def test_workbook_write_read_and_sync_roundtrip(tmp: Path):
     edits = qr.read_edits(path)
     assert [e["note"] for e in edits] == ["also check SP"]
     print("  ok  test_workbook_write_read_and_sync_roundtrip")
+
+
+def test_sync_upgrades_previous_add_note_layout(tmp: Path):
+    from types import SimpleNamespace
+
+    from openpyxl import load_workbook
+
+    records = _records()
+    path = tmp / "quote_run_review.xlsx"
+    queue = tmp / "quote_run_review_notes.json"
+    qr.write_workbook(path, records, {"notes": []}, field_order=FIELD_ORDER)
+
+    # Recreate the earlier layout: a dedicated Add Note column after Note,
+    # with an entry the migration must not lose.
+    wb = load_workbook(str(path), data_only=False)
+    ws = wb[qr.REVIEW_SHEET]
+    note_col = qr.HEADERS.index("Note") + 1
+    ws.insert_cols(note_col + 1, 1)
+    ws.cell(1, note_col + 1).value = qr.ADD_NOTE
+    target = next(
+        row for row in range(2, ws.max_row + 1)
+        if str(ws.cell(row, 1).value) == "421572"
+        and str(ws.cell(row, qr.HEADERS.index("Item") + 1).value) == "CFM"
+    )
+    ws.cell(target, note_col + 1).value = "preserve old Add Note entry"
+    wb.save(str(path))
+    wb.close()
+    assert qr._layout_needs_upgrade(path)
+
+    old_store_path = qr.REVIEW_STORE_PATH
+    old_runs, old_fields = qr._load_runs, qr._core_fields
+    qr.REVIEW_STORE_PATH = queue
+    qr._load_runs = lambda: records
+    qr._core_fields = lambda: FIELD_ORDER
+    try:
+        assert qr._cmd_sync(SimpleNamespace(out=str(path))) == 0
+    finally:
+        qr.REVIEW_STORE_PATH = old_store_path
+        qr._load_runs, qr._core_fields = old_runs, old_fields
+
+    stored = qr.load_store(queue)
+    assert [n["note"] for n in stored["notes"]] == ["preserve old Add Note entry"]
+    rebuilt = load_workbook(str(path), data_only=False)
+    header = [cell.value for cell in rebuilt[qr.REVIEW_SHEET][1]]
+    assert header[:len(qr.HEADERS)] == qr.HEADERS
+    assert qr.ADD_NOTE not in header
+    rebuilt.close()
+    assert not qr._layout_needs_upgrade(path)
+    print("  ok  test_sync_upgrades_previous_add_note_layout")
 
 
 def test_resolved_tab_keeps_history_off_the_active_row(tmp: Path):
@@ -292,6 +340,7 @@ def main() -> int:
         test_store_roundtrip,
         test_handled_marks_ledger_roundtrip,
         test_workbook_write_read_and_sync_roundtrip,
+        test_sync_upgrades_previous_add_note_layout,
         test_resolved_tab_keeps_history_off_the_active_row,
     ]
     for t in tests_no_tmp:

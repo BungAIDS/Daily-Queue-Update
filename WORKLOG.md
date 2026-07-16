@@ -5,6 +5,12 @@ each section. **If you're picking this up fresh, read this whole file first.**
 
 ## 2026-07-16 — Quote-Run review loop (the SO-review twin, per DG)
 
+Update (same day): merged main's "Use-Note-as-direct-review-input" and ported
+it to the twin — the yellow **Note** column IS the input now (no separate Add
+Note column), matching the SO review. `sync`/`refresh` migrate an existing
+workbook to the new layout, and legacy Add Note entries are still read once
+during migration (`test_sync_upgrades_previous_add_note_layout`).
+
 DG: "how is quote run detection doing? could it use a boost? set up a similar
 environment to sales-order review where I can review each order and give
 feedback on each item." Detection state measured on the 2026-07-16 corpus:

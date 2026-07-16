@@ -8,8 +8,8 @@ can scribble in. It exists only as a path to a better parser - it is not part
 of the final workbook.
 
 The Quote Runs tab is the canonical row grid. Every run unrolls into real cell
-rows, so Excel's normal column filters search the actual data and an Add Note
-entry stays attached to that row:
+rows, so Excel's normal column filters search the actual data and an edited
+Note stays attached to that row:
 
   RUN      the run file itself (status, template, field count) — linked to Z:
   FIELD    one extracted field per row: name + the value we pulled
@@ -18,9 +18,9 @@ entry stays attached to that row:
 
 The loop:
   1. `python quote_run_review.py build` -> writes quote_run_review.xlsx from the
-     quote-run scan store: every order's runs, one row per item, with a
-     dedicated "Add Note" input and any open note already recorded.
-  2. Filter Quote Runs to the orders/fields you want, type in Add Note, then
+     quote-run scan store: every order's runs, one row per item, with an
+     editable "Note" cell containing any open note already recorded.
+  2. Filter Quote Runs to the orders/fields you want, type in Note, then
      save and close. The next refresh folds those entries into
      quote_run_review_notes.json for publication (data_push).
   3. `python quote_run_review.py list` shows the OPEN notes. Claude acts on each
@@ -72,11 +72,12 @@ KIND_FIELD = "FIELD"
 KIND_SUSPECT = "SUSPECT"
 KIND_MISSED = "MISSED"
 
-# Workbook columns (also the read-back contract). ``Note`` renders open notes;
-# only ``Add Note`` is read as new human input.
+# Workbook columns (also the read-back contract). ``Note`` renders open notes
+# and accepts new human input. ``Add Note`` is recognized only when migrating an
+# older workbook.
 ADD_NOTE = "Add Note"
 HEADERS = ["Order", "Run", "Kind", "Item", "Value", "Note",
-           ADD_NOTE, "Status", "Resolution"]
+           "Status", "Resolution"]
 _COL = {h: i for i, h in enumerate(HEADERS)}
 
 REVIEW_SHEET = "Quote Runs"
@@ -417,7 +418,7 @@ def write_workbook(path: Path, records: Dict[str, Dict[str, Any]],
         if r["group_start"]:
             parity ^= 1                                     # flip per order group
         ws.append([r["order"], r["run"], r["kind"], r["item"], _excel_text(r["value"]),
-                   r["note"], "", r["status"], r["resolution"], parity, r["row_key"]])
+                   r["note"], r["status"], r["resolution"], parity, r["row_key"]])
         if r["kind"] == KIND_RUN and r.get("path"):
             cell = ws.cell(ws.max_row, _COL["Item"] + 1)
             cell.hyperlink = r["path"]
@@ -427,8 +428,8 @@ def write_workbook(path: Path, records: Dict[str, Dict[str, Any]],
         ws.cell(1, c).fill = header_fill
         ws.cell(1, c).font = header_font
         ws.cell(1, c).alignment = Alignment(vertical="center")
-    ws.cell(1, _COL[ADD_NOTE] + 1).fill = note_fill
-    ws.cell(1, _COL[ADD_NOTE] + 1).font = Font(color="7F6000", bold=True)
+    ws.cell(1, _COL["Note"] + 1).fill = note_fill
+    ws.cell(1, _COL["Note"] + 1).font = Font(color="7F6000", bold=True)
     ws.row_dimensions[1].height = 24
     ws.column_dimensions[get_column_letter(band_col)].hidden = True
     ws.column_dimensions[get_column_letter(row_key_col)].hidden = True
@@ -436,7 +437,7 @@ def write_workbook(path: Path, records: Dict[str, Dict[str, Any]],
     if last >= 2:
         full = f"A2:{get_column_letter(ncols)}{last}"
         bandL, kindL = get_column_letter(band_col), get_column_letter(_COL["Kind"] + 1)
-        add_noteL = get_column_letter(_COL[ADD_NOTE] + 1)
+        noteL = get_column_letter(_COL["Note"] + 1)
         itemL = get_column_letter(_COL["Item"] + 1)
         # Order banding (fill only) + Kind cues coexist: each rule sets only
         # the properties it needs, so they layer without fighting.
@@ -446,14 +447,14 @@ def write_workbook(path: Path, records: Dict[str, Dict[str, Any]],
         ws.conditional_formatting.add(full, FormulaRule(formula=[f'${kindL}2="{KIND_MISSED}"'], fill=missed_fill))
         # Every displayed row can take a note. Resolved notes leave this grid.
         ws.conditional_formatting.add(
-            f"{add_noteL}2:{add_noteL}{last}",
+            f"{noteL}2:{noteL}{last}",
             FormulaRule(formula=[f'${itemL}2<>""'], fill=note_fill),
         )
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:{get_column_letter(ncols)}{last}"
     ws.sheet_view.showGridLines = False
     for h, w in {"Order": 10, "Run": 30, "Kind": 10, "Item": 28, "Value": 55,
-                 "Note": 50, ADD_NOTE: 45, "Status": 9, "Resolution": 55}.items():
+                 "Note": 50, "Status": 9, "Resolution": 55}.items():
         ws.column_dimensions[get_column_letter(_COL[h] + 1)].width = w
 
     # --- Resolved tab: compact audit history, separate from active inputs ----
@@ -522,9 +523,28 @@ def _review_sheet(wb):
     return wb.active
 
 
+def _layout_needs_upgrade(path: Path) -> bool:
+    """Whether this is not yet the direct-Note-input Quote Runs layout."""
+    from openpyxl import load_workbook
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Data Validation extension is not supported and will be removed",
+        )
+        wb = load_workbook(str(path), read_only=True, data_only=False)
+    try:
+        if REVIEW_SHEET not in wb.sheetnames:
+            return True
+        header = [_excel_text(c.value) for c in wb[REVIEW_SHEET][1]]
+        return not all(h in header for h in HEADERS) or ADD_NOTE in header
+    finally:
+        wb.close()
+
+
 def read_edits(path: Path) -> List[Dict[str, Any]]:
-    """Read dedicated Add Note inputs and recover manual overrides typed into
-    rendered Note cells."""
+    """Read edited Note cells (plus legacy Add Note inputs when migrating an
+    older workbook), ignoring the rendered ``#id:`` note history."""
     from openpyxl import load_workbook
 
     with warnings.catch_warnings():
@@ -536,7 +556,8 @@ def read_edits(path: Path) -> List[Dict[str, Any]]:
     try:
         ws = _review_sheet(wb)
         header = [_excel_text(c.value) for c in ws[1]]
-        idx = {h: header.index(h) for h in HEADERS if h in header}
+        readable_headers = HEADERS + [ADD_NOTE]
+        idx = {h: header.index(h) for h in readable_headers if h in header}
         row_key_index = header.index(ROW_KEY_HEADER) if ROW_KEY_HEADER in header else None
 
         def cell(row: tuple, heading: str) -> str:
@@ -594,7 +615,7 @@ def _cmd_build(args) -> int:
     pend = len(open_notes(store))
     print(f"Wrote {args.out} ({n} rows). {pend} open note(s) shown; resolved history "
           f"is on the {RESOLVED_SHEET} tab. Filter the rows on {REVIEW_SHEET} and "
-          f"type directly in the yellow Add Note cells.")
+          f"type directly in the yellow Note cells.")
     return 0
 
 
@@ -619,11 +640,12 @@ def _cmd_sync(args) -> int:
     if not path.exists():
         print(f"{path} not found — 'Open QR Review' builds it first.", file=sys.stderr)
         return 1
+    needs_upgrade = _layout_needs_upgrade(path)
     edits = read_edits(path)
     store = load_store()
     added = ingest_edits(store, edits)
     save_store(store)
-    if edits:
+    if edits or needs_upgrade:
         try:
             write_workbook(path, _load_runs(), store, field_order=_core_fields())
         except RuntimeError as exc:
@@ -632,8 +654,9 @@ def _cmd_sync(args) -> int:
                 f"review workbook. {exc} Re-run refresh after closing Excel; "
                 f"the notes will not duplicate."
             ) from None
-    cleared = f" Cleared {len(edits)} captured Add Note cell(s)." if edits else ""
-    print(f"Recorded {added} new note(s).{cleared} {len(open_notes(store))} open in the "
+    cleared = f" Captured {len(edits)} edited Note cell(s)." if edits else ""
+    upgraded = " Upgraded Quote Runs to the direct-Note layout." if needs_upgrade else ""
+    print(f"Recorded {added} new note(s).{cleared}{upgraded} {len(open_notes(store))} open in the "
           f"queue ({REVIEW_STORE_PATH}).")
     return 0
 
