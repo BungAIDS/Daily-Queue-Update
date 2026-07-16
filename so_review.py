@@ -7,15 +7,15 @@ The co-authored master stays read-only; this builds a SEPARATE, disposable
 not part of the final workbook.
 
 The Sales Order tab is the canonical row grid. Every hierarchy row is a real
-cell row, so Excel's normal column filters search the actual data and an Add
-Note entry stays attached to that row without a picker or formula projection.
+cell row, so Excel's normal column filters search the actual data and an edited
+Note stays attached to that row without a picker or formula projection.
 
 The loop:
   1. `python so_review.py build`  -> writes sales_order_review.xlsx from the
      line-items store: every order's component hierarchy (so_hierarchy), one
-     row per row, with a dedicated "Add Note" input and any open note already
+     row per row, with an editable "Note" cell containing any open note already
      recorded.
-  2. Filter Sales Order to the orders/rows you want, type in Add Note, then save
+  2. Filter Sales Order to the orders/rows you want, type in Note, then save
      and close. The workbook remains the durable draft; the next refresh or
      review folds those entries into so_review_notes.json for publication.
   3. `python so_review.py list` shows the OPEN notes. Claude acts on each and
@@ -62,11 +62,12 @@ STATUS_OPEN = "open"
 STATUS_HANDLED = "handled"
 NOTE_SEPARATOR = "\n\n---\n\n"
 
-# Workbook columns (also the read-back contract). ``Note`` renders open notes;
-# only ``Add Note`` is read as new human input in current workbooks.
+# Workbook columns (also the read-back contract). ``Note`` renders open notes
+# and accepts new human input. ``Add Note`` is recognized only when migrating an
+# older workbook.
 NOTES_ADD_NOTE = "Add Note"
 HEADERS = ["Order", "Item", "Kind", "Hierarchy", "Price", "Note",
-           NOTES_ADD_NOTE, "Status", "Resolution"]
+           "Status", "Resolution"]
 _COL = {h: i for i, h in enumerate(HEADERS)}
 
 # New workbooks keep the canonical flat grid directly on Sales Order. The other
@@ -375,14 +376,14 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
         if r["group_start"]:
             parity ^= 1                                     # flip per order group
         notes.append([r["order"], r["item_no"], r["kind"], r["hierarchy"], r["price"],
-                      r["note"], "", r["status"], r["resolution"], parity, r["row_key"]])
+                      r["note"], r["status"], r["resolution"], parity, r["row_key"]])
     last = notes.max_row
     for c in range(1, ncols + 1):
         notes.cell(1, c).fill = header_fill
         notes.cell(1, c).font = header_font
         notes.cell(1, c).alignment = Alignment(vertical="center")
-    notes.cell(1, _COL[NOTES_ADD_NOTE] + 1).fill = note_fill
-    notes.cell(1, _COL[NOTES_ADD_NOTE] + 1).font = Font(color="7F6000", bold=True)
+    notes.cell(1, _COL["Note"] + 1).fill = note_fill
+    notes.cell(1, _COL["Note"] + 1).font = Font(color="7F6000", bold=True)
     notes.row_dimensions[1].height = 24
     notes.column_dimensions[get_column_letter(band_col)].hidden = True
     notes.column_dimensions[get_column_letter(row_key_col)].hidden = True
@@ -390,7 +391,7 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
     if last >= 2:
         full = f"A2:{get_column_letter(ncols)}{last}"
         bandL, kindL = get_column_letter(band_col), get_column_letter(_COL["Kind"] + 1)
-        add_noteL = get_column_letter(_COL[NOTES_ADD_NOTE] + 1)
+        noteL = get_column_letter(_COL["Note"] + 1)
         hierarchyL = get_column_letter(_COL["Hierarchy"] + 1)
         # Order banding (fill only) + Kind cues (font only) coexist: each rule
         # sets only the properties it needs, so they layer without fighting.
@@ -400,14 +401,14 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
         # Every displayed hierarchy row can take a note. Resolved notes leave
         # this active grid.
         notes.conditional_formatting.add(
-            f"{add_noteL}2:{add_noteL}{last}",
+            f"{noteL}2:{noteL}{last}",
             FormulaRule(formula=[f'${hierarchyL}2<>""'], fill=note_fill),
         )
     notes.freeze_panes = "A2"
     notes.auto_filter.ref = f"A1:{get_column_letter(ncols)}{last}"
     notes.sheet_view.showGridLines = False
     for h, w in {"Order": 10, "Item": 6, "Kind": 11, "Hierarchy": 60, "Price": 12,
-                 "Note": 50, NOTES_ADD_NOTE: 45, "Status": 10, "Resolution": 55}.items():
+                 "Note": 50, "Status": 10, "Resolution": 55}.items():
         notes.column_dimensions[get_column_letter(_COL[h] + 1)].width = w
 
     # --- Resolved tab: compact audit history, separate from active inputs ----
@@ -474,7 +475,7 @@ def _browse_layout_needs_upgrade(path: Path) -> bool:
         if BROWSE_SHEET not in wb.sheetnames:
             return True
         header = [_excel_text(c.value) for c in wb[BROWSE_SHEET][1]]
-        return not all(h in header for h in HEADERS)
+        return not all(h in header for h in HEADERS) or NOTES_ADD_NOTE in header
     finally:
         wb.close()
 
@@ -512,7 +513,8 @@ def read_edits(path: Path) -> List[Dict[str, Any]]:
     try:
         notes = _notes_sheet(wb)
         header = [_excel_text(c.value) for c in notes[1]]
-        idx = {h: header.index(h) for h in HEADERS if h in header}
+        readable_headers = HEADERS + [NOTES_ADD_NOTE]
+        idx = {h: header.index(h) for h in readable_headers if h in header}
         row_key_index = header.index(ROW_KEY_HEADER) if ROW_KEY_HEADER in header else None
 
         def notes_value(row: tuple, heading: str) -> str:
@@ -647,7 +649,7 @@ def _cmd_build(args) -> int:
     pend = len(open_notes(store))
     print(f"Wrote {args.out} ({n} rows). {pend} open note(s) shown; resolved history "
           f"is on the {RESOLVED_SHEET} tab. Filter the real rows on Sales Order and "
-          f"type directly in the yellow Add Note cells.")
+          f"type directly in the yellow Note cells.")
     return 0
 
 
@@ -686,7 +688,7 @@ def _cmd_sync(args) -> int:
                 f"review workbook. {exc} Re-run refresh after closing Excel; "
                 f"the notes will not duplicate."
             ) from None
-    cleared = f" Cleared {len(edits)} captured Add Note cell(s)." if edits else ""
+    cleared = f" Captured {len(edits)} edited Note cell(s)." if edits else ""
     upgraded = " Upgraded Sales Order to the filterable row-grid layout." if needs_upgrade else ""
     print(f"Recorded {added} new note(s).{cleared}{upgraded} {len(open_notes(store))} open in the "
           f"queue ({REVIEW_STORE_PATH}).")

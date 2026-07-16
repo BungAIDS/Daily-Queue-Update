@@ -555,7 +555,7 @@ def base_actions() -> list[LauncherAction]:
             "Open SO Review",
             "Opens the Sales-Order review workbook in Excel (builds it from the "
             "line-items store first if it's missing). Filter the real Sales Order "
-            "rows, type in the yellow Add Note cells, then save and close Excel.",
+            "rows, type in the yellow Note cells, then save and close Excel.",
             "so_review.py",
             default_args=("open",),
         ),
