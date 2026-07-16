@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "severity1-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "severity1/severity1-marketplace"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "auto-memory@severity1-marketplace": true
+  }
+}
