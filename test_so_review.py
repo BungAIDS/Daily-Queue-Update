@@ -447,8 +447,9 @@ def test_workbook_writer_streams_rows_and_reports_progress(tmp: Path):
         sr.iter_review_rows = original_iterator
 
     from openpyxl import load_workbook
-    book = load_workbook(path)
+    book = load_workbook(path, read_only=True)
     assert book[sr.BROWSE_SHEET].max_row == 4
+    assert book[sr.BROWSE_SHEET].max_column == 10
     book.close()
     assert not path.with_name("streamed.building.xlsx").exists()
     assert messages[0] == "Building Sales Order review rows..."

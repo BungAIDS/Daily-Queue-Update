@@ -427,6 +427,38 @@ def _append_text_row(ws, values: List[Any]) -> None:
             cell.data_type = "s"
 
 
+def _add_streaming_dimensions(path: Path,
+                              dimensions: Dict[str, str]) -> None:
+    """Add worksheet dimensions omitted by openpyxl's write-only writer.
+
+    Excel otherwise scans the entire worksheet XML before it can display a
+    large streamed workbook. Rewrite the ZIP one member at a time so this fix
+    remains bounded in memory too.
+    """
+    import shutil
+    import zipfile
+
+    finalized = path.with_name(f"{path.stem}.dimensioned{path.suffix}")
+    marker = b"</sheetPr>"
+    with zipfile.ZipFile(path, "r") as source, zipfile.ZipFile(
+            finalized, "w", allowZip64=True) as target:
+        for info in source.infolist():
+            with source.open(info, "r") as reader, target.open(
+                    info, "w", force_zip64=info.file_size >= 2 ** 31) as writer:
+                first = reader.read(64 * 1024)
+                ref = dimensions.get(info.filename)
+                if ref and b"<dimension " not in first:
+                    if marker not in first:
+                        raise RuntimeError(
+                            f"Could not finalize Excel dimensions in {info.filename}."
+                        )
+                    dimension = f'<dimension ref="{ref}" />'.encode("ascii")
+                    first = first.replace(marker, marker + dimension, 1)
+                writer.write(first)
+                shutil.copyfileobj(reader, writer, length=1024 * 1024)
+    finalized.replace(path)
+
+
 def write_workbook(path: Path, line_items_store: Dict[str, Any],
                    review_store: Dict[str, Any], *,
                    progress: Optional[Callable[[str], None]] = None) -> int:
@@ -558,6 +590,11 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
         raise RuntimeError(
             f"Could not write {building.name}. Close Excel, then run this again."
         ) from None
+    report("Finalizing Excel sheet dimensions...")
+    _add_streaming_dimensions(building, {
+        "xl/worksheets/sheet1.xml": f"A1:J{last}",
+        "xl/worksheets/sheet2.xml": f"A1:F{resolved_count + 1}",
+    })
     try:
         building.replace(path)
     except PermissionError:
