@@ -32,6 +32,40 @@ def _line_items_store():
     ]}}}
 
 
+def _legacy_picker_workbook(path: Path, line_items=None) -> None:
+    """Build the pre-row-grid Notes + formula-picker workbook shape."""
+    from openpyxl import load_workbook
+
+    sr.write_workbook(path, line_items or _line_items_store(), {"notes": []})
+    book = load_workbook(str(path), data_only=False)
+    notes = book[sr.BROWSE_SHEET]
+    notes.title = sr.NOTES_SHEET
+
+    windows = []
+    order_col = sr.HEADERS.index("Order") + 1
+    start = 2
+    while start <= notes.max_row:
+        order = str(notes.cell(start, order_col).value or "")
+        end = start
+        while end + 1 <= notes.max_row and str(notes.cell(end + 1, order_col).value or "") == order:
+            end += 1
+        if order:
+            windows.append((order, start, end - start + 1))
+        start = end + 1
+
+    orders = book.create_sheet(sr.ORDERS_SHEET)
+    for row in windows:
+        orders.append(row)
+    orders.sheet_state = "hidden"
+
+    browse = book.create_sheet(sr.BROWSE_SHEET, 0)
+    browse["B1"] = windows[0][0] if windows else ""
+    for col, header in enumerate(sr.BROWSE_HEADERS, start=1):
+        browse.cell(sr.BROWSE_HEADER_ROW, col).value = header
+    book.save(str(path))
+    book.close()
+
+
 def test_record_note_appends_and_dedups():
     store = {"notes": []}
     a = sr.record_note(store, "421966", 1, "Base Fan", "keep as-is")
@@ -228,7 +262,7 @@ def test_workbook_write_read_and_sync_roundtrip(tmp: Path):
     # SOURCE row, then reading it back.
     from openpyxl import load_workbook
     book = load_workbook(str(wb))
-    ws = book[sr.NOTES_SHEET]
+    ws = book[sr.BROWSE_SHEET]
     note_col = sr.HEADERS.index("Note") + 1
     add_note_col = sr.HEADERS.index(sr.NOTES_ADD_NOTE) + 1
     item_col = sr.HEADERS.index("Item") + 1
@@ -249,7 +283,7 @@ def test_workbook_write_read_and_sync_roundtrip(tmp: Path):
     # Rebuild with the note recorded -> it shows on the sheet, marked open.
     sr.write_workbook(wb, li, store)
     book2 = load_workbook(str(wb))
-    ws2 = book2[sr.NOTES_SHEET]
+    ws2 = book2[sr.BROWSE_SHEET]
     status_col = sr.HEADERS.index("Status") + 1
     found = [i for i in range(2, ws2.max_row + 1)
              if str(ws2.cell(row=i, column=item_col).value) == "2"
@@ -271,7 +305,7 @@ def test_current_note_column_override_on_derived_row_is_recovered(tmp: Path):
     wb = tmp / "review.xlsx"
     sr.write_workbook(wb, line_items, {"notes": []})
     book = load_workbook(str(wb), data_only=False)
-    notes = book[sr.NOTES_SHEET]
+    notes = book[sr.BROWSE_SHEET]
     hierarchy_col = sr.HEADERS.index("Hierarchy") + 1
     note_col = sr.HEADERS.index("Note") + 1
     row_no = next(
@@ -308,10 +342,12 @@ def test_legacy_duplicate_attribute_labels_keep_separate_parent_targets(tmp: Pat
          "price": "1.00", "details": [], "tags": ["SPARE PARTS"],
          "attributes": {"component": "REPLACEMENT WHEEL", "shared": "X"}},
     ]}}}
+
+
     wb = tmp / "review.xlsx"
     sr.write_workbook(wb, line_items, {"notes": []})
     book = load_workbook(str(wb), data_only=False)
-    notes = book[sr.NOTES_SHEET]
+    notes = book[sr.BROWSE_SHEET]
     # Simulate the workbook saved before hidden row keys existed.
     row_key_col = next(cell.column for cell in notes[1] if cell.value == sr.ROW_KEY_HEADER)
     notes.delete_cols(row_key_col)
@@ -336,7 +372,7 @@ def test_legacy_notes_column_is_imported_once(tmp: Path):
     from openpyxl import load_workbook
 
     wb = tmp / "review.xlsx"
-    sr.write_workbook(wb, _line_items_store(), {"notes": []})
+    _legacy_picker_workbook(wb)
     book = load_workbook(str(wb), data_only=False)
     notes = book[sr.NOTES_SHEET]
     notes.delete_cols(sr.HEADERS.index(sr.NOTES_ADD_NOTE) + 1, 1)
@@ -355,53 +391,30 @@ def test_legacy_notes_column_is_imported_once(tmp: Path):
     assert sr._browse_layout_needs_upgrade(wb)
 
 
-def test_workbook_has_browse_and_notes_tabs(tmp: Path):
+def test_workbook_has_one_filterable_real_row_grid(tmp: Path):
     from openpyxl import load_workbook
+
     wb = tmp / "review.xlsx"
     sr.write_workbook(wb, _line_items_store(), {"notes": []})
-    book = load_workbook(str(wb))
-    # Two visible tabs like the live Sales Order view, plus a hidden dropdown
-    # source; the browse (picker) tab opens first.
-    assert book.sheetnames[:2] == [sr.BROWSE_SHEET, sr.NOTES_SHEET]
-    assert sr.RESOLVED_SHEET in book.sheetnames
-    assert book[sr.ORDERS_SHEET].sheet_state == "hidden"
+    book = load_workbook(str(wb), data_only=False)
+    assert book.sheetnames == [sr.BROWSE_SHEET, sr.RESOLVED_SHEET]
     assert book.active.title == sr.BROWSE_SHEET
-    browse = book[sr.BROWSE_SHEET]
-    notes = book[sr.NOTES_SHEET]
-    assert [notes.cell(1, c).value for c in range(1, len(sr.HEADERS) + 1)] == sr.HEADERS
-    # Picker dropdown plus line-item-only Add Note validation, and compatible
-    # INDEX formulas that read Notes.
-    # A normal FILTER formula makes Excel repair and discard Sales Order!A4
-    # because openpyxl cannot write the required dynamic-array metadata.
-    assert [browse.cell(sr.BROWSE_HEADER_ROW, c).value
-            for c in range(1, len(sr.BROWSE_HEADERS) + 1)] == sr.BROWSE_HEADERS
-    validations = browse.data_validations.dataValidation
-    assert len(validations) == 2
-    assert {dv.type for dv in validations} == {"list", "custom"}
-    f = browse["A4"].value
-    assert f.startswith('=IF(OR($B$1=""')
-    assert f"INDEX('{sr.NOTES_SHEET}'!$B:$B" in f
-    assert "FILTER(" not in f and not browse.array_formulae
-    assert str(browse["G1"].value).startswith("=IFERROR(INDEX('Orders'!")
-    assert str(browse["H1"].value).startswith("=IFERROR(INDEX('Orders'!")
-    assert '$B$1&""' in browse["G1"].value
-    assert '$B$1&""' in browse["H1"].value
-    assert browse.column_dimensions["G"].hidden
-    assert browse.column_dimensions["H"].hidden
-    assert browse["E4"].value.startswith("=IF(")
-    assert browse["F4"].value is None
-    assert browse.protection.sheet
-    assert not browse["B1"].protection.locked
-    assert browse["E4"].protection.locked
-    assert not browse["F4"].protection.locked
-    assert str(browse["C2"].value).startswith("=IF(COUNTIF(")
-    assert any(str(cf.sqref).startswith("F4:F") for cf in browse.conditional_formatting)
-    # The hidden Orders list holds each order once plus its Notes row window.
-    assert book[sr.ORDERS_SHEET].cell(1, 1).value == "421966"
-    assert book[sr.ORDERS_SHEET].cell(1, 2).value == 2
-    assert book[sr.ORDERS_SHEET].cell(1, 3).value > 1
-    # Colour cues are conditional-format rules (fast), not per-cell styling.
-    assert notes.conditional_formatting._cf_rules
+    review = book[sr.BROWSE_SHEET]
+    assert [review.cell(1, c).value for c in range(1, len(sr.HEADERS) + 1)] == sr.HEADERS
+    assert review.freeze_panes == "A2"
+    assert review.auto_filter.ref == f"A1:I{review.max_row}"
+    assert review.cell(2, 1).value == "421966"
+    assert all(
+        not (isinstance(review.cell(row, col).value, str)
+             and review.cell(row, col).value.startswith("="))
+        for row in range(2, review.max_row + 1)
+        for col in range(1, len(sr.HEADERS) + 1)
+    )
+    assert review.column_dimensions["J"].hidden
+    assert review.column_dimensions["K"].hidden
+    assert review.conditional_formatting._cf_rules
+    assert not sr._browse_layout_needs_upgrade(wb)
+    book.close()
 
 
 def test_resolved_tab_keeps_history_off_the_active_row(tmp: Path):
@@ -414,7 +427,7 @@ def test_resolved_tab_keeps_history_off_the_active_row(tmp: Path):
     sr.write_workbook(wb, _line_items_store(), store)
 
     book = load_workbook(str(wb), data_only=False)
-    notes = book[sr.NOTES_SHEET]
+    notes = book[sr.BROWSE_SHEET]
     item_col = sr.HEADERS.index("Item") + 1
     note_col = sr.HEADERS.index("Note") + 1
     active_row = next(
@@ -439,26 +452,13 @@ def test_sales_order_add_note_is_read_back(tmp: Path):
     sr.write_workbook(wb, _line_items_store(), {"notes": []})
     book = load_workbook(str(wb), data_only=False)
     browse = book[sr.BROWSE_SHEET]
-    notes = book[sr.NOTES_SHEET]
-    orders = book[sr.ORDERS_SHEET]
-    browse["B1"] = "421966"
-
-    start_row, row_count = None, None
-    for order, start, count in orders.iter_rows(min_row=1, max_col=3, values_only=True):
-        if str(order) == "421966":
-            start_row, row_count = int(start), int(count)
-            break
-    assert start_row is not None and row_count is not None
-
     item_col = sr.HEADERS.index("Item") + 1
-    item_offset = next(
-        offset for offset in range(row_count)
-        if str(notes.cell(start_row + offset, item_col).value) == "2"
+    row = next(
+        row for row in range(2, browse.max_row + 1)
+        if str(browse.cell(row, item_col).value) == "2"
     )
-    add_note_col = sr.BROWSE_HEADERS.index(sr.BROWSE_ADD_NOTE) + 1
-    browse.cell(sr.BROWSE_FIRST_ROW + item_offset, add_note_col).value = (
-        "parsed IVC grouping is correct"
-    )
+    add_note_col = sr.HEADERS.index(sr.NOTES_ADD_NOTE) + 1
+    browse.cell(row, add_note_col).value = "parsed IVC grouping is correct"
     book.save(str(wb))
     book.close()
 
@@ -478,22 +478,15 @@ def test_sales_order_accepts_note_on_derived_row(tmp: Path):
     sr.write_workbook(wb, _line_items_store(), {"notes": []})
     book = load_workbook(str(wb), data_only=False)
     browse = book[sr.BROWSE_SHEET]
-    notes = book[sr.NOTES_SHEET]
-    orders = book[sr.ORDERS_SHEET]
-    browse["B1"] = "421966"
-    _, start_row, row_count = next(
-        row for row in orders.iter_rows(min_row=1, max_col=3, values_only=True)
-        if str(row[0]) == "421966"
-    )
     item_col = sr.HEADERS.index("Item") + 1
     kind_col = sr.HEADERS.index("Kind") + 1
-    offset = next(
-        n for n in range(int(row_count))
-        if not notes.cell(int(start_row) + n, item_col).value
-        and notes.cell(int(start_row) + n, kind_col).value == sr.so_hierarchy.KIND_ATTRIBUTE
+    row = next(
+        row for row in range(2, browse.max_row + 1)
+        if not browse.cell(row, item_col).value
+        and browse.cell(row, kind_col).value == sr.so_hierarchy.KIND_ATTRIBUTE
     )
-    add_note_col = sr.BROWSE_HEADERS.index(sr.BROWSE_ADD_NOTE) + 1
-    browse.cell(sr.BROWSE_FIRST_ROW + offset, add_note_col).value = "derived-row note"
+    add_note_col = sr.HEADERS.index(sr.NOTES_ADD_NOTE) + 1
+    browse.cell(row, add_note_col).value = "derived-row note"
     book.save(str(wb))
     book.close()
 
@@ -503,7 +496,7 @@ def test_sales_order_accepts_note_on_derived_row(tmp: Path):
     assert edits[0]["note"] == "derived-row note"
 
 
-def test_sync_moves_sales_order_input_to_notes_and_clears_it(tmp: Path):
+def test_sync_records_sales_order_input_and_clears_it(tmp: Path):
     from types import SimpleNamespace
 
     from openpyxl import load_workbook
@@ -514,20 +507,13 @@ def test_sync_moves_sales_order_input_to_notes_and_clears_it(tmp: Path):
     sr.write_workbook(wb, line_items, {"notes": []})
     book = load_workbook(str(wb), data_only=False)
     browse = book[sr.BROWSE_SHEET]
-    notes = book[sr.NOTES_SHEET]
-    orders = book[sr.ORDERS_SHEET]
-    browse["B1"] = "421966"
-    _, start_row, row_count = next(
-        row for row in orders.iter_rows(min_row=1, max_col=3, values_only=True)
-        if str(row[0]) == "421966"
-    )
     item_col = sr.HEADERS.index("Item") + 1
-    item_offset = next(
-        offset for offset in range(int(row_count))
-        if str(notes.cell(int(start_row) + offset, item_col).value) == "2"
+    item_row = next(
+        row for row in range(2, browse.max_row + 1)
+        if str(browse.cell(row, item_col).value) == "2"
     )
-    add_note_col = sr.BROWSE_HEADERS.index(sr.BROWSE_ADD_NOTE) + 1
-    browse.cell(sr.BROWSE_FIRST_ROW + item_offset, add_note_col).value = "sync this note"
+    add_note_col = sr.HEADERS.index(sr.NOTES_ADD_NOTE) + 1
+    browse.cell(item_row, add_note_col).value = "sync this note"
     book.save(str(wb))
     book.close()
 
@@ -548,19 +534,18 @@ def test_sync_moves_sales_order_input_to_notes_and_clears_it(tmp: Path):
     rebuilt_browse = rebuilt[sr.BROWSE_SHEET]
     assert all(
         rebuilt_browse.cell(row, add_note_col).value is None
-        for row in range(sr.BROWSE_FIRST_ROW, rebuilt_browse.max_row + 1)
+        for row in range(2, rebuilt_browse.max_row + 1)
     )
-    rebuilt_notes = rebuilt[sr.NOTES_SHEET]
     note_col = sr.HEADERS.index("Note") + 1
     assert any(
-        str(rebuilt_notes.cell(row, item_col).value) == "2"
-        and rebuilt_notes.cell(row, note_col).value == "#1: sync this note"
-        for row in range(2, rebuilt_notes.max_row + 1)
+        str(rebuilt_browse.cell(row, item_col).value) == "2"
+        and rebuilt_browse.cell(row, note_col).value == "#1: sync this note"
+        for row in range(2, rebuilt_browse.max_row + 1)
     )
     rebuilt.close()
 
 
-def test_sync_clears_notes_tab_input_too(tmp: Path):
+def test_sync_upgrades_legacy_notes_tab_input(tmp: Path):
     from types import SimpleNamespace
 
     from openpyxl import load_workbook
@@ -568,7 +553,7 @@ def test_sync_clears_notes_tab_input_too(tmp: Path):
     line_items = _line_items_store()
     wb = tmp / "review.xlsx"
     queue = tmp / "so_review_notes.json"
-    sr.write_workbook(wb, line_items, {"notes": []})
+    _legacy_picker_workbook(wb, line_items)
     book = load_workbook(str(wb), data_only=False)
     notes = book[sr.NOTES_SHEET]
     item_col = sr.HEADERS.index("Item") + 1
@@ -594,7 +579,8 @@ def test_sync_clears_notes_tab_input_too(tmp: Path):
     stored = sr.load_store(queue)
     assert [n["note"] for n in stored["notes"]] == ["clear this Notes-tab input"]
     rebuilt = load_workbook(str(wb), data_only=False)
-    rebuilt_notes = rebuilt[sr.NOTES_SHEET]
+    assert rebuilt.sheetnames == [sr.BROWSE_SHEET, sr.RESOLVED_SHEET]
+    rebuilt_notes = rebuilt[sr.BROWSE_SHEET]
     assert all(
         rebuilt_notes.cell(row_no, add_note_col).value is None
         for row_no in range(2, rebuilt_notes.max_row + 1)
@@ -606,7 +592,7 @@ def test_legacy_sales_order_formula_overwrite_is_recovered(tmp: Path):
     from openpyxl import load_workbook
 
     wb = tmp / "review.xlsx"
-    sr.write_workbook(wb, _line_items_store(), {"notes": []})
+    _legacy_picker_workbook(wb)
     book = load_workbook(str(wb), data_only=False)
     browse = book[sr.BROWSE_SHEET]
     notes = book[sr.NOTES_SHEET]
@@ -645,7 +631,7 @@ def test_sync_upgrades_legacy_browse_without_pending_notes(tmp: Path):
     line_items = _line_items_store()
     wb = tmp / "review.xlsx"
     queue = tmp / "so_review_notes.json"
-    sr.write_workbook(wb, line_items, {"notes": []})
+    _legacy_picker_workbook(wb, line_items)
     book = load_workbook(str(wb), data_only=False)
     browse = book[sr.BROWSE_SHEET]
     browse.cell(sr.BROWSE_HEADER_ROW, 5).value = "Note"
@@ -665,12 +651,10 @@ def test_sync_upgrades_legacy_browse_without_pending_notes(tmp: Path):
         sr._load_line_items = old_loader
 
     rebuilt = load_workbook(str(wb), data_only=False)
-    headers = [
-        rebuilt[sr.BROWSE_SHEET].cell(sr.BROWSE_HEADER_ROW, col).value
-        for col in range(1, len(sr.BROWSE_HEADERS) + 1)
-    ]
+    headers = [rebuilt[sr.BROWSE_SHEET].cell(1, col).value
+               for col in range(1, len(sr.HEADERS) + 1)]
     rebuilt.close()
-    assert headers == sr.BROWSE_HEADERS
+    assert headers == sr.HEADERS
 
 
 def test_refresh_reports_notes_safe_when_workbook_rewrite_fails(tmp: Path):
@@ -683,7 +667,7 @@ def test_refresh_reports_notes_safe_when_workbook_rewrite_fails(tmp: Path):
     queue = tmp / "so_review_notes.json"
     sr.write_workbook(wb, line_items, {"notes": []})
     book = load_workbook(str(wb), data_only=False)
-    notes = book[sr.NOTES_SHEET]
+    notes = book[sr.BROWSE_SHEET]
     kind_col = sr.HEADERS.index("Kind") + 1
     note_col = sr.HEADERS.index(sr.NOTES_ADD_NOTE) + 1
     row = next(

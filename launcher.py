@@ -554,21 +554,10 @@ def base_actions() -> list[LauncherAction]:
             "Sales Order Review",
             "Open SO Review",
             "Opens the Sales-Order review workbook in Excel (builds it from the "
-            "line-items store first if it's missing). Pick an order, type in the "
-            "yellow Add Note cells, then save and close Excel. Use 'Read SO Notes' "
-            "before selecting another order.",
+            "line-items store first if it's missing). Filter the real Sales Order "
+            "rows, type in the yellow Add Note cells, then save and close Excel.",
             "so_review.py",
             default_args=("open",),
-        ),
-        LauncherAction(
-            "so_review_read",
-            "Sales Order Review",
-            "Read SO Notes",
-            "Imports yellow Add Note entries from Sales Order into the Notes queue "
-            "and tab, then clears those input cells. Close Excel first. Re-reading "
-            "the same notes never duplicates them.",
-            "so_review.py",
-            default_args=("sync",),
         ),
         LauncherAction(
             "so_review_update",

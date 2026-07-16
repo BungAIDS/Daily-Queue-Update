@@ -6,22 +6,18 @@ The co-authored master stays read-only; this builds a SEPARATE, disposable
 .xlsx you can scribble in. It exists only as a path to a better parser - it is
 not part of the final workbook.
 
-Why separate: a picker-driven Sales Order view has no Excel event code to bind
-typed text to an order. This workbook therefore keeps Notes as the canonical
-STATIC list. Sales Order has a temporary Add Note column for one selected
-order; sync it before changing the picker. The red unsynced warning makes that
-state visible, and sync transfers the text to Notes before clearing the input.
+The Sales Order tab is the canonical row grid. Every hierarchy row is a real
+cell row, so Excel's normal column filters search the actual data and an Add
+Note entry stays attached to that row without a picker or formula projection.
 
 The loop:
   1. `python so_review.py build`  -> writes sales_order_review.xlsx from the
      line-items store: every order's component hierarchy (so_hierarchy), one
      row per row, with a dedicated "Add Note" input and any open note already
      recorded.
-  2. You either type directly on Notes, or pick one order and use Sales Order's
-     Add Note cells. Save and close, then `python so_review.py sync` folds them
-     into the note queue
-     (so_review_notes.json), which is published with the other stores so
-     Claude can read it.
+  2. Filter Sales Order to the orders/rows you want, type in Add Note, then save
+     and close. The workbook remains the durable draft; the next refresh or
+     review folds those entries into so_review_notes.json for publication.
   3. `python so_review.py list` shows the OPEN notes. Claude acts on each and
      `python so_review.py handle <id> "what I did"` marks it handled with a
      resolution. The next refresh removes it from the active review row so that
@@ -73,9 +69,9 @@ HEADERS = ["Order", "Item", "Kind", "Hierarchy", "Price", "Note",
            NOTES_ADD_NOTE, "Status", "Resolution"]
 _COL = {h: i for i, h in enumerate(HEADERS)}
 
-# Two tabs, like the live GL Queue workbook's Sales Order view: BROWSE_SHEET is
-# a picker with a dedicated Add Note input; NOTES_SHEET is the canonical flat
-# note grid. ORDERS_SHEET maps each picker order to its rows in NOTES_SHEET.
+# New workbooks keep the canonical flat grid directly on Sales Order. The other
+# names/constants remain only so notes can still be recovered from old picker
+# workbooks during the transition.
 BROWSE_SHEET = "Sales Order"
 NOTES_SHEET = "Notes"
 RESOLVED_SHEET = "Resolved"
@@ -341,33 +337,20 @@ def ingest_edits(review_store: Dict[str, Any],
 # --------------------------------------------------------------------------- #
 # Excel I/O (lazy openpyxl)                                                     #
 # --------------------------------------------------------------------------- #
-def _unique_orders(rows: List[Dict[str, Any]]) -> List[str]:
-    seen, out = set(), []
-    for r in rows:
-        if r["order"] not in seen:
-            seen.add(r["order"])
-            out.append(r["order"])
-    return out
-
-
 def write_workbook(path: Path, line_items_store: Dict[str, Any],
                    review_store: Dict[str, Any]) -> int:
-    """Write the two-tab review workbook. Returns the data-row count.
+    """Write the review workbook. Returns the data-row count.
 
     Colour and grouping are applied as a handful of workbook-level conditional-
-    format rules (O(1) each), never cell-by-cell — styling every one of the
-    ~16K rows was what made the build take ~30s (and the launcher button look
-    hung); this stays ~1-2s.
+    format rules (O(1) each), never styled cell-by-cell, so the large backlog
+    does not pay a separate formatting cost for every row.
 
-    Tabs (like the live GL Queue Sales Order view):
-      - 'Sales Order' — a picker: choose an order, review its hierarchy, and add
-        notes in the dedicated input column.
-      - 'Notes' — the canonical flat grid; sync reads both tabs back."""
+    Sales Order is one canonical, filterable grid of real rows. Resolved keeps
+    handled-note history out of the active inputs."""
     from openpyxl import Workbook
     from openpyxl.formatting.rule import FormulaRule
-    from openpyxl.styles import Font, PatternFill, Protection
+    from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
-    from openpyxl.worksheet.datavalidation import DataValidation
 
     header_fill = PatternFill("solid", fgColor="305496")
     header_font = Font(color="FFFFFF", bold=True)
@@ -376,22 +359,14 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
     comp_fill = PatternFill("solid", fgColor="DDEBF7")      # component header rows
     comp_font = Font(bold=True)
     review_font = Font(color="C00000", bold=True)           # parser review rows
-    picker_fill = PatternFill("solid", fgColor="FFF2CC")
 
     rows = review_rows(line_items_store, review_store)
-    orders = _unique_orders(rows)
-    order_windows: Dict[str, List[int]] = {}
-    for sheet_row, row in enumerate(rows, start=2):
-        order = row["order"]
-        if order not in order_windows:
-            order_windows[order] = [sheet_row, 0]
-        order_windows[order][1] += 1
     ncols = len(HEADERS)
     wb = Workbook()
 
-    # --- Notes tab: the data + input grid ------------------------------------
+    # --- Sales Order: canonical data + input grid -----------------------------
     notes = wb.active
-    notes.title = NOTES_SHEET
+    notes.title = BROWSE_SHEET
     band_col = ncols + 1                                    # hidden parity helper
     row_key_col = ncols + 2
     notes.append(HEADERS + ["_band", ROW_KEY_HEADER])
@@ -405,6 +380,10 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
     for c in range(1, ncols + 1):
         notes.cell(1, c).fill = header_fill
         notes.cell(1, c).font = header_font
+        notes.cell(1, c).alignment = Alignment(vertical="center")
+    notes.cell(1, _COL[NOTES_ADD_NOTE] + 1).fill = note_fill
+    notes.cell(1, _COL[NOTES_ADD_NOTE] + 1).font = Font(color="7F6000", bold=True)
+    notes.row_dimensions[1].height = 24
     notes.column_dimensions[get_column_letter(band_col)].hidden = True
     notes.column_dimensions[get_column_letter(row_key_col)].hidden = True
 
@@ -426,6 +405,7 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
         )
     notes.freeze_panes = "A2"
     notes.auto_filter.ref = f"A1:{get_column_letter(ncols)}{last}"
+    notes.sheet_view.showGridLines = False
     for h, w in {"Order": 10, "Item": 6, "Kind": 11, "Hierarchy": 60, "Price": 12,
                  "Note": 50, NOTES_ADD_NOTE: 45, "Status": 10, "Resolution": 55}.items():
         notes.column_dimensions[get_column_letter(_COL[h] + 1)].width = w
@@ -452,101 +432,7 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
     for c, width in enumerate((10, 7, 65, 50, 60, 20), start=1):
         resolved.column_dimensions[get_column_letter(c)].width = width
 
-    # --- Orders tab (hidden): dropdown plus source row windows ---------------
-    osheet = wb.create_sheet(ORDERS_SHEET)
-    for o in orders:
-        start_row, row_count = order_windows[o]
-        osheet.append([o, start_row, row_count])
-    osheet.sheet_state = "hidden"
-
-    # --- Sales Order tab (first): pick an order -> its hierarchy appears ------
-    browse = wb.create_sheet(BROWSE_SHEET, 0)
-    browse["A1"] = "Order:"
-    browse["A1"].font = Font(bold=True)
-    browse["B1"].fill = picker_fill
-    browse["B1"].font = Font(bold=True)
-    browse["B1"].protection = Protection(locked=False)
-    browse["C1"] = "Pick an order, then use the yellow Add Note cells"
-    browse["C1"].font = Font(italic=True, color="808080")
-    if orders:
-        dv = DataValidation(type="list", formula1=f"={ORDERS_SHEET}!$A$1:$A${len(orders)}",
-                            allow_blank=True)
-        dv.showErrorMessage = False                        # free typing allowed too
-        browse.add_data_validation(dv)
-        dv.add(browse["B1"])
-    for i, h in enumerate(BROWSE_HEADERS, start=1):
-        browse.cell(BROWSE_HEADER_ROW, i).value = h
-        browse.cell(BROWSE_HEADER_ROW, i).fill = header_fill
-        browse.cell(BROWSE_HEADER_ROW, i).font = header_font
-    add_note_col = BROWSE_HEADERS.index(BROWSE_ADD_NOTE) + 1
-    browse.cell(BROWSE_HEADER_ROW, add_note_col).fill = note_fill
-    browse.cell(BROWSE_HEADER_ROW, add_note_col).font = Font(color="7F6000", bold=True)
-    # Keep the source lookup in hidden helper cells, then use ordinary INDEX
-    # formulas for the picked order.  openpyxl cannot emit Excel's required
-    # dynamic-array metadata for FILTER; writing FILTER as a normal formula
-    # makes Excel repair the workbook and remove Sales Order!A4 on open.
-    if orders:
-        order_last = len(orders)
-        browse["G1"] = (
-            f'=IFERROR(INDEX(\'{ORDERS_SHEET}\'!$B$1:$B${order_last},'
-            f'MATCH($B$1&"",\'{ORDERS_SHEET}\'!$A$1:$A${order_last},0)),0)'
-        )
-        browse["H1"] = (
-            f'=IFERROR(INDEX(\'{ORDERS_SHEET}\'!$C$1:$C${order_last},'
-            f'MATCH($B$1&"",\'{ORDERS_SHEET}\'!$A$1:$A${order_last},0)),0)'
-        )
-    else:
-        browse["G1"], browse["H1"] = 0, 0
-    browse.column_dimensions["G"].hidden = True
-    browse.column_dimensions["H"].hidden = True
-
-    max_order_rows = max((window[1] for window in order_windows.values()), default=1)
-    for output_row in range(BROWSE_FIRST_ROW, BROWSE_FIRST_ROW + max_order_rows):
-        position = f"ROWS($A${BROWSE_FIRST_ROW}:A{output_row})"
-        for output_col, source_col in enumerate(range(2, 7), start=1):
-            source_letter = get_column_letter(source_col)
-            lookup = (
-                f"INDEX('{NOTES_SHEET}'!${source_letter}:${source_letter},"
-                f"$G$1+{position}-1)"
-            )
-            browse.cell(output_row, output_col).value = (
-                f'=IF(OR($B$1="",$H$1<{position}),"",'
-                f'IF({lookup}="","",{lookup}))'
-            )
-    bmax = BROWSE_HEADER_ROW + max_order_rows
-    bkindL = get_column_letter(2)                           # Kind is the 2nd browse col (B)
-    browse.conditional_formatting.add(f"A4:E{bmax}", FormulaRule(formula=[f'${bkindL}4="COMPONENT"'], fill=comp_fill, font=comp_font))
-    browse.conditional_formatting.add(f"A4:E{bmax}", FormulaRule(formula=[f'${bkindL}4="REVIEW"'], font=review_font))
-    add_note_range = f"F{BROWSE_FIRST_ROW}:F{bmax}"
-    browse.conditional_formatting.add(
-        add_note_range,
-        FormulaRule(formula=[f'$C{BROWSE_FIRST_ROW}<>""'], fill=note_fill),
-    )
-    add_note_validation = DataValidation(
-        type="custom",
-        formula1=f'=$C{BROWSE_FIRST_ROW}<>""',
-        allow_blank=True,
-    )
-    add_note_validation.showErrorMessage = True
-    add_note_validation.errorTitle = "Choose a review row"
-    add_note_validation.error = "Notes can only be added beside a displayed hierarchy row."
-    add_note_validation.showInputMessage = True
-    add_note_validation.promptTitle = "Add Note"
-    add_note_validation.prompt = "Save and close Excel, then run Read SO Notes."
-    browse.add_data_validation(add_note_validation)
-    add_note_validation.add(add_note_range)
-    for output_row in range(BROWSE_FIRST_ROW, bmax + 1):
-        browse.cell(output_row, add_note_col).protection = Protection(locked=False)
-    browse["C2"] = (
-        f'=IF(COUNTIF({add_note_range},"<>")=0,"",'
-        f'"UNSYNCED NOTES - save, close, and run Read SO Notes before changing order")'
-    )
-    browse["C2"].font = Font(color="C00000", bold=True)
-    browse.protection.sheet = True
-    browse.freeze_panes = f"A{BROWSE_FIRST_ROW}"
-    for i, w in enumerate((6, 11, 70, 12, 35, 45), start=1):
-        browse.column_dimensions[get_column_letter(i)].width = w
-    wb.active = 0                                           # open on the browse tab
+    wb.active = 0
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -560,11 +446,13 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
 
 
 def _notes_sheet(wb):
-    """The sheet holding the note grid: NOTES_SHEET, else the legacy 'Line Items'
-    name, else the first sheet whose header row carries Order + Note."""
-    for name in (NOTES_SHEET, "Line Items"):
+    """The canonical row grid, with legacy workbook fallbacks."""
+    for name in (BROWSE_SHEET, NOTES_SHEET, "Line Items"):
         if name in wb.sheetnames:
-            return wb[name]
+            ws = wb[name]
+            header = {_excel_text(c.value) for c in ws[1]}
+            if {"Order", "Note"} <= header:
+                return ws
     for ws in wb.worksheets:
         header = {str(c.value or "") for c in ws[1]}
         if {"Order", "Note"} <= header:
@@ -573,7 +461,7 @@ def _notes_sheet(wb):
 
 
 def _browse_layout_needs_upgrade(path: Path) -> bool:
-    """Whether either visible tab predates its dedicated Add Note column."""
+    """Whether this is not yet the canonical Sales Order row-grid layout."""
     from openpyxl import load_workbook
 
     with warnings.catch_warnings():
@@ -583,12 +471,10 @@ def _browse_layout_needs_upgrade(path: Path) -> bool:
         )
         wb = load_workbook(str(path), read_only=True, data_only=False)
     try:
-        notes_header = [_excel_text(c.value) for c in _notes_sheet(wb)[1]]
-        notes_old = NOTES_ADD_NOTE not in notes_header
         if BROWSE_SHEET not in wb.sheetnames:
-            return notes_old
-        browse_header = [_excel_text(c.value) for c in wb[BROWSE_SHEET][BROWSE_HEADER_ROW]]
-        return notes_old or BROWSE_ADD_NOTE not in browse_header
+            return True
+        header = [_excel_text(c.value) for c in wb[BROWSE_SHEET][1]]
+        return not all(h in header for h in HEADERS)
     finally:
         wb.close()
 
@@ -654,6 +540,7 @@ def read_edits(path: Path) -> List[Dict[str, Any]]:
             row_key = stored_key or derived_key
             notes_row_keys[sheet_row] = row_key
             if order:
+                source = "sales_order" if notes.title == BROWSE_SHEET else "notes"
                 typed = _manual_note_parts(notes_value(row, "Note"))
                 if NOTES_ADD_NOTE in header:
                     typed.extend(_note_parts(notes_value(row, NOTES_ADD_NOTE)))
@@ -664,10 +551,12 @@ def read_edits(path: Path) -> List[Dict[str, Any]]:
                         "item_text": notes_value(row, "Hierarchy"),
                         "note": note,
                         "row_key": row_key,
-                        "source": "notes",
+                        "source": source,
                     })
 
-        if BROWSE_SHEET not in wb.sheetnames:
+        # New workbooks already use Sales Order as the canonical grid. The
+        # remainder only recovers Add Note entries from the old formula picker.
+        if notes.title == BROWSE_SHEET or BROWSE_SHEET not in wb.sheetnames:
             return edits
         browse = wb[BROWSE_SHEET]
         browse_header = [_excel_text(c.value) for c in browse[BROWSE_HEADER_ROW]]
@@ -757,9 +646,8 @@ def _cmd_build(args) -> int:
     n = write_workbook(Path(args.out), _load_line_items(), store)
     pend = len(open_notes(store))
     print(f"Wrote {args.out} ({n} rows). {pend} open note(s) shown; resolved history "
-          f"is on the {RESOLVED_SHEET} tab. "
-          f"pick an order, type in the yellow Add Note cells, save and close, then "
-          f"'Read SO Notes'.")
+          f"is on the {RESOLVED_SHEET} tab. Filter the real rows on Sales Order and "
+          f"type directly in the yellow Add Note cells.")
     return 0
 
 
@@ -795,11 +683,11 @@ def _cmd_sync(args) -> int:
         except RuntimeError as exc:
             raise RuntimeError(
                 f"Recorded {added} new note(s), but could not refresh the Sales Order "
-                f"review workbook. {exc} Re-run Read SO Notes after closing Excel; "
+                f"review workbook. {exc} Re-run refresh after closing Excel; "
                 f"the notes will not duplicate."
             ) from None
-    cleared = f" Cleared {len(edits)} Add Note input cell(s)." if edits else ""
-    upgraded = " Upgraded the Sales Order note-entry layout." if needs_upgrade else ""
+    cleared = f" Cleared {len(edits)} captured Add Note cell(s)." if edits else ""
+    upgraded = " Upgraded Sales Order to the filterable row-grid layout." if needs_upgrade else ""
     print(f"Recorded {added} new note(s).{cleared}{upgraded} {len(open_notes(store))} open in the "
           f"queue ({REVIEW_STORE_PATH}).")
     return 0
