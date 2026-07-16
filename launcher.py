@@ -593,6 +593,41 @@ def base_actions() -> list[LauncherAction]:
             options=(option("job", "Order number", "The order to show, e.g. 421967.", positional=True),),
         ),
         LauncherAction(
+            "qr_review_open",
+            "Quote Run Review",
+            "Open QR Review",
+            "Opens the Quote-Run review workbook in Excel (builds it from the "
+            "quote-run scan store first if it's missing). Every run unrolls into "
+            "rows — the file, each extracted field, vision complaints, and lines "
+            "we haven't captured. Filter to what you want, type in the yellow "
+            "Add Note cells, then save and close Excel.",
+            "quote_run_review.py",
+            default_args=("open",),
+        ),
+        LauncherAction(
+            "qr_review_update",
+            "Quote Run Review",
+            "Update QR Review",
+            "Refreshes the review workbook: captures anything you've typed, applies "
+            "Claude's handled-marks (a note Claude resolved drops off the sheet), and "
+            "leaves every still-open note in place. Run after a Git Update to see "
+            "what Claude handled.",
+            "quote_run_review.py",
+            default_args=("refresh",),
+        ),
+        LauncherAction(
+            "qr_review_reparse",
+            "Quote Run Review",
+            "Re-parse + Refresh QR Review",
+            "Applies the latest quote-run parser to the WHOLE stored corpus "
+            "(raw text + vision transcripts — no Z:, no API cost), refreshing "
+            "quote_runs.xlsx and the master too, then rebuilds the review sheet "
+            "so you see the result. Run this once after a Git Update that "
+            "changed the parser.",
+            "quote_run_review.py",
+            default_args=("reparse",),
+        ),
+        LauncherAction(
             "custom_script",
             "Tools",
             "Run Any Python Script",
@@ -626,6 +661,7 @@ class LauncherApp(tk.Tk):
         "Scans / Backfill",
         "Search / Inspect",
         "Sales Order Review",
+        "Quote Run Review",
         "Transmittals",
         "Tools",
         "Developer",
