@@ -380,6 +380,17 @@ def ingest_edits(review_store: Dict[str, Any],
 # --------------------------------------------------------------------------- #
 # Excel I/O (lazy openpyxl)                                                     #
 # --------------------------------------------------------------------------- #
+def _append_text_row(ws, values: List[Any]) -> None:
+    """ws.append, but formula-proof. Real document lines can start with ``=``
+    (price sums like ``=80240-6773-6056=67,411``), which openpyxl stores as an
+    Excel FORMULA — a broken one, so Excel "repairs" the sheet by deleting the
+    cell on open. Re-type any such cell as plain text."""
+    ws.append(values)
+    for cell in ws[ws.max_row]:
+        if cell.data_type == "f":
+            cell.data_type = "s"
+
+
 def write_workbook(path: Path, records: Dict[str, Dict[str, Any]],
                    review_store: Dict[str, Any],
                    field_order: Optional[List[str]] = None) -> int:
@@ -417,8 +428,9 @@ def write_workbook(path: Path, records: Dict[str, Dict[str, Any]],
     for r in rows:
         if r["group_start"]:
             parity ^= 1                                     # flip per order group
-        ws.append([r["order"], r["run"], r["kind"], r["item"], _excel_text(r["value"]),
-                   r["note"], r["status"], r["resolution"], parity, r["row_key"]])
+        _append_text_row(ws, [r["order"], r["run"], r["kind"], r["item"],
+                              _excel_text(r["value"]), r["note"], r["status"],
+                              r["resolution"], parity, r["row_key"]])
         if r["kind"] == KIND_RUN and r.get("path"):
             cell = ws.cell(ws.max_row, _COL["Item"] + 1)
             cell.hyperlink = r["path"]
@@ -466,7 +478,7 @@ def write_workbook(path: Path, records: Dict[str, Dict[str, Any]],
         reverse=True,
     )
     for n in handled:
-        resolved.append([
+        _append_text_row(resolved, [
             str(n.get("order", "")), str(n.get("run", "")),
             str(n.get("item", "") or n.get("item_text", "")), str(n.get("note", "")),
             str(n.get("resolution", "") or ""), str(n.get("handled_at", "") or ""),

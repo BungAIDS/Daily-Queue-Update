@@ -338,6 +338,17 @@ def ingest_edits(review_store: Dict[str, Any],
 # --------------------------------------------------------------------------- #
 # Excel I/O (lazy openpyxl)                                                     #
 # --------------------------------------------------------------------------- #
+def _append_text_row(ws, values: List[Any]) -> None:
+    """ws.append, but formula-proof. Hierarchy or note text starting with ``=``
+    (e.g. a quoted price sum) would be stored by openpyxl as an Excel FORMULA —
+    a broken one, so Excel "repairs" the sheet by deleting the cell on open.
+    Re-type any such cell as plain text."""
+    ws.append(values)
+    for cell in ws[ws.max_row]:
+        if cell.data_type == "f":
+            cell.data_type = "s"
+
+
 def write_workbook(path: Path, line_items_store: Dict[str, Any],
                    review_store: Dict[str, Any]) -> int:
     """Write the review workbook. Returns the data-row count.
@@ -375,8 +386,9 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
     for r in rows:
         if r["group_start"]:
             parity ^= 1                                     # flip per order group
-        notes.append([r["order"], r["item_no"], r["kind"], r["hierarchy"], r["price"],
-                      r["note"], r["status"], r["resolution"], parity, r["row_key"]])
+        _append_text_row(notes, [r["order"], r["item_no"], r["kind"], r["hierarchy"],
+                                 r["price"], r["note"], r["status"], r["resolution"],
+                                 parity, r["row_key"]])
     last = notes.max_row
     for c in range(1, ncols + 1):
         notes.cell(1, c).fill = header_fill
@@ -420,7 +432,7 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
         reverse=True,
     )
     for n in handled:
-        resolved.append([
+        _append_text_row(resolved, [
             str(n.get("order", "")), str(n.get("item_no", "")),
             str(n.get("item_text", "")), str(n.get("note", "")),
             str(n.get("resolution", "") or ""), str(n.get("handled_at", "") or ""),

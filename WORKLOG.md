@@ -11,6 +11,16 @@ Note column), matching the SO review. `sync`/`refresh` migrate an existing
 workbook to the new layout, and legacy Add Note entries are still read once
 during migration (`test_sync_upgrades_previous_add_note_layout`).
 
+Fix (same day): DG's first Open QR Review hit Excel's "We found a problem /
+Removed Records: Formula" repair dialog. Root cause: 3 real corpus lines start
+with `=` (price sums like `=80240-6773-6056=67,411`) and openpyxl stores any
+`=`-leading string as an Excel FORMULA — broken ones, which Excel deletes on
+open. `_append_text_row` now re-types such cells as literal text in BOTH
+review writers (quote_run_review + so_review, which had the same latent bug).
+Verified against the published corpus: 27,220 rows, 0 formula cells, all 3
+lines kept as text. After Git Update, run **Update QR Review** to rebuild the
+sheet cleanly (the repaired copy lost those 3 cells; the store still has them).
+
 DG: "how is quote run detection doing? could it use a boost? set up a similar
 environment to sales-order review where I can review each order and give
 feedback on each item." Detection state measured on the 2026-07-16 corpus:

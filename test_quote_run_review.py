@@ -305,6 +305,36 @@ def test_sync_upgrades_previous_add_note_layout(tmp: Path):
     print("  ok  test_sync_upgrades_previous_add_note_layout")
 
 
+def test_formula_like_document_lines_stay_text(tmp: Path):
+    # Real corpus lines can start with "=" (price sums like
+    # "=80240-6773-6056=67,411"); written as formulas they make Excel "repair"
+    # the sheet by deleting the cell. They must round-trip as literal text.
+    from openpyxl import load_workbook
+
+    records = _records()
+    run = records["421572"]["runs"][0]
+    run["missed_data"] = ["=80240-6773-6056=67,411"]
+    run["fields"]["Total"] = "= $9,704.1"
+    store = {"notes": []}
+    qr.record_note(store, "421572", run["file"], "CFM", "12000", "=confirm this sum")
+    qr.mark_handled(store, 1, "=verified against the PDF")
+    path = tmp / "quote_run_review.xlsx"
+    qr.write_workbook(path, records, store, field_order=FIELD_ORDER)
+
+    wb = load_workbook(str(path))
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                assert cell.data_type != "f", (ws.title, cell.coordinate, cell.value)
+    ws = wb[qr.REVIEW_SHEET]
+    val_col = qr.HEADERS.index("Value") + 1
+    values = {str(ws.cell(r, val_col).value) for r in range(2, ws.max_row + 1)}
+    assert "=80240-6773-6056=67,411" in values
+    assert "= $9,704.1" in values
+    wb.close()
+    print("  ok  test_formula_like_document_lines_stay_text")
+
+
 def test_resolved_tab_keeps_history_off_the_active_row(tmp: Path):
     from openpyxl import load_workbook
 
@@ -341,6 +371,7 @@ def main() -> int:
         test_handled_marks_ledger_roundtrip,
         test_workbook_write_read_and_sync_roundtrip,
         test_sync_upgrades_previous_add_note_layout,
+        test_formula_like_document_lines_stay_text,
         test_resolved_tab_keeps_history_off_the_active_row,
     ]
     for t in tests_no_tmp:
