@@ -59,6 +59,7 @@ def data_files() -> List[Path]:
         BACKLOG_DIR / "autocad_scan_progress.json",
         BACKLOG_DIR / "so_review_notes.json",        # the Sales-Order note queue
         BACKLOG_DIR / "so_review_parser_metrics.json",  # review-count history
+        BACKLOG_DIR / "quote_run_review_notes.json",  # the Quote-Run note queue
 
         BACKLOG_DIR / "quote_runs.xlsx",             # the human sheets
         BACKLOG_DIR / "backlog.xlsx",

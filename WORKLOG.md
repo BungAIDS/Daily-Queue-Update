@@ -3,6 +3,56 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-07-16 — Quote-Run review loop (the SO-review twin, per DG)
+
+Update (same day): merged main's "Use-Note-as-direct-review-input" and ported
+it to the twin — the yellow **Note** column IS the input now (no separate Add
+Note column), matching the SO review. `sync`/`refresh` migrate an existing
+workbook to the new layout, and legacy Add Note entries are still read once
+during migration (`test_sync_upgrades_previous_add_note_layout`).
+
+Fix (same day): DG's first Open QR Review hit Excel's "We found a problem /
+Removed Records: Formula" repair dialog. Root cause: 3 real corpus lines start
+with `=` (price sums like `=80240-6773-6056=67,411`) and openpyxl stores any
+`=`-leading string as an Excel FORMULA — broken ones, which Excel deletes on
+open. `_append_text_row` now re-types such cells as literal text in BOTH
+review writers (quote_run_review + so_review, which had the same latent bug).
+Verified against the published corpus: 27,220 rows, 0 formula cells, all 3
+lines kept as text. After Git Update, run **Update QR Review** to rebuild the
+sheet cleanly (the repaired copy lost those 3 cells; the store still has them).
+
+DG: "how is quote run detection doing? could it use a boost? set up a similar
+environment to sales-order review where I can review each order and give
+feedback on each item." Detection state measured on the 2026-07-16 corpus:
+468 runs / 382 orders, 389 OK / 62 CHECK VISION / 14 UNRECOGNIZED (.doc
+dampers) / 3 NO FIELDS, 57.8 avg fields/run, 2 coverage tags (both legit
+specials), ~3.5k uncaptured (MISSED) lines. The 62 CHECK VISION all have
+attempts=None — the escalated re-read loop (built 07-06) hasn't been run yet;
+`python pdf_vision.py` is still the pending P0 user action.
+
+New **`quote_run_review.py`** — mirrors `so_review.py` exactly (same note
+queue / handled-ledger / workbook contract), but unrolls the quote-run store
+instead of the line-items store. Every order's runs (deduped via
+`run_rank.dedupe_runs`, same as quote_runs.xlsx) become real filterable rows:
+- **RUN** — the file itself (status — template — field count, hyperlinked to
+  Z:), blue+bold; **FIELD** — one row per extracted field, name + value, in
+  CORE_FIELDS order; **SUSPECT** — vision-QC complaints / NEEDS HUMAN reason,
+  red; **MISSED** — each uncaptured `missed_data` line, amber. Real corpus:
+  27,220 rows (421 RUN / 23,216 FIELD / 3,504 MISSED / 79 SUSPECT), ~6s build.
+- Notes anchor by stable row key (FIELD keys on the field NAME, so a note
+  survives the value being fixed; MISSED/SUSPECT key on their text and
+  self-clear when a pattern lands), fall back to exact text, then the order's
+  first row. Same open/handled lifecycle, Resolved history tab,
+  `quote_run_review_handled.json` tracked return-ledger, notes published via
+  data_push (`quote_run_review_notes.json` added to the file list).
+- CLI: build / open / sync / refresh / reparse / list / handle. `reparse` =
+  `quote_run_scan --reparse-stored` (patterns + vision QC, no Z:, no API) then
+  rebuild, so one action shows the current parser's take for re-review.
+- Launcher: new **Quote Run Review** category — Open / Update / Re-parse +
+  Refresh, mirroring the SO trio. Tests: `test_quote_run_review.py` (12, in
+  CI after test_so_review); full-loop smoke on the real corpus (build → type →
+  sync → handle → refresh) verified.
+
 ## 2026-07-10 — Fix: workbook unusable during renders (phantom row rewrites)
 
 DG: "the update takes so long the sheet is almost unusable for the whole 2-min

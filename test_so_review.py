@@ -449,6 +449,29 @@ def test_resolved_tab_keeps_history_off_the_active_row(tmp: Path):
     book.close()
 
 
+def test_formula_like_note_text_stays_text(tmp: Path):
+    # Note/resolution text starting with "=" must be written as literal text —
+    # openpyxl would otherwise store it as a broken Excel formula, and Excel
+    # "repairs" the sheet by deleting the cell on open.
+    from openpyxl import load_workbook
+
+    store = {"notes": []}
+    note = sr.record_note(store, "421966", 1, "Base Fan",
+                          "=80240-6773-6056=67,411 is a price sum, capture it")
+    sr.mark_handled(store, note["id"], "= now captured as text")
+    wb = tmp / "review.xlsx"
+    sr.write_workbook(wb, _line_items_store(), store)
+
+    book = load_workbook(str(wb))
+    for ws in book.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                assert cell.data_type != "f", (ws.title, cell.coordinate, cell.value)
+    resolved = book[sr.RESOLVED_SHEET]
+    assert str(resolved.cell(2, 4).value).startswith("=80240")
+    book.close()
+
+
 def test_sales_order_note_is_read_back(tmp: Path):
     from openpyxl import load_workbook
 

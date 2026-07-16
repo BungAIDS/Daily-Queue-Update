@@ -78,6 +78,12 @@ scanned PDFs ──pdf_vision.py (Claude API)──>  (full doc text), vision.tr
 - User spot-checks the 8-order list (419103, 421311, 412477, 420402, 404346,
   404795, 400567, 410087) against the PDFs. Each ❌ becomes a pattern fix +
   regression test.
+- **The "needs eyeballs" channel now exists** (2026-07-16):
+  `quote_run_review.py` — the SO-review twin for quote runs. Launcher: Quote
+  Run Review → Open/Update/Re-parse. DG types feedback on any RUN / FIELD /
+  SUSPECT / MISSED row; notes publish with the data (data_push), Claude acts +
+  `handle`s each, marks ride back on Git Update. Use it for the spot-check
+  list above and for adjudicating NEEDS HUMAN scans.
 
 ### P1 — Coupling-shaft block + hub/box/accessory lines  [DONE 2026-07-09]
 Landed: `Coupling Max/Min/Nom Shaft Dia`, `Coupling Keyway`; fabricated-hub
