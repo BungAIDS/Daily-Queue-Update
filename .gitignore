@@ -27,3 +27,6 @@ __pycache__/
 
 # Single-instance launcher lock (runtime only)
 .launcher.lock
+
+# Claude Code auto-memory
+.claude/auto-memory/dirty-files*
