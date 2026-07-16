@@ -221,7 +221,8 @@ DEFAULT_RULES: Dict[str, Any] = {
         "FLANGE": [r"flange"],
         "FLEX CONNECTOR": [r"flex(ible)?\s*conn", r"expan(?:s|t)ion\s*joint"],
         "COUPLING": [r"flexible\s*coupling", r"steelflex",
-                     r"thomas\s+series", r"\bhalf\s+coupling\b"],
+                     r"thomas\s+series", r"\bhalf\s+coupling\b",
+                     r"^mounting\s+options?\s*:?[ ]*both\s+halves\b"],
         "UNITARY BASE": [r"unitary\s*base", r"structural\s*(steel\s*)?base",
                          r"channel\s*base"],
         "BEARINGS": [r"^bearings?\s+(standard|split\s+pillow\s+block)\b",
@@ -244,8 +245,8 @@ DEFAULT_RULES: Dict[str, Any] = {
                                  r"\bconduit\b", r"\boverhang\b",
                                  r"effective\s*diameter", r"threaded\s*plug",
                                  r"hole\s*diameters?", r"earthing\s*boss"],
-        "INSPECTION": [r"\binspection\b", r"\bISPM\b",
-                       r"mill\s*certifications?"],
+        "INSPECTION": [r"\binspection\b", r"\bISPM\b"],
+        "CERTIFICATION": [r"\bgeneral\s+mill\s+certifications?\b"],
         "DRAWINGS": [r"\bcertified\s*drawings?\b", r"\bprints?\b",
                      r"\bdrawings?\b"],
         "FAN DRAWING WEIGHTS": [
@@ -417,16 +418,20 @@ def split_lead(text: str) -> Tuple[str, str]:
     return text[m.end():].strip(), m.group("num")
 
 
-def normalize_text(raw: str, rules: Dict[str, Any] | None = None) -> str:
-    """The canonical lookup form of a line: uppercase, enumeration/qty, price
-    columns and the L/C/N type letter stripped, known abbreviations expanded,
-    punctuation collapsed to spaces (decimals inside numbers survive).
+def normalize_text(raw: str, rules: Dict[str, Any] | None = None, *,
+                   strip_columns: bool = True) -> str:
+    """The canonical lookup form of a line: uppercase, with enumeration/qty,
+    price columns and the L/C/N type letter optionally stripped, known
+    abbreviations expanded, punctuation collapsed to spaces (decimals inside
+    numbers survive).
     Spelling variants of the same option converge here — this is what search
     and tagging run against."""
     rules = rules or load_rules()
-    s, _ = split_lead(raw.strip().upper())
-    s, _ = split_price_tail(s)
-    s, _, _ = split_type_tail(s)
+    s = raw.strip().upper()
+    if strip_columns:
+        s, _ = split_lead(s)
+        s, _ = split_price_tail(s)
+        s, _, _ = split_type_tail(s)
     abbrev = rules["abbreviations"]
     out: List[str] = []
     for tok in s.split():
@@ -469,6 +474,24 @@ def _item_blob(item: Dict[str, Any]) -> str:
     return " ".join(re.sub(r"\s+", " ", p).strip() for p in parts if str(p).strip())
 
 
+def _normalized_item_blob(item: Dict[str, Any],
+                          rules: Dict[str, Any] | None = None) -> str:
+    """Normalize each physical PDF line before joining it.
+
+    CBC inserts the price columns at the end of the first physical line, even
+    when the description continues below it. Normalizing the already-joined
+    blob leaves those columns in the middle of phrases such as ``Painted Safety
+    / Yellow``. Per-line normalization removes the columns first, then restores
+    the semantic sentence the customer actually printed.
+    """
+    raw = normalize_text(str(item.get("raw", "")), rules)
+    details = [
+        normalize_text(str(detail), rules, strip_columns=False)
+        for detail in item.get("details") or []
+    ]
+    return " ".join(value for value in [raw, *details] if value)
+
+
 def _source_wording(item: Dict[str, Any]) -> str:
     """Verbatim item wording without CBC's quantity/type/price columns."""
     body, _qty = split_lead(str(item.get("raw") or ""))
@@ -477,6 +500,47 @@ def _source_wording(item: Dict[str, Any]) -> str:
     parts = [body.strip()]
     parts.extend(str(detail).strip() for detail in item.get("details") or [])
     return " ".join(part for part in parts if part)
+
+
+_ADDITIONAL_NOTES_TAG = "ADDITIONAL FEATURES / NOTES"
+
+
+def _is_additional_features_section(item: Dict[str, Any]) -> bool:
+    return bool(re.search(
+        r"\bADDITIONAL\s+FEATURES?\b|\bADDITIONAL\s+FEATURES?\s*/\s*NOTES?\b",
+        str(item.get("section") or ""),
+        re.I,
+    ))
+
+
+def _is_additional_note_item(item: Dict[str, Any], primary: str,
+                             norm_blob: str, tags: set[str]) -> bool:
+    """A prose/admin row in Additional Features, not another sold component."""
+    if not _is_additional_features_section(item):
+        return False
+    # Run-test status is an engineering fact even when CBC repeats it here.
+    if re.search(r"\b(?:MECHANICAL\s+)?RUN\s+TEST\b", primary):
+        return False
+    if (_is_customer_responsibility_note(primary) or _is_admin_note(primary)
+            or _is_assembly_note(primary)):
+        return False
+    note_wording = bool(re.search(
+        r"^(?:[A-Z]\.|B\s*&\s*W\s+PART\s+NUMBERS?\b|"
+        r"ALL\s+PIECES\s+NEED\s+TO\s+BE\s+PHYSICALLY\s+LABELLED\b|"
+        r"THE\s+INLET\s+STACK\s+IS\s+TO\s+BE\s+SEPARATE\b|"
+        r"(?:FAN|OUTLET\s+DAMPER|INLET\s+BOX|PRE\s*SPIN\s+DAMPER|"
+        r"MIXING\s+BOX|FRESH\s+AIR\s+DAMPER|SILENCER)\s*:\s*\d+\b)",
+        _source_wording(item),
+        re.I,
+    ))
+    return note_wording or not tags
+
+
+def _additional_note_attributes(item: Dict[str, Any]) -> Dict[str, str]:
+    return {
+        "component": _ADDITIONAL_NOTES_TAG,
+        "note": _source_wording(item),
+    }
 
 
 def _is_fan_drawing_weights(norm_blob: str) -> bool:
@@ -513,7 +577,8 @@ def _accessory_drawing_requirement(norm_blob: str) -> str:
 
 
 _DETAIL_LABELS = (
-    "Vendor", "Product", "Operation", "Actuator Manufacturer",
+    "Vendor", "Product", "Quote Num", "Quote Number", "Quote No", "Operation",
+    "Actuator Manufacturer",
     "Actuator Supplied By", "Actuator Mounting",
     "Actuator Size",
     "Fail Position Upon Loss of Supply/Air/Power",
@@ -581,32 +646,70 @@ def inquiry_numbers(item: Dict[str, Any]) -> List[str]:
     return nums
 
 
-def _used_on(norm_blob: str) -> str:
+def _used_on_components(norm_blob: str) -> List[str]:
     if _is_without_ivc(norm_blob):
-        return ""
+        return []
     # "Inlet, Flanged ... (with IVC)" describes the inlet construction. The
     # parenthetical does not make that inlet line an IVC component.
     if re.match(r"^INLET\b", norm_blob) and re.search(r"\bWITH\s+IVC\b", norm_blob):
-        return ""
+        return []
     component_context = ("DAMPER" in norm_blob or "ACTUATOR" in norm_blob
                          or "VOLUME CONTROL" in norm_blob)
     if not component_context and "IVC" not in norm_blob:
-        return ""
-    if "FRESH AIR" in norm_blob or re.search(r"\bFA\s+DAMPER\b", norm_blob):
-        return "FRESH AIR DAMPER"
-    if "PRESPIN" in norm_blob or "PRE SPIN" in norm_blob:
-        return "PRESPIN DAMPER"
-    if "OUTLET" in norm_blob and ("DAMPER" in norm_blob or "VOLUME CONTROL" in norm_blob):
-        return "OUTLET DAMPER"
-    if "DISCHARGE" in norm_blob and ("DAMPER" in norm_blob or "ACTUATOR" in norm_blob):
-        return "OUTLET DAMPER"
-    if "INLET VANE DAMPER" in norm_blob or re.search(r"\bIVD\b", norm_blob):
-        return "INLET VANE DAMPER"
-    if "IVC" in norm_blob or "INLET VOLUME CONTROL" in norm_blob:
-        return "IVC"
-    if "INLET" in norm_blob and "DAMPER" in norm_blob:
-        return "INLET DAMPER"
-    return ""
+        return []
+
+    matches: List[Tuple[int, str]] = []
+
+    def add(pattern: str, value: str) -> None:
+        match = re.search(pattern, norm_blob)
+        if match:
+            matches.append((match.start(), value))
+
+    # CBC commonly shares the trailing word in "Prespin and Fresh Air Damper
+    # Actuators". Preserve both explicit owners, in the order they are printed.
+    # Normalization removes an ampersand, so the conjunction is optional here.
+    combined_patterns = (
+        (
+            r"\bPRE\s*SPIN\s+(?:AND\s+)?FRESH\s+AIR\s+DAMPER\s+ACTUATORS?\b",
+            ("PRESPIN DAMPER", "FRESH AIR DAMPER"),
+        ),
+        (
+            r"\bFRESH\s+AIR\s+(?:AND\s+)?PRE\s*SPIN\s+DAMPER\s+ACTUATORS?\b",
+            ("FRESH AIR DAMPER", "PRESPIN DAMPER"),
+        ),
+    )
+    combined = None
+    for pattern, owners in combined_patterns:
+        combined = re.search(pattern, norm_blob)
+        if combined:
+            matches.extend(
+                (combined.start() + offset, owner)
+                for offset, owner in enumerate(owners)
+            )
+            break
+    if not combined:
+        add(r"\b(?:FRESH\s+AIR|FA)\s+DAMPER\b", "FRESH AIR DAMPER")
+        add(r"\bPRE\s*SPIN\s+(?:INLET\s+BOX\s+)?DAMPER\b", "PRESPIN DAMPER")
+    add(r"\bOUTLET\s+(?:VOLUME\s+CONTROL|DAMPER)\b", "OUTLET DAMPER")
+    add(r"\bDISCHARGE\s+DAMPER\b", "OUTLET DAMPER")
+    add(r"\bINLET\s+VANE\s+DAMPER\b|\bIVD\b", "INLET VANE DAMPER")
+    add(r"\bINLET\s+VOLUME\s+CONTROL\b|\bIVC\b", "IVC")
+    if not matches:
+        add(r"\bINLET\s+DAMPER\b", "INLET DAMPER")
+
+    values: List[str] = []
+    for _position, value in sorted(matches):
+        _add_unique(values, value)
+    return values
+
+
+def _used_on(norm_blob: str) -> str:
+    values = _used_on_components(norm_blob)
+    return values[0] if values else ""
+
+
+def _used_on_value(norm_blob: str) -> str:
+    return ", ".join(_used_on_components(norm_blob))
 
 
 def _needs_used_on_review(norm_blob: str, attrs: Dict[str, str]) -> bool:
@@ -619,6 +722,177 @@ def _needs_used_on_review(norm_blob: str, attrs: Dict[str, str]) -> bool:
     if re.search(r"\b(BETTIS|UNIC|EMERSON|ACTUATOR\s*:?)\b", norm_blob, re.I):
         return True
     return False
+
+
+def _damper_component(primary: str) -> str:
+    if "ACTUATOR" in primary or "DAMPER" not in primary:
+        return ""
+    if re.search(r"\bFRESH\s+AIR\s+DAMPER\b", primary):
+        return "FRESH AIR DAMPER"
+    if re.search(r"\bPRE\s*SPIN\s+(?:INLET\s+BOX\s+)?DAMPER\b", primary):
+        return "PRESPIN DAMPER"
+    if re.search(r"\b(?:OUTLET|DISCHARGE)\s+DAMPER\b", primary):
+        return "OUTLET DAMPER"
+    if re.search(r"\bINLET\s+VANE\s+DAMPER\b", primary):
+        return "INLET VANE DAMPER"
+    return ""
+
+
+def _damper_attributes(primary: str, norm_blob: str,
+                       tags: set[str]) -> Dict[str, str]:
+    component = _damper_component(primary)
+    if not component or "DAMPER" not in tags:
+        return {}
+    attrs: Dict[str, str] = {"component": component}
+    if re.search(r"\bOPPOSED\s+BLADE\b", norm_blob):
+        attrs["damper_type"] = "OPPOSED BLADE"
+    elif re.search(r"\bOPPOSED\b", norm_blob):
+        attrs["damper_type"] = "OPPOSED"
+    elif re.search(r"\bBACK\s*DRAFT\b", norm_blob):
+        attrs["damper_type"] = "BACKDRAFT"
+    if re.search(r"\bWITHOUT\s+STUFFING\s+BOX(?:ES)?\b", norm_blob):
+        attrs["stuffing_boxes"] = "NO"
+    elif re.search(r"\bWITH\s+STUFFING\s+BOX(?:ES)?\b", norm_blob):
+        attrs["stuffing_boxes"] = "YES"
+    if re.search(r"\bMANUAL\b", norm_blob):
+        attrs["operation"] = "Manual"
+    return attrs
+
+
+def _actuator_model(value: str) -> str:
+    model = re.sub(r"[^A-Z0-9]", "", str(value).upper())
+    if model.startswith("RPD") and not model.startswith("RPED"):
+        model = "RPED" + model[3:]
+    return model
+
+
+def _actuator_attributes(item: Dict[str, Any], primary: str, norm_blob: str,
+                         tags: set[str], raw_blob: str) -> Dict[str, str]:
+    operation = _label_value(item, "Operation")
+    explicit_actuator_labels = any(
+        _label_value(item, label)
+        for label in (
+            "Actuator Manufacturer", "Actuator Supplied By", "Actuator Mounting",
+            "Actuator Size",
+            "Fail Position Upon Loss of Supply/Air/Power",
+            "Fail Position Upon Loss of Signal",
+        )
+    )
+    damper_actuator_context = (
+        explicit_actuator_labels or operation.strip().upper() == "AUTOMATIC"
+    )
+    if ("ACTUATOR" not in tags and "ACTUATOR" not in norm_blob
+            and not (_damper_component(primary) and damper_actuator_context)):
+        return {}
+    attrs: Dict[str, str] = {"component": "ACTUATOR"}
+    used_on = _used_on_value(norm_blob)
+    if used_on:
+        attrs["used_on"] = used_on
+
+    manufacturer_value = _label_value(item, "Actuator Manufacturer")
+    manufacturer_blob = f"{manufacturer_value} {norm_blob}".upper()
+    for manufacturer in ("BETTIS", "UNIC", "EMERSON"):
+        if manufacturer in manufacturer_blob:
+            attrs["manufacturer"] = manufacturer
+            break
+
+    vendor = _label_value(item, "Vendor")
+    if vendor:
+        attrs["vendor"] = vendor
+
+    supplied_by = _label_value(item, "Actuator Supplied By")
+    if supplied_by and not re.fullmatch(r"CBC\s*\(MOUNTED\)", supplied_by, re.I):
+        attrs["supplied_by"] = supplied_by
+    mounting = _label_value(item, "Actuator Mounting")
+    if mounting:
+        attrs["mounting"] = mounting
+    elif re.search(r"\bCBC\s+MOUNT\b", norm_blob):
+        attrs["mounting"] = "CBC MOUNT"
+
+    if operation:
+        attrs["operation"] = operation
+    elif re.search(r"\bAUTOMATIC\b", norm_blob):
+        attrs["operation"] = "Automatic"
+
+    model_match = re.search(r"\b(RP(?:E)?D\s*-?\s*\d*|UNIC\s*\d+(?:/\d+)?)\b",
+                            raw_blob, re.I)
+    if model_match:
+        model = _actuator_model(model_match.group(1))
+        if model:
+            attrs["model"] = model
+            size = re.search(r"(\d+(?:/\d+)?)$", model)
+            if size:
+                attrs["size"] = size.group(1)
+    explicit_size = _label_value(item, "Actuator Size")
+    if explicit_size:
+        attrs["size"] = explicit_size.upper()
+
+    if re.search(r"\bDOUBLE\s+ACTING\b", norm_blob):
+        attrs["actuator_type"] = (
+            "DOUBLE ACTING PNEUMATIC" if "PNEUMATIC" in norm_blob
+            else "DOUBLE ACTING"
+        )
+    elif "PNEUMATIC" in norm_blob:
+        attrs["actuator_type"] = "PNEUMATIC"
+
+    compact_blob = re.sub(r"\s*-\s*", "-", raw_blob)
+    if re.search(r"\bVAC\s*#?\s*D400", compact_blob, re.I):
+        attrs["positioner_manufacturer"] = "VAC"
+    positioner = re.search(r"\bVAC\s*#?\s*(D400-[A-Z0-9/-]+)", compact_blob, re.I)
+    if positioner:
+        attrs["positioner_model"] = positioner.group(1).upper().rstrip("-")
+    if re.search(r"\bFAIL\s+FREEZE\b", norm_blob):
+        attrs["positioner_action"] = "FAIL FREEZE"
+    if re.search(r"\bHART\b", norm_blob):
+        attrs["positioner_protocol"] = "HART"
+    if re.search(r"\bNEMA\s+4X\b", norm_blob):
+        attrs["positioner_enclosure"] = "NEMA 4X"
+
+    switches = re.search(r"\bWITH\s*\(?\s*(\d+)\s*\)?\s+MICRO\s+SWITCHES?\b",
+                         norm_blob)
+    if switches:
+        attrs["micro_switch_qty"] = switches.group(1)
+    switch_voltage = re.search(r"\b(\d+)\s*V\s+MAX\b", norm_blob)
+    if switch_voltage:
+        attrs["micro_switch_voltage"] = f"{switch_voltage.group(1)}V MAX"
+    if re.search(r"\b4(?:\s*-\s*|\s+)20\s*MA\s+TRANSMITTER\b", norm_blob):
+        attrs["transmitter"] = "4-20MA"
+    lockup = re.search(r"\bFISHER\s*#?\s*(377-?1)\s+LOCK\s*-?\s*UP\s+VALVE\b",
+                       compact_blob, re.I)
+    if lockup:
+        attrs["lock_up_valve"] = f"FISHER {lockup.group(1).upper()}"
+    regulator = re.search(r"\bFISHER\s*#?\s*(67CFR)\s+FILTER\s*/?\s*REGULATOR\b",
+                          compact_blob, re.I)
+    if regulator:
+        attrs["filter_regulator"] = f"FISHER {regulator.group(1).upper()}"
+    if re.search(r"\b(?:SS|STAINLESS\s+STEEL)\s+TUBING\b", raw_blob, re.I):
+        attrs["ss_tubing"] = "YES"
+
+    power_fail = _label_value(item, "Fail Position Upon Loss of Supply/Air/Power")
+    signal_fail = _label_value(item, "Fail Position Upon Loss of Signal")
+    if power_fail:
+        attrs["fail_position_upon_loss_of_power"] = power_fail
+    if signal_fail:
+        attrs["fail_position_upon_loss_of_signal"] = signal_fail
+    if re.search(r"\bFAIL\s+IN\s+PLACE\b.*\bLOSS\s+OF\s+(?:AIR\s+SUPPLY|SUPPLY\s+AIR)\b",
+                 norm_blob):
+        attrs["fail_position_upon_loss_of_power"] = "In Place"
+    if re.search(r"\bLOSS\s+OF\s+(?:ELECTRIC\s+)?CONTROL\s+SIGNAL\b", norm_blob):
+        attrs["fail_position_upon_loss_of_signal"] = "In Place"
+
+    quantity = re.search(r"\bQTY\s*\(?\s*(\d+)\s*\)?", raw_blob, re.I)
+    if quantity:
+        attrs["quantity"] = quantity.group(1)
+    quote = re.search(
+        r"\bQUOTE\s*(?:NUM(?:BER)?|NO|#)\s*:?\s*([A-Z0-9-]+)",
+        raw_blob,
+        re.I,
+    )
+    if quote:
+        attrs["quote_number"] = quote.group(1).upper()
+    if _needs_used_on_review(norm_blob, attrs):
+        attrs["used_on_review"] = "INCONCLUSIVE - INLET/OUTLET/PRESPIN/IVC"
+    return attrs
 
 
 def _is_ivc_actuator_context(norm_blob: str, tags: set[str]) -> bool:
@@ -643,7 +917,6 @@ def _is_inspection_line(primary: str, norm_blob: str) -> bool:
         r"\bCUSTOMER\s+FINAL\s+INSPECTION\b",
         r"\bUNWITNESSED\s+DIMENSIONAL\s+INSPECTION\b",
         r"\bFINAL\s+INSPECTION\s+REPORT\b",
-        r"\bGENERAL\s+MILL\s+CERTIFICATIONS?\b",
     ]
     return any(re.search(pattern, primary, re.I) or re.search(pattern, norm_blob, re.I)
                for pattern in inspection_patterns)
@@ -1104,9 +1377,14 @@ def _inlet_outlet_construction_attributes(primary: str, tags: set[str]) -> Dict[
 def _inlet_attributes(primary: str, norm_blob: str, tags: set[str], raw_blob: str) -> Dict[str, str]:
     if "INLET" not in tags:
         return {}
+    if re.search(r"\bPRE\s*SPIN\s+(?:INLET\s+BOX\s+)?DAMPER\b", primary):
+        return {}
     attrs: Dict[str, str] = {}
     subcategories: List[str] = []
     features: List[str] = []
+    inlet_box = bool(re.search(r"\bINLET\s+BOX\b", primary))
+    if inlet_box:
+        attrs["component"] = "INLET BOX"
 
     def add_subcategory(value: str) -> None:
         _add_unique(subcategories, value)
@@ -1122,8 +1400,6 @@ def _inlet_attributes(primary: str, norm_blob: str, tags: set[str], raw_blob: st
         add_subcategory("BELL")
     if re.search(r"\bINLET\s+CONE\b|\bINTEGRAL\s+INLET\s+CONE\b", primary):
         add_subcategory("INLET CONE")
-    if re.search(r"\bINLET\s+BOX\b", primary):
-        add_subcategory("INLET BOX")
     if re.search(r"\bINLET,\s*TUBE\b|\bINLET\s+TUBE\b", primary):
         add_subcategory("TUBE")
 
@@ -1140,8 +1416,10 @@ def _inlet_attributes(primary: str, norm_blob: str, tags: set[str], raw_blob: st
         if m:
             attrs["inlet_direction"] = m.group(1)
     if "BOLT ON" in primary or "BOLT-ON" in raw_blob.upper():
-        add_feature("BOLT-ON")
-        attrs["inlet_box_type"] = "BOLT-ON"
+        if inlet_box:
+            attrs["bolt_on"] = "YES"
+        else:
+            add_feature("BOLT-ON")
     if "ASSEMBLY" in primary and "INLET BOX" in primary:
         add_feature("ASSEMBLY")
         attrs["inlet_box_type"] = "ASSEMBLY"
@@ -1150,12 +1428,20 @@ def _inlet_attributes(primary: str, norm_blob: str, tags: set[str], raw_blob: st
     if re.search(r"\bSUPPORT\s+LEGS\b", primary):
         add_feature("SUPPORT LEGS")
     if "OVERSIZED" in norm_blob and "INLET BOX" in primary:
-        add_feature("OVERSIZED")
+        attrs["inlet_box_size"] = "OVERSIZED"
+    if inlet_box and re.search(r"\bFREE\s+STANDING\b", norm_blob):
+        attrs["free_standing"] = "YES"
+    deadload = re.search(r"\bSUPPORT\s+(\d[\d,]*)\s+LBS?\.?\s+DEAD\s*LOAD\b", norm_blob)
+    if inlet_box and deadload:
+        attrs["supported_deadload"] = f"{deadload.group(1)} LBS"
     if "SHIPPED LOOSE" in norm_blob or "SHIP LOOSE" in norm_blob:
         attrs["shipping_state"] = "SHIPPED LOOSE"
     m = re.search(r"\bINLET\s+BOX\s+SIZE\s+(\d+)\b|\bBOX\s+SIZE\s+(\d+)\b", norm_blob)
     if m:
-        attrs["inlet_box_size"] = next(v for v in m.groups() if v)
+        size = next(v for v in m.groups() if v)
+        attrs["inlet_box_size"] = f"OVERSIZED {size}" if "OVERSIZED" in norm_blob else size
+    elif inlet_box and "OVERSIZED" not in norm_blob:
+        attrs["inlet_box_size"] = "STD"
     m = re.search(r"\b(?:INLET\s+CONE\s+)?(\d+)\s*%", primary)
     if m and "INLET CONE" in primary:
         attrs["inlet_cone_width_percent"] = m.group(1)
@@ -1179,22 +1465,24 @@ def _inlet_attributes(primary: str, norm_blob: str, tags: set[str], raw_blob: st
     if "CARTONED" in norm_blob and "INLET CONE" in primary:
         add_feature("CARTONED")
 
-    if subcategories:
+    if subcategories and not inlet_box:
         attrs["inlet_subcategory"] = ", ".join(subcategories)
-    if features:
+    if features and not inlet_box:
         attrs["inlet_feature"] = ", ".join(features)
     return attrs
 
 
-def _mixing_box_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
+def _mixing_box_attributes(norm_blob: str, tags: set[str],
+                           raw_blob: str = "") -> Dict[str, str]:
     if "MIXING BOX" not in tags:
         return {}
     attrs: Dict[str, str] = {"component": "MIXING BOX"}
-    features: List[str] = []
-    if "FGR PORT" in norm_blob:
-        _add_unique(features, "FGR PORT")
-    if "FLANGED" in norm_blob:
-        _add_unique(features, "FLANGED")
+    fgr = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:\"|IN(?:CH(?:ES)?)?\.?)?\s+FGR\s+PORT\b",
+                    raw_blob or norm_blob, re.I)
+    if fgr:
+        attrs["fgr_port"] = f'{fgr.group(1)}"'
+    elif "FGR PORT" in norm_blob:
+        attrs["fgr_port"] = "YES"
     if "SHIPPED LOOSE" in norm_blob or "SHIP LOOSE" in norm_blob:
         attrs["shipping_state"] = "SHIPPED LOOSE"
     if "INLET BOX" in norm_blob:
@@ -1202,8 +1490,10 @@ def _mixing_box_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
     m = re.search(r"\bSIZE\s+(\d+)\s+INLET\s+BOX\b|\bINLET\s+BOX\s+SIZE\s+(\d+)\b", norm_blob)
     if m:
         attrs["used_on_size"] = next(v for v in m.groups() if v)
-    if features:
-        attrs["mixing_box_feature"] = ", ".join(features)
+    size = re.search(r"^\s*(\d+(?:\.\d+)?)\s*(?:\"|IN(?:CH(?:ES)?)?\.?)?\s+MIXING\s+BOX\b",
+                     raw_blob or norm_blob, re.I)
+    if size:
+        attrs["size"] = f'{size.group(1)}"'
     return attrs
 
 
@@ -1514,6 +1804,38 @@ def _motor_attributes(item: Dict[str, Any], primary: str, norm_blob: str,
             if code and value:
                 attrs[f"motor_mod_{code}"] = value
 
+    # ABB and other buyout motors often print option codes as a wrapped list:
+    # ``+002 Restamping ...`` followed by one or more continuation lines. Keep
+    # every coded option under MOTOR, including packaging/certification options;
+    # the code is the stable vendor vocabulary and the wording remains verbatim.
+    current_code = ""
+    current_parts: List[str] = []
+
+    def flush_mod() -> None:
+        nonlocal current_code, current_parts
+        value = re.sub(r"\s+", " ", " ".join(current_parts)).strip(" ,;.")
+        while value.endswith(")") and value.count(")") > value.count("("):
+            value = value[:-1].rstrip()
+        if current_code and value:
+            attrs[f"motor_mod_{current_code}"] = value
+        current_code, current_parts = "", []
+
+    for detail in [str(value).strip() for value in item.get("details") or []]:
+        option = re.match(r"^\+(\d{2,4})\s+(.+)$", detail)
+        if option:
+            flush_mod()
+            current_code = option.group(1)
+            current_parts = [option.group(2)]
+            continue
+        if not current_code:
+            continue
+        if re.match(r"^(?:VENDOR|PRODUCT|QUOTE\s+(?:NUM|NO|#)|\d+(?:\.\d+)?\s*HP)\b",
+                    detail, re.I):
+            flush_mod()
+            continue
+        current_parts.append(detail)
+    flush_mod()
+
     if re.search(r"\b(?:CUSTOMER\s+(?:PROVIDED|FURNISHED|SUPPLIED)|MOTOR\s+BY\s+CUSTOMER)\b", norm_blob):
         attrs["motor_supplied_by"] = "CUSTOMER"
     elif re.search(r"\b(?:MOTOR\s+(?:PROVIDED|FURNISHED|SUPPLIED)?\s*BY\s+OTHERS|SUPPLIED\s+AND\s+MOUNTED\s+BY\s+OTHERS)\b", norm_blob):
@@ -1697,6 +2019,16 @@ def _nameplate_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[
     return attrs
 
 
+def _certification_attributes(primary: str, norm_blob: str,
+                              tags: set[str]) -> Dict[str, str]:
+    if "CERTIFICATION" not in tags:
+        return {}
+    attrs: Dict[str, str] = {"component": "CERTIFICATION"}
+    if re.search(r"\bGENERAL\s+MILL\s+CERTIFICATIONS?\b", norm_blob):
+        attrs["certification_type"] = "GENERAL MILL CERTIFICATIONS"
+    return attrs
+
+
 def _lifting_lug_attributes(tags: set[str]) -> Dict[str, str]:
     if "LIFTING LUGS" not in tags:
         return {}
@@ -1864,13 +2196,11 @@ def _weather_cover_attributes(primary: str, norm_blob: str, tags: set[str]) -> D
 def _shaft_cooler_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
     if "SHAFT COOLER" not in tags:
         return {}
-    attrs: Dict[str, str] = {"shaft_cooler": "YES"}
+    attrs: Dict[str, str] = {}
     if re.match(r"^(SHAFT\s+COOLER|HEAT\s+SLINGER)\b", primary):
         attrs["component"] = "SHAFT COOLER"
     if re.search(r"\bHEAT\s+SLINGER\b", norm_blob):
         attrs["shaft_cooler_type"] = "HEAT SLINGER"
-    else:
-        attrs["shaft_cooler_type"] = "SHAFT COOLER"
     if "CAST" in norm_blob:
         attrs["shaft_cooler_construction"] = "CAST"
     return attrs
@@ -2044,14 +2374,20 @@ def _silencer_attributes(primary: str, norm_blob: str, tags: set[str], product: 
     else:
         attrs["component"] = "SILENCER"
 
+    if "AEROACOUSTIC" in norm_blob:
+        attrs["brand"] = "AEROACOUSTIC"
+    elif re.search(r"\bVAW\b", norm_blob):
+        attrs["brand"] = "VAW"
+
     model_patterns = (
-        r"\bMODEL\s*:?\s*([A-Z0-9]+(?:[-\s][A-Z0-9]+){0,3})\b",
+        r"\bMODEL\s*:?\s*([A-Z0-9]+(?:[.-][A-Z0-9]+)+)\b",
         r"\b(?:VAW\s+)?SILENCER\s+([0-9A-Z]+VRSB[-\s][A-Z0-9]+)\b",
         r"\b([0-9]{2}VCIB[-\s]V99[-\s]SN\d+)\b",
         r"\b((?:CI|IB|SI)[-\s]\d+[-\s][A-Z0-9.]+|[0-9]+[-\s]TA[-\s][A-Z0-9]+)\b",
     )
+    model_source = blob or norm_blob
     for pattern in model_patterns:
-        m = re.search(pattern, norm_blob)
+        m = re.search(pattern, model_source, re.I)
         if m:
             model = re.sub(r"\s+", "-", m.group(1).strip())
             model = re.sub(
@@ -2074,33 +2410,38 @@ def _silencer_attributes(primary: str, norm_blob: str, tags: set[str], product: 
     if m and m.group(1):
         attrs["pressure_drop"] = m.group(1)
 
-    features: List[str] = []
-    for label, pattern in (
-        ("PIEZOMETER TUBE", r"\bPIEZOMETER\s+TUBE\b"),
-        ("VELOCITY TUBE", r"\bVELOCITY\s+TUBE\b"),
-        ("THERMOWELL PORT", r"\bTHERMOWELL\s+PORT\b"),
-        ("TRASH SCREEN", r"\bTRASH\s+SCREEN\b"),
-        ("RAIN HOOD", r"\bRAIN\s+HOOD\b|\bRAINHOOD\b"),
-        ("FILTER", r"\bFILTER\b"),
-        ("SUPPORT LEGS", r"\b(SUPPORT|EXTENDED)\s+LEGS?\b"),
-        ("HARDWARE/GASKET", r"\b(H\s*&\s*G|H\s+G|HARDWARE\s+AND\s+GASKET|GASKET)\b"),
-        ("LIFTING LUGS", r"\bLIFTING\s+LUGS?\b"),
-        ("MOUNTING HARDWARE", r"\bMOUNTING\s+HARDWARE\b"),
+    for key, pattern in (
+        ("piezometer_tube", r"\bPIEZOMETER\s+TUBE\b"),
+        ("velocity_tube", r"\bVELOCITY\s+TUBE\b"),
+        ("thermowell_port", r"\bTHERMOWELL\s+PORT\b"),
+        ("trash_screen", r"\bTRASH\s+SCREEN\b"),
+        ("rain_hood", r"\bRAIN\s+HOOD\b|\bRAINHOOD\b"),
+        ("filter", r"\bFILTER\b"),
+        ("support_legs", r"\b(?:SUPPORT|EXTENDED)\s+LEGS?\b"),
+        ("mounting_lugs", r"\bMOUNTING\s+LUGS?\b"),
+        ("lifting_lugs", r"\bLIFTING\s+LUGS?\b"),
+        ("mounting_hardware", r"\bMOUNTING\s+HARDWARE\b"),
+        ("gasket", r"\b(?:H\s*&\s*G|H\s+G|HARDWARE\s+AND\s+GASKET|GASKET)\b"),
     ):
         if re.search(pattern, norm_blob):
-            _add_unique(features, label)
-    if features:
-        attrs["feature"] = ", ".join(features)
+            attrs[key] = "YES"
     drawing = _accessory_drawing_requirement(norm_blob)
     if drawing:
         attrs["drawing_requirement"] = drawing
     job_number = _thm_job_number(blob or norm_blob)
     if job_number:
         attrs["job_number"] = job_number
-    tag = re.search(r"\bTAG\s+SILENCER\s*:?[ ]*([A-Z0-9]+(?:-[A-Z0-9]+)+)\b",
-                    blob or norm_blob, re.I)
+    tag = re.search(
+        r"\bTAG(?:\s+SILENCER)?\s*:?\s*((?:B\s*&\s*W\s+PN\s+)?[A-Z0-9]+(?:-[A-Z0-9]+)*)\b",
+        blob or norm_blob,
+        re.I,
+    )
     if tag:
-        attrs["tag"] = tag.group(1).upper()
+        attrs["tag"] = re.sub(r"\s+", " ", tag.group(1)).upper()
+    quote = re.search(r"\bQUOTE\s*(?:NUM(?:BER)?|NO|#)\s*:?\s*([A-Z0-9-]+)",
+                      blob or norm_blob, re.I)
+    if quote:
+        attrs["quote_number"] = quote.group(1).upper()
     return attrs
 
 
@@ -2643,12 +2984,10 @@ def _coupling_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
     if "FALK" in norm_blob or "STEELFLEX" in norm_blob:
         attrs["manufacturer"] = "FALK"
         attrs["coupling_type"] = "FALK TYPE T STEELFLEX"
-        attrs["model"] = "TYPE T STEELFLEX"
     if "REXNORD" in norm_blob:
         attrs["manufacturer"] = "REXNORD"
         m = re.search(r"\bREXNORD\s+(THOMAS\s+SERIES\s+\d+)\b", norm_blob)
         attrs["coupling_type"] = f"REXNORD {m.group(1)}" if m else "REXNORD THOMAS SERIES"
-        attrs["model"] = attrs["coupling_type"].replace("REXNORD ", "")
     if re.search(r"\bHALF\s+COUPLING\b", norm_blob):
         attrs["coupling_type"] = "HALF COUPLING"
     m = re.search(r"\bSIZE\s+([A-Z0-9-]+)\b", norm_blob)
@@ -2663,6 +3002,14 @@ def _coupling_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
         attrs["cover_type"] = m.group(1)
     if re.search(r"\bSET\s+SCREWS?\b", norm_blob):
         attrs["set_screws"] = "YES"
+    puller_holes = re.search(r"\bPULLER\s+HOLES?\s*:?\s*(NONE|YES|NO|[A-Z0-9./-]+)\b",
+                             norm_blob)
+    if puller_holes:
+        attrs["puller_holes"] = puller_holes.group(1).upper()
+    mounting_options = re.search(r"\bMOUNTING\s+OPTIONS?\s*:?\s*(BOTH\s+HALVES)\b",
+                                  norm_blob)
+    if mounting_options:
+        attrs["mounting_options"] = mounting_options.group(1).upper()
     if "CBC MOUNT" in norm_blob:
         attrs["mounting"] = "CBC MOUNT"
     return attrs
@@ -3465,8 +3812,10 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
     tags = tag_item(_taggable_text(item, rules), rules)
     tag_set = set(tags)
     primary = _primary_norm(item, rules)
-    norm_blob = normalize_text(_item_blob(item), rules)
+    norm_blob = _normalized_item_blob(item, rules)
     context = item.get("_order_context") if isinstance(item.get("_order_context"), dict) else {}
+    if _is_additional_note_item(item, primary, norm_blob, set(tags)):
+        return [_ADDITIONAL_NOTES_TAG]
     if _is_fan_drawing_weights(norm_blob):
         return ["FAN DRAWING WEIGHTS"]
     if re.search(r"\bTHREADED\s+PLUG\b.*\bCONDUIT\s+BOX\b", norm_blob):
@@ -3498,6 +3847,8 @@ def _final_tags(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Li
     if "MIXING BOX" in tags and _is_mixing_box_line(primary, norm_blob):
         tags = [t for t in tags if t != "INLET"]
     if _is_non_inlet_component_mounted_to_inlet_box(primary, norm_blob, set(tags)):
+        tags = [t for t in tags if t != "INLET"]
+    if re.search(r"\bPRE\s*SPIN\s+(?:INLET\s+BOX\s+)?DAMPER\b", primary):
         tags = [t for t in tags if t != "INLET"]
     if _is_label_instruction_line(primary, norm_blob, set(tags)):
         tags = [t for t in tags if t not in _LABEL_DETAIL_TAGS]
@@ -3620,6 +3971,21 @@ def _canonical_component_attrs(item: Dict[str, Any], primary: str, norm_blob: st
         if not tied:
             attrs.setdefault("component", name)
 
+    if _is_base_fan_line(primary):
+        claim("BASE FAN")
+        wording = _source_wording(item)
+        description = re.search(r"^Base\s+Fan\s*\((.+)\)\s*$", wording, re.I)
+        if description:
+            value = re.sub(
+                r",?\s*Inquiry\s*(?:Num(?:ber)?|#)\s*:?\s*"
+                + _INQUIRY_NUM + r"\s*$",
+                "",
+                description.group(1),
+                flags=re.I,
+            ).strip(" ,")
+            if value:
+                attrs.setdefault("description", value)
+
     # A run test (mechanical run test / run test) is the one mechanical run test.
     if re.search(r"\b(?:MECHANICAL\s+)?RUN\s+TEST\b", primary):
         claim("MECHANICAL RUN TEST")
@@ -3697,12 +4063,15 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     """Structured fan-component details pulled from raw text + detail lines."""
     rules = rules or load_rules()
     blob = _item_blob(item)
-    norm_blob = normalize_text(blob, rules)
+    norm_blob = _normalized_item_blob(item, rules)
     raw_tags = set(tag_item(_taggable_text(item, rules), rules))
     tags = set(_final_tags(item, rules))
     primary = _primary_norm(item, rules)
     context = item.get("_order_context") if isinstance(item.get("_order_context"), dict) else {}
     attrs: Dict[str, str] = {}
+
+    if _is_additional_note_item(item, primary, norm_blob, raw_tags):
+        return _additional_note_attributes(item)
 
     inquiries = inquiry_numbers(item)
     if inquiries:
@@ -3734,14 +4103,16 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
         attrs.update(location_attrs)
     attrs.update(_flex_connector_attributes(norm_blob, tags))
     attrs.update(_coupling_attributes(norm_blob, tags))
+    attrs.update(_damper_attributes(primary, norm_blob, tags))
     attrs.update(_low_leakage_attributes(norm_blob, tags))
     attrs.update(_temperature_attributes(primary, norm_blob, tags, blob))
     attrs.update(_heavy_duty_attributes(norm_blob, tags))
     attrs.update(_inlet_attributes(primary, norm_blob, tags, blob))
-    attrs.update(_mixing_box_attributes(norm_blob, tags))
+    attrs.update(_mixing_box_attributes(norm_blob, tags, blob))
     attrs.update(_inlet_mount_attributes(norm_blob))
     attrs.update(_inlet_vane_attributes(primary, norm_blob, tags))
     attrs.update(_inspection_attributes(primary, norm_blob, tags))
+    attrs.update(_certification_attributes(primary, norm_blob, tags))
     attrs.update(_motor_insulation_attributes(norm_blob, tags, raw_tags))
     attrs.update(_motor_warranty_attributes(norm_blob, tags))
     attrs.update(_insulation_attributes(item, primary, norm_blob, tags))
@@ -3760,12 +4131,21 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
 
     vendor = _label_value(item, "Vendor")
     product = _label_value(item, "Product")
+    quote_number = (
+        _label_value(item, "Quote Num")
+        or _label_value(item, "Quote Number")
+        or _label_value(item, "Quote No")
+    )
     base_fan = _is_base_fan_line(primary)
+    silencer_attrs = _silencer_attributes(primary, norm_blob, tags, product, blob)
+    if silencer_attrs:
+        attrs.update(silencer_attrs)
     if vendor and not base_fan:
         attrs.setdefault("vendor", vendor)
     if product and not base_fan:
         attrs.setdefault("product", product)
-    attrs.update(_silencer_attributes(primary, norm_blob, tags, product, blob))
+    if quote_number and "MOTOR" not in tags:
+        attrs.setdefault("quote_number", quote_number.upper())
     attrs.update(_spark_resistant_attributes(norm_blob, tags))
     attrs.update(_spare_parts_attributes(item, primary, norm_blob, tags))
     if _is_phase_balance_disclaimer(primary):
@@ -3818,43 +4198,28 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_balance_attributes(norm_blob))
     attrs.update(_bearing_attributes(blob, norm_blob))
 
-    used_on = "" if _is_ship_via_note(primary, norm_blob) else _used_on(norm_blob)
-    if used_on and "SPARE PARTS" not in tags:
+    used_on = "" if _is_ship_via_note(primary, norm_blob) else _used_on_value(norm_blob)
+    parent_damper = str(attrs.get("component") or "").upper() in {
+        "FRESH AIR DAMPER", "OUTLET DAMPER", "PRESPIN DAMPER",
+        "INLET VANE DAMPER", "IVC",
+    }
+    if used_on and "SPARE PARTS" not in tags and not parent_damper:
         attrs["used_on"] = used_on
     if "SPARE PARTS" in tags:
         attrs.pop("used_on", None)
 
-    if "ACTUATOR" in tags or "ACTUATOR" in norm_blob:
-        attrs["component"] = "ACTUATOR"
-        for label, key in (
-            ("Actuator Manufacturer", "manufacturer"),
-            ("Actuator Supplied By", "supplied_by"),
-            ("Actuator Mounting", "mounting"),
-            ("Fail Position Upon Loss of Supply/Air/Power",
-             "fail_position_upon_loss_of_power"),
-            ("Fail Position Upon Loss of Signal",
-             "fail_position_upon_loss_of_signal"),
-            ("Operation", "operation"),
-        ):
-            val = _label_value(item, label)
-            if val:
-                attrs[key] = val
-        m = re.search(
-            r"\b(UNIC\s*(?P<unic_size>\d+(?:/\d+)?)|"
-            r"BETTIS\s*#?\s*(?P<bettis_size>[A-Z0-9-]+)|"
-            r"EMERSON\s+FIELD\s+Q)\b",
-            blob, re.I,
-        )
-        if m:
-            attrs["model"] = re.sub(r"\s+", " ", m.group(1)).strip()
-            size = (_label_value(item, "Actuator Size")
-                    or m.groupdict().get("unic_size")
-                    or m.groupdict().get("bettis_size")
-                    or "")
-            if size:
-                attrs["size"] = size.upper()
-        if _needs_used_on_review(norm_blob, attrs):
-            attrs["used_on_review"] = "INCONCLUSIVE - INLET/OUTLET/PRESPIN/IVC"
+    actuator_attrs = _actuator_attributes(item, primary, norm_blob, tags, blob)
+    if actuator_attrs and parent_damper:
+        for key, value in actuator_attrs.items():
+            if key not in {"component", "used_on"}:
+                attrs[f"actuator_{key}"] = value
+    elif actuator_attrs:
+        attrs.update(actuator_attrs)
+
+    if attrs.get("ss_tubing") == "YES" or attrs.get("actuator_ss_tubing") == "YES":
+        if str(attrs.get("component_material_scope") or "").upper() == "TUBING":
+            attrs.pop("component_material", None)
+            attrs.pop("component_material_scope", None)
 
     is_drive = "DRIVE COMPONENTS" in tags
     if is_drive:
@@ -3892,6 +4257,34 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     _canonical_component_attrs(item, primary, norm_blob, blob, tags, attrs)
 
     component = str(attrs.get("component") or "").upper()
+    if component == "MOTOR":
+        attrs.pop("shipping_scope", None)
+        # Vendor option codes such as +374 are motor facts, not customer fan
+        # drawing deliverables.
+        attrs.pop("drawing_type", None)
+        attrs.pop("drawing_scope", None)
+    if component == "COUPLING":
+        if str(attrs.get("special_construction_type") or "").upper() == "SET SCREWS":
+            attrs.pop("special_construction_type", None)
+    if component == "ACTUATOR":
+        if normalize_text(str(attrs.get("product") or "")) == "ACTUATOR":
+            attrs.pop("product", None)
+        attrs.pop("shipping_scope", None)
+    if component in {"FRESH AIR DAMPER", "OUTLET DAMPER", "PRESPIN DAMPER",
+                     "INLET VANE DAMPER", "IVC"}:
+        attrs.pop("shipping_scope", None)
+        attrs.pop("inlet_subcategory", None)
+        attrs.pop("used_on", None)
+        if any(key.startswith("actuator_") for key in attrs):
+            attrs.pop("mounting", None)
+            if normalize_text(str(attrs.get("product") or "")) == "ACTUATOR":
+                attrs.pop("product", None)
+            if attrs.get("vendor") == attrs.get("actuator_vendor"):
+                attrs.pop("vendor", None)
+    if component == "INLET BOX":
+        attrs.pop("inlet_subcategory", None)
+        attrs.pop("inlet_feature", None)
+        attrs.pop("inlet_box_type", None)
     if component in {"INLET SILENCER", "OUTLET SILENCER", "SILENCER",
                      "INLET EXPANSION JOINT", "OUTLET EXPANSION JOINT",
                      "EXPANSION JOINT"}:
@@ -3902,12 +4295,14 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
         attrs.pop("drawing_type", None)
         attrs.pop("drawing_scope", None)
         attrs.pop("shipping_scope", None)
+        attrs.pop("weather_cover_type", None)
+        attrs.pop("weather_cover_scope", None)
+        attrs.pop("weather_cover_used_on", None)
+        attrs.pop("weather_cover_feature", None)
+        attrs.pop("weather_cover_model", None)
         attrs.pop("flange_type", None)
         attrs.pop("flange_scope", None)
-        if str(attrs.get("used_on") or "").upper() in {
-            "SILENCER", "INLET", "OUTLET", "FLEX CONNECTOR"
-        }:
-            attrs.pop("used_on", None)
+        attrs.pop("used_on", None)
         product_value = normalize_text(str(attrs.get("product") or ""))
         redundant_products = {
             "SILENCER", "INLET SILENCER", "OUTLET SILENCER",
@@ -3925,13 +4320,17 @@ _UNCLASSIFIED_DETAIL_PREFIX = "UNCLASSIFIED DETAIL: "
 def _known_non_fact_detail(detail: str) -> bool:
     """Source context we intentionally retain without turning into a fact."""
     norm = normalize_text(detail)
+    labels = "|".join(re.escape(label) for label in _DETAIL_LABELS)
     return bool(
-        re.match(r"^IVC\s+HANDLE\s+LOCATION\s+FOR\s+DISCHARGE\s*$", norm, re.I)
+        re.fullmatch(r"EQUIVALENT", norm, re.I)
+        or re.match(rf"^\s*(?:{labels})\s*:", detail, re.I)
+        or re.match(r"^DROP\s+OF\s+AT\s+[\d,\s]+\s+CFM\b", norm, re.I)
+        or re.match(r"^IVC\s+HANDLE\s+LOCATION\s+FOR\s+DISCHARGE\s*$", norm, re.I)
         or _thm_job_number(detail)
         or re.match(r"^TO\s+BE\s+PHASE\s+BALANCED\b", norm, re.I)
         or re.match(r"^ARE\s+NOT\s+MOUNTED\s+BY\s+CHICAGO\s+BLOWER\b", norm, re.I)
         or re.match(
-            r"^PRODUCT\s+(?:(?:INLET|OUTLET)\s+)?(?:SILENCER|EXPANSION\s+JOINT)$",
+            r"^PRODUCT\s+(?:(?:INLET|OUTLET)\s+)?(?:ACTUATOR|SILENCER|EXPANSION\s+JOINT)$",
             norm,
             re.I,
         )
@@ -4355,7 +4754,7 @@ def _contextual_numeric_detail(s: str, context: List[str]) -> bool:
     return False
 
 
-def _section_wrapped_detail(s: str, context: List[str]) -> bool:
+def _section_wrapped_detail(s: str, context: List[str], section: str = "") -> bool:
     """Known wrapped prose that a feature section would otherwise split."""
     if not context:
         return False
@@ -4368,10 +4767,36 @@ def _section_wrapped_detail(s: str, context: List[str]) -> bool:
             and re.match(r"^(?:TO BE PHASE BALANCED|ARE NOT MOUNTED BY CHICAGO BLOWER)\b",
                          current)):
         return True
+    if (re.search(r"\bADDITIONAL\s+FEATURES?\b", section, re.I)
+            and re.match(r"^[A-Z]\.\s+", context[0], re.I)
+            and re.search(r"\b(?:IF|AND|OR|TO|OF|INCLUDING)\s*$", context[-1], re.I)
+            and not re.match(r"^[A-Z]\.\s+", s, re.I)):
+        return True
     return False
 
 
-MAX_DETAILS = 10  # per item — continuation blocks run ~7 lines (motors)
+MAX_DETAILS = 80  # safety valve; structural/new-item boundaries normally close blocks
+
+
+def _skipped_line_is_item_detail(line: str) -> bool:
+    """A globally skipped heading that is a real detail inside an open item."""
+    return bool(re.match(
+        r"^(?:QUOTE\s*(?:NUM(?:BER)?|NO|#)\s*:|QUOTATION\s*\()",
+        line,
+        re.I,
+    ))
+
+
+def _is_wrapped_skipped_section_line(line: str, previous_line: str,
+                                     previous_kind: str, section: str) -> bool:
+    """Keep a wrapped CO-history tail from becoming an Additional-Notes item."""
+    return bool(
+        previous_kind == "skip"
+        and re.search(r"\bADDITIONAL\s+FEATURES?\b", section, re.I)
+        and re.match(r"^C\s*/?\s*O\s*#?\s*\d", previous_line, re.I)
+        and re.search(r"\bNOT\s*$", previous_line, re.I)
+        and re.fullmatch(r"AVAILABLE[.!]?", line, re.I)
+    )
 
 
 def _parts_only_from_lines(lines: Iterable[str]) -> bool:
@@ -4461,25 +4886,38 @@ def iter_classified(lines: Iterable[str], rules: Dict[str, Any] | None = None,
     every line — classify_line's kinds plus "detail" (an unpriced line
     attached to the item above: vendor, motor specs, "Product: Damper", ...).
     Repeated page furniture does not break a detail block, while structural
-    totals and lead-time/table boundaries do. A new item, section event, or
-    MAX_DETAILS also closes it. Single source of truth for extract_items AND
+    totals and lead-time/table boundaries do. A new item or section event closes
+    it; MAX_DETAILS is only a high safety valve for malformed documents. Single
+    source of truth for extract_items AND
     the --dump tuning view, so the dump shows exactly what the extractor does."""
     rules = rules or load_rules()
     section = ""
     have_item = False
     n_details = 0
     detail_context: List[str] = []
+    previous_line = ""
+    previous_kind = ""
     for line in lines:
         s = re.sub(r"\s+", " ", str(line)).strip()
         kind, detail = classify_line(s, section, rules)
+        if (kind == "item-section"
+                and _is_wrapped_skipped_section_line(
+                    s, previous_line, previous_kind, section
+                )):
+            kind, detail = "skip", "wrapped change-order history"
         if kind == "section-start":
             section, have_item, detail_context = detail, False, []
         elif kind == "section-end":
             section, have_item, detail_context = "", False, []
+        elif (kind == "skip" and have_item and n_details < MAX_DETAILS
+              and _skipped_line_is_item_detail(s)):
+            kind = "detail"
+            n_details += 1
+            detail_context.append(s)
         elif kind == "skip" and _skip_ends_detail_block(s):
             have_item, n_details, detail_context = False, 0, []
         elif (kind == "item-section" and have_item and n_details < MAX_DETAILS
-              and _section_wrapped_detail(s, detail_context)):
+              and _section_wrapped_detail(s, detail_context, section)):
             kind = "detail"
             n_details += 1
             detail_context.append(s)
@@ -4492,6 +4930,7 @@ def iter_classified(lines: Iterable[str], rules: Dict[str, Any] | None = None,
                 n_details += 1
                 detail_context.append(s)
         yield kind, detail, s
+        previous_line, previous_kind = s, kind
 
 
 def extract_items(lines: Iterable[str], rules: Dict[str, Any] | None = None,
@@ -4588,7 +5027,10 @@ def extract_items(lines: Iterable[str], rules: Dict[str, Any] | None = None,
 def _taggable_text(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> str:
     """norm + normalized details — everything a tag pattern may match."""
     parts = [item.get("norm", "")]
-    parts += [normalize_text(d, rules) for d in item.get("details") or []]
+    parts += [
+        normalize_text(d, rules, strip_columns=False)
+        for d in item.get("details") or []
+    ]
     return " ; ".join(p for p in parts if p)
 
 
@@ -4669,7 +5111,11 @@ def apply_ai_cache(items: List[Dict[str, Any]], store: Dict[str, Any]) -> None:
 
 def _is_skipped_stored_item(item: Dict[str, Any], rules: Dict[str, Any]) -> bool:
     raw = str(item.get("raw", "")).strip()
-    return bool(raw and any(p.search(raw) for p in rules["skip"]))
+    orphaned_co_tail = bool(
+        _is_additional_features_section(item)
+        and re.fullmatch(r"AVAILABLE[.!]?", raw, re.I)
+    )
+    return bool(orphaned_co_tail or (raw and any(p.search(raw) for p in rules["skip"])))
 
 
 def audit_untagged(store: Dict[str, Any], limit: int = 50) -> List[Dict[str, Any]]:

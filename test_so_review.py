@@ -7,6 +7,7 @@ No pytest — run directly:
 """
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 from contextlib import redirect_stderr
@@ -742,6 +743,43 @@ def test_refresh_reports_notes_safe_when_workbook_rewrite_fails(tmp: Path):
     stored = sr.load_store(queue)
     assert len(stored["notes"]) == 1
     assert stored["notes"][0]["note"] == "keep derived-row note even if Excel is open"
+
+
+def test_parser_review_metrics_are_recorded_as_history(tmp: Path):
+    store = {"jobs": {
+        "421900": {"items": [{
+            "raw": "Unknown option L 10.00",
+            "norm": "UNKNOWN OPTION",
+            "price": "10.00",
+            "details": [],
+            "tags": [],
+            "review_flags": ["UNTAGGED", "UNCLASSIFIED DETAIL: odd"],
+        }]},
+        "421901": {"items": [{
+            "raw": "Base Fan L 100.00",
+            "norm": "BASE FAN",
+            "price": "100.00",
+            "details": [],
+            "tags": ["BASE FAN"],
+            "attributes": {"component": "BASE FAN"},
+        }]},
+    }}
+    before = sr.parser_review_metrics(store)
+    assert before == {
+        "review_rows": 2,
+        "jobs_with_review": 1,
+        "flagged_items": 1,
+        "parser_flags": 2,
+    }
+    after = {key: 0 for key in before}
+    path = tmp / "parser_metrics.json"
+    entry = sr.record_parser_metrics(before, after, 2, 2, path)
+    assert entry["review_rows_reduced"] == 2
+    sr.record_parser_metrics(after, after, 2, 2, path)
+    history = json.loads(path.read_text(encoding="utf-8"))
+    assert len(history["runs"]) == 2
+    assert history["runs"][0]["before"] == before
+    assert history["runs"][0]["after"] == after
 
 
 def main() -> int:

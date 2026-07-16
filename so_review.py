@@ -48,6 +48,7 @@ from config import BACKLOG_DIR
 
 REVIEW_STORE_PATH = BACKLOG_DIR / "so_review_notes.json"
 DEFAULT_WORKBOOK = BACKLOG_DIR / "sales_order_review.xlsx"
+PARSER_METRICS_PATH = BACKLOG_DIR / "so_review_parser_metrics.json"
 
 # Return channel for Claude's handled-marks. The note queue flows UP to Claude
 # with the other published stores (data_push), but that push is one-way, so
@@ -168,6 +169,59 @@ def mark_handled(store: Dict[str, Any], note_id: int, resolution: str,
 
 def open_notes(store: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [n for n in store["notes"] if n.get("status") != STATUS_HANDLED]
+
+
+def parser_review_metrics(line_items_store: Dict[str, Any]) -> Dict[str, int]:
+    """Counts behind the workbook's red MARKED FOR REVIEW rows."""
+    review_rows = 0
+    jobs_with_review = 0
+    flagged_items = 0
+    parser_flags = 0
+    for record in (line_items_store.get("jobs") or {}).values():
+        items = (record or {}).get("items") or []
+        job_rows = sum(
+            row.get("kind") == so_hierarchy.KIND_REVIEW
+            for row in so_hierarchy.tree_rows(items)
+        )
+        review_rows += job_rows
+        jobs_with_review += int(job_rows > 0)
+        flagged_items += sum(bool(item.get("review_flags")) for item in items)
+        parser_flags += sum(len(item.get("review_flags") or []) for item in items)
+    return {
+        "review_rows": review_rows,
+        "jobs_with_review": jobs_with_review,
+        "flagged_items": flagged_items,
+        "parser_flags": parser_flags,
+    }
+
+
+def record_parser_metrics(before: Dict[str, int], after: Dict[str, int],
+                          item_count: int, job_count: int,
+                          path: Optional[Path] = None) -> Dict[str, Any]:
+    """Append one reparse comparison so parser progress remains measurable."""
+    destination = Path(path or PARSER_METRICS_PATH)
+    try:
+        history = json.loads(destination.read_text(encoding="utf-8")) \
+            if destination.exists() else {"runs": []}
+    except (json.JSONDecodeError, OSError):
+        history = {"runs": []}
+    if not isinstance(history, dict) or not isinstance(history.get("runs"), list):
+        history = {"runs": []}
+    entry = {
+        "recorded_at": _now(),
+        "items": int(item_count),
+        "jobs": int(job_count),
+        "before": dict(before),
+        "after": dict(after),
+        "review_rows_reduced": int(before.get("review_rows", 0)
+                                    - after.get("review_rows", 0)),
+    }
+    history["runs"].append(entry)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temp = destination.with_suffix(destination.suffix + ".tmp")
+    temp.write_text(json.dumps(history, indent=2), encoding="utf-8")
+    temp.replace(destination)
+    return entry
 
 
 # --------------------------------------------------------------------------- #
@@ -750,10 +804,19 @@ def _cmd_reparse(args) -> int:
     from process_lock import data_file_lock
     with data_file_lock(line_items.store_path(), label="line-items renormalization"):
         store_li = line_items.load_store()
+        before = parser_review_metrics(store_li)
         n = line_items.renormalize_store(store_li)
+        after = parser_review_metrics(store_li)
         line_items.save_store(store_li)
+        metric = record_parser_metrics(
+            before, after, n, len(store_li.get("jobs") or {})
+        )
     print(f"Re-parsed {n} item(s) across {len(store_li.get('jobs') or {})} order(s) "
           f"with the current parser; rebuilding the review sheet...")
+    reduction = metric["review_rows_reduced"]
+    direction = f"{reduction:,} fewer" if reduction >= 0 else f"{-reduction:,} more"
+    print(f"Marked-for-review rows: {before['review_rows']:,} -> "
+          f"{after['review_rows']:,} ({direction}); recorded in {PARSER_METRICS_PATH}.")
     return _cmd_refresh(args)
 
 

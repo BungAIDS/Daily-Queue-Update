@@ -64,6 +64,8 @@ _NON_ATTRIBUTE_KEYS = {"used_on", "component", "vfd_context"}
 # there is kept ('A | B') and flagged for review.
 _ACCUMULATIVE_SUFFIXES = ("_subcategory", "_feature", "_scope", "_instruction",
                           "_state", "_method")
+_NESTED_COMPONENTS = {"ACTUATOR"}
+_ACTUATOR_PREFIX = "actuator_"
 
 
 def _accumulative(key: str) -> bool:
@@ -167,6 +169,71 @@ def group_key(item: Dict[str, Any]) -> str:
             or _derived_component(a))
 
 
+def _used_on_parents(value: Any) -> List[str]:
+    parents: List[str] = []
+    for part in re.split(r"\s*(?:,|\|)\s*", str(value or "")):
+        parent = part.strip().upper()
+        if parent and parent not in parents:
+            parents.append(parent)
+    return parents
+
+
+def _hierarchy_views(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Expand actuator ownership without changing the captured item records.
+
+    A damper line can contain actuator fields (stored with ``actuator_`` keys),
+    and a separately priced actuator line can explicitly name one or several
+    dampers. Both become the same nested [ACTUATOR] child. A shared buyout line
+    is visible/priced once, while its facts are linked to every named parent.
+    """
+    views: List[Dict[str, Any]] = []
+
+    def add(item: Dict[str, Any], item_no: int, attrs: Dict[str, Any],
+            parent: str = "", price: Any = None, hide_source: bool = False) -> None:
+        view = dict(item)
+        view["attributes"] = attrs
+        view["_item_no"] = item_no
+        view["_hierarchy_parent"] = parent
+        view["_hide_source"] = hide_source
+        if price is not None:
+            view["price"] = price
+        views.append(view)
+
+    for item_no, item in enumerate(items or [], start=1):
+        attrs = dict(_attrs(item))
+        component = str(attrs.get("component") or "").strip().upper()
+        parents = _used_on_parents(attrs.get("used_on"))
+        if component in _NESTED_COMPONENTS and parents:
+            for parent_index, parent in enumerate(parents):
+                child_attrs = dict(attrs)
+                child_attrs["used_on"] = parent
+                add(item, item_no, child_attrs, parent=parent,
+                    price=item.get("price") if parent_index == 0 else "",
+                    hide_source=parent_index > 0)
+            continue
+
+        child_attrs = {
+            key[len(_ACTUATOR_PREFIX):]: value
+            for key, value in attrs.items()
+            if key.startswith(_ACTUATOR_PREFIX) and value
+        }
+        parent_attrs = {
+            key: value for key, value in attrs.items()
+            if not key.startswith(_ACTUATOR_PREFIX)
+        }
+        add(item, item_no, parent_attrs)
+        if child_attrs and component:
+            child_attrs["component"] = "ACTUATOR"
+            child_attrs["used_on"] = component
+            child_item = dict(item)
+            # The source row's review belongs to the parent fact. Do not repeat
+            # it on the synthetic child created from actuator_* attributes.
+            child_item["review_flags"] = []
+            add(child_item, item_no, child_attrs, parent=component, price="",
+                hide_source=True)
+    return views
+
+
 def components(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """One record per real thing, in SO print order (a merged component sits
     where its first evidence line appeared):
@@ -176,26 +243,51 @@ def components(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     `keyed` says the name came from a used_on/component link (rendered
     [BRACKETED]); an un-keyed record is a lone line named by its own text."""
+    views = _hierarchy_views(items or [])
     groups: Dict[str, List[int]] = {}
-    for i, it in enumerate(items or []):
-        groups.setdefault(group_key(it) or f"\x00{i}", []).append(i)
+    for i, it in enumerate(views):
+        parent = str(it.get("_hierarchy_parent") or "").strip().upper()
+        if parent:
+            component = str(_attrs(it).get("component") or "?").strip().upper()
+            key = f"\x01{parent}\x1f{component}"
+        else:
+            key = group_key(it) or f"\x00{i}"
+        groups.setdefault(key, []).append(i)
 
-    out: List[Dict[str, Any]] = []
-    for key, idxs in groups.items():           # insertion order = SO print order
-        keyed = not key.startswith("\x00")
-        primary = max(idxs, key=lambda i: parse_price(items[i].get("price")))
+    records: List[Dict[str, Any]] = []
+    for order, (key, idxs) in enumerate(groups.items()):
+        nested = key.startswith("\x01")
+        parent = ""
+        if nested:
+            parent, name = key[1:].split("\x1f", 1)
+            keyed = True
+        else:
+            keyed = not key.startswith("\x00")
+            name = key if keyed else (line_text(views[idxs[0]]) or "?")
+        primary = max(idxs, key=lambda i: parse_price(views[i].get("price")))
         attributes: Dict[str, Any] = {}
         conflict_keys: List[str] = []
         review: List[Dict[str, Any]] = []
         sources: List[Dict[str, Any]] = []
         for i in [primary] + [i for i in idxs if i != primary]:
-            it = items[i]
-            sources.append({"item_no": i + 1, "text": line_text(it),
-                            "details": [str(d) for d in it.get("details") or []],
-                            "price": it.get("price") or "", "primary": i == primary})
+            it = views[i]
+            item_no = int(it.get("_item_no") or 0)
+            if not it.get("_hide_source"):
+                sources.append({
+                    "item_no": item_no,
+                    "text": line_text(it),
+                    "details": [str(d) for d in it.get("details") or []],
+                    "price": it.get("price") or "",
+                    "primary": i == primary,
+                })
             for k in sorted(_attrs(it)):
                 v = _attrs(it)[k]
                 if not v or k in _NON_ATTRIBUTE_KEYS or k.endswith("_review"):
+                    continue
+                if k == "note":
+                    notes = attributes.setdefault(k, [])
+                    if str(v) not in notes:
+                        notes.append(str(v))
                     continue
                 have = attributes.get(k)
                 if have is None:
@@ -206,32 +298,92 @@ def components(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                     if merged:
                         attributes[k] = merged
                         continue
+                if nested and name == "ACTUATOR" and k == "model":
+                    have_model = re.sub(r"[^A-Z0-9]", "", str(have).upper())
+                    new_model = re.sub(r"[^A-Z0-9]", "", str(v).upper())
+                    # A damper line often says only RPED; its separately priced
+                    # actuator line supplies the exact RPED150/RPED200 model.
+                    if (have_model == "RPED" and new_model.startswith("RPED")
+                            and new_model != "RPED"):
+                        attributes[k] = v
+                        continue
+                    if (new_model == "RPED" and have_model.startswith("RPED")
+                            and have_model != "RPED"):
+                        continue
+                if k == "testing_status":
+                    equivalents = {str(have).upper(), str(v).upper()}
+                    if equivalents <= {"N/A", "NOT AVAILABLE"}:
+                        attributes[k] = "NOT AVAILABLE"
+                        continue
                 seen = [x.strip() for x in re.split(r"[|,]", str(have))]
                 for part in (str(v).split(", ") if _accumulative(k) else [str(v)]):
                     if part.strip() in seen:
                         continue
-                    if i != primary and _paid_inquiry_override(k, items[primary], it):
+                    if i != primary and _paid_inquiry_override(k, views[primary], it):
                         continue
-                    if _accumulative(k):        # collection key -> union quietly
+                    if _accumulative(k):
                         attributes[k] = f"{attributes[k]}, {part}"
-                    else:                       # single-valued key -> keep both, flag
+                    else:
                         attributes[k] = f"{attributes[k]} | {part}"
                         if k not in conflict_keys:
                             conflict_keys.append(k)
                     seen.append(part.strip())
-            for f in it.get("review_flags") or []:
-                entry = {"text": str(f), "item_no": i + 1}
+            for flag in it.get("review_flags") or []:
+                entry = {"text": str(flag), "item_no": item_no}
                 if entry not in review:
                     review.append(entry)
-        conflicts = [{"text": f"CONFLICTING {k}: {attributes[k]}", "item_no": ""}
-                     for k in conflict_keys]
-        total = sum(parse_price(items[i].get("price")) for i in idxs)
-        out.append({"name": key if keyed else (line_text(items[idxs[0]]) or "?"),
-                    "keyed": keyed,
-                    "attributes": attributes,
-                    "review": review + conflicts, "sources": sources,
-                    "price": total})
-    return out
+        conflicts = [
+            {"text": f"CONFLICTING {k}: {attributes[k]}", "item_no": ""}
+            for k in conflict_keys
+        ]
+        records.append({
+            "name": name,
+            "keyed": keyed,
+            "attributes": attributes,
+            "review": review + conflicts,
+            "sources": sources,
+            "price": sum(parse_price(views[i].get("price")) for i in idxs),
+            "children": [],
+            "_parent": parent,
+            "_order": order,
+        })
+
+    top: Dict[str, Dict[str, Any]] = {}
+    output: List[Dict[str, Any]] = []
+    for record in records:
+        if record["_parent"]:
+            continue
+        top[str(record["name"]).upper()] = record
+        output.append(record)
+    for child in (record for record in records if record["_parent"]):
+        parent_name = str(child["_parent"]).upper()
+        parent = top.get(parent_name)
+        if parent is None:
+            parent = {
+                "name": parent_name,
+                "keyed": True,
+                "attributes": {},
+                "review": [],
+                "sources": [],
+                "price": 0.0,
+                "children": [],
+                "_parent": "",
+                "_order": child["_order"],
+            }
+            top[parent_name] = parent
+            output.append(parent)
+        parent["_order"] = min(parent["_order"], child["_order"])
+        parent["children"].append(child)
+
+    output.sort(key=lambda record: record["_order"])
+    for record in output:
+        record["children"].sort(key=lambda child: child["_order"])
+        record.pop("_parent", None)
+        record.pop("_order", None)
+        for child in record["children"]:
+            child.pop("_parent", None)
+            child.pop("_order", None)
+    return output
 
 
 def _attribute_text(key: str, value: Any) -> str:
@@ -245,29 +397,45 @@ def tree_rows(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     then the SOURCE lines (skipped for a lone line — the
     component row IS the line, and carries its item # directly)."""
     rows: List[Dict[str, Any]] = []
-    for c in components(items):
-        multi = len(c["sources"]) > 1
-        name = f"[{c['name']}]" if c["keyed"] else c["name"]
-        # A lone line keeps its printed price mark (STD / NC stay visible, like
-        # the flat table); a merged component shows the sum of its charges.
-        price = (f"{c['price']:,.2f}" if c["price"] else "") if multi \
-            else c["sources"][0]["price"]
-        rows.append({"depth": 0, "kind": KIND_COMPONENT, "text": name,
-                     "price": price,
-                     "item_no": "" if multi else c["sources"][0]["item_no"]})
-        for k, v in c["attributes"].items():
-            rows.append({"depth": 1, "kind": KIND_ATTRIBUTE,
-                         "text": _attribute_text(k, v),
-                         "price": "", "item_no": ""})
-        for review in c["review"]:
-            rows.append({"depth": 1, "kind": KIND_REVIEW,
+
+    def append_component(component: Dict[str, Any], depth: int) -> None:
+        sources = component.get("sources") or []
+        multi = len(sources) > 1
+        name = f"[{component['name']}]" if component["keyed"] else component["name"]
+        if multi:
+            price = f"{component['price']:,.2f}" if component["price"] else ""
+            item_no: Any = ""
+        elif sources:
+            price = sources[0]["price"]
+            item_no = sources[0]["item_no"]
+        else:
+            price, item_no = "", ""
+        rows.append({"depth": depth, "kind": KIND_COMPONENT, "text": name,
+                     "price": price, "item_no": item_no})
+        for key, value in component["attributes"].items():
+            values = value if isinstance(value, list) else [value]
+            for part in values:
+                rows.append({"depth": depth + 1, "kind": KIND_ATTRIBUTE,
+                             "text": _attribute_text(key, part),
+                             "price": "", "item_no": ""})
+        for review in component["review"]:
+            rows.append({"depth": depth + 1, "kind": KIND_REVIEW,
                          "text": review["text"], "price": "",
                          "item_no": review["item_no"]})
+        for child in component.get("children") or []:
+            append_component(child, depth + 1)
         if multi:
-            for s in c["sources"]:
-                rows.append({"depth": 1, "kind": KIND_SOURCE,
-                             "text": ("" if s["primary"] else "+ ") + s["text"],
-                             "price": s["price"], "item_no": s["item_no"]})
+            for source in sources:
+                rows.append({
+                    "depth": depth + 1,
+                    "kind": KIND_SOURCE,
+                    "text": ("" if source["primary"] else "+ ") + source["text"],
+                    "price": source["price"],
+                    "item_no": source["item_no"],
+                })
+
+    for component in components(items):
+        append_component(component, 0)
     return rows
 
 

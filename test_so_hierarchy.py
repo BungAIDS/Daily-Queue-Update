@@ -204,6 +204,77 @@ def test_indent_text_follows_depth():
     assert soh.indent_text({"depth": 2, "text": "x"}) == "        x"
 
 
+def test_damper_actuators_nest_with_exact_models_and_one_shared_price():
+    fresh = _item(
+        "Fresh Air Damper L 1,000.00", "1,000.00",
+        attrs={"component": "FRESH AIR DAMPER", "actuator_model": "RPED",
+               "actuator_operation": "Automatic"},
+    )
+    outlet = _item(
+        "Outlet Damper L 1,000.00", "1,000.00",
+        attrs={"component": "OUTLET DAMPER", "actuator_model": "RPED",
+               "actuator_operation": "Automatic"},
+    )
+    prespin = _item(
+        "Prespin Damper L 1,000.00", "1,000.00",
+        attrs={"component": "PRESPIN DAMPER", "actuator_model": "RPED",
+               "actuator_operation": "Automatic"},
+    )
+    outlet_actuator = _item(
+        "Outlet Damper Actuator C 150.00", "150.00",
+        used_on="OUTLET DAMPER",
+        attrs={"component": "ACTUATOR", "model": "RPED150", "size": "150"},
+    )
+    shared_actuator = _item(
+        "Prespin and Fresh Air Damper Actuators C 200.00", "200.00",
+        used_on="PRESPIN DAMPER, FRESH AIR DAMPER",
+        attrs={"component": "ACTUATOR", "model": "RPED200", "size": "200",
+               "quantity": "2"},
+    )
+
+    components = soh.components(
+        [fresh, outlet, prespin, outlet_actuator, shared_actuator]
+    )
+    by_name = {component["name"]: component for component in components}
+
+    def actuator(parent):
+        return next(child for child in by_name[parent]["children"]
+                    if child["name"] == "ACTUATOR")
+
+    assert actuator("OUTLET DAMPER")["attributes"]["model"] == "RPED150"
+    assert actuator("OUTLET DAMPER")["attributes"]["size"] == "150"
+    assert actuator("PRESPIN DAMPER")["attributes"]["model"] == "RPED200"
+    assert actuator("FRESH AIR DAMPER")["attributes"]["model"] == "RPED200"
+    assert actuator("PRESPIN DAMPER")["attributes"]["quantity"] == "2"
+    assert not actuator("OUTLET DAMPER")["review"]
+    assert not actuator("PRESPIN DAMPER")["review"]
+    assert not actuator("FRESH AIR DAMPER")["review"]
+    assert actuator("OUTLET DAMPER")["price"] == 150.0
+    assert actuator("PRESPIN DAMPER")["price"] == 200.0
+    assert actuator("FRESH AIR DAMPER")["price"] == 0.0
+    shared_sources = (
+        actuator("PRESPIN DAMPER")["sources"]
+        + actuator("FRESH AIR DAMPER")["sources"]
+    )
+    assert [source["text"] for source in shared_sources] == [
+        "Prespin and Fresh Air Damper Actuators"
+    ]
+
+
+def test_run_test_unavailable_wordings_merge_without_conflict():
+    long = _item(
+        "Mechanical Run Test - Not Available L STD", "STD",
+        attrs={"component": "MECHANICAL RUN TEST", "testing_status": "NOT AVAILABLE"},
+    )
+    short = _item(
+        "Run Test - N/A L INC", "INC",
+        attrs={"component": "MECHANICAL RUN TEST", "testing_status": "N/A"},
+    )
+    component = soh.components([long, short])[0]
+    assert component["attributes"]["testing_status"] == "NOT AVAILABLE"
+    assert not component["review"]
+
+
 def main() -> int:
     passed = 0
     for name, fn in sorted(globals().items()):

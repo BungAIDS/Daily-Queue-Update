@@ -444,6 +444,456 @@
       "id": 125,
       "resolution": "Detected repair/parts-only Sales Orders, removed the false [BASE FAN], and stored broad construction material under [PARTS-ONLY ORDER].",
       "handled_at": "2026-07-15T18:11:46"
+    },
+    {
+      "id": 126,
+      "resolution": "Stored the Base Fan parenthetical wording as its description while keeping the inquiry number separate.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 127,
+      "resolution": "Removed redundant motor shipping scope; vendor packaging options remain under their motor_mod codes.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 128,
+      "resolution": "Captured every wrapped +NNN vendor option as a MOTOR motor_mod_NNN attribute, including continuation text.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 129,
+      "resolution": "Captured every wrapped +NNN vendor option as a MOTOR motor_mod_NNN attribute, including continuation text.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 130,
+      "resolution": "Captured every wrapped +NNN vendor option as a MOTOR motor_mod_NNN attribute, including continuation text.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 131,
+      "resolution": "Captured every wrapped +NNN vendor option as a MOTOR motor_mod_NNN attribute, including continuation text.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 132,
+      "resolution": "Captured every wrapped +NNN vendor option as a MOTOR motor_mod_NNN attribute, including continuation text.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 133,
+      "resolution": "Removed redundant coupling model/special-construction wording while retaining the useful coupling facts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 134,
+      "resolution": "Removed redundant coupling model/special-construction wording while retaining the useful coupling facts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 135,
+      "resolution": "Recognized Equivalent as retained source context, not a review item or separate fact.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 136,
+      "resolution": "Captured Puller Holes as a COUPLING attribute.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 137,
+      "resolution": "Grouped Mounting Options: Both Halves under COUPLING as mounting_options=BOTH HALVES.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 138,
+      "resolution": "Moved all Fresh Air Damper actuator facts into its nested [ACTUATOR], including BETTIS, exact RPED200/size 200, vendor, SS tubing, operation, and fail positions; removed damper shipping scope and leaked material.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 139,
+      "resolution": "Moved all Fresh Air Damper actuator facts into its nested [ACTUATOR], including BETTIS, exact RPED200/size 200, vendor, SS tubing, operation, and fail positions; removed damper shipping scope and leaked material.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 140,
+      "resolution": "Moved all Fresh Air Damper actuator facts into its nested [ACTUATOR], including BETTIS, exact RPED200/size 200, vendor, SS tubing, operation, and fail positions; removed damper shipping scope and leaked material.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 141,
+      "resolution": "Moved all Fresh Air Damper actuator facts into its nested [ACTUATOR], including BETTIS, exact RPED200/size 200, vendor, SS tubing, operation, and fail positions; removed damper shipping scope and leaked material.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 142,
+      "resolution": "Moved all Fresh Air Damper actuator facts into its nested [ACTUATOR], including BETTIS, exact RPED200/size 200, vendor, SS tubing, operation, and fail positions; removed damper shipping scope and leaked material.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 143,
+      "resolution": "Moved all Fresh Air Damper actuator facts into its nested [ACTUATOR], including BETTIS, exact RPED200/size 200, vendor, SS tubing, operation, and fail positions; removed damper shipping scope and leaked material.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 144,
+      "resolution": "Moved all Fresh Air Damper actuator facts into its nested [ACTUATOR], including BETTIS, exact RPED200/size 200, vendor, SS tubing, operation, and fail positions; removed damper shipping scope and leaked material.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 145,
+      "resolution": "Moved all Fresh Air Damper actuator facts into its nested [ACTUATOR], including BETTIS, exact RPED200/size 200, vendor, SS tubing, operation, and fail positions; removed damper shipping scope and leaked material.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 146,
+      "resolution": "Parsed the explicitly shared Prespin and Fresh Air actuator line into positioner, NEMA 4X, micro-switch quantity/voltage, transmitter, Fisher valve/regulator, SS tubing, and fail-position facts under both nested actuators.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 147,
+      "resolution": "Parsed the explicitly shared Prespin and Fresh Air actuator line into positioner, NEMA 4X, micro-switch quantity/voltage, transmitter, Fisher valve/regulator, SS tubing, and fail-position facts under both nested actuators.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 148,
+      "resolution": "Parsed the explicitly shared Prespin and Fresh Air actuator line into positioner, NEMA 4X, micro-switch quantity/voltage, transmitter, Fisher valve/regulator, SS tubing, and fail-position facts under both nested actuators.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 149,
+      "resolution": "Parsed the explicitly shared Prespin and Fresh Air actuator line into positioner, NEMA 4X, micro-switch quantity/voltage, transmitter, Fisher valve/regulator, SS tubing, and fail-position facts under both nested actuators.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 150,
+      "resolution": "Parsed the explicitly shared Prespin and Fresh Air actuator line into positioner, NEMA 4X, micro-switch quantity/voltage, transmitter, Fisher valve/regulator, SS tubing, and fail-position facts under both nested actuators.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 151,
+      "resolution": "Recognized Operation: Automatic as the nested actuator operation without leaving a duplicate review flag.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 152,
+      "resolution": "Resolved generic RPD/RPED wording with the separately priced exact Fresh Air actuator model RPED200 and size 200.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 153,
+      "resolution": "Resolved generic RPD/RPED wording with the separately priced exact Fresh Air actuator model RPED200 and size 200.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 154,
+      "resolution": "Moved General Mill Certifications to [CERTIFICATION]; it no longer creates a false [INSPECTION].",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 155,
+      "resolution": "Normalized the line as [INLET BOX] with bolt_on=YES, inlet_box_size=OVERSIZED 3300, free_standing=YES, and no redundant inlet category fields.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 156,
+      "resolution": "Normalized the line as [INLET BOX] with bolt_on=YES, inlet_box_size=OVERSIZED 3300, free_standing=YES, and no redundant inlet category fields.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 157,
+      "resolution": "Normalized the line as [INLET BOX] with bolt_on=YES, inlet_box_size=OVERSIZED 3300, free_standing=YES, and no redundant inlet category fields.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 158,
+      "resolution": "Normalized the line as [INLET BOX] with bolt_on=YES, inlet_box_size=OVERSIZED 3300, free_standing=YES, and no redundant inlet category fields.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 159,
+      "resolution": "Merged Mechanical Run Test facts found in line items and Additional Features; N/A and Not Available are treated as the same status without conflict.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 160,
+      "resolution": "Moved Outlet Damper actuator facts into its nested [ACTUATOR], using BETTIS RPED150/size 150 and retaining mounting, vendor, operation, SS tubing, and fail positions without redundant parent facts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 161,
+      "resolution": "Moved Outlet Damper actuator facts into its nested [ACTUATOR], using BETTIS RPED150/size 150 and retaining mounting, vendor, operation, SS tubing, and fail positions without redundant parent facts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 162,
+      "resolution": "Moved Outlet Damper actuator facts into its nested [ACTUATOR], using BETTIS RPED150/size 150 and retaining mounting, vendor, operation, SS tubing, and fail positions without redundant parent facts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 163,
+      "resolution": "Moved Outlet Damper actuator facts into its nested [ACTUATOR], using BETTIS RPED150/size 150 and retaining mounting, vendor, operation, SS tubing, and fail positions without redundant parent facts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 164,
+      "resolution": "Moved Outlet Damper actuator facts into its nested [ACTUATOR], using BETTIS RPED150/size 150 and retaining mounting, vendor, operation, SS tubing, and fail positions without redundant parent facts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 165,
+      "resolution": "Moved Outlet Damper actuator facts into its nested [ACTUATOR], using BETTIS RPED150/size 150 and retaining mounting, vendor, operation, SS tubing, and fail positions without redundant parent facts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 166,
+      "resolution": "Moved Outlet Damper actuator facts into its nested [ACTUATOR], using BETTIS RPED150/size 150 and retaining mounting, vendor, operation, SS tubing, and fail positions without redundant parent facts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 167,
+      "resolution": "Moved Outlet Damper actuator facts into its nested [ACTUATOR], using BETTIS RPED150/size 150 and retaining mounting, vendor, operation, SS tubing, and fail positions without redundant parent facts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 168,
+      "resolution": "Moved Outlet Damper actuator facts into its nested [ACTUATOR], using BETTIS RPED150/size 150 and retaining mounting, vendor, operation, SS tubing, and fail positions without redundant parent facts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 169,
+      "resolution": "Parsed the Outlet Damper actuator buyout into exact RPED150, VAC positioner/action/protocol/enclosure, switches, transmitter, Fisher valve/regulator, SS tubing, and fail-position facts; generic RPED no longer conflicts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 170,
+      "resolution": "Parsed the Outlet Damper actuator buyout into exact RPED150, VAC positioner/action/protocol/enclosure, switches, transmitter, Fisher valve/regulator, SS tubing, and fail-position facts; generic RPED no longer conflicts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 171,
+      "resolution": "Parsed the Outlet Damper actuator buyout into exact RPED150, VAC positioner/action/protocol/enclosure, switches, transmitter, Fisher valve/regulator, SS tubing, and fail-position facts; generic RPED no longer conflicts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 172,
+      "resolution": "Parsed the Outlet Damper actuator buyout into exact RPED150, VAC positioner/action/protocol/enclosure, switches, transmitter, Fisher valve/regulator, SS tubing, and fail-position facts; generic RPED no longer conflicts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 173,
+      "resolution": "Parsed the Outlet Damper actuator buyout into exact RPED150, VAC positioner/action/protocol/enclosure, switches, transmitter, Fisher valve/regulator, SS tubing, and fail-position facts; generic RPED no longer conflicts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 174,
+      "resolution": "Parsed the Outlet Damper actuator buyout into exact RPED150, VAC positioner/action/protocol/enclosure, switches, transmitter, Fisher valve/regulator, SS tubing, and fail-position facts; generic RPED no longer conflicts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 175,
+      "resolution": "Parsed the Outlet Damper actuator buyout into exact RPED150, VAC positioner/action/protocol/enclosure, switches, transmitter, Fisher valve/regulator, SS tubing, and fail-position facts; generic RPED no longer conflicts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 176,
+      "resolution": "Parsed the Outlet Damper actuator buyout into exact RPED150, VAC positioner/action/protocol/enclosure, switches, transmitter, Fisher valve/regulator, SS tubing, and fail-position facts; generic RPED no longer conflicts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 177,
+      "resolution": "Confirmed the corrected mapping: the Outlet Damper uses RPED150/size 150; the Fresh Air and Prespin dampers use RPED200/size 200.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 178,
+      "resolution": "Moved Prespin actuator facts into its nested [ACTUATOR] with BETTIS RPED200/size 200, double-acting pneumatic operation, and removed irrelevant inlet/shipping fields; stuffing_boxes remains a Prespin Damper fact.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 179,
+      "resolution": "Moved Prespin actuator facts into its nested [ACTUATOR] with BETTIS RPED200/size 200, double-acting pneumatic operation, and removed irrelevant inlet/shipping fields; stuffing_boxes remains a Prespin Damper fact.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 180,
+      "resolution": "Moved Prespin actuator facts into its nested [ACTUATOR] with BETTIS RPED200/size 200, double-acting pneumatic operation, and removed irrelevant inlet/shipping fields; stuffing_boxes remains a Prespin Damper fact.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 181,
+      "resolution": "Moved Prespin actuator facts into its nested [ACTUATOR] with BETTIS RPED200/size 200, double-acting pneumatic operation, and removed irrelevant inlet/shipping fields; stuffing_boxes remains a Prespin Damper fact.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 182,
+      "resolution": "Moved Prespin actuator facts into its nested [ACTUATOR] with BETTIS RPED200/size 200, double-acting pneumatic operation, and removed irrelevant inlet/shipping fields; stuffing_boxes remains a Prespin Damper fact.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 183,
+      "resolution": "Moved Prespin actuator facts into its nested [ACTUATOR] with BETTIS RPED200/size 200, double-acting pneumatic operation, and removed irrelevant inlet/shipping fields; stuffing_boxes remains a Prespin Damper fact.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 184,
+      "resolution": "Moved Prespin actuator facts into its nested [ACTUATOR] with BETTIS RPED200/size 200, double-acting pneumatic operation, and removed irrelevant inlet/shipping fields; stuffing_boxes remains a Prespin Damper fact.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 185,
+      "resolution": "Moved Prespin actuator facts into its nested [ACTUATOR] with BETTIS RPED200/size 200, double-acting pneumatic operation, and removed irrelevant inlet/shipping fields; stuffing_boxes remains a Prespin Damper fact.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 186,
+      "resolution": "Removed redundant shaft_cooler=YES and shaft_cooler_type=SHAFT COOLER; the [SHAFT COOLER] component and meaningful construction/material facts remain.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 187,
+      "resolution": "Removed redundant shaft_cooler=YES and shaft_cooler_type=SHAFT COOLER; the [SHAFT COOLER] component and meaningful construction/material facts remain.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 188,
+      "resolution": "Joined the wrapped Yellow continuation to produce coating=PAINTED SAFETY YELLOW on the shaft/bearing/coupling guard.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 189,
+      "resolution": "Captured the Mixing Box size and FGR port separately, including fgr_port=14 inches, rather than a generic combined feature.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 190,
+      "resolution": "Captured the Mixing Box size and FGR port separately, including fgr_port=14 inches, rather than a generic combined feature.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 191,
+      "resolution": "Made brand the first useful Inlet Silencer fact and recognize AEROACOUSTIC and VAW.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 192,
+      "resolution": "Split silencer features into separate boolean attributes and removed redundant weather-cover scope/type/used-on fields from the silencer.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 193,
+      "resolution": "Split silencer features into separate boolean attributes and removed redundant weather-cover scope/type/used-on fields from the silencer.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 194,
+      "resolution": "Split silencer features into separate boolean attributes and removed redundant weather-cover scope/type/used-on fields from the silencer.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 195,
+      "resolution": "Split silencer features into separate boolean attributes and removed redundant weather-cover scope/type/used-on fields from the silencer.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 196,
+      "resolution": "Split silencer features into separate boolean attributes and removed redundant weather-cover scope/type/used-on fields from the silencer.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 197,
+      "resolution": "Treat the malformed pressure-drop tail as retained source context that does not require an engineering review fact.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 198,
+      "resolution": "Captured silencer mounting_lugs=YES as its own attribute.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 199,
+      "resolution": "Removed the orphan AVAILABLE row created by wrapped Additional Features wording.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 200,
+      "resolution": "Grouped the prose under [ADDITIONAL FEATURES / NOTES] as a note attribute and removed accidental drawing/inlet facts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 201,
+      "resolution": "Grouped the prose under [ADDITIONAL FEATURES / NOTES] as a note attribute and removed accidental drawing/inlet facts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 202,
+      "resolution": "Grouped the prose under [ADDITIONAL FEATURES / NOTES] as a note attribute and removed accidental drawing/inlet facts.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 203,
+      "resolution": "Grouped each Additional Features instruction under one [ADDITIONAL FEATURES / NOTES] component; wrapped continuations such as PROVIDED stay with the preceding note.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 204,
+      "resolution": "Grouped each Additional Features instruction under one [ADDITIONAL FEATURES / NOTES] component; wrapped continuations such as PROVIDED stay with the preceding note.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 205,
+      "resolution": "Grouped each Additional Features instruction under one [ADDITIONAL FEATURES / NOTES] component; wrapped continuations such as PROVIDED stay with the preceding note.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 206,
+      "resolution": "Grouped each Additional Features instruction under one [ADDITIONAL FEATURES / NOTES] component; wrapped continuations such as PROVIDED stay with the preceding note.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 207,
+      "resolution": "Grouped each Additional Features instruction under one [ADDITIONAL FEATURES / NOTES] component; wrapped continuations such as PROVIDED stay with the preceding note.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 208,
+      "resolution": "Grouped each Additional Features instruction under one [ADDITIONAL FEATURES / NOTES] component; wrapped continuations such as PROVIDED stay with the preceding note.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 209,
+      "resolution": "Grouped each Additional Features instruction under one [ADDITIONAL FEATURES / NOTES] component; wrapped continuations such as PROVIDED stay with the preceding note.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 210,
+      "resolution": "Grouped each Additional Features instruction under one [ADDITIONAL FEATURES / NOTES] component; wrapped continuations such as PROVIDED stay with the preceding note.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 211,
+      "resolution": "Grouped each Additional Features instruction under one [ADDITIONAL FEATURES / NOTES] component; wrapped continuations such as PROVIDED stay with the preceding note.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 212,
+      "resolution": "Grouped each Additional Features instruction under one [ADDITIONAL FEATURES / NOTES] component; wrapped continuations such as PROVIDED stay with the preceding note.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 213,
+      "resolution": "Grouped each Additional Features instruction under one [ADDITIONAL FEATURES / NOTES] component; wrapped continuations such as PROVIDED stay with the preceding note.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 214,
+      "resolution": "Grouped each Additional Features instruction under one [ADDITIONAL FEATURES / NOTES] component; wrapped continuations such as PROVIDED stay with the preceding note.",
+      "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 215,
+      "resolution": "Prevented Additional Features references from creating a second silencer component; the order has one [INLET SILENCER].",
+      "handled_at": "2026-07-16T14:45:30"
     }
   ]
 }

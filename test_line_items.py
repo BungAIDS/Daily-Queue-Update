@@ -213,8 +213,11 @@ def test_real_so_ivd_and_buyout_tagging():
     ivd = items["INLET VANE DAMPER"]            # IVD abbreviation expanded
     assert "DAMPER" in ivd["tags"] and "INLET VANES" in ivd["tags"], ivd
     assert any("Ruskin" in d for d in ivd["details"]), ivd["details"]
-    assert ivd["attributes"]["used_on"] == "INLET VANE DAMPER"
+    assert ivd["attributes"]["component"] == "INLET VANE DAMPER"
+    assert "used_on" not in ivd["attributes"]
     assert ivd["attributes"]["damper_subcategory"] == "INLET VANE DAMPER"
+    assert ivd["attributes"]["quote_number"] == "042426GCM2"
+    assert not ivd.get("review_flags")
     # The flanged expansion-joint buyouts tag FLEX CONNECTOR via "Product:".
     items473 = {it["norm"]: it for it in li.extract_items(REAL_LINES_473)}
     assert "FLEX CONNECTOR" in items473["INLET FLANGED"]["tags"]
@@ -342,7 +345,9 @@ def test_tagging():
     assert "SPECIAL CONSTRUCTION" in li.tag_item(li.normalize_text("Continuous Weld Airstream"))
     assert "SPECIAL CONSTRUCTION" in li.tag_item(li.normalize_text("Earthing Boss"))
     assert "INSPECTION" in li.tag_item(li.normalize_text("Customer Final Inspection"))
-    assert "INSPECTION" in li.tag_item(li.normalize_text("General Mill Certifications"))
+    certifications = li.tag_item(li.normalize_text("General Mill Certifications"))
+    assert "CERTIFICATION" in certifications
+    assert "INSPECTION" not in certifications
     assert "LABEL" in li.tag_item(li.normalize_text("FEI Label Inquiry Num"))
     assert "BALANCE" in li.tag_item(li.normalize_text("G2.5 Balance"))
     assert "BALANCE" in li.tag_item(li.normalize_text("Welded Balance Weights"))
@@ -534,15 +539,62 @@ def test_actuator_attributes():
     assert attrs["used_on"] == "IVC"
     assert "ivc_subcategory" not in attrs and "ivc_component" not in attrs
     assert attrs["vendor"] == "Novaspect"
-    assert attrs["product"] == "Actuator"
-    assert attrs["manufacturer"] == "Bettis RPD"
-    assert attrs["model"].upper().replace(" ", "") == "BETTIS#RPED100"
-    assert attrs["size"] == "RPED100"
+    assert "product" not in attrs
+    assert attrs["manufacturer"] == "BETTIS"
+    assert attrs["model"] == "RPED100"
+    assert attrs["size"] == "100"
     assert attrs["operation"] == "Automatic"
-    assert attrs["supplied_by"] == "CBC (Mounted)"
+    assert "supplied_by" not in attrs
     assert attrs["mounting"] == "Bracket and actuator"
     assert attrs["fail_position_upon_loss_of_power"] == "In Place"
     assert attrs["fail_position_upon_loss_of_signal"] == "Closed"
+    assert not actuator.get("review_flags")
+
+
+def test_shared_damper_actuator_attributes_keep_explicit_owners():
+    items = li.extract_items([
+        "Outlet Damper Actuator C 6,537.14",
+        "Bettis #RPED150 Double Acting Pneumatic Actuator with 4-20mA Transmitter",
+        "Vendor: Novaspect",
+        "Quote Num: N-583671-2",
+        "Product: Actuator",
+        "Prespin and Fresh Air Damper Actuators C 13,254.28",
+        "QTY (2) - Bettis #RPED200 Double Acting Pneumatic Actuator with 4-20mA Transmitter",
+        "Vendor: Novaspect",
+        "Quote Num: N-583671-2",
+        "Product: Actuator",
+    ])
+    outlet, shared = items
+    assert outlet["attributes"]["used_on"] == "OUTLET DAMPER"
+    assert outlet["attributes"]["model"] == "RPED150"
+    assert outlet["attributes"]["size"] == "150"
+    assert shared["attributes"]["used_on"] == "PRESPIN DAMPER, FRESH AIR DAMPER"
+    assert shared["attributes"]["model"] == "RPED200"
+    assert shared["attributes"]["size"] == "200"
+    assert shared["attributes"]["quantity"] == "2"
+    for item in items:
+        assert item["attributes"]["transmitter"] == "4-20MA"
+        assert item["attributes"]["quote_number"] == "N-583671-2"
+        assert not item.get("review_flags")
+
+
+def test_shared_damper_actuator_accepts_reverse_order_and_ampersand():
+    item = li.extract_items([
+        "Fresh Air & Prespin Damper Actuators C 13,254.28",
+        "QTY (2) - Bettis #RPED200 Double Acting Pneumatic Actuator",
+    ])[0]
+    assert item["attributes"]["used_on"] == "FRESH AIR DAMPER, PRESPIN DAMPER"
+
+
+def test_manual_damper_operation_does_not_create_an_actuator():
+    item = li.extract_items([
+        "Fresh Air Damper C 2,100.00",
+        "Operation: Manual",
+    ])[0]
+    attrs = item["attributes"]
+    assert attrs["component"] == "FRESH AIR DAMPER"
+    assert attrs["operation"] == "Manual"
+    assert not any(key.startswith("actuator_") for key in attrs)
 
 
 def test_drive_attributes():
@@ -2014,8 +2066,9 @@ def test_component_materials_do_not_count_as_fan_materials():
     assert "ACTUATOR" in actuator["tags"]
     assert not {"MATERIALS", "STAINLESS STEEL"} & set(actuator["tags"])
     assert attrs["component"] == "ACTUATOR"
-    assert attrs["component_material"] == "STAINLESS STEEL"
-    assert attrs["component_material_scope"] == "TUBING"
+    assert attrs["ss_tubing"] == "YES"
+    assert "component_material" not in attrs
+    assert "component_material_scope" not in attrs
     assert "material" not in attrs
 
     motor = li.extract_items([
@@ -2068,7 +2121,8 @@ def test_used_on_requires_damper_context():
     assert "used_on" not in flange["attributes"]
     damper = li.extract_items(["Outlet Damper, Opposed L 100.00"])[0]
     assert "OUTLET" not in damper["tags"]
-    assert damper["attributes"]["used_on"] == "OUTLET DAMPER"
+    assert damper["attributes"]["component"] == "OUTLET DAMPER"
+    assert "used_on" not in damper["attributes"]
     volume = li.extract_items(["Outlet Volume Control, Manual L 691.00"])[0]
     assert "DAMPER" in volume["tags"]
     assert "OUTLET" not in volume["tags"]
@@ -2090,7 +2144,12 @@ def test_used_on_requires_damper_context():
     assert "DAMPER" in mounted_damper["tags"]
     assert "ACTUATOR" in mounted_damper["tags"]
     assert "INLET" not in mounted_damper["tags"]
-    assert mounted_damper["attributes"]["used_on"] == "FRESH AIR DAMPER"
+    assert mounted_damper["attributes"]["component"] == "FRESH AIR DAMPER"
+    assert "used_on" not in mounted_damper["attributes"]
+    assert mounted_damper["attributes"]["actuator_manufacturer"] == "BETTIS"
+    assert mounted_damper["attributes"]["actuator_operation"] == "Automatic"
+    assert "product" not in mounted_damper["attributes"]
+    assert "vendor" not in mounted_damper["attributes"]
     assert mounted_damper["attributes"]["mount_location"] == "INLET BOX"
 
 
@@ -2161,9 +2220,11 @@ def test_inlet_flange_direction_and_box_attributes():
         "Box Size 300 (Inlet Box, Bolt-on (Shipped Loose),",
         "Bolt-On Inlet Box Position: @ 0",
     ])[0]
-    assert box["attributes"]["inlet_subcategory"] == "INLET BOX"
-    assert box["attributes"]["inlet_box_type"] == "BOLT-ON"
-    assert box["attributes"]["inlet_box_size"] == "300"
+    assert box["attributes"]["component"] == "INLET BOX"
+    assert box["attributes"]["bolt_on"] == "YES"
+    assert box["attributes"]["inlet_box_size"] == "OVERSIZED 300"
+    assert "inlet_subcategory" not in box["attributes"]
+    assert "inlet_box_type" not in box["attributes"]
     assert box["attributes"]["inlet_box_position"] == "0"
     assert box["attributes"]["shipping_state"] == "SHIPPED LOOSE"
 
@@ -2177,7 +2238,9 @@ def test_mixing_box_is_not_inlet_category():
     assert "INLET" not in mixing["tags"]
     assert mixing["attributes"]["component"] == "MIXING BOX"
     assert mixing["attributes"]["flange_scope"] == "MIXING BOX"
-    assert mixing["attributes"]["mixing_box_feature"] == "FGR PORT, FLANGED"
+    assert mixing["attributes"]["flange_type"] == "FLANGED"
+    assert mixing["attributes"]["fgr_port"] == "YES"
+    assert "mixing_box_feature" not in mixing["attributes"]
     assert mixing["attributes"]["used_on"] == "INLET BOX"
     assert mixing["attributes"]["used_on_size"] == "300"
 
@@ -2377,8 +2440,8 @@ def test_screen_and_shaft_cooler_attributes():
     attrs = shaft["attributes"]
     assert {"ALUMINUM", "MATERIALS", "SHAFT COOLER"} <= set(shaft["tags"])
     assert attrs["component"] == "SHAFT COOLER"
-    assert attrs["shaft_cooler"] == "YES"
-    assert attrs["shaft_cooler_type"] == "SHAFT COOLER"
+    assert "shaft_cooler" not in attrs
+    assert "shaft_cooler_type" not in attrs
     assert attrs["shaft_cooler_construction"] == "CAST"
     assert attrs["material_scope"] == "SHAFT COOLER"
 
@@ -2414,9 +2477,10 @@ def test_weather_cover_attributes_and_reference_cleanup():
         "Product: Inlet Silencer",
     ])[0]
     assert {"SILENCER", "SHIPPING", "WEATHER COVER"} <= set(inlet_hood["tags"])
-    assert inlet_hood["attributes"]["weather_cover_type"] == "INLET HOOD"
-    assert inlet_hood["attributes"]["weather_cover_model"] == "VWH5-36"
-    assert inlet_hood["attributes"]["weather_cover_scope"] == "SILENCER"
+    assert inlet_hood["attributes"]["component"] == "INLET SILENCER"
+    assert inlet_hood["attributes"]["model"] == "VWH5-36"
+    assert "weather_cover_type" not in inlet_hood["attributes"]
+    assert "weather_cover_scope" not in inlet_hood["attributes"]
 
     drawing_note = li.derive_item_fields({
         "raw": "Engineering to show fan plus accessory weight, including rainhood, motor weight and total assembled weight on the drawing.",
@@ -2441,10 +2505,10 @@ def test_silencer_spare_parts_and_spark_resistant_attributes():
     assert attrs["model"] == "12VRSB-S81"
     assert attrs["noise_target"] == "85 DBA"
     assert attrs["pressure_drop"] == ".19"
-    assert "RAIN HOOD" in attrs["feature"]
-    assert attrs["weather_cover_type"] == "RAINHOOD"
-    assert attrs["weather_cover_model"] == "VWH1-16X18"
-    assert attrs["weather_cover_feature"] == "GALVANIZED SCREEN"
+    assert attrs["rain_hood"] == "YES"
+    assert attrs["screen_subcategory"] == "RAINHOOD SCREEN"
+    assert "used_on" not in attrs
+    assert not any(key.startswith("weather_cover_") for key in attrs)
     assert attrs["shipping_method"] == "SHIP DIRECT"
     assert attrs["coating"] == "GALVANIZED"
     assert "product" not in attrs
@@ -2542,6 +2606,26 @@ def test_silencer_spare_parts_and_spark_resistant_attributes():
     assert "SPARK RESISTANT" in spark["tags"]
     assert spark["attributes"]["spark_resistant_type"] == "AMCA C"
     assert spark["attributes"]["temperature_rating"] == "650F"
+
+
+def test_silencer_leading_numeric_detail_is_structured_not_reviewed():
+    silencer = li.extract_items([
+        'Inlet Silencer C 14,054.00',
+        'One (1) Aeroacoustic "Silentflow" Model IB10-5.0-4 inlet silencer',
+        '85 dBA at Position #3, 3 ft from fan, 5 ft above',
+        'drop of at 19,447 CFM.',
+        '- Model IB10-5.0-4 inlet silencer',
+        'Vendor: Aeroacoustic Corp',
+        'Quote Num: 260259',
+        'Product: Inlet Silencer',
+    ])[0]
+    attrs = silencer["attributes"]
+    assert attrs["component"] == "INLET SILENCER"
+    assert attrs["brand"] == "AEROACOUSTIC"
+    assert attrs["model"] == "IB10-5.0-4"
+    assert attrs["noise_target"] == "85 DBA"
+    assert attrs["quote_number"] == "260259"
+    assert not silencer.get("review_flags")
 
 
 def test_special_construction_stainless_and_testing_attributes():
