@@ -421,6 +421,65 @@ def test_workbook_has_one_filterable_real_row_grid(tmp: Path):
     book.close()
 
 
+def test_workbook_writer_streams_rows_and_reports_progress(tmp: Path):
+    original_iterator = sr.iter_review_rows
+    rows = [{
+        "order": "421966",
+        "item_no": str(i),
+        "kind": sr.so_hierarchy.KIND_SOURCE,
+        "hierarchy": f"line {i}",
+        "price": "",
+        "note": "",
+        "status": "",
+        "resolution": "",
+        "annotatable": True,
+        "row_key": f"item:{i}",
+        "group_start": i == 1,
+    } for i in range(1, 4)]
+    messages = []
+    sr.iter_review_rows = lambda *_args, **_kwargs: iter(rows)
+    try:
+        path = tmp / "streamed.xlsx"
+        assert sr.write_workbook(
+            path, {"jobs": {}}, {"notes": []}, progress=messages.append
+        ) == 3
+    finally:
+        sr.iter_review_rows = original_iterator
+
+    from openpyxl import load_workbook
+    book = load_workbook(path)
+    assert book[sr.BROWSE_SHEET].max_row == 4
+    book.close()
+    assert not path.with_name("streamed.building.xlsx").exists()
+    assert messages[0] == "Building Sales Order review rows..."
+    assert messages[-1] == "Saved streamed.xlsx."
+
+
+def test_workbook_writer_rejects_excel_lock_before_building(tmp: Path):
+    path = tmp / "review.xlsx"
+    lock = tmp / "~$review.xlsx"
+    lock.write_text("Excel lock", encoding="utf-8")
+    original_iterator = sr.iter_review_rows
+    called = False
+
+    def rows_should_not_start(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        return iter(())
+
+    sr.iter_review_rows = rows_should_not_start
+    try:
+        try:
+            sr.write_workbook(path, {"jobs": {}}, {"notes": []})
+        except RuntimeError as exc:
+            assert "open in Excel" in str(exc)
+        else:
+            raise AssertionError("Excel lock should stop workbook generation")
+    finally:
+        sr.iter_review_rows = original_iterator
+    assert not called
+
+
 def test_resolved_tab_keeps_history_off_the_active_row(tmp: Path):
     from openpyxl import load_workbook
 

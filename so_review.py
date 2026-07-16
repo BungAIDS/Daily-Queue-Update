@@ -41,7 +41,7 @@ import sys
 import warnings
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 import so_hierarchy
 from config import BACKLOG_DIR
@@ -305,18 +305,18 @@ def _order_notes(review_store: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]
     return out
 
 
-def review_rows(line_items_store: Dict[str, Any],
-                review_store: Dict[str, Any]) -> List[Dict[str, Any]]:
+def iter_review_rows(line_items_store: Dict[str, Any],
+                     review_store: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
     """One display row per hierarchy row across every order, newest job first,
     with open notes shown on their lines. Handled notes are intentionally absent
     so the line is ready for another note; their history is retained separately.
     A source note anchors by item number; a component/attribute/review note
     anchors by its displayed hierarchy text. If that target no longer exists,
     it re-anchors to the order's first row. `group_start` marks the first row of
-    each order. Pure — no Excel."""
+    each order. Rows are yielded one order at a time so large workbooks do not
+    require a second full-backlog list in memory. Pure — no Excel."""
     by_order = _order_notes(review_store)
     jobs = (line_items_store.get("jobs") or {})
-    rows: List[Dict[str, Any]] = []
     for jn in sorted(jobs, key=_job_sort_key, reverse=True):
         items = (jobs[jn] or {}).get("items") or []
         tree = so_hierarchy.tree_rows(items)
@@ -358,7 +358,7 @@ def review_rows(line_items_store: Dict[str, Any],
                 f"#{n.get('id')}: {text}" for n in here
                 if (text := str(n.get("note", "")).strip()))
             item_no = tr.get("item_no")
-            rows.append({
+            yield {
                 "order": str(jn),
                 "item_no": item_no if item_no != "" else "",
                 "kind": tr["kind"],
@@ -370,8 +370,13 @@ def review_rows(line_items_store: Dict[str, Any],
                 "annotatable": True,
                 "row_key": row_keys[i],
                 "group_start": i == 0,
-            })
-    return rows
+            }
+
+
+def review_rows(line_items_store: Dict[str, Any],
+                review_store: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Materialized review rows for callers that need random access."""
+    return list(iter_review_rows(line_items_store, review_store))
 
 
 def ingest_edits(review_store: Dict[str, Any],
@@ -392,11 +397,30 @@ def ingest_edits(review_store: Dict[str, Any],
 # --------------------------------------------------------------------------- #
 # Excel I/O (lazy openpyxl)                                                     #
 # --------------------------------------------------------------------------- #
+def _write_only_text_cell(ws, value: Any, *, fill=None, font=None,
+                          alignment=None):
+    from openpyxl.cell import WriteOnlyCell
+
+    cell = WriteOnlyCell(ws, value=value)
+    if cell.data_type == "f":
+        cell.data_type = "s"
+    if fill is not None:
+        cell.fill = fill
+    if font is not None:
+        cell.font = font
+    if alignment is not None:
+        cell.alignment = alignment
+    return cell
+
+
 def _append_text_row(ws, values: List[Any]) -> None:
     """ws.append, but formula-proof. Hierarchy or note text starting with ``=``
     (e.g. a quoted price sum) would be stored by openpyxl as an Excel FORMULA —
     a broken one, so Excel "repairs" the sheet by deleting the cell on open.
     Re-type any such cell as plain text."""
+    if getattr(ws.parent, "write_only", False):
+        ws.append([_write_only_text_cell(ws, value) for value in values])
+        return
     ws.append(values)
     for cell in ws[ws.max_row]:
         if cell.data_type == "f":
@@ -404,12 +428,13 @@ def _append_text_row(ws, values: List[Any]) -> None:
 
 
 def write_workbook(path: Path, line_items_store: Dict[str, Any],
-                   review_store: Dict[str, Any]) -> int:
+                   review_store: Dict[str, Any], *,
+                   progress: Optional[Callable[[str], None]] = None) -> int:
     """Write the review workbook. Returns the data-row count.
 
-    Colour and grouping are applied as a handful of workbook-level conditional-
-    format rules (O(1) each), never styled cell-by-cell, so the large backlog
-    does not pay a separate formatting cost for every row.
+    Rows are generated and written as streams. Colour and grouping are applied
+    as a handful of workbook-level conditional-format rules (O(1) each), never
+    styled cell-by-cell, so the large backlog stays bounded in memory.
 
     Sales Order is one canonical, filterable grid of real rows. Resolved keeps
     handled-note history out of the active inputs."""
@@ -426,33 +451,61 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
     comp_font = Font(bold=True)
     review_font = Font(color="C00000", bold=True)           # parser review rows
 
-    rows = review_rows(line_items_store, review_store)
+    def report(message: str) -> None:
+        if progress is not None:
+            progress(message)
+
+    path = Path(path)
+    lock_path = path.with_name(f"~${path.name}")
+    if lock_path.exists():
+        raise RuntimeError(
+            f"Could not write {path.name} — it is open in Excel. Close it, then "
+            "run this again."
+        )
+
     ncols = len(HEADERS)
-    wb = Workbook()
+    wb = Workbook(write_only=True)
 
     # --- Sales Order: canonical data + input grid -----------------------------
-    notes = wb.active
-    notes.title = BROWSE_SHEET
+    notes = wb.create_sheet(BROWSE_SHEET)
     band_col = ncols + 1                                    # hidden parity helper
     row_key_col = ncols + 2
-    notes.append(HEADERS + ["_band", ROW_KEY_HEADER])
+    notes.freeze_panes = "A2"
+    notes.sheet_view.showGridLines = False
+    notes.row_dimensions[1].height = 24
+    notes.column_dimensions[get_column_letter(band_col)].hidden = True
+    notes.column_dimensions[get_column_letter(row_key_col)].hidden = True
+    for h, w in {"Order": 10, "Item": 6, "Kind": 11, "Hierarchy": 60, "Price": 12,
+                 "Note": 50, "Status": 10, "Resolution": 55}.items():
+        notes.column_dimensions[get_column_letter(_COL[h] + 1)].width = w
+
+    header_cells = []
+    for column, value in enumerate(HEADERS + ["_band", ROW_KEY_HEADER], start=1):
+        if column <= ncols:
+            fill = note_fill if column == _COL["Note"] + 1 else header_fill
+            font = (Font(color="7F6000", bold=True)
+                    if column == _COL["Note"] + 1 else header_font)
+            alignment = Alignment(vertical="center")
+        else:
+            fill = font = alignment = None
+        header_cells.append(_write_only_text_cell(
+            notes, value, fill=fill, font=font, alignment=alignment
+        ))
+    notes.append(header_cells)
+
+    report("Building Sales Order review rows...")
     parity = 0
-    for r in rows:
+    row_count = 0
+    for row_count, r in enumerate(
+            iter_review_rows(line_items_store, review_store), start=1):
         if r["group_start"]:
             parity ^= 1                                     # flip per order group
         _append_text_row(notes, [r["order"], r["item_no"], r["kind"], r["hierarchy"],
                                  r["price"], r["note"], r["status"], r["resolution"],
                                  parity, r["row_key"]])
-    last = notes.max_row
-    for c in range(1, ncols + 1):
-        notes.cell(1, c).fill = header_fill
-        notes.cell(1, c).font = header_font
-        notes.cell(1, c).alignment = Alignment(vertical="center")
-    notes.cell(1, _COL["Note"] + 1).fill = note_fill
-    notes.cell(1, _COL["Note"] + 1).font = Font(color="7F6000", bold=True)
-    notes.row_dimensions[1].height = 24
-    notes.column_dimensions[get_column_letter(band_col)].hidden = True
-    notes.column_dimensions[get_column_letter(row_key_col)].hidden = True
+        if row_count % 25_000 == 0:
+            report(f"  {row_count:,} rows written...")
+    last = row_count + 1
 
     if last >= 2:
         full = f"A2:{get_column_letter(ncols)}{last}"
@@ -470,46 +523,50 @@ def write_workbook(path: Path, line_items_store: Dict[str, Any],
             f"{noteL}2:{noteL}{last}",
             FormulaRule(formula=[f'${hierarchyL}2<>""'], fill=note_fill),
         )
-    notes.freeze_panes = "A2"
     notes.auto_filter.ref = f"A1:{get_column_letter(ncols)}{last}"
-    notes.sheet_view.showGridLines = False
-    for h, w in {"Order": 10, "Item": 6, "Kind": 11, "Hierarchy": 60, "Price": 12,
-                 "Note": 50, "Status": 10, "Resolution": 55}.items():
-        notes.column_dimensions[get_column_letter(_COL[h] + 1)].width = w
 
     # --- Resolved tab: compact audit history, separate from active inputs ----
     resolved = wb.create_sheet(RESOLVED_SHEET)
-    resolved.append(RESOLVED_HEADERS)
+    resolved.freeze_panes = "A2"
+    for c, width in enumerate((10, 7, 65, 50, 60, 20), start=1):
+        resolved.column_dimensions[get_column_letter(c)].width = width
+    resolved.append([
+        _write_only_text_cell(resolved, value, fill=header_fill, font=header_font)
+        for value in RESOLVED_HEADERS
+    ])
     handled = sorted(
         (n for n in review_store["notes"] if n.get("status") == STATUS_HANDLED),
         key=lambda n: int(n.get("id", 0)),
         reverse=True,
     )
-    for n in handled:
+    resolved_count = 0
+    for resolved_count, n in enumerate(handled, start=1):
         _append_text_row(resolved, [
             str(n.get("order", "")), str(n.get("item_no", "")),
             str(n.get("item_text", "")), str(n.get("note", "")),
             str(n.get("resolution", "") or ""), str(n.get("handled_at", "") or ""),
         ])
-    for c in range(1, len(RESOLVED_HEADERS) + 1):
-        resolved.cell(1, c).fill = header_fill
-        resolved.cell(1, c).font = header_font
-    resolved.freeze_panes = "A2"
-    resolved.auto_filter.ref = f"A1:F{max(resolved.max_row, 1)}"
-    for c, width in enumerate((10, 7, 65, 50, 60, 20), start=1):
-        resolved.column_dimensions[get_column_letter(c)].width = width
+    resolved.auto_filter.ref = f"A1:F{resolved_count + 1}"
+    wb.active = notes
 
-    wb.active = 0
-
-    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    building = path.with_name(f"{path.stem}.building{path.suffix}")
+    report(f"Saving {row_count:,} rows to {path.name}...")
     try:
-        wb.save(str(path))
+        wb.save(str(building))
     except PermissionError:
         raise RuntimeError(
-            f"Could not write {path.name} — it looks like it's still open in "
-            f"Excel. Close it, then run this again.") from None
-    return len(rows)
+            f"Could not write {building.name}. Close Excel, then run this again."
+        ) from None
+    try:
+        building.replace(path)
+    except PermissionError:
+        raise RuntimeError(
+            f"Could not replace {path.name} because it is open in Excel. The "
+            f"completed replacement is preserved as {building.name}."
+        ) from None
+    report(f"Saved {path.name}.")
+    return row_count
 
 
 def _notes_sheet(wb):
@@ -709,9 +766,15 @@ def _load_line_items() -> Dict[str, Any]:
     return line_items.load_store()
 
 
+def _console_progress(message: str) -> None:
+    print(message, flush=True)
+
+
 def _cmd_build(args) -> int:
     store = load_store()
-    n = write_workbook(Path(args.out), _load_line_items(), store)
+    n = write_workbook(
+        Path(args.out), _load_line_items(), store, progress=_console_progress
+    )
     pend = len(open_notes(store))
     print(f"Wrote {args.out} ({n} rows). {pend} open note(s) shown; resolved history "
           f"is on the {RESOLVED_SHEET} tab. Filter the real rows on Sales Order and "
@@ -724,7 +787,9 @@ def _cmd_open(args) -> int:
     import os
     path = Path(args.out)
     if not path.exists():
-        write_workbook(path, _load_line_items(), load_store())
+        write_workbook(
+            path, _load_line_items(), load_store(), progress=_console_progress
+        )
         print(f"Built {path}.")
     try:
         os.startfile(str(path))          # Windows: opens in Excel  # type: ignore[attr-defined]
@@ -747,7 +812,9 @@ def _cmd_sync(args) -> int:
     save_store(store)
     if edits or needs_upgrade:
         try:
-            write_workbook(path, _load_line_items(), store)
+            write_workbook(
+                path, _load_line_items(), store, progress=_console_progress
+            )
         except RuntimeError as exc:
             raise RuntimeError(
                 f"Recorded {added} new note(s), but could not refresh the Sales Order "
@@ -784,7 +851,9 @@ def _cmd_refresh(args) -> int:
     closed = apply_handled_marks(store)                 # Claude's resolutions
     save_store(store)
     try:
-        n = write_workbook(path, _load_line_items(), store)
+        n = write_workbook(
+            path, _load_line_items(), store, progress=_console_progress
+        )
     except RuntimeError as exc:
         if workbook_note_count:
             safe = (
