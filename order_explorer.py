@@ -515,7 +515,7 @@ def main(argv: List[str] | None = None) -> int:
     out = write_explorer(payload, args.out)
     n_q = sum(1 for e in payload["jobs"].values() if e.get("q"))
     print(f"Wrote {out}  ({payload['n_jobs']} orders, {payload['n_items']} line "
-          f"items, {n_q} on the board)  + {BAT_NAME} + {VERSION_NAME}")
+          f"items, {n_q} in the queue)  + {BAT_NAME} + {VERSION_NAME}")
     if args.open:
         return 0 if open_in_app_window(out) else 1
     return 0
@@ -603,8 +603,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .sd-item .job { font-family: var(--mono); font-weight: 700; }
   .sd-item .cust { color: var(--muted); font-size: 12.5px; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; }
-  .sd-item .onq { margin-left: auto; font-size: 10.5px; font-family: var(--mono);
-    color: var(--good); letter-spacing: .06em; }
+  .sd-item .onq { margin-left: auto; }
   .sd-item .why { font-family: var(--mono); font-size: 11.5px; color: var(--muted);
     margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sd-item .why mark { background: var(--hit); color: inherit; padding: 0 1px; }
@@ -698,8 +697,17 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .ohead .cust { font-size: 13px; color: var(--muted); }
   .ohead .co { font-family: var(--mono); font-size: 11.5px; color: var(--muted);
     border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; }
-  .ohead .onq { font-size: 10.5px; font-family: var(--mono); color: var(--good);
-    letter-spacing: .06em; }
+  /* IN QUEUE badge: filled with the job's own row color from the Live Queue
+     (overdue red, due-today orange, soon gold, new grey) — plain green outline
+     when its row is unfilled. */
+  .onq { font-size: 10px; font-family: var(--mono); letter-spacing: .06em;
+    color: var(--good); border: 1px solid var(--good); border-radius: 999px;
+    padding: 1px 7px; white-space: nowrap; align-self: center; }
+  .onq.qbf { color: #1B242D; border-color: rgba(27, 36, 45, .25); }
+  .qb-xf-ov { background: #FFC7CE; }   .qb-xf-dt { background: #F8CBAD; }
+  .qb-xf-sn { background: #FFEB9C; }   .qb-xf-nw { background: #D9D9D9; }
+  .qb-xf-ovn { background: #F4A5A8; }  .qb-xf-dtn { background: #F4B183; }
+  .qb-xf-snn { background: #F5D750; }
   .metaline { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px;
     font-size: 12px; align-items: baseline; }
   .metaline .dwg { font-family: var(--mono); color: var(--good); font-weight: 600; }
@@ -774,6 +782,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .m-job { font-family: var(--mono); font-size: 15px; font-weight: 700; }
   .m-job:hover { color: var(--accent); }
   .m-cust { font-size: 12px; color: var(--muted); }
+  .m-spec { margin: 1px 0 0 32px; font-size: 12px; color: var(--muted); }
   .m-score { margin-left: auto; font-family: var(--mono); font-size: 11.5px;
     font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 700; }
   .m-scorebar { height: 3px; border-radius: 2px; background: var(--chip);
@@ -901,6 +910,32 @@ function fillClass(j, e) {
     if (ed <= soon) return isNew ? "xf-snn" : "xf-sn";
   }
   return isNew ? "xf-nw" : "";
+}
+/* The IN QUEUE badge, filled with the job's current row color on the queue. */
+function queueBadge(j, e) {
+  if (!e.q) return "";
+  const f = fillClass(j, e);
+  return '<span class="onq' + (f ? " qbf qb-" + f : "") + '" title="'
+    + (f ? "Filled with its row color on the queue" : "Currently in the queue")
+    + '">IN QUEUE</span>';
+}
+/* One compact fan line: D/design · S/size · A/arr · width% · rot-disch · wheel */
+function fanSpec(e) {
+  const v = label => {
+    const t = spv(e, label);
+    return t && t.toUpperCase() !== "N/A" ? t : "";
+  };
+  const parts = [];
+  if (v("Design")) parts.push("D/" + v("Design"));
+  if (v("Size")) parts.push("S/" + v("Size"));
+  const a = v("Arrangement");
+  if (a) parts.push(a.startsWith("A/") ? a : "A/" + a);
+  const w = v("% Width");
+  if (w) parts.push(w.endsWith("%") ? w : w + "%");
+  const rd = [v("Rotation"), v("Discharge")].filter(Boolean).join("-");
+  if (rd) parts.push(rd);
+  if (v("Wheel")) parts.push(v("Wheel"));
+  return parts.join(" · ");
 }
 
 async function boot() {
@@ -1215,7 +1250,7 @@ function renderBoard() {
     + '<span class="m-count">' + rows.length + " of " + onq.length
     + " orders · $" + money(total) + " shown · click a column to sort · "
     + "colors match the workbook"
-    + (hasPos ? "" : " · board # appears on watcher-generated pages")
+    + (hasPos ? "" : " · queue # appears on watcher-generated pages")
     + "</span></div>"
     + '<div class="histbar"><input id="boardq" type="text" placeholder="Filter: '
     + 'job #, customer, design, engineer, note&hellip;" value="'
@@ -1499,7 +1534,7 @@ function renderJobPane() {
     + '<div class="ohead"><span class="job">' + esc(j) + '</span>'
     + '<span class="cust">' + esc(e.c) + "</span>"
     + (e.co ? '<span class="co">' + esc(e.co) + "</span>" : "")
-    + (e.q ? '<span class="onq">ON BOARD</span>' : "")
+    + queueBadge(j, e)
     + (e.pdf ? '<a href="' + esc(fileUrl(e.pdf)) + '" target="_blank" title="'
         + esc(e.pdf) + '">Open SO PDF</a>' : "")
     + (e.qr ? '<a href="' + esc(fileUrl(e.qr)) + '" target="_blank" title="'
@@ -1601,18 +1636,17 @@ function renderMatches() {
     if (o.qr) foot.push('<a href="' + esc(fileUrl(o.qr))
       + '" target="_blank" title="' + esc(o.qr) + '">Quote Run</a>');
     const theirDesign = spv(o, "Design");
-    const designChip = srcDesign && theirDesign
-      ? (theirDesign === srcDesign
-          ? '<span class="chip same">✓ design ' + esc(srcDesign) + "</span>"
-          : '<span class="chip">design ' + esc(theirDesign) + "</span>")
-      : "";
+    const designChip = srcDesign && theirDesign === srcDesign
+      ? '<span class="chip same">✓ design ' + esc(srcDesign) + "</span>" : "";
+    const spec = fanSpec(o);
     return '<div class="match"><div class="m-head">'
       + '<span class="m-rank">' + (i + 1) + ".</span>"
       + '<button class="m-job" data-job="' + esc(r.j) + '" title="Open this order">'
       + esc(r.j) + "</button>"
       + '<span class="m-cust">' + esc(o.c) + (o.co ? " · " + esc(o.co) : "")
-      + (o.q ? " · ON BOARD" : "") + "</span>" + designChip
+      + "</span>" + queueBadge(r.j, o) + designChip
       + '<span class="m-score">score ' + r.score.toFixed(2) + "</span></div>"
+      + (spec ? '<div class="m-spec">' + esc(spec) + "</div>" : "")
       + '<div class="m-scorebar"><i style="width:'
       + Math.max(6, 100 * r.score / max) + '%"></i></div>'
       + '<div class="m-lines">' + head + more + "</div>"
@@ -1702,7 +1736,7 @@ function doSearch() {
         return '<button class="sd-item" data-job="' + esc(h.j) + '">'
           + '<span class="l1"><span class="job">' + esc(h.j) + "</span>"
           + '<span class="cust">' + esc(e.c) + "</span>"
-          + (e.q ? '<span class="onq">ON BOARD</span>' : "") + "</span>"
+          + queueBadge(h.j, e) + "</span>"
           + (h.why ? '<span class="why">= ' + h.why + "</span>" : "")
           + "</button>";
       }).join("")
