@@ -135,6 +135,24 @@ def test_events_and_removed():
     print("  change events / removals / master-only history OK")
 
 
+def test_spec_values_tidied():
+    """Size/Arrangement show the workbook's short forms (split_size /
+    split_arrangement), not the raw SO text."""
+    qjob = {"job": "421966", "customer": "X", "line_items": [],
+            "so_size": "2412 (3600 RPM or less)", "so_arrangement": "Arrangement 4"}
+    p = oe.build_payload(_store(), queue_jobs={"421966": qjob})
+    sp = dict(p["jobs"]["421966"]["sp"])
+    assert sp["Size"] == "2412", sp["Size"]
+    assert sp["Arrangement"] == "A/4", sp["Arrangement"]
+    qjob["so_arrangement"] = "A/4V C-Face Flange mount (no motor base)"
+    qjob["so_size"] = "3650-C12 Blade-1800"
+    p = oe.build_payload(_store(), queue_jobs={"421966": qjob})
+    sp = dict(p["jobs"]["421966"]["sp"])
+    assert sp["Arrangement"] == "A/4V", sp["Arrangement"]
+    assert sp["Size"] == "3650", sp["Size"]
+    print("  size/arrangement tidying OK")
+
+
 def test_master_orders_fallback_queue():
     master_orders = {"421314": {"on_queue": True, "added": "2026-07-15T08:30:00",
                                 "job": {"job": "421314", "customer": "Bayside",
@@ -198,6 +216,7 @@ def main() -> int:
     test_payload_components_merge()
     test_queue_jobs_take_master_items()
     test_events_and_removed()
+    test_spec_values_tidied()
     test_master_orders_fallback_queue()
     test_render_roundtrip_and_safety()
     test_bat_launcher()

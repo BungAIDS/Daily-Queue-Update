@@ -28,7 +28,7 @@ import logging
 import os
 import subprocess
 import sys
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 
@@ -50,8 +50,13 @@ def data_files() -> List[Path]:
     """The order-data files we publish, in a stable order. Only the ones that
     actually exist on disk are returned (a fresh machine may lack some)."""
     line_items = LINE_ITEMS_STORE if LINE_ITEMS_STORE else BACKLOG_DIR / "line_items.json"
+    today = date.today()
     candidates = [
         SNAPSHOT_DIR / "live_master.json",           # the master store (richest)
+        # Today's + yesterday's field-change logs: the Changes tab's source, so
+        # a page/report built from this branch shows the day's activity too.
+        SNAPSHOT_DIR / f"change_log_{today.isoformat()}.json",
+        SNAPSHOT_DIR / f"change_log_{(today - timedelta(days=1)).isoformat()}.json",
         BACKLOG_DIR / "quote_run_scan_progress.json",  # every parsed quote run
         line_items,                                  # line-item store
         BACKLOG_DIR / "backfill_line_items.json",   # watcher-safe backfill overlay

@@ -60,8 +60,9 @@ from typing import Any, Dict, List, Optional
 import engineers
 import so_hierarchy
 from config import EXPLORER_PATH, LIVE_WORKBOOK_PATH, OUTPUT_DIR
-# Pure display helper shared with the Excel Changes tab, so CO descriptions
-# never diverge between the two.
+# Pure display helpers shared with the Excel tabs, so CO descriptions and the
+# tidy Size / Arrangement forms never diverge between the two.
+from excel_writer import split_arrangement, split_size
 from live_sheets import _co_change_desc
 
 log = logging.getLogger("order-explorer")
@@ -129,6 +130,18 @@ def _item_rows(items: List[Dict[str, Any]]) -> List[List[Any]]:
              it.get("section", ""), it.get("norm", ""),
              list(it.get("tags") or [])]
             for i, it in enumerate(items, start=1)]
+
+
+def _spec_value(key: str, v: str) -> str:
+    """Tidy display forms, identical to the workbook's columns: the size keeps
+    only its leading number ('2412 (3600 RPM or less)' -> '2412') and the
+    arrangement its short code ('Arrangement 4' -> 'A/4', 'A/4V C-Face Flange
+    mount (no motor base)' -> 'A/4V')."""
+    if key == "so_size":
+        return split_size(v)[0]
+    if key == "so_arrangement":
+        return split_arrangement(v)[0]
+    return v
 
 
 def _board_fields(j: Dict[str, Any], added: str = "") -> Dict[str, Any]:
@@ -229,7 +242,8 @@ def build_payload(store: Dict[str, Any],
             entry["e"] = eng
         if mjob.get("item"):
             entry["im"] = mjob["item"]
-        spec = [[label, str(mjob.get(key)).strip()] for label, key in SPEC_FIELDS
+        spec = [[label, _spec_value(key, str(mjob.get(key)).strip())]
+                for label, key in SPEC_FIELDS
                 if str(mjob.get(key) or "").strip() not in ("", "None")]
         if spec:
             entry["sp"] = spec
@@ -434,6 +448,9 @@ def main(argv: List[str] | None = None) -> int:
                     help="live_master.json (default: the configured snapshot)")
     ap.add_argument("--dwg", type=Path, default=None,
                     help="AutoCAD scan store JSON (default: the configured store)")
+    ap.add_argument("--changes", type=Path, default=None,
+                    help="Day change-log JSON for the Changes tab (default: "
+                         "today's log from the configured snapshots folder)")
     ap.add_argument("--open", action="store_true",
                     help="Open the page in an app window (Edge/Chrome --app). "
                          "An existing page opens as-is — the watcher keeps it "
@@ -467,8 +484,14 @@ def main(argv: List[str] | None = None) -> int:
         master = live_master.load_master()
 
     today = date.today()
+    if args.changes:
+        events = json.loads(args.changes.read_text(encoding="utf-8"))
+        if not isinstance(events, list):
+            events = []
+    else:
+        events = change_log.load(today)
     payload = build_payload(store, dwg, master_orders=master.get("orders"),
-                            events=change_log.load(today), today=today)
+                            events=events, today=today)
     out = write_explorer(payload, args.out)
     n_q = sum(1 for e in payload["jobs"].values() if e.get("q"))
     print(f"Wrote {out}  ({payload['n_jobs']} orders, {payload['n_items']} line "
@@ -1145,7 +1168,14 @@ function renderBoard() {
   // (snapshot builds) the stable sort still yields a sensible fixed order.
   const onq = Object.keys(DB.jobs).filter(j => DB.jobs[j].q)
     .sort((a, b) => jobNum(a) - jobNum(b));
-  const sort = state.boardSort || { col: 18, dir: 1 };   // cbcinsider board order
+  // The "#" board position exists only on watcher-generated pages; hide the
+  // column entirely (instead of showing blanks) when this build lacks it.
+  const hasPos = onq.some(j => ((DB.jobs[j].bd || {}).ps || 0) > 0);
+  const cols = hasPos ? BOARD_COLS : BOARD_COLS.slice(0, -1);
+  let sort = state.boardSort;
+  if (sort && sort.col >= cols.length) sort = null;
+  sort = sort || (hasPos ? { col: 18, dir: 1 }          // cbcinsider board order
+                         : { col: 1, dir: 1 });         // else job # order
   let rows = onq.map(j => {
     const e = DB.jobs[j], bd = e.bd || {};
     const t = s => ({ v: s || "", h: esc(s || "") });
@@ -1159,6 +1189,7 @@ function renderBoard() {
       t(bd.ed), t(bd.sd), t(bd.fn), t(bd.pr), t(bd.ru),
       { v: bd.ps || "", h: String(bd.ps || "") },
     ];
+    if (!hasPos) c.pop();
     return { j, e, bd, c };
   });
   const needle = state.boardQ.trim().toUpperCase();
@@ -1179,16 +1210,19 @@ function renderBoard() {
   el.innerHTML = '<div class="panel-head"><span class="eyebrow">Live Queue</span>'
     + '<span class="m-count">' + rows.length + " of " + onq.length
     + " orders · $" + money(total) + " shown · click a column to sort · "
-    + "colors match the workbook</span></div>"
+    + "colors match the workbook"
+    + (hasPos ? "" : " · board # appears on watcher-generated pages")
+    + "</span></div>"
     + '<div class="histbar"><input id="boardq" type="text" placeholder="Filter: '
     + 'job #, customer, design, engineer, note&hellip;" value="'
     + esc(state.boardQ) + '"></div>'
     + '<div class="tablewrap"><table class="gt"><thead><tr>'
-    + sortableHead(BOARD_COLS, sort)
+    + sortableHead(cols, sort)
     + "</tr></thead><tbody>" + body
     + '<tr class="totrow"><td colspan="6">Total jobs: ' + rows.length + "</td>"
     + '<td colspan="10" style="text-align:right">Total $ in process:</td>'
-    + '<td class="num">' + money(total) + "</td><td></td><td></td></tr>"
+    + '<td class="num">' + money(total) + "</td>"
+    + "<td></td>".repeat(cols.length - 17) + "</tr>"
     + "</tbody></table></div>";
   wireJobCells(el);
   wireSort(el, "boardSort");
