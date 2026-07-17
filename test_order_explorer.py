@@ -207,7 +207,19 @@ def test_bat_launcher():
     assert "\r\n" in text and "\n" == text[-1] or text.endswith("\r\n")
     assert 'set "PAGE=%~dp0My Page.html"' in text
     assert "--app=" in text and "msedge" in text.lower()
+    # Registers the per-user glqueue: handler (File Explorer folder links).
+    assert text.count("reg add") == 3 and "glq_open.vbs" in text
+    assert r"HKCU\Software\Classes\glqueue" in text and "%%1" in text
     print("  bat launcher OK")
+
+
+def test_vbs_folder_opener():
+    text = oe.vbs_text()
+    text.encode("ascii")                                 # wscript-safe
+    assert text.endswith("\r\n") and "\r\n" in text
+    assert "DecodeUrl" in text and "explorer.exe" in text
+    assert 'LCase(Left(u, 8)) = "glqueue:"' in text
+    print("  vbs folder opener OK")
 
 
 def test_write_explorer_files():
@@ -218,6 +230,7 @@ def test_write_explorer_files():
         assert got == out and out.exists() and out.stat().st_size > 10_000
         bat = Path(td) / oe.BAT_NAME
         assert bat.exists(), "launcher .bat not written"
+        assert (Path(td) / oe.VBS_NAME).exists(), "glq_open.vbs not written"
         # The auto-refresh stamp open pages poll, matching the page's gen.
         ver = Path(td) / oe.VERSION_NAME
         assert ver.exists(), "version stamp not written"
@@ -239,6 +252,7 @@ def main() -> int:
     test_master_orders_fallback_queue()
     test_render_roundtrip_and_safety()
     test_bat_launcher()
+    test_vbs_folder_opener()
     test_write_explorer_files()
     print("All order_explorer tests passed.")
     return 0
