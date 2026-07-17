@@ -530,6 +530,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   table.gt { border-collapse: collapse; font-size: 12px; width: 100%; }
   .gt th { position: sticky; top: 0; z-index: 2; background: #305496; color: #FFFFFF;
     font-weight: 700; text-align: left; padding: 5px 8px; white-space: nowrap; }
+  .gt th.sth { cursor: pointer; user-select: none; }
+  .gt th.sth:hover { background: #3E64A8; }
   .gt th.vh { writing-mode: vertical-rl; transform: rotate(180deg);
     text-align: left; vertical-align: bottom; font-weight: 600; font-size: 11px;
     padding: 6px 2px; max-height: 150px; }
@@ -587,8 +589,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
   #toast.show { opacity: 1; }
   @media (prefers-reduced-motion: reduce) { #toast { transition: none; } }
 
-  main.cols { display: grid; grid-template-columns: minmax(0, 11fr) minmax(0, 9fr);
+  /* The Order view is a grid ONLY while active — a bare `main.cols`
+     display rule would outrank `.view`'s hide and bleed under other tabs. */
+  main.cols { grid-template-columns: minmax(0, 11fr) minmax(0, 9fr);
     gap: 18px; align-items: start; }
+  main.cols.view.on { display: grid; }
   @media (max-width: 920px) { main.cols { grid-template-columns: 1fr; } }
 
   .backlink { font-size: 12.5px; color: var(--accent); font-weight: 600; }
@@ -715,9 +720,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <header class="top">
     <span class="wordmark">GL QUEUE <span class="dim">/</span> EXPLORER</span>
     <nav class="tabs" id="tabs" style="display:none">
-      <button class="tabbtn" data-tab="board">Board</button>
       <button class="tabbtn" data-tab="changes">Changes</button>
+      <button class="tabbtn" data-tab="board">Live Queue</button>
       <button class="tabbtn" data-tab="hist">Order History</button>
+      <button class="tabbtn" data-tab="job" id="jobtab">Order</button>
     </nav>
     <div class="searchbox">
       <span class="glass">&#8981;</span>
@@ -754,7 +760,8 @@ let DB = null;                 // {gen, today, n_jobs, n_items, jobs, ev, rm}
 let IDX = null;                // {tagDF, normDF, sets: {job -> {t:Set, n:Set}}}
 let COSET = new Set();         // jobs a CO# landed on today (red text)
 const state = { tab: "board", job: null, path: null, whole: false,
-                pinned: new Set(), histQ: "", histN: 500 };
+                pinned: new Set(), histQ: "", histN: 500,
+                boardQ: "", boardSort: null, histSort: null };
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c =>
@@ -916,9 +923,13 @@ function anyAttrMatch(entry, key, val) {
   return walk(entry.cp);
 }
 
-/* ---- matching: rarity-weighted overlap (find_orders.similar_to_items) ----- */
+/* ---- matching: rarity-weighted overlap (find_orders.similar_to_items),
+   plus a fan-design bonus — an order of the SAME design that shares content
+   outranks an equally-shared order of a different design. ------------------- */
+const DESIGN_BONUS = 1.5;
 function rankMatches(srcJob, items) {
   const { tagDF, normDF, sets } = ensureIndex();
+  const srcDesign = spv(DB.jobs[srcJob], "Design");
   const tTags = new Set(), tNorms = new Set();
   for (const row of items) {
     for (const tg of row[IT.TAGS]) tTags.add(tg);
@@ -933,6 +944,7 @@ function rankMatches(srcJob, items) {
     for (const n of tNorms) if (s.n.has(n)) { score += 2 / normDF[n]; sharedNorms.push(n); }
     for (const t of tTags) if (s.t.has(t)) score += 1 / tagDF[t];
     if (!score) continue;
+    if (srcDesign && spv(DB.jobs[j], "Design") === srcDesign) score += DESIGN_BONUS;
     if (state.pinned.size) {
       let ok = true;
       for (const p of state.pinned) {
@@ -953,6 +965,7 @@ function render() {
     $("view-" + t).classList.toggle("on", state.tab === t);
   document.querySelectorAll(".tabbtn").forEach(b =>
     b.classList.toggle("active", b.dataset.tab === state.tab));
+  $("jobtab").textContent = state.job ? "Order · " + state.job : "Order";
   if (state.tab === "board") renderBoard();
   else if (state.tab === "changes") renderChanges();
   else if (state.tab === "hist") renderHist();
@@ -960,7 +973,9 @@ function render() {
 }
 function setTab(t) { state.tab = t; render(); window.scrollTo(0, 0); }
 function selectJob(j) {
-  state.job = j; state.path = null; state.whole = false; state.pinned.clear();
+  /* Opening an order lands on its whole-order matches (the Similar Orders
+     view) — a component/attribute click narrows from there. */
+  state.job = j; state.path = null; state.whole = true; state.pinned.clear();
   setTab("job");
 }
 function wireJobCells(root) {
@@ -989,54 +1004,105 @@ function fallbackCopy(t, done) {
   ta.remove();
 }
 
-/* -------------------------------- Board ------------------------------------ */
+/* ------------------------------ Live Queue --------------------------------- */
 const BOARD_COLS = ["Added", "Job #", "Run", "CO#", "Oper", "Design", "Customer",
   "Size", "Arr.", "Assigned To", "Checker", "Note", "Engineer", "End Date",
   "Start Date", "FanNet", "Price", "DWG Reuse", "#"];
 
+/* Sort value: currency/plain numbers numerically, dates chronologically,
+   everything else as text; blanks always sink to the bottom. */
+function numish(v) {
+  if (v === null || v === undefined || v === "") return null;
+  if (typeof v === "number") return v;
+  const s = String(v).replace(/[$,]/g, "");
+  if (/^-?\d+(\.\d+)?$/.test(s)) return +s;
+  const d = new Date(v);
+  return isNaN(d) ? null : d.getTime();
+}
+function sortRows(rows, sort) {
+  const { col, dir } = sort;
+  return rows.slice().sort((a, b) => {
+    const va = a.c[col].v, vb = b.c[col].v;
+    const ea = va === "" || va === null, eb = vb === "" || vb === null;
+    if (ea || eb) return ea && eb ? 0 : ea ? 1 : -1;
+    const na = numish(va), nb = numish(vb);
+    const r = (na !== null && nb !== null) ? na - nb
+      : String(va).localeCompare(String(vb));
+    return dir * r;
+  });
+}
+function sortableHead(cols, sort) {
+  return cols.map((h, i) => '<th class="sth" data-si="' + i
+    + '" title="Click to sort">' + esc(h)
+    + (sort && sort.col === i ? (sort.dir < 0 ? " ▼" : " ▲") : "")
+    + "</th>").join("");
+}
+function wireSort(el, key) {
+  el.querySelectorAll("th.sth").forEach(th => th.onclick = () => {
+    const col = +th.dataset.si, cur = state[key];
+    state[key] = cur && cur.col === col ? { col, dir: -cur.dir } : { col, dir: 1 };
+    render();
+  });
+}
+function wireFilter(inp, key, rerender) {
+  inp.oninput = () => { state[key] = inp.value;
+    clearTimeout(inp._t); inp._t = setTimeout(() => {
+      const pos = inp.selectionStart; rerender();
+      const ni = $(inp.id); ni.focus(); ni.setSelectionRange(pos, pos);
+    }, 250); };
+}
+
 function renderBoard() {
   const el = $("view-board");
   const onq = Object.keys(DB.jobs).filter(j => DB.jobs[j].q);
-  onq.sort((a, b) => ((DB.jobs[a].bd || {}).ps || 9e9) - ((DB.jobs[b].bd || {}).ps || 9e9)
-                     || jobNum(a) - jobNum(b));
-  let total = 0;
-  const rows = onq.map(j => {
+  const sort = state.boardSort || { col: 18, dir: 1 };   // cbcinsider board order
+  let rows = onq.map(j => {
     const e = DB.jobs[j], bd = e.bd || {};
-    total += +String(bd.pr || "").replace(/[^0-9.\-]/g, "") || 0;
-    const cls = [fillClass(e), COSET.has(j) ? "co-red" : "", "rowbtn"]
+    const t = s => ({ v: s || "", h: esc(s || "") });
+    const c = [
+      { v: bd.ai || "", h: esc(fmtWhen(bd.ai)) },
+      { v: jobNum(j), h: '<span class="jobcell" data-job="' + esc(j) + '">'
+          + esc(j) + "</span>" },
+      { v: bd.dr ? 1 : "", h: bd.dr ? '<span class="drun">Run</span>' : "" },
+      t(e.co), t(bd.op), t(spv(e, "Design")), t(e.c), t(spv(e, "Size")),
+      t(spv(e, "Arrangement")), t(bd.as), t(bd.ck), t(bd.no), t(e.e),
+      t(bd.ed), t(bd.sd), t(bd.fn), t(bd.pr), t(bd.ru),
+      { v: bd.ps || "", h: String(bd.ps || "") },
+    ];
+    return { j, e, bd, c };
+  });
+  const needle = state.boardQ.trim().toUpperCase();
+  if (needle)
+    rows = rows.filter(r => [r.j, r.e.c, spv(r.e, "Design"), r.bd.no, r.bd.as,
+      r.bd.ck, r.e.e, r.e.co, r.bd.st].some(x =>
+        String(x || "").toUpperCase().includes(needle)));
+  rows = sortRows(rows, sort);
+  let total = 0;
+  const body = rows.map(r => {
+    total += +String(r.bd.pr || "").replace(/[^0-9.\-]/g, "") || 0;
+    const cls = [fillClass(r.e), COSET.has(r.j) ? "co-red" : "", "rowbtn"]
       .filter(Boolean).join(" ");
-    return '<tr class="' + cls + '">'
-      + "<td>" + esc(fmtWhen(bd.ai)) + "</td>"
-      + '<td class="jobcell" data-job="' + esc(j) + '">' + esc(j) + "</td>"
-      + "<td>" + (bd.dr ? '<span class="drun">Run</span>' : "") + "</td>"
-      + "<td>" + esc(e.co || "") + "</td>"
-      + "<td>" + esc(bd.op || "") + "</td>"
-      + "<td>" + esc(spv(e, "Design")) + "</td>"
-      + "<td>" + esc(e.c) + "</td>"
-      + "<td>" + esc(spv(e, "Size")) + "</td>"
-      + "<td>" + esc(spv(e, "Arrangement")) + "</td>"
-      + "<td>" + esc(bd.as || "") + "</td>"
-      + "<td>" + esc(bd.ck || "") + "</td>"
-      + "<td>" + esc(bd.no || "") + "</td>"
-      + "<td>" + esc(e.e || "") + "</td>"
-      + "<td>" + esc(bd.ed || "") + "</td>"
-      + "<td>" + esc(bd.sd || "") + "</td>"
-      + "<td>" + esc(bd.fn || "") + "</td>"
-      + '<td class="num">' + esc(bd.pr || "") + "</td>"
-      + "<td>" + esc(bd.ru || "") + "</td>"
-      + '<td class="ctr">' + (bd.ps || "") + "</td></tr>";
+    return '<tr class="' + cls + '">' + r.c.map((x, i) =>
+      "<td" + (i === 16 ? ' class="num"' : i === 18 ? ' class="ctr"' : "")
+      + ">" + x.h + "</td>").join("") + "</tr>";
   }).join("");
-  el.innerHTML = '<div class="panel-head"><span class="eyebrow">Board — live queue</span>'
-    + '<span class="m-count">' + onq.length + " orders · $" + money(total)
-    + " in process · colors match the workbook</span></div>"
+  el.innerHTML = '<div class="panel-head"><span class="eyebrow">Live Queue</span>'
+    + '<span class="m-count">' + rows.length + " of " + onq.length
+    + " orders · $" + money(total) + " shown · click a column to sort · "
+    + "colors match the workbook</span></div>"
+    + '<div class="histbar"><input id="boardq" type="text" placeholder="Filter: '
+    + 'job #, customer, design, engineer, note&hellip;" value="'
+    + esc(state.boardQ) + '"></div>'
     + '<div class="tablewrap"><table class="gt"><thead><tr>'
-    + BOARD_COLS.map(h => "<th>" + esc(h) + "</th>").join("")
-    + "</tr></thead><tbody>" + rows
-    + '<tr class="totrow"><td colspan="6">Total jobs: ' + onq.length + "</td>"
+    + sortableHead(BOARD_COLS, sort)
+    + "</tr></thead><tbody>" + body
+    + '<tr class="totrow"><td colspan="6">Total jobs: ' + rows.length + "</td>"
     + '<td colspan="10" style="text-align:right">Total $ in process:</td>'
     + '<td class="num">' + money(total) + "</td><td></td><td></td></tr>"
     + "</tbody></table></div>";
   wireJobCells(el);
+  wireSort(el, "boardSort");
+  wireFilter($("boardq"), "boardQ", renderBoard);
 }
 
 /* ------------------------------- Changes ----------------------------------- */
@@ -1106,9 +1172,14 @@ function renderChanges() {
       + "<td>" + esc(e.c || "") + "</td></tr>";
   });
 
+  const allEmpty = !newRows.length && !coRows.length && !byJob.size && !rmRows.length;
   el.innerHTML = '<div class="panel-head"><span class="eyebrow">Changes — '
     + esc(DB.today) + '</span><span class="m-count">generated ' + esc(DB.gen)
     + "</span></div>"
+    + (allEmpty ? '<div class="sectnote" style="padding-top:12px">Nothing logged '
+        + "for " + esc(DB.today) + " yet. This tab fills from the watcher PC&#39;s "
+        + "day log as orders arrive, change, and leave — a page built from a "
+        + "data snapshot (like a download of this file) starts empty.</div>" : "")
     + '<div class="secttitle">New orders today <span class="cnt">(' + newRows.length
     + ")</span></div>"
     + miniTable(["Time", "Job #", "CO#", "Design", "Customer", "Note", "End Date",
@@ -1158,51 +1229,52 @@ function jobTags(e) {
 function renderHist() {
   const el = $("view-hist");
   const all = histRowsAll();
-  const rows = histFilter(all, state.histQ.trim());
+  const filtered = histFilter(all, state.histQ.trim());
+  const matrix = filtered.length <= MATRIX_LIMIT && filtered.length > 0;
+  const sort = state.histSort || { col: 0, dir: -1 };   // newest job first
+
+  let rows = filtered.map(j => {
+    const e = DB.jobs[j], oh = e.oh;
+    const t = s => ({ v: s || "", h: esc(s || "") });
+    const c = [
+      { v: jobNum(j), h: '<span class="jobcell" data-job="' + esc(j) + '">'
+          + esc(j) + "</span>" },
+      t(e.co), t(spv(e, "Design")), t(spv(e, "Description")), t(spv(e, "Size")),
+      t(spv(e, "Arrangement")), t(spv(e, "Motor Pos")), t(spv(e, "Class")),
+      t(spv(e, "Rotation")), t(spv(e, "Discharge")), t(spv(e, "% Width")),
+      t(spv(e, "Wheel")), t(spv(e, "Design Temp")), t(spv(e, "Max Temp")),
+      t(e.c), t(e.e), t(e.im),
+      { v: oh[0], h: oh[0] ? '<span class="flag-yes">YES</span>' : "NO" },
+      { v: oh[1] || "", h: esc(fmtWhen(oh[1])) },
+      { v: oh[2] || "", h: esc(fmtWhen(oh[2])) },
+    ];
+    return { j, e, c };
+  });
+  rows = sortRows(rows, sort);
   const shown = rows.slice(0, state.histN);
-  const matrix = rows.length <= MATRIX_LIMIT && rows.length > 0;
 
   let sufCols = [], tagCols = [];
   if (matrix) {
     const suf = new Set(), tgs = new Set();
-    for (const j of rows) {
-      for (const s of DB.jobs[j].dx || []) suf.add(s);
-      for (const t of jobTags(DB.jobs[j])) tgs.add(t);
+    for (const r of rows) {
+      for (const s of r.e.dx || []) suf.add(s);
+      for (const t of jobTags(r.e)) tgs.add(t);
     }
     sufCols = [...suf].sort((a, b) => (parseInt(a, 10) || 9e9) - (parseInt(b, 10) || 9e9)
                                       || String(a).localeCompare(String(b)));
     tagCols = [...tgs].sort();
   }
 
-  const head = HIST_COLS.map(h => "<th>" + esc(h) + "</th>").join("")
+  const head = sortableHead(HIST_COLS, sort)
     + (matrix ? sufCols.map(s => '<th class="vh">-' + esc(s) + "</th>").join("")
         + (sufCols.length || tagCols.length ? '<th class="vh">&#9474;</th>' : "")
         + tagCols.map(t => '<th class="vh">' + esc(t) + "</th>").join("") : "");
 
-  const body = shown.map(j => {
-    const e = DB.jobs[j], oh = e.oh;
-    let tds = '<td class="jobcell" data-job="' + esc(j) + '">' + esc(j) + "</td>"
-      + "<td>" + esc(e.co || "") + "</td>"
-      + "<td>" + esc(spv(e, "Design")) + "</td>"
-      + "<td>" + esc(spv(e, "Description")) + "</td>"
-      + "<td>" + esc(spv(e, "Size")) + "</td>"
-      + "<td>" + esc(spv(e, "Arrangement")) + "</td>"
-      + "<td>" + esc(spv(e, "Motor Pos")) + "</td>"
-      + "<td>" + esc(spv(e, "Class")) + "</td>"
-      + "<td>" + esc(spv(e, "Rotation")) + "</td>"
-      + "<td>" + esc(spv(e, "Discharge")) + "</td>"
-      + "<td>" + esc(spv(e, "% Width")) + "</td>"
-      + "<td>" + esc(spv(e, "Wheel")) + "</td>"
-      + "<td>" + esc(spv(e, "Design Temp")) + "</td>"
-      + "<td>" + esc(spv(e, "Max Temp")) + "</td>"
-      + "<td>" + esc(e.c || "") + "</td>"
-      + "<td>" + esc(e.e || "") + "</td>"
-      + "<td>" + esc(e.im || "") + "</td>"
-      + '<td class="ctr">' + (oh[0] ? '<span class="flag-yes">YES</span>' : "NO") + "</td>"
-      + "<td>" + esc(fmtWhen(oh[1])) + "</td>"
-      + "<td>" + esc(fmtWhen(oh[2])) + "</td>";
+  const body = shown.map(r => {
+    let tds = r.c.map((x, i) => "<td" + (i === 17 ? ' class="ctr"' : "") + ">"
+      + x.h + "</td>").join("");
     if (matrix) {
-      const dx = new Set(e.dx || []), tg = jobTags(e);
+      const dx = new Set(r.e.dx || []), tg = jobTags(r.e);
       tds += sufCols.map(s => dx.has(s) ? '<td class="mx-y">✓</td>'
                                         : '<td class="mx-n"></td>').join("")
         + (sufCols.length || tagCols.length ? '<td class="mx-sep"></td>' : "")
@@ -1213,7 +1285,8 @@ function renderHist() {
   }).join("");
 
   el.innerHTML = '<div class="panel-head"><span class="eyebrow">Order History</span>'
-    + '<span class="m-count">' + rows.length + " of " + all.length + " orders"
+    + '<span class="m-count">' + rows.length + " of " + all.length
+    + " orders · click a column to sort"
     + (matrix ? " · showing the ✓/✗ DWG + feature matrices"
               : " · filter to ≤ " + MATRIX_LIMIT + " to unfold the ✓/✗ matrices")
     + "</span></div>"
@@ -1228,12 +1301,8 @@ function renderHist() {
           + Math.min(500, rows.length - shown.length) + " more (of "
           + (rows.length - shown.length) + " remaining)</button>" : "");
   wireJobCells(el);
-  const inp = $("histq");
-  inp.oninput = () => { state.histQ = inp.value; state.histN = 500;
-    clearTimeout(inp._t); inp._t = setTimeout(() => {
-      const pos = inp.selectionStart; renderHist();
-      const ni = $("histq"); ni.focus(); ni.setSelectionRange(pos, pos);
-    }, 250); };
+  wireSort(el, "histSort");
+  wireFilter($("histq"), "histQ", () => { state.histN = 500; renderHist(); });
   const more = $("histmore");
   if (more) more.onclick = () => { state.histN += 500; renderHist(); };
 }
@@ -1241,7 +1310,13 @@ function renderHist() {
 /* ------------------------------ Job view ----------------------------------- */
 function renderJobPane() {
   const el = $("left");
-  if (!state.job) { setTab("board"); return; }
+  if (!state.job) {
+    el.innerHTML = '<div class="panel-head"><span class="eyebrow">Order</span></div>'
+      + '<div class="empty"><div class="big">No order open yet</div>'
+      + "Click any job # on the Changes, Live Queue, or Order History tab — "
+      + "or search one above — and it opens here.</div>";
+    return;
+  }
   const j = state.job, e = DB.jobs[j];
   const specs = (e.sp || []).map(kv =>
     '<div class="spec"><div class="k">' + esc(kv[0]) + '</div><div class="v">'
@@ -1258,13 +1333,15 @@ function renderJobPane() {
     const active = !state.whole && state.path === path;
     const items = c.i.map(no => itemByNo(e, no)).filter(Boolean);
     const attrs = Object.entries(c.a).map(([k, v]) => {
-      const key = k + "=" + v, pin = state.pinned.has(key);
+      const key = k + "=" + v;
+      const pin = state.pinned.has(key) && !state.whole && state.path === path;
       return '<button class="attr-row' + (pin ? " pinned" : "")
-        + '" data-a="' + esc(key)
-        + '" title="Click to require this attribute on every match">'
+        + '" data-a="' + esc(key) + '" data-p="' + path
+        + '" title="Find orders whose ' + esc(c.n)
+        + ' has this attribute — most similar fans first">'
         + '<span class="k">' + esc(k.replace(/_/g, " ")) + ':</span>'
         + '<span class="v">' + esc(v) + '</span>'
-        + '<span class="pin">' + (pin ? "✕ required" : "filter") + "</span></button>";
+        + '<span class="pin">' + (pin ? "✕ required" : "find matches") + "</span></button>";
     }).join("");
     const revs = (c.r || []).map(x => '<div class="rev-row">' + esc(x) + "</div>").join("");
     const srcs = items.length > 1 ? items.map((row, i) =>
@@ -1286,7 +1363,7 @@ function renderJobPane() {
     : '<div class="empty">No line items captured for this order yet.</div>';
 
   el.innerHTML = '<div class="panel-head">'
-    + '<button class="backlink" id="back">← back</button>'
+    + '<button class="backlink" id="back">← live queue</button>'
     + '<div class="ohead"><span class="job">' + esc(j) + '</span>'
     + '<span class="cust">' + esc(e.c) + "</span>"
     + (e.co ? '<span class="co">' + esc(e.co) + "</span>" : "")
@@ -1306,12 +1383,17 @@ function renderJobPane() {
 
   $("back").onclick = () => setTab("board");
   $("whole").onclick = () => { state.whole = !state.whole;
-    if (state.whole) state.path = null; render(); };
+    if (state.whole) { state.path = null; state.pinned.clear(); } render(); };
   el.querySelectorAll(".comp-row").forEach(b => b.onclick = () => {
     state.whole = false; state.path = b.dataset.c; state.pinned.clear(); render();
   });
+  /* An attribute click works standalone: it targets the component the
+     attribute belongs to and requires the attribute on every match. */
   el.querySelectorAll(".attr-row").forEach(b => b.onclick = () => {
-    const k = b.dataset.a;
+    const k = b.dataset.a, p = b.dataset.p;
+    if (state.whole || state.path !== p) {
+      state.whole = false; state.path = p; state.pinned.clear();
+    }
     state.pinned.has(k) ? state.pinned.delete(k) : state.pinned.add(k);
     render();
   });
@@ -1323,12 +1405,14 @@ function renderMatches() {
   const ready = state.job && (state.whole || state.path !== null);
   if (!ready) {
     el.innerHTML = '<div class="panel-head"><span class="eyebrow">Matching orders</span></div>'
-      + '<div class="empty"><div class="big">Click a component on the left</div>'
-      + "Past orders sharing it appear here, most relevant first, each with "
-      + "the line items that made it a match.</div>";
+      + '<div class="empty"><div class="big">'
+      + (state.job ? "Click a component on the left" : "No order open yet")
+      + "</div>Past orders sharing it appear here, most relevant first, each "
+      + "with the line items that made it a match.</div>";
     return;
   }
   const j = state.job, e = DB.jobs[j];
+  const srcDesign = spv(e, "Design");
   const items = state.whole ? e.it : compItems(e, state.path);
   const target = state.whole ? "whole order" : (() => {
     const c = compAt(e, state.path);
@@ -1377,12 +1461,18 @@ function renderMatches() {
     if (o.f) foot.push('<span class="path">' + esc(o.f) + "</span>" + copyBtn(o.f));
     if (o.pdf) foot.push('<a href="' + esc(fileUrl(o.pdf))
       + '" target="_blank" title="' + esc(o.pdf) + '">SO PDF</a>');
+    const theirDesign = spv(o, "Design");
+    const designChip = srcDesign && theirDesign
+      ? (theirDesign === srcDesign
+          ? '<span class="chip same">✓ design ' + esc(srcDesign) + "</span>"
+          : '<span class="chip">design ' + esc(theirDesign) + "</span>")
+      : "";
     return '<div class="match"><div class="m-head">'
       + '<span class="m-rank">' + (i + 1) + ".</span>"
       + '<button class="m-job" data-job="' + esc(r.j) + '" title="Open this order">'
       + esc(r.j) + "</button>"
       + '<span class="m-cust">' + esc(o.c) + (o.co ? " · " + esc(o.co) : "")
-      + (o.q ? " · ON BOARD" : "") + "</span>"
+      + (o.q ? " · ON BOARD" : "") + "</span>" + designChip
       + '<span class="m-score">score ' + r.score.toFixed(2) + "</span></div>"
       + '<div class="m-scorebar"><i style="width:'
       + Math.max(6, 100 * r.score / max) + '%"></i></div>'
@@ -1394,7 +1484,9 @@ function renderMatches() {
     + '<span class="m-target">' + esc(target) + '</span>'
     + '<span class="m-cust">on ' + esc(j) + "</span>"
     + '<span class="m-count">' + res.length + " match"
-    + (res.length === 1 ? "" : "es") + "</span></div>"
+    + (res.length === 1 ? "" : "es")
+    + (srcDesign ? " · same fan design (" + esc(srcDesign) + ") ranks first" : "")
+    + "</span></div>"
     + (state.pinned.size
         ? '<div class="filterbar"><span class="fl">Required attributes:</span>'
           + chips + "</div>" : "")
