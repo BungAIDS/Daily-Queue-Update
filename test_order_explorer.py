@@ -92,6 +92,11 @@ def test_queue_jobs_take_master_items():
     bd = e["bd"]
     assert bd["ed"] == "7/16/2026" and bd["pr"] == "$47,763.00", bd
     assert bd["dr"] == 1 and bd["ps"] == 3 and bd["ai"].startswith("2026-07-17"), bd
+    # The watcher's exact new-today set is embedded verbatim when given.
+    p2 = oe.build_payload(_store(), queue_jobs={"421966": qjob},
+                          new_ids={"421966"})
+    assert p2["nw"] == ["421966"], p2.get("nw")
+    assert "nw" not in p, "nw must be absent when new_ids not passed"
     # A store-only job is still present (the match pool).
     assert "421314" in p["jobs"] and "q" not in p["jobs"]["421314"]
     print("  queue-job override / spec / board fields OK")
@@ -131,14 +136,17 @@ def test_events_and_removed():
 
 
 def test_master_orders_fallback_queue():
-    master_orders = {"421314": {"on_queue": True,
+    master_orders = {"421314": {"on_queue": True, "added": "2026-07-15T08:30:00",
                                 "job": {"job": "421314", "customer": "Bayside",
                                         "line_items": [], "co_number": 1}}}
     p = oe.build_payload(_store(), master_orders=master_orders)
     assert p["jobs"]["421314"].get("q") == 1
     # Empty master line_items falls back to the store's captured items.
     assert len(p["jobs"]["421314"]["it"]) == 1
-    print("  master on_queue fallback OK")
+    # The job dict has no live _added_iso stamp (snapshot build), so the
+    # master entry's arrival timestamp — what the workbook shows — is used.
+    assert p["jobs"]["421314"]["bd"]["ai"] == "2026-07-15T08:30:00"
+    print("  master on_queue fallback / added timestamp OK")
 
 
 def test_render_roundtrip_and_safety():

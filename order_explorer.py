@@ -131,9 +131,11 @@ def _item_rows(items: List[Dict[str, Any]]) -> List[List[Any]]:
             for i, it in enumerate(items, start=1)]
 
 
-def _board_fields(j: Dict[str, Any]) -> Dict[str, Any]:
+def _board_fields(j: Dict[str, Any], added: str = "") -> Dict[str, Any]:
     """The churny Live Queue columns for one on-board order, keys matched to
-    the page's Board table."""
+    the page's Board table. `added` is the master entry's arrival timestamp —
+    the same value the workbook's 'Added' column reflects — used when the job
+    dict wasn't stamped by a live poll (snapshot builds)."""
     bd = {
         "st": j.get("status", ""), "op": j.get("oper", ""),
         "as": j.get("assigned_to", ""), "ck": j.get("checker", ""),
@@ -141,7 +143,7 @@ def _board_fields(j: Dict[str, Any]) -> Dict[str, Any]:
         "ed": j.get("end_date", ""), "hr": j.get("plan_hrs", ""),
         "fn": j.get("fannet_date", ""), "pr": j.get("total_price", ""),
         "ru": j.get("dwg_reuse_label", ""),
-        "ai": j.get("_added_iso") or j.get("_first_seen") or "",
+        "ai": j.get("_added_iso") or added or j.get("_first_seen") or "",
     }
     if j.get("has_drive_run"):
         bd["dr"] = 1
@@ -175,7 +177,8 @@ def build_payload(store: Dict[str, Any],
                   master_orders: Dict[str, Dict[str, Any]] | None = None,
                   queue_jobs: Dict[str, Dict[str, Any]] | None = None,
                   events: List[Dict[str, Any]] | None = None,
-                  today: date | None = None) -> Dict[str, Any]:
+                  today: date | None = None,
+                  new_ids: set | None = None) -> Dict[str, Any]:
     """The page's embedded data: every order the store OR the master log knows
     (the master-only ones carry no line items but fill Order History), with
     items + derived component tree, DWG-scan facts, board fields for on-board
@@ -235,7 +238,7 @@ def build_payload(store: Dict[str, Any],
                            str(ment.get("added") or ""), str(ment.get("left") or "")]
         if qjob:
             entry["q"] = 1
-            entry["bd"] = _board_fields(qjob)
+            entry["bd"] = _board_fields(qjob, added=str(ment.get("added") or ""))
             hist = [str(h)[:_HIST_CLIP] for h in (qjob.get("co_history") or [])[:_HIST_MAX]]
             if hist:
                 entry["h"] = hist
@@ -247,7 +250,7 @@ def build_payload(store: Dict[str, Any],
          and str(e.get("left") or "")[:10] == today.isoformat()),
         key=lambda r: r[1], reverse=True)
 
-    return {
+    payload = {
         "gen": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "today": today.isoformat(),
         "n_jobs": len(jobs),
@@ -256,6 +259,12 @@ def build_payload(store: Dict[str, Any],
         "ev": _events_payload(events or [], master_orders),
         "rm": removed,
     }
+    # The watcher's own new-today set (snapshot-diff based), so the grey
+    # new-order shading matches the workbook EXACTLY. When absent (snapshot
+    # builds) the page falls back to comparing arrival dates.
+    if new_ids is not None:
+        payload["nw"] = sorted(str(x) for x in new_ids)
+    return payload
 
 
 def render_html(payload: Dict[str, Any]) -> str:
@@ -340,6 +349,36 @@ def write_explorer(payload: Dict[str, Any], out: Path | None = None) -> Path:
     return out
 
 
+def open_in_app_window(page: Path) -> bool:
+    """Open the page as a clean app window (no tabs/address bar): Edge first
+    (ships with Windows), then Chrome, then the OS default handler. The same
+    fallback chain as the .bat launcher, for the launcher's Open button."""
+    import os
+    import subprocess
+    if os.name != "nt":
+        print(f"Open this file in a Chromium browser: {page}")
+        return False
+    url = "file:///" + str(page).replace("\\", "/")
+    candidates = (
+        ("ProgramFiles(x86)", r"Microsoft\Edge\Application\msedge.exe"),
+        ("ProgramFiles", r"Microsoft\Edge\Application\msedge.exe"),
+        ("ProgramFiles", r"Google\Chrome\Application\chrome.exe"),
+        ("ProgramFiles(x86)", r"Google\Chrome\Application\chrome.exe"),
+    )
+    for env, sub in candidates:
+        base = os.environ.get(env)
+        exe = Path(base) / sub if base else None
+        if exe and exe.exists():
+            subprocess.Popen([str(exe), f"--app={url}"], close_fds=True)
+            return True
+    try:
+        os.startfile(str(page))          # plain browser tab as a last resort
+        return True
+    except OSError as e:
+        print(f"Could not open {page}: {e}")
+        return False
+
+
 # --------------------------------------------------------------------------- #
 # Watcher hook: regenerate only when something it shows could have changed     #
 # --------------------------------------------------------------------------- #
@@ -349,6 +388,7 @@ _MAX_AGE_SECONDS = 3600     # regenerate at least hourly regardless
 
 def maybe_write(master: Dict[str, Any] | None,
                 lq_jobs: List[Dict[str, Any]] | None,
+                new_ids: set | None = None,
                 force: bool = False) -> Optional[Path]:
     """Called by the watcher each poll. Cheap unless the line-items/DWG store
     files or today's change log changed on disk, the board membership changed,
@@ -368,7 +408,7 @@ def maybe_write(master: Dict[str, Any] | None,
     queue = {str(j.get("job")): j for j in lq_jobs or [] if j.get("job")}
     key = (_mtime(li.store_path()), _mtime(autocad_scan.PROGRESS_PATH),
            _mtime(change_log.log_path(today)), today.isoformat(),
-           tuple(sorted(queue)))
+           tuple(sorted(queue)), tuple(sorted(str(x) for x in new_ids or ())))
     now = time.time()
     if (not force and out.exists() and _CACHE["key"] == key
             and now - _CACHE["at"] < _MAX_AGE_SECONDS):
@@ -377,7 +417,7 @@ def maybe_write(master: Dict[str, Any] | None,
     payload = build_payload(li.load_store(), autocad_scan.load_progress(),
                             master_orders=(master or {}).get("orders"),
                             queue_jobs=queue, events=change_log.load(today),
-                            today=today)
+                            today=today, new_ids=new_ids)
     path = write_explorer(payload, out)
     _CACHE.update(key=key, at=now)
     return path
@@ -394,7 +434,18 @@ def main(argv: List[str] | None = None) -> int:
                     help="live_master.json (default: the configured snapshot)")
     ap.add_argument("--dwg", type=Path, default=None,
                     help="AutoCAD scan store JSON (default: the configured store)")
+    ap.add_argument("--open", action="store_true",
+                    help="Open the page in an app window (Edge/Chrome --app). "
+                         "An existing page opens as-is — the watcher keeps it "
+                         "fresh; the page is only built here when missing.")
     args = ap.parse_args(argv)
+
+    if args.open:
+        out = args.out or default_output_path()
+        if out.exists():
+            print(f"Opening {out}")
+            return 0 if open_in_app_window(out) else 1
+        print(f"{out} does not exist yet — building it first…")
 
     import change_log
     import line_items as li
@@ -422,6 +473,8 @@ def main(argv: List[str] | None = None) -> int:
     n_q = sum(1 for e in payload["jobs"].values() if e.get("q"))
     print(f"Wrote {out}  ({payload['n_jobs']} orders, {payload['n_items']} line "
           f"items, {n_q} on the board)  + {BAT_NAME} + {VERSION_NAME}")
+    if args.open:
+        return 0 if open_in_app_window(out) else 1
     return 0
 
 
@@ -756,9 +809,10 @@ const PAYLOAD_B64 = "__B64__";
 const VERSION_FILE = "gl_queue_explorer_version.js";
 const STATE_KEY = "glq_state";
 
-let DB = null;                 // {gen, today, n_jobs, n_items, jobs, ev, rm}
+let DB = null;                 // {gen, today, n_jobs, n_items, jobs, ev, rm, nw?}
 let IDX = null;                // {tagDF, normDF, sets: {job -> {t:Set, n:Set}}}
 let COSET = new Set();         // jobs a CO# landed on today (red text)
+let NWSET = null;              // the watcher's exact new-today set (null = derive)
 const state = { tab: "board", job: null, path: null, whole: false,
                 pinned: new Set(), histQ: "", histN: 500,
                 boardQ: "", boardSort: null, histSort: null };
@@ -788,10 +842,16 @@ function fmtWhen(iso) {
   return d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
 }
 /* The workbook's row-fill rules (live_sheets._row_fill), against the REAL
-   current date so a page left open overnight keeps telling the truth. */
-function fillClass(e) {
+   current date so a page left open overnight keeps telling the truth. The
+   new-today set is the watcher's own (snapshot-diff based) when embedded —
+   identical to the workbook — else derived from the arrival timestamp. */
+function isNewToday(j, bd) {
+  if (NWSET) return NWSET.has(j);
+  return sameDay(pDate(bd.ai), new Date());
+}
+function fillClass(j, e) {
   const bd = e.bd || {};
-  const isNew = sameDay(pDate(bd.ai), new Date());
+  const isNew = isNewToday(j, bd);
   const ed = pDate(bd.ed);
   if (ed) {
     const t0 = dayFloor(new Date());
@@ -809,11 +869,13 @@ async function boot() {
     .pipeThrough(new DecompressionStream("gzip"));
   DB = JSON.parse(await new Response(stream).text());
   COSET = new Set(DB.ev.filter(x => x.f === "CO#").map(x => x.j));
+  NWSET = Array.isArray(DB.nw) ? new Set(DB.nw) : null;
   $("boot").style.display = "none";
   $("tabs").style.display = "";
   document.querySelector("footer").style.display = "";
   $("stamp").textContent = "generated " + DB.gen + " · " + DB.n_jobs
     + " orders · " + DB.n_items + " line items";
+  loadPrefs();
   restoreState();
   render();
   setTimeout(ensureIndex, 50);        // warm the match index off the first paint
@@ -854,6 +916,29 @@ function restoreState() {
   state.histQ = saved.histQ || "";
   if (saved.y) setTimeout(() => window.scrollTo(0, saved.y), 60);
   if (saved.refreshed) toast("Refreshed — new data as of " + DB.gen);
+}
+/* Per-user view preferences: each coworker's browser profile keeps their own
+   sort/filter/tab in localStorage, so watcher refreshes and reopens never
+   reset anyone's view. The shared file itself stores nothing per user. */
+const PREFS_KEY = "glq_prefs";
+function savePrefs() {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify({
+      tab: state.tab === "job" ? "board" : state.tab,
+      boardSort: state.boardSort, histSort: state.histSort,
+      boardQ: state.boardQ, histQ: state.histQ }));
+  } catch (e) {}
+}
+function loadPrefs() {
+  try {
+    const p = JSON.parse(localStorage.getItem(PREFS_KEY) || "null");
+    if (!p) return;
+    if (["board", "changes", "hist"].includes(p.tab)) state.tab = p.tab;
+    if (p.boardSort && typeof p.boardSort.col === "number") state.boardSort = p.boardSort;
+    if (p.histSort && typeof p.histSort.col === "number") state.histSort = p.histSort;
+    state.boardQ = p.boardQ || "";
+    state.histQ = p.histQ || "";
+  } catch (e) {}
 }
 let toastTimer = null;
 function toast(msg) {
@@ -971,7 +1056,7 @@ function render() {
   else if (state.tab === "hist") renderHist();
   else { renderJobPane(); renderMatches(); }
 }
-function setTab(t) { state.tab = t; render(); window.scrollTo(0, 0); }
+function setTab(t) { state.tab = t; savePrefs(); render(); window.scrollTo(0, 0); }
 function selectJob(j) {
   /* Opening an order lands on its whole-order matches (the Similar Orders
      view) — a component/attribute click narrows from there. */
@@ -1041,12 +1126,14 @@ function wireSort(el, key) {
   el.querySelectorAll("th.sth").forEach(th => th.onclick = () => {
     const col = +th.dataset.si, cur = state[key];
     state[key] = cur && cur.col === col ? { col, dir: -cur.dir } : { col, dir: 1 };
+    savePrefs();
     render();
   });
 }
 function wireFilter(inp, key, rerender) {
   inp.oninput = () => { state[key] = inp.value;
     clearTimeout(inp._t); inp._t = setTimeout(() => {
+      savePrefs();
       const pos = inp.selectionStart; rerender();
       const ni = $(inp.id); ni.focus(); ni.setSelectionRange(pos, pos);
     }, 250); };
@@ -1054,7 +1141,10 @@ function wireFilter(inp, key, rerender) {
 
 function renderBoard() {
   const el = $("view-board");
-  const onq = Object.keys(DB.jobs).filter(j => DB.jobs[j].q);
+  // Base order: job # ascending, so when the "#" board position is missing
+  // (snapshot builds) the stable sort still yields a sensible fixed order.
+  const onq = Object.keys(DB.jobs).filter(j => DB.jobs[j].q)
+    .sort((a, b) => jobNum(a) - jobNum(b));
   const sort = state.boardSort || { col: 18, dir: 1 };   // cbcinsider board order
   let rows = onq.map(j => {
     const e = DB.jobs[j], bd = e.bd || {};
@@ -1080,7 +1170,7 @@ function renderBoard() {
   let total = 0;
   const body = rows.map(r => {
     total += +String(r.bd.pr || "").replace(/[^0-9.\-]/g, "") || 0;
-    const cls = [fillClass(r.e), COSET.has(r.j) ? "co-red" : "", "rowbtn"]
+    const cls = [fillClass(r.j, r.e), COSET.has(r.j) ? "co-red" : "", "rowbtn"]
       .filter(Boolean).join(" ");
     return '<tr class="' + cls + '">' + r.c.map((x, i) =>
       "<td" + (i === 16 ? ' class="num"' : i === 18 ? ' class="ctr"' : "")
@@ -1116,7 +1206,8 @@ function renderChanges() {
   const el = $("view-changes");
   const newToday = Object.keys(DB.jobs).filter(j => {
     const e = DB.jobs[j];
-    return e.q && String((e.bd || {}).ai || "").slice(0, 10) === DB.today;
+    return e.q && (NWSET ? NWSET.has(j)
+      : String((e.bd || {}).ai || "").slice(0, 10) === DB.today);
   }).sort((a, b) => jobNum(b) - jobNum(a));
   const newRows = newToday.map(j => {
     const e = DB.jobs[j], bd = e.bd || {};

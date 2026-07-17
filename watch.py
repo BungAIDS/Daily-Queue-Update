@@ -536,7 +536,7 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
     # maybe_write is cheap unless a store file or the board membership changed
     # (hourly floor otherwise); a failure never disturbs the Excel render.
     try:
-        written = order_explorer.maybe_write(master, lq_jobs)
+        written = order_explorer.maybe_write(master, lq_jobs, new_ids=new_today)
         if written:
             log.info("GL Queue Explorer refreshed: %s", written)
     except Exception as e:  # noqa: BLE001 - the page is an extra, never poll-fatal
