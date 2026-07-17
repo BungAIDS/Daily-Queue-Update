@@ -1,0 +1,156 @@
+"""Tests for order_explorer.py — the GL Queue Explorer page generator.
+
+Run:  python test_order_explorer.py
+Pure logic only (payload building, HTML embedding, the .bat launcher); no
+browser, no COM, no network — safe for CI.
+"""
+from __future__ import annotations
+
+import base64
+import gzip
+import json
+import re
+import tempfile
+from pathlib import Path
+
+import order_explorer as oe
+
+
+# The docstring example from so_hierarchy: three printed lines, one real IVC.
+_IVC_ITEMS = [
+    {"raw": "Inlet Volume Control, Low Leak, Automatic 3,531.00",
+     "norm": "INLET VOLUME CONTROL LOW LEAK AUTOMATIC", "qty": "", "price": "3,531.00",
+     "ptype": "L", "section": "", "details": [], "tags": ["IVC"],
+     "attributes": {"used_on": "IVC", "leakage_class": "LOW LEAKAGE",
+                    "operation": "Automatic"}},
+    {"raw": "Inlet Volume Control Handle Location, Non-Standard 425.00",
+     "norm": "INLET VOLUME CONTROL HANDLE LOCATION NON STANDARD", "qty": "",
+     "price": "425.00", "ptype": "L", "section": "", "details": [], "tags": ["IVC"],
+     "attributes": {"used_on": "IVC", "handle_location": "4:30 (NON-STD)"}},
+    {"raw": "Shaft Seal, Teflon 610.00", "norm": "SHAFT SEAL TEFLON", "qty": "",
+     "price": "610.00", "ptype": "L", "section": "", "details": [],
+     "tags": ["SHAFT SEAL"], "attributes": {"component": "SHAFT SEAL"}},
+]
+
+
+def _store():
+    return {"jobs": {
+        "421966": {"customer": "Meridian Foundry", "co_number": 2,
+                   "so_pdf": r"Z:\SO\421966.pdf", "items": _IVC_ITEMS},
+        "421314": {"customer": "Bayside Chemical", "co_number": None,
+                   "so_pdf": "", "items": [_IVC_ITEMS[0]]},
+    }}
+
+
+def _dwg():
+    return {"421314": {"job": "421314", "type": "BC",
+                       "folder": r"Z:\AUTOCAD\CURRENT\JOBS\BC\421\421314",
+                       "extras": {"07": "DWG", "51": "PDF+DWG"}}}
+
+
+def test_payload_components_merge():
+    p = oe.build_payload(_store(), _dwg())
+    e = p["jobs"]["421966"]
+    assert e["c"] == "Meridian Foundry", e["c"]
+    assert e["co"] == "CO#2", e["co"]
+    assert len(e["it"]) == 3, e["it"]
+    # Two components: the merged [IVC] (2 lines) and the shaft seal.
+    names = [c["n"] for c in e["cp"]]
+    assert names == ["IVC", "SHAFT SEAL"], names
+    ivc = e["cp"][0]
+    assert ivc["k"] == 1 and len(ivc["i"]) == 2, ivc
+    assert ivc["a"].get("leakage_class") == "LOW LEAKAGE", ivc["a"]
+    assert ivc["p"] == 3956.0, ivc["p"]          # 3,531 + 425
+    # DWG enrichment lands on the other job.
+    e2 = p["jobs"]["421314"]
+    assert e2["d"] == "-07 (DWG), -51 (PDF+DWG)", e2.get("d")
+    assert e2["f"].endswith("421314"), e2.get("f")
+    assert e2["t"] == "BC", e2.get("t")
+    print("  payload components/enrichment OK")
+
+
+def test_queue_jobs_take_master_items():
+    fresh = [{"raw": "Motor, 40 HP, TEFC 6,890.00", "norm": "MOTOR 40 HP TEFC",
+              "qty": "", "price": "6,890.00", "ptype": "L", "section": "",
+              "details": [], "tags": ["MOTOR"],
+              "attributes": {"component": "MOTOR"}}]
+    qjob = {"job": "421966", "customer": "Meridian Foundry", "co_number": 4,
+            "so_pdf": r"Z:\SO\421966 CO4.pdf", "line_items": fresh,
+            "design": "BC-3660", "so_size": "366",
+            "co_history": ["CO#4 rev", "CO#3 " + "x" * 500]}
+    p = oe.build_payload(_store(), queue_jobs={"421966": qjob})
+    e = p["jobs"]["421966"]
+    assert e.get("q") == 1, e
+    assert e["co"] == "CO#4", e["co"]                    # master beats store
+    assert len(e["it"]) == 1 and e["it"][0][5] == "MOTOR 40 HP TEFC", e["it"]
+    assert ["Design", "BC-3660"] in e["sp"] and ["Size", "366"] in e["sp"], e["sp"]
+    assert len(e["h"]) == 2 and len(e["h"][1]) <= 160, e["h"]
+    # A store-only job is still present (the match pool).
+    assert "421314" in p["jobs"] and "q" not in p["jobs"]["421314"]
+    print("  queue-job override / spec / history OK")
+
+
+def test_master_orders_fallback_queue():
+    master_orders = {"421314": {"on_queue": True,
+                                "job": {"job": "421314", "customer": "Bayside",
+                                        "line_items": [], "co_number": 1}}}
+    p = oe.build_payload(_store(), master_orders=master_orders)
+    assert p["jobs"]["421314"].get("q") == 1
+    # Empty master line_items falls back to the store's captured items.
+    assert len(p["jobs"]["421314"]["it"]) == 1
+    print("  master on_queue fallback OK")
+
+
+def test_render_roundtrip_and_safety():
+    store = _store()
+    # Hostile strings must survive the embedding: script closers, quotes, unicode.
+    store["jobs"]["421966"]["items"][0]["raw"] = 'X </script> "quote" 650°F & <b>'
+    p = oe.build_payload(store)
+    html = oe.render_html(p)
+    assert "</script> \"quote\"" not in html            # never embedded raw
+    m = re.search(r'const PAYLOAD_B64 = "([A-Za-z0-9+/=]+)"', html)
+    assert m, "payload marker missing"
+    back = json.loads(gzip.decompress(base64.b64decode(m.group(1))).decode("utf-8"))
+    assert back == p, "payload did not round-trip"
+    assert html.count("__B64__") == 0
+    assert "<title>GL Queue Explorer</title>" in html
+    print("  render round-trip / embedding safety OK")
+
+
+def test_bat_launcher():
+    text = oe.bat_text("My Page.html")
+    text.encode("ascii")                                 # cmd.exe-safe
+    assert "\r\n" in text and "\n" == text[-1] or text.endswith("\r\n")
+    assert 'set "PAGE=%~dp0My Page.html"' in text
+    assert "--app=" in text and "msedge" in text.lower()
+    print("  bat launcher OK")
+
+
+def test_write_explorer_files():
+    p = oe.build_payload(_store(), _dwg())
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td) / "GL Queue Explorer.html"
+        got = oe.write_explorer(p, out)
+        assert got == out and out.exists() and out.stat().st_size > 10_000
+        bat = Path(td) / oe.BAT_NAME
+        assert bat.exists(), "launcher .bat not written"
+        first = bat.read_bytes()
+        oe.write_explorer(p, out)                        # idempotent second write
+        assert bat.read_bytes() == first
+        assert not list(Path(td).glob("*.tmp")), "temp file left behind"
+    print("  write_explorer files OK")
+
+
+def main() -> int:
+    test_payload_components_merge()
+    test_queue_jobs_take_master_items()
+    test_master_orders_fallback_queue()
+    test_render_roundtrip_and_safety()
+    test_bat_launcher()
+    test_write_explorer_files()
+    print("All order_explorer tests passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

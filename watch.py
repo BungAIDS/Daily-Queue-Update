@@ -46,6 +46,7 @@ import live_master
 import live_sheets
 import live_state
 import notify
+import order_explorer
 import stop_signal
 from compare import load_latest_snapshot, load_snapshot, save_snapshot
 from config import (DATA_PUSH_BRANCH, DATA_PUSH_ON_CHANGE, EXCEL_RECYCLE_EVERY_POLLS,
@@ -530,6 +531,16 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
     if oh_payload is not None and oh_payload["name"] in rendered:
         oh_commit()
         _OH_RENDER_FP["fp"] = oh_fp
+
+    # GL Queue Explorer: the clickable HTML search page next to the workbook.
+    # maybe_write is cheap unless a store file or the board membership changed
+    # (hourly floor otherwise); a failure never disturbs the Excel render.
+    try:
+        written = order_explorer.maybe_write(master, lq_jobs)
+        if written:
+            log.info("GL Queue Explorer refreshed: %s", written)
+    except Exception as e:  # noqa: BLE001 - the page is an extra, never poll-fatal
+        log.warning("GL Queue Explorer refresh failed (%s)", e)
 
 
 def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce: bool) -> dict:

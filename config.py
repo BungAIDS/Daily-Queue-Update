@@ -225,6 +225,13 @@ EMAIL_ALERT_TO = os.environ.get("EMAIL_ALERT_TO") or EMAIL_TO
 _live_wb_raw = (os.environ.get("LIVE_WORKBOOK_PATH") or "").strip()
 LIVE_WORKBOOK_PATH = _expand_path(_live_wb_raw) if _live_wb_raw else None
 
+# Where the GL Queue Explorer page (order_explorer.py — the clickable HTML
+# search over the line-items store) is written. Blank = next to the live
+# workbook (so coworkers find it where the workbook already lives), falling
+# back to OUTPUT_DIR when no workbook path is configured.
+_explorer_raw = (os.environ.get("EXPLORER_PATH") or "").strip()
+EXPLORER_PATH = _expand_path(_explorer_raw) if _explorer_raw else None
+
 # How often to poll the board, in seconds (default 120 = every 2 minutes).
 try:
     POLL_INTERVAL_SECONDS = max(15, int(os.environ.get("POLL_INTERVAL_SECONDS", "120")))
