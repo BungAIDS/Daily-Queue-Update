@@ -77,6 +77,9 @@ def test_queue_jobs_take_master_items():
     qjob = {"job": "421966", "customer": "Meridian Foundry", "co_number": 4,
             "so_pdf": r"Z:\SO\421966 CO4.pdf", "line_items": fresh,
             "design": "BC-3660", "so_size": "366",
+            "status": "AT WC", "oper": "23", "end_date": "7/16/2026",
+            "total_price": "$47,763.00", "has_drive_run": True, "_cbc_pos": 3,
+            "_added_iso": "2026-07-17T06:01:00",
             "co_history": ["CO#4 rev", "CO#3 " + "x" * 500]}
     p = oe.build_payload(_store(), queue_jobs={"421966": qjob})
     e = p["jobs"]["421966"]
@@ -85,9 +88,46 @@ def test_queue_jobs_take_master_items():
     assert len(e["it"]) == 1 and e["it"][0][5] == "MOTOR 40 HP TEFC", e["it"]
     assert ["Design", "BC-3660"] in e["sp"] and ["Size", "366"] in e["sp"], e["sp"]
     assert len(e["h"]) == 2 and len(e["h"][1]) <= 160, e["h"]
+    # The Board fields ride along for the on-board order.
+    bd = e["bd"]
+    assert bd["ed"] == "7/16/2026" and bd["pr"] == "$47,763.00", bd
+    assert bd["dr"] == 1 and bd["ps"] == 3 and bd["ai"].startswith("2026-07-17"), bd
     # A store-only job is still present (the match pool).
     assert "421314" in p["jobs"] and "q" not in p["jobs"]["421314"]
-    print("  queue-job override / spec / history OK")
+    print("  queue-job override / spec / board fields OK")
+
+
+def test_events_and_removed():
+    master_orders = {
+        "421966": {"on_queue": True, "seen_on_queue": True,
+                   "job": {"job": "421966", "customer": "Meridian Foundry",
+                           "line_items": [],
+                           "co_history": ["CO#2 070126 ABC - ADDED SHAFT COOLER"]}},
+        "421000": {"on_queue": False, "seen_on_queue": True,
+                   "left": "2026-07-17T09:30:00", "job": {"job": "421000"}},
+        "420900": {"on_queue": False, "seen_on_queue": True,
+                   "left": "2026-07-10T09:30:00", "job": {"job": "420900"}},
+    }
+    events = [
+        {"time": "2026-07-17T08:00:00", "job": "421966", "customer": "Meridian",
+         "field": "CO#", "old": "1", "new": "2"},
+        {"time": "2026-07-17T09:00:00", "job": "421966", "customer": "Meridian",
+         "field": "End Date", "old": "7/10/2026", "new": "7/20/2026"},
+    ]
+    from datetime import date as _date
+    p = oe.build_payload(_store(), master_orders=master_orders, events=events,
+                         today=_date(2026, 7, 17))
+    assert p["today"] == "2026-07-17"
+    # Newest first; the CO event carries its co_history description.
+    assert [e["f"] for e in p["ev"]] == ["End Date", "CO#"], p["ev"]
+    co = p["ev"][1]
+    assert co["d"] == "ADDED SHAFT COOLER", co
+    # Only the departure dated today lands in the removed list.
+    assert p["rm"] == [["421000", "2026-07-17T09:30:00"]], p["rm"]
+    # A master-only order (never in the store) still gets an Order History row.
+    assert p["jobs"]["420900"]["oh"] == [0, "", "2026-07-10T09:30:00"]
+    assert p["jobs"]["421966"]["oh"][0] == 1
+    print("  change events / removals / master-only history OK")
 
 
 def test_master_orders_fallback_queue():
@@ -134,6 +174,11 @@ def test_write_explorer_files():
         assert got == out and out.exists() and out.stat().st_size > 10_000
         bat = Path(td) / oe.BAT_NAME
         assert bat.exists(), "launcher .bat not written"
+        # The auto-refresh stamp open pages poll, matching the page's gen.
+        ver = Path(td) / oe.VERSION_NAME
+        assert ver.exists(), "version stamp not written"
+        assert p["gen"] in ver.read_text(encoding="utf-8")
+        assert "__GLQ_VERSION__" in ver.read_text(encoding="utf-8")
         first = bat.read_bytes()
         oe.write_explorer(p, out)                        # idempotent second write
         assert bat.read_bytes() == first
@@ -144,6 +189,7 @@ def test_write_explorer_files():
 def main() -> int:
     test_payload_components_merge()
     test_queue_jobs_take_master_items()
+    test_events_and_removed()
     test_master_orders_fallback_queue()
     test_render_roundtrip_and_safety()
     test_bat_launcher()

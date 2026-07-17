@@ -1,5 +1,5 @@
-"""Build the GL Queue Explorer — a self-contained HTML search page over the
-line-items store, written next to the live workbook on the shared drive.
+"""Build the GL Queue Explorer — a self-contained HTML companion to the live
+workbook, written next to it on the shared drive.
 
     python order_explorer.py                  # from the real stores (config paths)
     python order_explorer.py --out page.html  # write somewhere else
@@ -8,25 +8,41 @@ line-items store, written next to the live workbook on the shared drive.
 
 The page is ONE file with everything embedded (gzip+base64 payload, no server,
 no internet, no install): coworkers double-click it — or the app-mode launcher
-`Open GL Queue Explorer.bat` written beside it — and get click-driven search
-the no-macro Excel tabs can't do:
+`Open GL Queue Explorer.bat` written beside it — and get four views:
 
-  - search any job # (or its last digits) or free text over every captured
-    Sales-Order line (normalized text + canonical tags) across the whole store;
-  - a job's parsed spec, CO history, Open-PDF link, and its component
-    hierarchy (so_hierarchy's rollup — the Sales Order tab's tree);
-  - click a component -> every other order sharing it, most relevant first,
-    each with the line items that made it a match, attribute agreement chips,
-    its custom DWGs and CAD folder — find_orders' rarity-weighted scoring
-    (shared tag = 1/df, identical normalized line = 2/df) computed on click;
-  - click an attribute -> matches must carry it ([ATTRIBUTES] refinement);
-  - or match the whole Sales Order (the Similar Orders view, uncapped).
+  Board          the Live Queue with the workbook's exact color coding
+                 (end-date urgency reds/orange/gold, grey new-today rows and
+                 their blended urgent variants, red text on a CO landing,
+                 orange Quote Run marks) and the totals footer.
+  Changes        today's activity log, mirroring the Changes tab's sections:
+                 new orders, change orders (with the CO description resolved
+                 from co_history), the field-modification log (grey ladder per
+                 later instance), and removals.
+  Order History  every order the master log has ever seen (stable spec columns
+                 + On Queue/Added/Left), filterable; the green-✓/red custom-DWG
+                 and feature matrices appear once the filter is narrow enough
+                 for a browser to draw them (Excel virtualizes 13K x 150 cells;
+                 a DOM can't).
+  Job view       click any job # anywhere: its parsed spec, CO history, and
+                 component hierarchy (so_hierarchy's rollup). Click a component
+                 to rank every other order sharing it (find_orders' rarity-
+                 weighted scoring — shared tag 1/df, identical line 2/df —
+                 computed on click), pin attributes to filter, or match the
+                 whole order (the Similar Orders view, uncapped).
 
-Import-light on purpose (stdlib + so_hierarchy + config): build_payload /
-render_html are pure and unit-tested (test_order_explorer.py); the store/dwg/
-master loads happen only in maybe_write() and the CLI. The watcher calls
-maybe_write() each poll — it regenerates only when a store file changed, the
-board membership changed, or an hour passed, so the usual poll adds nothing.
+AUTO-REFRESH: every write also updates `gl_queue_explorer_version.js` beside
+the page. Open pages poll that stamp each minute via a <script> tag (the only
+cross-file read a file:// page is allowed) and, when it moves, reload
+themselves — restoring the view they were on. Delete the .js and pages simply
+stop auto-refreshing; nothing breaks.
+
+build_payload / render_html are pure and unit-tested (test_order_explorer.py);
+store loads live only in maybe_write() and the CLI. The watcher calls
+maybe_write() each poll — it regenerates only when a store file, the day's
+change log, or the board membership changed (hourly floor), so the usual poll
+adds nothing. The scoring formula is duplicated in the page's JS by necessity
+(no Python inside a browser) — if find_orders.similar_to_items' weights ever
+change, update the JS to match.
 """
 from __future__ import annotations
 
@@ -37,28 +53,33 @@ import json
 import logging
 import sys
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import engineers
 import so_hierarchy
 from config import EXPLORER_PATH, LIVE_WORKBOOK_PATH, OUTPUT_DIR
+# Pure display helper shared with the Excel Changes tab, so CO descriptions
+# never diverge between the two.
+from live_sheets import _co_change_desc
 
 log = logging.getLogger("order-explorer")
 
 HTML_NAME = "GL Queue Explorer.html"
 BAT_NAME = "Open GL Queue Explorer.bat"
+VERSION_NAME = "gl_queue_explorer_version.js"
 
-# The parsed SO spec fields shown in the job header (mirrors the Sales Order
-# tab's live_sheets.SO_SUMMARY_COLUMNS, minus the fields the header shows
-# elsewhere: customer, CO#, rep).
+# The parsed SO spec fields shown in the job header and the Order History
+# columns (mirrors live_sheets.SO_SUMMARY_COLUMNS / OH_DATA_COLUMNS).
 SPEC_FIELDS = [
     ("Design", "design"), ("Description", "so_design_desc"), ("Size", "so_size"),
     ("Arrangement", "so_arrangement"), ("Class", "so_class"),
     ("Rotation", "so_rotation"), ("Discharge", "so_discharge"),
     ("Motor Pos", "so_motor_pos"), ("% Width", "so_pct_width"),
     ("Wheel", "so_wheel_type"), ("Design Temp", "so_design_temp"),
-    ("Max Temp", "so_max_temp"), ("Total Price", "total_price"),
+    ("Max Temp", "so_max_temp"), ("Special Temp", "so_special_temp"),
+    ("Total Price", "total_price"), ("Primary Rep", "primary_rep"),
 ]
 _HIST_MAX = 8            # CO-history entries kept per on-board job
 _HIST_CLIP = 160         # ...each clipped to this many chars (some run to pages)
@@ -110,12 +131,55 @@ def _item_rows(items: List[Dict[str, Any]]) -> List[List[Any]]:
             for i, it in enumerate(items, start=1)]
 
 
+def _board_fields(j: Dict[str, Any]) -> Dict[str, Any]:
+    """The churny Live Queue columns for one on-board order, keys matched to
+    the page's Board table."""
+    bd = {
+        "st": j.get("status", ""), "op": j.get("oper", ""),
+        "as": j.get("assigned_to", ""), "ck": j.get("checker", ""),
+        "no": j.get("status_note", ""), "sd": j.get("start_date", ""),
+        "ed": j.get("end_date", ""), "hr": j.get("plan_hrs", ""),
+        "fn": j.get("fannet_date", ""), "pr": j.get("total_price", ""),
+        "ru": j.get("dwg_reuse_label", ""),
+        "ai": j.get("_added_iso") or j.get("_first_seen") or "",
+    }
+    if j.get("has_drive_run"):
+        bd["dr"] = 1
+    pos = j.get("_cbc_pos")
+    if isinstance(pos, int):
+        bd["ps"] = pos
+    return {k: v for k, v in bd.items() if v not in ("", None)}
+
+
+def _events_payload(events: List[Dict[str, Any]],
+                    master_orders: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Today's change-log entries, newest first, with the change-order
+    description resolved from co_history at build time (same helper as the
+    Excel Changes tab)."""
+    out = []
+    for e in sorted(events or [], key=lambda x: x.get("time", ""), reverse=True):
+        row = {"t": e.get("time", ""), "j": str(e.get("job", "")),
+               "c": e.get("customer", ""), "f": e.get("field", ""),
+               "o": str(e.get("old", "")), "n": str(e.get("new", ""))}
+        if row["f"] == "CO#":
+            order = (master_orders.get(row["j"]) or {}).get("job") or {}
+            desc = _co_change_desc(order, e.get("new"))
+            if desc:
+                row["d"] = desc[:400]
+        out.append(row)
+    return out
+
+
 def build_payload(store: Dict[str, Any],
                   dwg: Dict[str, Dict[str, Any]] | None = None,
                   master_orders: Dict[str, Dict[str, Any]] | None = None,
-                  queue_jobs: Dict[str, Dict[str, Any]] | None = None) -> Dict[str, Any]:
-    """The page's embedded data: every stored order with its items and derived
-    component tree, enriched with DWG-scan and master-log facts where known.
+                  queue_jobs: Dict[str, Dict[str, Any]] | None = None,
+                  events: List[Dict[str, Any]] | None = None,
+                  today: date | None = None) -> Dict[str, Any]:
+    """The page's embedded data: every order the store OR the master log knows
+    (the master-only ones carry no line items but fill Order History), with
+    items + derived component tree, DWG-scan facts, board fields for on-board
+    orders, today's change events, and today's removals.
 
     `queue_jobs` ({job -> job dict}) marks the on-board orders and supplies
     their FRESH line items / spec (the master job dict the watcher carries —
@@ -124,17 +188,20 @@ def build_payload(store: Dict[str, Any],
     dwg = dwg or {}
     master_orders = master_orders or {}
     queue_jobs = dict(queue_jobs or {})
+    today = today or date.today()
     if not queue_jobs:
         for j, rec in master_orders.items():
             if rec.get("on_queue") and isinstance(rec.get("job"), dict):
                 queue_jobs[str(j)] = rec["job"]
 
     jobs: Dict[str, Any] = {}
-    all_jns = set(store.get("jobs") or {}) | set(queue_jobs)
+    all_jns = (set(store.get("jobs") or {}) | set(queue_jobs)
+               | {str(j) for j in master_orders})
     for jn in all_jns:
         rec = (store.get("jobs") or {}).get(jn) or {}
+        ment = master_orders.get(jn) or {}
         qjob = queue_jobs.get(jn)
-        mjob = qjob or (master_orders.get(jn) or {}).get("job") or {}
+        mjob = qjob or ment.get("job") or {}
         items = (qjob.get("line_items") if qjob else None) or rec.get("items") or []
 
         entry: Dict[str, Any] = {
@@ -146,29 +213,48 @@ def build_payload(store: Dict[str, Any],
             "cp": [_comp_entry(c) for c in so_hierarchy.components(items)],
         }
         drec = dwg.get(jn) or {}
-        if drec.get("extras"):
-            entry["d"] = _dwg_label(drec["extras"])
-        if drec.get("folder"):
-            entry["f"] = drec["folder"]
-        if drec.get("type"):
-            entry["t"] = drec["type"]
-        if qjob:
-            entry["q"] = 1
+        extras = drec.get("extras") or mjob.get("dwg_extras") or {}
+        if extras:
+            entry["d"] = _dwg_label(extras)
+            entry["dx"] = sorted(extras)
+        if drec.get("folder") or mjob.get("job_folder"):
+            entry["f"] = drec.get("folder") or mjob.get("job_folder")
+        if drec.get("type") or mjob.get("job_type"):
+            entry["t"] = drec.get("type") or mjob.get("job_type")
+        eng = engineers.cell_text(mjob) if mjob else ""
+        if eng:
+            entry["e"] = eng
+        if mjob.get("item"):
+            entry["im"] = mjob["item"]
         spec = [[label, str(mjob.get(key)).strip()] for label, key in SPEC_FIELDS
                 if str(mjob.get(key) or "").strip() not in ("", "None")]
         if spec:
             entry["sp"] = spec
+        if ment:      # in the master log -> an Order History row
+            entry["oh"] = [1 if ment.get("on_queue") else 0,
+                           str(ment.get("added") or ""), str(ment.get("left") or "")]
         if qjob:
+            entry["q"] = 1
+            entry["bd"] = _board_fields(qjob)
             hist = [str(h)[:_HIST_CLIP] for h in (qjob.get("co_history") or [])[:_HIST_MAX]]
             if hist:
                 entry["h"] = hist
         jobs[str(jn)] = entry
 
+    removed = sorted(
+        ([str(j), str(e.get("left") or "")] for j, e in master_orders.items()
+         if e.get("seen_on_queue") and not e.get("on_queue")
+         and str(e.get("left") or "")[:10] == today.isoformat()),
+        key=lambda r: r[1], reverse=True)
+
     return {
         "gen": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "today": today.isoformat(),
         "n_jobs": len(jobs),
         "n_items": sum(len(e["it"]) for e in jobs.values()),
         "jobs": jobs,
+        "ev": _events_payload(events or [], master_orders),
+        "rm": removed,
     }
 
 
@@ -179,6 +265,11 @@ def render_html(payload: Dict[str, Any]) -> str:
     raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
     b64 = base64.b64encode(gzip.compress(raw.encode("utf-8"), 9)).decode("ascii")
     return _TEMPLATE.replace("__B64__", b64)
+
+
+def version_js(payload: Dict[str, Any]) -> str:
+    """The tiny sibling stamp open pages poll to notice a rewrite."""
+    return f'window.__GLQ_VERSION__ = "{payload.get("gen", "")}";\n'
 
 
 def bat_text(html_name: str = HTML_NAME) -> str:
@@ -219,7 +310,9 @@ def bat_text(html_name: str = HTML_NAME) -> str:
 
 
 def write_explorer(payload: Dict[str, Any], out: Path | None = None) -> Path:
-    """Write the page (atomically) and keep the .bat launcher beside it."""
+    """Write the page (atomically), bump the version stamp open pages poll,
+    and keep the .bat launcher beside it. The stamp is replaced strictly AFTER
+    the page, so a page that notices the new stamp always reloads new data."""
     out = out or default_output_path()
     out.parent.mkdir(parents=True, exist_ok=True)
     html = render_html(payload)
@@ -227,12 +320,20 @@ def write_explorer(payload: Dict[str, Any], out: Path | None = None) -> Path:
     tmp.write_text(html, encoding="utf-8")
     tmp.replace(out)
 
+    ver = out.parent / VERSION_NAME
+    try:
+        vtmp = ver.with_suffix(".js.tmp")
+        vtmp.write_text(version_js(payload), encoding="utf-8")
+        vtmp.replace(ver)
+    except OSError as e:  # auto-refresh is a nicety — never fail the page for it
+        log.warning("Could not write %s (%s)", ver, e)
+
     bat = out.parent / BAT_NAME
     text = bat_text(out.name)
     try:
         if not bat.exists() or bat.read_text(encoding="ascii", errors="replace") != text:
             bat.write_bytes(text.encode("ascii"))
-    except OSError as e:  # the launcher is a nicety — never fail the page for it
+    except OSError as e:
         log.warning("Could not write %s (%s)", bat, e)
     log.info("Explorer written: %s (%d orders, %d items)",
              out, payload.get("n_jobs", 0), payload.get("n_items", 0))
@@ -250,10 +351,11 @@ def maybe_write(master: Dict[str, Any] | None,
                 lq_jobs: List[Dict[str, Any]] | None,
                 force: bool = False) -> Optional[Path]:
     """Called by the watcher each poll. Cheap unless the line-items/DWG store
-    files changed on disk, the board membership changed, or an hour passed —
-    then the page is rebuilt from the real stores. Returns the path written,
-    or None when the page was already current."""
+    files or today's change log changed on disk, the board membership changed,
+    or an hour passed — then the page is rebuilt from the real stores. Returns
+    the path written, or None when the page was already current."""
     import autocad_scan
+    import change_log
     import line_items as li
 
     out = default_output_path()
@@ -262,8 +364,10 @@ def maybe_write(master: Dict[str, Any] | None,
             return p.stat().st_mtime
         except OSError:
             return 0.0
+    today = date.today()
     queue = {str(j.get("job")): j for j in lq_jobs or [] if j.get("job")}
     key = (_mtime(li.store_path()), _mtime(autocad_scan.PROGRESS_PATH),
+           _mtime(change_log.log_path(today)), today.isoformat(),
            tuple(sorted(queue)))
     now = time.time()
     if (not force and out.exists() and _CACHE["key"] == key
@@ -272,7 +376,8 @@ def maybe_write(master: Dict[str, Any] | None,
 
     payload = build_payload(li.load_store(), autocad_scan.load_progress(),
                             master_orders=(master or {}).get("orders"),
-                            queue_jobs=queue)
+                            queue_jobs=queue, events=change_log.load(today),
+                            today=today)
     path = write_explorer(payload, out)
     _CACHE.update(key=key, at=now)
     return path
@@ -291,6 +396,7 @@ def main(argv: List[str] | None = None) -> int:
                     help="AutoCAD scan store JSON (default: the configured store)")
     args = ap.parse_args(argv)
 
+    import change_log
     import line_items as li
     store = li.load_store(args.store) if args.store else li.load_store()
     if not store.get("jobs"):
@@ -309,17 +415,22 @@ def main(argv: List[str] | None = None) -> int:
         import live_master
         master = live_master.load_master()
 
-    payload = build_payload(store, dwg, master_orders=master.get("orders"))
+    today = date.today()
+    payload = build_payload(store, dwg, master_orders=master.get("orders"),
+                            events=change_log.load(today), today=today)
     out = write_explorer(payload, args.out)
     n_q = sum(1 for e in payload["jobs"].values() if e.get("q"))
     print(f"Wrote {out}  ({payload['n_jobs']} orders, {payload['n_items']} line "
-          f"items, {n_q} on the board)  + {BAT_NAME}")
+          f"items, {n_q} on the board)  + {BAT_NAME} + {VERSION_NAME}")
     return 0
 
 
 # --------------------------------------------------------------------------- #
 # The page. One token: __B64__ (the gzip+base64 payload). No external          #
 # resources of any kind — works from file:// on a shared drive, offline.       #
+# The xf-*/chg*/mx-* classes carry the Excel workbook's exact fill RGBs        #
+# (live_excel._FILL_RGB) in BOTH themes, with dark ink on the fills like       #
+# Excel, so the color language transfers 1:1.                                  #
 # --------------------------------------------------------------------------- #
 _TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en">
@@ -359,19 +470,26 @@ _TEMPLATE = r"""<!DOCTYPE html>
            padding: 0; cursor: pointer; text-align: left; }
   a { color: var(--accent); font-weight: 600; text-decoration: none; }
   a:hover { text-decoration: underline; }
+  input { font: inherit; }
   button:focus-visible, input:focus-visible, a:focus-visible {
     outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 
-  .wrap { max-width: 1240px; margin: 0 auto; padding: 0 20px 40px; }
-  header.top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px;
-    padding: 18px 0 14px; border-bottom: 2px solid var(--ink); margin-bottom: 18px; }
+  .wrap { max-width: 1360px; margin: 0 auto; padding: 0 20px 40px; }
+  header.top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
+    padding: 16px 0 12px; border-bottom: 2px solid var(--ink); margin-bottom: 16px; }
   .wordmark { font-family: var(--mono); font-size: 15px; letter-spacing: .14em;
               font-weight: 700; white-space: nowrap; }
   .wordmark .dim { color: var(--muted); font-weight: 400; }
-  .searchbox { position: relative; flex: 1 1 340px; max-width: 560px; margin-left: auto; }
-  .searchbox input { width: 100%; padding: 9px 12px 9px 36px; font: 13.5px var(--sans);
-    color: var(--ink); background: var(--panel); border: 1.5px solid var(--line);
-    border-radius: 8px; }
+  nav.tabs { display: flex; gap: 6px; }
+  .tabbtn { font-size: 12.5px; font-weight: 600; padding: 5px 14px;
+    border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .tabbtn:hover { border-color: var(--accent); color: var(--accent); }
+  .tabbtn.active { background: var(--accent); color: var(--accent-ink);
+    border-color: var(--accent); }
+  .searchbox { position: relative; flex: 1 1 300px; max-width: 520px; margin-left: auto; }
+  .searchbox input[type=search] { width: 100%; padding: 8px 12px 8px 34px;
+    font-size: 13.5px; color: var(--ink); background: var(--panel);
+    border: 1.5px solid var(--line); border-radius: 8px; }
   .searchbox input::placeholder { color: var(--faint); }
   .searchbox .glass { position: absolute; left: 12px; top: 50%;
     transform: translateY(-50%); color: var(--faint); pointer-events: none; }
@@ -395,9 +513,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
     margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sd-item .why mark { background: var(--hit); color: inherit; padding: 0 1px; }
 
-  main.cols { display: grid; grid-template-columns: minmax(0, 11fr) minmax(0, 9fr);
-    gap: 18px; align-items: start; }
-  @media (max-width: 920px) { main.cols { grid-template-columns: 1fr; } }
+  .view { display: none; }
+  .view.on { display: block; }
   .panel { background: var(--panel); border: 1px solid var(--line);
     border-radius: 12px; overflow: hidden; }
   .panel-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
@@ -408,15 +525,71 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .empty { padding: 46px 24px; text-align: center; color: var(--muted); }
   .empty .big { font-size: 15px; color: var(--ink); margin-bottom: 6px; }
 
-  .qrow { display: flex; align-items: baseline; gap: 12px; width: 100%;
-    padding: 10px 16px; border-bottom: 1px solid var(--line); }
-  .qrow:last-child { border-bottom: none; }
-  .qrow:hover { background: var(--accent-soft); }
-  .qrow .job { font-family: var(--mono); font-weight: 700; font-size: 14px; }
-  .qrow .cust { color: var(--muted); font-size: 12.5px; flex: 1; overflow: hidden;
-    text-overflow: ellipsis; white-space: nowrap; }
-  .qrow .n { font-family: var(--mono); font-size: 11.5px; color: var(--faint);
-    white-space: nowrap; }
+  /* ---- data tables (Board / Changes / History): Excel's color language ---- */
+  .tablewrap { overflow: auto; max-height: 78vh; }
+  table.gt { border-collapse: collapse; font-size: 12px; width: 100%; }
+  .gt th { position: sticky; top: 0; z-index: 2; background: #305496; color: #FFFFFF;
+    font-weight: 700; text-align: left; padding: 5px 8px; white-space: nowrap; }
+  .gt th.vh { writing-mode: vertical-rl; transform: rotate(180deg);
+    text-align: left; vertical-align: bottom; font-weight: 600; font-size: 11px;
+    padding: 6px 2px; max-height: 150px; }
+  .gt td { padding: 3px 8px; border-bottom: 1px solid var(--line);
+    white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .gt td.wrapcell { white-space: normal; min-width: 260px; }
+  .gt tr.rowbtn:hover td { outline: 1px solid var(--accent); outline-offset: -1px; }
+  .gt .jobcell { font-family: var(--mono); font-weight: 700; cursor: pointer; }
+  .gt .jobcell:hover { color: var(--accent); text-decoration: underline; }
+  .gt td.num { text-align: right; }
+  .gt td.ctr { text-align: center; }
+  .totrow td { font-weight: 700; border-top: 2px solid var(--ink); border-bottom: none;
+    padding-top: 6px; }
+
+  /* Excel fills, exact RGBs from live_excel._FILL_RGB; dark ink like Excel. */
+  .xf-ov td, .xf-dt td, .xf-sn td, .xf-nw td,
+  .xf-ovn td, .xf-dtn td, .xf-snn td,
+  .chg1 td, .chg2 td, .chg3 td, .chg4 td { color: #1B242D; }
+  .xf-ov td { background: #FFC7CE; }    /* overdue */
+  .xf-dt td { background: #F8CBAD; }    /* due today */
+  .xf-sn td { background: #FFEB9C; }    /* due within 3 days */
+  .xf-nw td { background: #D9D9D9; }    /* new today */
+  .xf-ovn td { background: #F4A5A8; }   /* overdue + new */
+  .xf-dtn td { background: #F4B183; }   /* due today + new */
+  .xf-snn td { background: #F5D750; }   /* soon + new */
+  .chg1 td { background: #D9D9D9; }     /* change instances, darker each time */
+  .chg2 td { background: #BFBFBF; }
+  .chg3 td { background: #A6A6A6; }
+  .chg4 td { background: #8C8C8C; }
+  td.mx-y { background: #C6EFCE; color: #1B242D; text-align: center; }  /* has it */
+  td.mx-n { background: #FFC7CE; }                                      /* doesn't */
+  td.mx-sep { background: #808080; padding: 0 2px; }
+  tr.co-red td { color: #C00000; font-weight: 600; }   /* a CO landed today */
+  .drun { color: #C55A11; font-weight: 700; }          /* highly-custom quote run */
+  .flag-yes { color: #1B242D; background: #C6EFCE; border-radius: 4px;
+    padding: 0 6px; font-weight: 700; font-size: 11px; }
+
+  .secttitle { font-weight: 700; font-size: 13px; padding: 14px 16px 6px; }
+  .secttitle .cnt { color: var(--muted); font-weight: 400; }
+  .sectnote { padding: 0 16px 8px; font-size: 12px; color: var(--muted); }
+  .histbar { display: flex; gap: 10px; align-items: center; padding: 10px 16px;
+    border-bottom: 1px solid var(--line); background: var(--panel-2); flex-wrap: wrap; }
+  .histbar input { padding: 6px 10px; border: 1.5px solid var(--line);
+    border-radius: 7px; background: var(--panel); color: var(--ink); width: 300px;
+    max-width: 100%; font-size: 13px; }
+  .histbar .note { font-size: 11.5px; color: var(--muted); }
+  .morebtn { display: block; width: 100%; text-align: center; padding: 9px;
+    font-weight: 600; color: var(--accent); border-top: 1px solid var(--line); }
+  .morebtn:hover { background: var(--accent-soft); }
+
+  #toast { position: fixed; right: 18px; bottom: 18px; z-index: 90;
+    background: var(--ink); color: var(--bg); font-size: 12.5px; font-weight: 600;
+    padding: 9px 16px; border-radius: 9px; box-shadow: 0 8px 24px rgba(0,0,0,.25);
+    opacity: 0; pointer-events: none; transition: opacity .3s; }
+  #toast.show { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { #toast { transition: none; } }
+
+  main.cols { display: grid; grid-template-columns: minmax(0, 11fr) minmax(0, 9fr);
+    gap: 18px; align-items: start; }
+  @media (max-width: 920px) { main.cols { grid-template-columns: 1fr; } }
 
   .backlink { font-size: 12.5px; color: var(--accent); font-weight: 600; }
   .ohead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; flex: 1; }
@@ -540,34 +713,48 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <body>
 <div class="wrap">
   <header class="top">
-    <span class="wordmark">GL QUEUE <span class="dim">/</span> ORDER EXPLORER</span>
+    <span class="wordmark">GL QUEUE <span class="dim">/</span> EXPLORER</span>
+    <nav class="tabs" id="tabs" style="display:none">
+      <button class="tabbtn" data-tab="board">Board</button>
+      <button class="tabbtn" data-tab="changes">Changes</button>
+      <button class="tabbtn" data-tab="hist">Order History</button>
+    </nav>
     <div class="searchbox">
       <span class="glass">&#8981;</span>
       <input id="q" type="search" autocomplete="off" spellcheck="false"
-             placeholder="Job # (or last digits) &mdash; or a feature: teflon, low leak, stainless&hellip;"
+             placeholder="Job # (or last digits) &mdash; or a feature: teflon, low leak&hellip;"
              aria-label="Search jobs or features">
       <div class="search-drop" id="drop"></div>
     </div>
   </header>
   <div id="boot">Loading the order data&hellip;</div>
-  <main class="cols" style="display:none">
+  <section class="view panel" id="view-board"></section>
+  <section class="view panel" id="view-changes"></section>
+  <section class="view panel" id="view-hist"></section>
+  <main class="cols view" id="view-job">
     <section class="panel" id="left"></section>
     <section class="panel" id="right"></section>
   </main>
   <footer class="note" style="display:none">
-    <span>One file, no install, no internet &mdash; regenerated by the queue watcher.
-      Scores: rare shared features count highest, identical Sales-Order lines double.</span>
+    <span>One file, no install, no internet &mdash; the watcher regenerates it and open
+      pages refresh themselves. Scores: rare shared features count highest,
+      identical Sales-Order lines double.</span>
     <span class="mono" id="stamp"></span>
   </footer>
+  <div id="toast" role="status"></div>
 </div>
 
 <script>
 "use strict";
 const PAYLOAD_B64 = "__B64__";
+const VERSION_FILE = "gl_queue_explorer_version.js";
+const STATE_KEY = "glq_state";
 
-let DB = null;                 // {gen, n_jobs, n_items, jobs: {job -> entry}}
+let DB = null;                 // {gen, today, n_jobs, n_items, jobs, ev, rm}
 let IDX = null;                // {tagDF, normDF, sets: {job -> {t:Set, n:Set}}}
-const state = { job: null, path: null, whole: false, pinned: new Set() };
+let COSET = new Set();         // jobs a CO# landed on today (red text)
+const state = { tab: "board", job: null, path: null, whole: false,
+                pinned: new Set(), histQ: "", histN: 500 };
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c =>
@@ -577,22 +764,96 @@ const money = n => (+n).toLocaleString("en-US",
 const jobNum = j => /^\d+/.test(j) ? parseInt(j, 10) : -1;
 const fileUrl = p => "file:///" + encodeURI(String(p).replace(/\\/g, "/"))
   .replace(/#/g, "%23");
+const spv = (e, label) => { const kv = (e.sp || []).find(x => x[0] === label);
+  return kv ? kv[1] : ""; };
 
-/* item row indices: [no, raw, price, qty, section, norm, tags] */
+/* item row indices: [no, text, price, qty, section, norm, tags] */
 const IT = { NO: 0, RAW: 1, PRICE: 2, QTY: 3, SECTION: 4, NORM: 5, TAGS: 6 };
+
+function pDate(s) { if (!s) return null; const d = new Date(s);
+  return isNaN(d) ? null : d; }
+function dayFloor(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+function sameDay(a, b) { return a && b && dayFloor(a).getTime() === dayFloor(b).getTime(); }
+function fmtWhen(iso) {
+  const d = pDate(iso); if (!d) return "";
+  if (sameDay(d, new Date()))
+    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+}
+/* The workbook's row-fill rules (live_sheets._row_fill), against the REAL
+   current date so a page left open overnight keeps telling the truth. */
+function fillClass(e) {
+  const bd = e.bd || {};
+  const isNew = sameDay(pDate(bd.ai), new Date());
+  const ed = pDate(bd.ed);
+  if (ed) {
+    const t0 = dayFloor(new Date());
+    const soon = new Date(t0.getFullYear(), t0.getMonth(), t0.getDate() + 3);
+    if (ed < t0) return isNew ? "xf-ovn" : "xf-ov";
+    if (ed.getTime() === t0.getTime()) return isNew ? "xf-dtn" : "xf-dt";
+    if (ed <= soon) return isNew ? "xf-snn" : "xf-sn";
+  }
+  return isNew ? "xf-nw" : "";
+}
 
 async function boot() {
   const bytes = Uint8Array.from(atob(PAYLOAD_B64), c => c.charCodeAt(0));
   const stream = new Blob([bytes]).stream()
     .pipeThrough(new DecompressionStream("gzip"));
   DB = JSON.parse(await new Response(stream).text());
+  COSET = new Set(DB.ev.filter(x => x.f === "CO#").map(x => x.j));
   $("boot").style.display = "none";
-  document.querySelector("main").style.display = "";
+  $("tabs").style.display = "";
   document.querySelector("footer").style.display = "";
   $("stamp").textContent = "generated " + DB.gen + " · " + DB.n_jobs
     + " orders · " + DB.n_items + " line items";
+  restoreState();
   render();
   setTimeout(ensureIndex, 50);        // warm the match index off the first paint
+  setInterval(pollVersion, 60000);
+}
+
+/* ---- auto-refresh: poll the sibling stamp; reload when the watcher wrote --- */
+function pollVersion() {
+  const s = document.createElement("script");
+  s.src = VERSION_FILE + "?t=" + Date.now();   // query defeats any file cache
+  s.onload = () => { s.remove();
+    if (window.__GLQ_VERSION__ && DB && window.__GLQ_VERSION__ !== DB.gen)
+      reloadFresh(); };
+  s.onerror = () => s.remove();                // stamp missing -> feature off
+  document.head.appendChild(s);
+}
+function reloadFresh() {
+  try {
+    sessionStorage.setItem(STATE_KEY, JSON.stringify({
+      tab: state.tab, job: state.job, path: state.path, whole: state.whole,
+      pinned: [...state.pinned], histQ: state.histQ, y: window.scrollY,
+      refreshed: 1 }));
+  } catch (e) {}
+  location.reload();
+}
+function restoreState() {
+  let saved = null;
+  try { saved = JSON.parse(sessionStorage.getItem(STATE_KEY) || "null");
+        sessionStorage.removeItem(STATE_KEY); } catch (e) {}
+  if (!saved) return;
+  if (saved.job && DB.jobs[saved.job]) {
+    state.job = saved.job; state.path = saved.path; state.whole = !!saved.whole;
+    state.pinned = new Set(saved.pinned || []);
+  }
+  state.tab = ["board", "changes", "hist", "job"].includes(saved.tab)
+    ? saved.tab : "board";
+  if (state.tab === "job" && !state.job) state.tab = "board";
+  state.histQ = saved.histQ || "";
+  if (saved.y) setTimeout(() => window.scrollTo(0, saved.y), 60);
+  if (saved.refreshed) toast("Refreshed — new data as of " + DB.gen);
+}
+let toastTimer = null;
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 4000);
 }
 
 function ensureIndex() {
@@ -670,8 +931,7 @@ function rankMatches(srcJob, items) {
     let score = 0;
     const sharedNorms = [];
     for (const n of tNorms) if (s.n.has(n)) { score += 2 / normDF[n]; sharedNorms.push(n); }
-    let anyTag = false;
-    for (const t of tTags) if (s.t.has(t)) { score += 1 / tagDF[t]; anyTag = true; }
+    for (const t of tTags) if (s.t.has(t)) score += 1 / tagDF[t];
     if (!score) continue;
     if (state.pinned.size) {
       let ok = true;
@@ -681,18 +941,31 @@ function rankMatches(srcJob, items) {
       }
       if (!ok) continue;
     }
-    out.push({ j, score, sharedNorms: new Set(sharedNorms), tTags, anyTag });
+    out.push({ j, score, sharedNorms: new Set(sharedNorms), tTags });
   }
   out.sort((a, b) => b.score - a.score || jobNum(b.j) - jobNum(a.j));
   return out;
 }
 
 /* ------------------------------- rendering --------------------------------- */
-function render() { renderLeft(); renderRight(); }
+function render() {
+  for (const t of ["board", "changes", "hist", "job"])
+    $("view-" + t).classList.toggle("on", state.tab === t);
+  document.querySelectorAll(".tabbtn").forEach(b =>
+    b.classList.toggle("active", b.dataset.tab === state.tab));
+  if (state.tab === "board") renderBoard();
+  else if (state.tab === "changes") renderChanges();
+  else if (state.tab === "hist") renderHist();
+  else { renderJobPane(); renderMatches(); }
+}
+function setTab(t) { state.tab = t; render(); window.scrollTo(0, 0); }
 function selectJob(j) {
   state.job = j; state.path = null; state.whole = false; state.pinned.clear();
-  render();
-  window.scrollTo(0, 0);
+  setTab("job");
+}
+function wireJobCells(root) {
+  root.querySelectorAll("[data-job]").forEach(el =>
+    el.onclick = () => selectJob(el.dataset.job));
 }
 
 function copyBtn(path) {
@@ -716,24 +989,259 @@ function fallbackCopy(t, done) {
   ta.remove();
 }
 
-function renderLeft() {
-  const el = $("left");
-  if (!state.job) {
-    const onq = Object.keys(DB.jobs).filter(j => DB.jobs[j].q)
-      .sort((a, b) => jobNum(a) - jobNum(b));
-    el.innerHTML = '<div class="panel-head"><span class="eyebrow">On the board now</span>'
-      + '<span class="m-count">' + onq.length
-      + ' orders · click one, or search all ' + DB.n_jobs + ' above</span></div>'
-      + onq.map(j => {
-          const e = DB.jobs[j];
-          return '<button class="qrow" data-job="' + esc(j) + '">'
-            + '<span class="job">' + esc(j) + '</span>'
-            + '<span class="cust">' + esc(e.c) + '</span>'
-            + '<span class="n">' + e.it.length + ' items</span></button>';
-        }).join("");
-    el.querySelectorAll(".qrow").forEach(b => b.onclick = () => selectJob(b.dataset.job));
-    return;
+/* -------------------------------- Board ------------------------------------ */
+const BOARD_COLS = ["Added", "Job #", "Run", "CO#", "Oper", "Design", "Customer",
+  "Size", "Arr.", "Assigned To", "Checker", "Note", "Engineer", "End Date",
+  "Start Date", "FanNet", "Price", "DWG Reuse", "#"];
+
+function renderBoard() {
+  const el = $("view-board");
+  const onq = Object.keys(DB.jobs).filter(j => DB.jobs[j].q);
+  onq.sort((a, b) => ((DB.jobs[a].bd || {}).ps || 9e9) - ((DB.jobs[b].bd || {}).ps || 9e9)
+                     || jobNum(a) - jobNum(b));
+  let total = 0;
+  const rows = onq.map(j => {
+    const e = DB.jobs[j], bd = e.bd || {};
+    total += +String(bd.pr || "").replace(/[^0-9.\-]/g, "") || 0;
+    const cls = [fillClass(e), COSET.has(j) ? "co-red" : "", "rowbtn"]
+      .filter(Boolean).join(" ");
+    return '<tr class="' + cls + '">'
+      + "<td>" + esc(fmtWhen(bd.ai)) + "</td>"
+      + '<td class="jobcell" data-job="' + esc(j) + '">' + esc(j) + "</td>"
+      + "<td>" + (bd.dr ? '<span class="drun">Run</span>' : "") + "</td>"
+      + "<td>" + esc(e.co || "") + "</td>"
+      + "<td>" + esc(bd.op || "") + "</td>"
+      + "<td>" + esc(spv(e, "Design")) + "</td>"
+      + "<td>" + esc(e.c) + "</td>"
+      + "<td>" + esc(spv(e, "Size")) + "</td>"
+      + "<td>" + esc(spv(e, "Arrangement")) + "</td>"
+      + "<td>" + esc(bd.as || "") + "</td>"
+      + "<td>" + esc(bd.ck || "") + "</td>"
+      + "<td>" + esc(bd.no || "") + "</td>"
+      + "<td>" + esc(e.e || "") + "</td>"
+      + "<td>" + esc(bd.ed || "") + "</td>"
+      + "<td>" + esc(bd.sd || "") + "</td>"
+      + "<td>" + esc(bd.fn || "") + "</td>"
+      + '<td class="num">' + esc(bd.pr || "") + "</td>"
+      + "<td>" + esc(bd.ru || "") + "</td>"
+      + '<td class="ctr">' + (bd.ps || "") + "</td></tr>";
+  }).join("");
+  el.innerHTML = '<div class="panel-head"><span class="eyebrow">Board — live queue</span>'
+    + '<span class="m-count">' + onq.length + " orders · $" + money(total)
+    + " in process · colors match the workbook</span></div>"
+    + '<div class="tablewrap"><table class="gt"><thead><tr>'
+    + BOARD_COLS.map(h => "<th>" + esc(h) + "</th>").join("")
+    + "</tr></thead><tbody>" + rows
+    + '<tr class="totrow"><td colspan="6">Total jobs: ' + onq.length + "</td>"
+    + '<td colspan="10" style="text-align:right">Total $ in process:</td>'
+    + '<td class="num">' + money(total) + "</td><td></td><td></td></tr>"
+    + "</tbody></table></div>";
+  wireJobCells(el);
+}
+
+/* ------------------------------- Changes ----------------------------------- */
+function miniTable(headers, rows) {
+  if (!rows.length) return '<div class="sectnote">(none)</div>';
+  return '<div class="tablewrap" style="max-height:none"><table class="gt"><thead><tr>'
+    + headers.map(h => "<th>" + esc(h) + "</th>").join("")
+    + "</tr></thead><tbody>" + rows.join("") + "</tbody></table></div>";
+}
+function renderChanges() {
+  const el = $("view-changes");
+  const newToday = Object.keys(DB.jobs).filter(j => {
+    const e = DB.jobs[j];
+    return e.q && String((e.bd || {}).ai || "").slice(0, 10) === DB.today;
+  }).sort((a, b) => jobNum(b) - jobNum(a));
+  const newRows = newToday.map(j => {
+    const e = DB.jobs[j], bd = e.bd || {};
+    return '<tr class="rowbtn"><td>' + esc(fmtWhen(bd.ai)) + "</td>"
+      + '<td class="jobcell" data-job="' + esc(j) + '">' + esc(j) + "</td>"
+      + "<td>" + esc(e.co || "") + "</td>"
+      + "<td>" + esc(spv(e, "Design")) + "</td>"
+      + "<td>" + esc(e.c) + "</td>"
+      + "<td>" + esc(bd.no || "") + "</td>"
+      + "<td>" + esc(bd.ed || "") + "</td>"
+      + '<td class="num">' + esc(bd.pr || "") + "</td></tr>";
+  });
+
+  const coEv = DB.ev.filter(x => x.f === "CO#");
+  const coRows = coEv.map(x => {
+    const e = DB.jobs[x.j] || {};
+    return '<tr class="rowbtn"><td>' + esc(fmtWhen(x.t)) + "</td>"
+      + '<td class="jobcell" data-job="' + esc(x.j) + '">' + esc(x.j) + "</td>"
+      + '<td style="color:#C00000;font-weight:700">CO#' + esc(x.n) + "</td>"
+      + "<td>" + esc(spv(e, "Design")) + "</td>"
+      + "<td>" + esc(x.c || e.c || "") + "</td>"
+      + '<td class="wrapcell">' + esc(x.d || "") + "</td></tr>";
+  });
+
+  const fieldEv = DB.ev.filter(x => x.f !== "CO#");
+  const byJob = new Map();
+  for (const x of fieldEv) {
+    if (!byJob.has(x.j)) byJob.set(x.j, []);
+    byJob.get(x.j).push(x);
   }
+  const chRows = [];
+  for (const [j, evs] of byJob) {
+    const e = DB.jobs[j] || {};
+    chRows.push('<tr><td colspan="5" style="font-weight:700">'
+      + '<span class="jobcell" data-job="' + esc(j) + '">' + esc(j) + "</span>"
+      + '&nbsp; <span style="font-weight:400;color:var(--muted)">'
+      + esc(evs[0].c || e.c || "") + "</span></td></tr>");
+    evs.forEach((x, i) => {
+      const shade = "chg" + Math.min(i + 1, 4);   // darker per later instance
+      chRows.push('<tr class="' + shade + '"><td>' + esc(fmtWhen(x.t)) + "</td>"
+        + "<td>" + esc(x.f) + "</td>"
+        + "<td>" + esc(x.o) + "</td><td>&rarr;</td>"
+        + "<td style='font-weight:600'>" + esc(x.n) + "</td></tr>");
+    });
+  }
+
+  const rmRows = DB.rm.map(r => {
+    const e = DB.jobs[r[0]] || {};
+    return '<tr class="rowbtn"><td>' + esc(fmtWhen(r[1])) + "</td>"
+      + '<td class="jobcell" data-job="' + esc(r[0]) + '">' + esc(r[0]) + "</td>"
+      + "<td>" + esc(e.co || "") + "</td>"
+      + "<td>" + esc(spv(e, "Design")) + "</td>"
+      + "<td>" + esc(e.c || "") + "</td></tr>";
+  });
+
+  el.innerHTML = '<div class="panel-head"><span class="eyebrow">Changes — '
+    + esc(DB.today) + '</span><span class="m-count">generated ' + esc(DB.gen)
+    + "</span></div>"
+    + '<div class="secttitle">New orders today <span class="cnt">(' + newRows.length
+    + ")</span></div>"
+    + miniTable(["Time", "Job #", "CO#", "Design", "Customer", "Note", "End Date",
+                 "Price"], newRows)
+    + '<div class="secttitle">Change orders today <span class="cnt">(' + coRows.length
+    + ")</span></div>"
+    + miniTable(["Time", "Job #", "CO#", "Design", "Customer", "What changed"], coRows)
+    + '<div class="secttitle">Orders that changed today <span class="cnt">('
+    + byJob.size + ")</span></div>"
+    + (chRows.length
+        ? miniTable(["Time", "Field", "Old", "", "New"], chRows)
+        : '<div class="sectnote">(none)</div>')
+    + '<div class="secttitle">Removed / completed today <span class="cnt">('
+    + rmRows.length + ")</span></div>"
+    + miniTable(["Time", "Job #", "CO#", "Design", "Customer"], rmRows)
+    + '<div style="height:10px"></div>';
+  wireJobCells(el);
+}
+
+/* ---------------------------- Order History -------------------------------- */
+const MATRIX_LIMIT = 300;   // full green-check/red matrices once filtered this narrow
+const HIST_COLS = ["Job #", "CO#", "Design", "Description", "Size", "Arr.",
+  "Motor Pos", "Class", "Rot.", "Disch.", "% W", "Wheel", "D.Temp", "M.Temp",
+  "Customer", "Engineer", "Item", "On Queue", "Added", "Left"];
+
+function histRowsAll() {
+  return Object.keys(DB.jobs).filter(j => DB.jobs[j].oh)
+    .sort((a, b) => jobNum(b) - jobNum(a));
+}
+function histFilter(rows, q) {
+  if (!q) return rows;
+  const n = q.toUpperCase();
+  return rows.filter(j => {
+    const e = DB.jobs[j];
+    return j.includes(n)
+      || (e.c || "").toUpperCase().includes(n)
+      || spv(e, "Design").toUpperCase().includes(n)
+      || (e.e || "").toUpperCase().includes(n)
+      || (e.im || "").toUpperCase().includes(n);
+  });
+}
+function jobTags(e) {
+  const s = new Set();
+  for (const row of e.it) for (const t of row[IT.TAGS]) s.add(t);
+  return s;
+}
+function renderHist() {
+  const el = $("view-hist");
+  const all = histRowsAll();
+  const rows = histFilter(all, state.histQ.trim());
+  const shown = rows.slice(0, state.histN);
+  const matrix = rows.length <= MATRIX_LIMIT && rows.length > 0;
+
+  let sufCols = [], tagCols = [];
+  if (matrix) {
+    const suf = new Set(), tgs = new Set();
+    for (const j of rows) {
+      for (const s of DB.jobs[j].dx || []) suf.add(s);
+      for (const t of jobTags(DB.jobs[j])) tgs.add(t);
+    }
+    sufCols = [...suf].sort((a, b) => (parseInt(a, 10) || 9e9) - (parseInt(b, 10) || 9e9)
+                                      || String(a).localeCompare(String(b)));
+    tagCols = [...tgs].sort();
+  }
+
+  const head = HIST_COLS.map(h => "<th>" + esc(h) + "</th>").join("")
+    + (matrix ? sufCols.map(s => '<th class="vh">-' + esc(s) + "</th>").join("")
+        + (sufCols.length || tagCols.length ? '<th class="vh">&#9474;</th>' : "")
+        + tagCols.map(t => '<th class="vh">' + esc(t) + "</th>").join("") : "");
+
+  const body = shown.map(j => {
+    const e = DB.jobs[j], oh = e.oh;
+    let tds = '<td class="jobcell" data-job="' + esc(j) + '">' + esc(j) + "</td>"
+      + "<td>" + esc(e.co || "") + "</td>"
+      + "<td>" + esc(spv(e, "Design")) + "</td>"
+      + "<td>" + esc(spv(e, "Description")) + "</td>"
+      + "<td>" + esc(spv(e, "Size")) + "</td>"
+      + "<td>" + esc(spv(e, "Arrangement")) + "</td>"
+      + "<td>" + esc(spv(e, "Motor Pos")) + "</td>"
+      + "<td>" + esc(spv(e, "Class")) + "</td>"
+      + "<td>" + esc(spv(e, "Rotation")) + "</td>"
+      + "<td>" + esc(spv(e, "Discharge")) + "</td>"
+      + "<td>" + esc(spv(e, "% Width")) + "</td>"
+      + "<td>" + esc(spv(e, "Wheel")) + "</td>"
+      + "<td>" + esc(spv(e, "Design Temp")) + "</td>"
+      + "<td>" + esc(spv(e, "Max Temp")) + "</td>"
+      + "<td>" + esc(e.c || "") + "</td>"
+      + "<td>" + esc(e.e || "") + "</td>"
+      + "<td>" + esc(e.im || "") + "</td>"
+      + '<td class="ctr">' + (oh[0] ? '<span class="flag-yes">YES</span>' : "NO") + "</td>"
+      + "<td>" + esc(fmtWhen(oh[1])) + "</td>"
+      + "<td>" + esc(fmtWhen(oh[2])) + "</td>";
+    if (matrix) {
+      const dx = new Set(e.dx || []), tg = jobTags(e);
+      tds += sufCols.map(s => dx.has(s) ? '<td class="mx-y">✓</td>'
+                                        : '<td class="mx-n"></td>').join("")
+        + (sufCols.length || tagCols.length ? '<td class="mx-sep"></td>' : "")
+        + tagCols.map(t => tg.has(t) ? '<td class="mx-y">✓</td>'
+                                     : '<td class="mx-n"></td>').join("");
+    }
+    return '<tr class="rowbtn">' + tds + "</tr>";
+  }).join("");
+
+  el.innerHTML = '<div class="panel-head"><span class="eyebrow">Order History</span>'
+    + '<span class="m-count">' + rows.length + " of " + all.length + " orders"
+    + (matrix ? " · showing the ✓/✗ DWG + feature matrices"
+              : " · filter to ≤ " + MATRIX_LIMIT + " to unfold the ✓/✗ matrices")
+    + "</span></div>"
+    + '<div class="histbar"><input id="histq" type="text" placeholder="Filter: job #, '
+    + 'customer, design, engineer, item&hellip;" value="' + esc(state.histQ) + '">'
+    + '<span class="note">green ✓ = has that custom DWG / feature, red = doesn&#39;t '
+    + "&mdash; same as the workbook</span></div>"
+    + '<div class="tablewrap"><table class="gt"><thead><tr>' + head
+    + "</tr></thead><tbody>" + body + "</tbody></table></div>"
+    + (rows.length > shown.length
+        ? '<button class="morebtn" id="histmore">Show '
+          + Math.min(500, rows.length - shown.length) + " more (of "
+          + (rows.length - shown.length) + " remaining)</button>" : "");
+  wireJobCells(el);
+  const inp = $("histq");
+  inp.oninput = () => { state.histQ = inp.value; state.histN = 500;
+    clearTimeout(inp._t); inp._t = setTimeout(() => {
+      const pos = inp.selectionStart; renderHist();
+      const ni = $("histq"); ni.focus(); ni.setSelectionRange(pos, pos);
+    }, 250); };
+  const more = $("histmore");
+  if (more) more.onclick = () => { state.histN += 500; renderHist(); };
+}
+
+/* ------------------------------ Job view ----------------------------------- */
+function renderJobPane() {
+  const el = $("left");
+  if (!state.job) { setTab("board"); return; }
   const j = state.job, e = DB.jobs[j];
   const specs = (e.sp || []).map(kv =>
     '<div class="spec"><div class="k">' + esc(kv[0]) + '</div><div class="v">'
@@ -778,7 +1286,7 @@ function renderLeft() {
     : '<div class="empty">No line items captured for this order yet.</div>';
 
   el.innerHTML = '<div class="panel-head">'
-    + '<button class="backlink" id="back">← board</button>'
+    + '<button class="backlink" id="back">← back</button>'
     + '<div class="ohead"><span class="job">' + esc(j) + '</span>'
     + '<span class="cust">' + esc(e.c) + "</span>"
     + (e.co ? '<span class="co">' + esc(e.co) + "</span>" : "")
@@ -796,8 +1304,7 @@ function renderLeft() {
     + '" id="whole">match whole order</button></div>'
     + '<div class="tree">' + tree + "</div></div>";
 
-  $("back").onclick = () => { state.job = null; state.path = null;
-    state.whole = false; state.pinned.clear(); render(); };
+  $("back").onclick = () => setTab("board");
   $("whole").onclick = () => { state.whole = !state.whole;
     if (state.whole) state.path = null; render(); };
   el.querySelectorAll(".comp-row").forEach(b => b.onclick = () => {
@@ -811,14 +1318,13 @@ function renderLeft() {
   wireCopy(el);
 }
 
-function renderRight() {
+function renderMatches() {
   const el = $("right");
   const ready = state.job && (state.whole || state.path !== null);
   if (!ready) {
     el.innerHTML = '<div class="panel-head"><span class="eyebrow">Matching orders</span></div>'
-      + '<div class="empty"><div class="big">'
-      + (state.job ? "Click a component on the left" : "Pick an order first")
-      + "</div>Past orders sharing it appear here, most relevant first, each with "
+      + '<div class="empty"><div class="big">Click a component on the left</div>'
+      + "Past orders sharing it appear here, most relevant first, each with "
       + "the line items that made it a match.</div>";
     return;
   }
@@ -978,6 +1484,8 @@ q.addEventListener("keydown", ev => {
 document.addEventListener("click", ev => {
   if (!ev.target.closest(".searchbox")) drop.classList.remove("open");
 });
+document.querySelectorAll(".tabbtn").forEach(b =>
+  b.onclick = () => setTab(b.dataset.tab));
 
 boot().catch(err => {
   $("boot").textContent = "Could not load the embedded data (" + err
