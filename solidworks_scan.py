@@ -9,9 +9,21 @@ A job "has 3D" when a folder named after it exists under the SolidWorks root
 AND that folder holds at least one SolidWorks file — a part (.sldprt),
 assembly (.sldasm), or drawing (.slddrw). Results land in one JSON store
 (backlog/solidworks_scan.json), read by the GL Queue Explorer's "Has 3D"
-filter and published with the other order data. Folders are matched by NAME
-anywhere up to three levels below the root, so both a flat root and a
-<type>\\<range>\\<job> layout like the AutoCAD tree work unchanged.
+filter and published with the other order data.
+
+The share's layout is Z:\\Solidworks\\Current\\JOBS\\<type>\\<intermediate>\\<job>:
+
+    GENERAL LINE   range folder over the first 3 digits ("416-420")
+    HD-PFD         first two digits + XXXX ("42XXXX")   [AutoCAD: HD-PFD-IAF]
+    HDX            range folder over the first 3 digits ("416-420")
+    AXIAL          no intermediate — the job sits right under AXIAL\\
+
+Range folders group the 3-digit prefix in fives: n = ceil(prefix/5), so
+prefix 420 -> "416-420"; the one irregular folder is "400-405" (in place of
+401-405). `sw_candidates` derives these paths directly, which is how --job
+finds a folder without walking; the full sweep stays a NAME-based walk (any
+directory named like a job, up to three levels down), so a new type or a
+misfiled job still gets found.
 
 Jobs are recorded whether or not 3D files were found — "scanned, nothing
 there" and "never scanned" stay distinguishable. Re-running refreshes the
@@ -64,6 +76,45 @@ def has_3d(store: Dict[str, Dict[str, Any]], job: str) -> bool:
     return bool(rec and rec.get("has_sw"))
 
 
+# The AutoCAD tree's name for the one type the two shares spell differently.
+_SW_TYPE_ALIASES = {"HD-PFD-IAF": "HD-PFD"}
+_SW_TYPES = ("GENERAL LINE", "HD-PFD", "HDX", "AXIAL")
+
+
+def range_folder(prefix: int) -> str:
+    """The share's 5-wide range folder for a 3-digit job prefix: 420 ->
+    '416-420' (n = ceil(prefix/5)). The share's one irregular folder is
+    '400-405', which stands in for the formula's 401-405."""
+    import math
+    n = math.ceil(prefix / 5)
+    start, end = 5 * (n - 1) + 1, 5 * n
+    if (start, end) == (401, 405):
+        return "400-405"
+    return f"{start}-{end}"
+
+
+def sw_candidates(root: Path, job: str, jtype: str = "") -> "list[Path]":
+    """The expected folder location(s) for `job` under the known layout. With
+    a job type (the AutoCAD scan's, aliases handled) one path comes back;
+    without, one per type — callers try them in order."""
+    job = str(job)
+    m = re.match(r"^(\d{3})\d{3}", job)
+    if not m:
+        return []
+    prefix = int(m.group(1))
+    types = ([_SW_TYPE_ALIASES.get(jtype.upper(), jtype.upper())]
+             if jtype else list(_SW_TYPES))
+    out = []
+    for t in types:
+        if t == "AXIAL":
+            out.append(root / "AXIAL" / job)
+        elif t == "HD-PFD":
+            out.append(root / "HD-PFD" / f"{job[:2]}XXXX" / job)
+        elif t in ("GENERAL LINE", "HDX"):
+            out.append(root / t / range_folder(prefix) / job)
+    return out
+
+
 def job_record(job: str, folder: Path) -> Dict[str, Any]:
     """One job folder's verdict: does it hold any SolidWorks file? Looks a
     couple of levels deep (revision subfolders are common), extensions
@@ -106,17 +157,20 @@ def scan_tree(root: Path, limit: int = 0) -> Dict[str, Dict[str, Any]]:
     return out
 
 
-def find_job_folder(root: Path, job: str) -> Path | None:
-    """Locate one job's folder: the direct child first (flat roots), then the
-    depth-limited walk."""
-    direct = root / job
+def find_job_folder(root: Path, job: str, jtype: str = "") -> Path | None:
+    """Locate one job's folder: the layout-derived candidates first (a couple
+    of stats), then the depth-limited walk as the safety net."""
+    for cand in sw_candidates(root, job, jtype):
+        if cand.is_dir():
+            return cand
+    direct = root / str(job)
     if direct.is_dir():
         return direct
     for dirpath, dirnames, _ in os.walk(root):
         p = Path(dirpath)
         if len(p.relative_to(root).parts) >= _WALK_DEPTH:
             dirnames[:] = []
-        if p.name == job:
+        if p.name == str(job):
             return p
     return None
 
@@ -141,7 +195,15 @@ def main(argv: list | None = None) -> int:
 
     if args.job:
         store = load_progress()
-        folder = find_job_folder(root, str(args.job))
+        # The AutoCAD scan already knows the job's type — use it to derive the
+        # exact SolidWorks path instead of walking the share.
+        jtype = ""
+        try:
+            import autocad_scan
+            jtype = (autocad_scan.load_progress().get(str(args.job)) or {}).get("type", "")
+        except Exception:  # noqa: BLE001 - the walk fallback covers us
+            pass
+        folder = find_job_folder(root, str(args.job), jtype)
         if folder is None:
             store.pop(str(args.job), None)
             save_progress(store)
