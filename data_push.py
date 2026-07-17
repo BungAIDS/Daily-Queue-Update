@@ -62,6 +62,7 @@ def data_files() -> List[Path]:
         BACKLOG_DIR / "backfill_line_items.json",   # watcher-safe backfill overlay
         BACKLOG_DIR / "backfill_progress.json",
         BACKLOG_DIR / "autocad_scan_progress.json",
+        BACKLOG_DIR / "solidworks_scan.json",        # which jobs have 3D data
         BACKLOG_DIR / "so_review_notes.json",        # the Sales-Order note queue
         BACKLOG_DIR / "so_review_parser_metrics.json",  # review-count history
         BACKLOG_DIR / "quote_run_review_notes.json",  # the Quote-Run note queue

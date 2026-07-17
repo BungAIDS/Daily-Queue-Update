@@ -153,6 +153,24 @@ def test_spec_values_tidied():
     print("  size/arrangement tidying OK")
 
 
+def test_quote_run_and_solidworks_links():
+    """drive_run_pdf becomes the Run/Quote-Run link target; a SolidWorks scan
+    record with 3D files becomes the sw folder link (and only then)."""
+    master_orders = {"421966": {"on_queue": True,
+                                "job": {"job": "421966", "customer": "X",
+                                        "line_items": [],
+                                        "drive_run_pdf": r"Z:\A\421966\ENG REF\RUN.txt"}}}
+    sw = {"421966": {"has_sw": True, "folder": r"Z:\SW\421966"},
+          "421314": {"has_sw": False, "folder": r"Z:\SW\421314"}}
+    p = oe.build_payload(_store(), master_orders=master_orders, sw=sw)
+    assert p["jobs"]["421966"]["qr"] == r"Z:\A\421966\ENG REF\RUN.txt"
+    assert p["jobs"]["421966"]["sw"] == r"Z:\SW\421966"
+    # Scanned-but-empty folders must NOT count as having 3D.
+    assert "sw" not in p["jobs"]["421314"]
+    assert "qr" not in p["jobs"]["421314"]
+    print("  quote-run / solidworks links OK")
+
+
 def test_master_orders_fallback_queue():
     master_orders = {"421314": {"on_queue": True, "added": "2026-07-15T08:30:00",
                                 "job": {"job": "421314", "customer": "Bayside",
@@ -217,6 +235,7 @@ def main() -> int:
     test_queue_jobs_take_master_items()
     test_events_and_removed()
     test_spec_values_tidied()
+    test_quote_run_and_solidworks_links()
     test_master_orders_fallback_queue()
     test_render_roundtrip_and_safety()
     test_bat_launcher()

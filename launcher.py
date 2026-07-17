@@ -302,6 +302,15 @@ def base_actions() -> list[LauncherAction]:
             default_args=("--open",),
         ),
         LauncherAction(
+            "solidworks_scan",
+            "Scans / Backfill",
+            "Scan SolidWorks 3D Folders",
+            "Sweeps the SolidWorks job folders and records which jobs have real 3D files (parts/assemblies/drawings). Feeds the Explorer's 'Has 3D' filter.",
+            "solidworks_scan.py",
+            options=(option("root", "SolidWorks root", "Override the SolidWorks jobs root from .env.", kind="folder", arg="--root"), LIMIT),
+            long_running=True,
+        ),
+        LauncherAction(
             "autocad_scan",
             "Scans / Backfill",
             "Scan AutoCAD Custom DWGs",

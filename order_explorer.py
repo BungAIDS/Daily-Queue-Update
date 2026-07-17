@@ -191,7 +191,8 @@ def build_payload(store: Dict[str, Any],
                   queue_jobs: Dict[str, Dict[str, Any]] | None = None,
                   events: List[Dict[str, Any]] | None = None,
                   today: date | None = None,
-                  new_ids: set | None = None) -> Dict[str, Any]:
+                  new_ids: set | None = None,
+                  sw: Dict[str, Dict[str, Any]] | None = None) -> Dict[str, Any]:
     """The page's embedded data: every order the store OR the master log knows
     (the master-only ones carry no line items but fill Order History), with
     items + derived component tree, DWG-scan facts, board fields for on-board
@@ -228,6 +229,12 @@ def build_payload(store: Dict[str, Any],
             "it": _item_rows(items),
             "cp": [_comp_entry(c) for c in so_hierarchy.components(items)],
         }
+        qr = (mjob.get("drive_run_pdf") or "").strip()
+        if qr:
+            entry["qr"] = qr
+        swrec = (sw or {}).get(jn) or {}
+        if swrec.get("has_sw") and swrec.get("folder"):
+            entry["sw"] = swrec["folder"]
         drec = dwg.get(jn) or {}
         extras = drec.get("extras") or mjob.get("dwg_extras") or {}
         if extras:
@@ -411,6 +418,7 @@ def maybe_write(master: Dict[str, Any] | None,
     import autocad_scan
     import change_log
     import line_items as li
+    import solidworks_scan
 
     out = default_output_path()
     def _mtime(p: Path) -> float:
@@ -421,7 +429,8 @@ def maybe_write(master: Dict[str, Any] | None,
     today = date.today()
     queue = {str(j.get("job")): j for j in lq_jobs or [] if j.get("job")}
     key = (_mtime(li.store_path()), _mtime(autocad_scan.PROGRESS_PATH),
-           _mtime(change_log.log_path(today)), today.isoformat(),
+           _mtime(change_log.log_path(today)), _mtime(solidworks_scan.PROGRESS_PATH),
+           today.isoformat(),
            tuple(sorted(queue)), tuple(sorted(str(x) for x in new_ids or ())))
     now = time.time()
     if (not force and out.exists() and _CACHE["key"] == key
@@ -431,7 +440,8 @@ def maybe_write(master: Dict[str, Any] | None,
     payload = build_payload(li.load_store(), autocad_scan.load_progress(),
                             master_orders=(master or {}).get("orders"),
                             queue_jobs=queue, events=change_log.load(today),
-                            today=today, new_ids=new_ids)
+                            today=today, new_ids=new_ids,
+                            sw=solidworks_scan.load_progress())
     path = write_explorer(payload, out)
     _CACHE.update(key=key, at=now)
     return path
@@ -451,6 +461,9 @@ def main(argv: List[str] | None = None) -> int:
     ap.add_argument("--changes", type=Path, default=None,
                     help="Day change-log JSON for the Changes tab (default: "
                          "today's log from the configured snapshots folder)")
+    ap.add_argument("--sw", type=Path, default=None,
+                    help="SolidWorks scan store JSON (default: the configured "
+                         "solidworks_scan store)")
     ap.add_argument("--open", action="store_true",
                     help="Open the page in an app window (Edge/Chrome --app). "
                          "An existing page opens as-is — the watcher keeps it "
@@ -490,8 +503,15 @@ def main(argv: List[str] | None = None) -> int:
             events = []
     else:
         events = change_log.load(today)
+
+    if args.sw:
+        sw = json.loads(args.sw.read_text(encoding="utf-8"))
+    else:
+        import solidworks_scan
+        sw = solidworks_scan.load_progress()
+
     payload = build_payload(store, dwg, master_orders=master.get("orders"),
-                            events=events, today=today)
+                            events=events, today=today, sw=sw)
     out = write_explorer(payload, args.out)
     n_q = sum(1 for e in payload["jobs"].values() if e.get("q"))
     print(f"Wrote {out}  ({payload['n_jobs']} orders, {payload['n_items']} line "
@@ -684,9 +704,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
     font-size: 12px; align-items: baseline; }
   .metaline .dwg { font-family: var(--mono); color: var(--good); font-weight: 600; }
   .metaline .path { font-family: var(--mono); color: var(--muted); }
-  .copybtn { font-size: 11px; color: var(--accent); border: 1px solid var(--accent);
-    border-radius: 5px; padding: 0 6px; }
-  .copybtn:hover { background: var(--accent-soft); }
 
   .specs { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
     gap: 8px 14px; margin: 12px 0 4px; }
@@ -838,7 +855,7 @@ let COSET = new Set();         // jobs a CO# landed on today (red text)
 let NWSET = null;              // the watcher's exact new-today set (null = derive)
 const state = { tab: "board", job: null, path: null, whole: false,
                 pinned: new Set(), histQ: "", histN: 500,
-                boardQ: "", boardSort: null, histSort: null };
+                boardQ: "", boardSort: null, histSort: null, only3d: false };
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c =>
@@ -949,7 +966,7 @@ function savePrefs() {
     localStorage.setItem(PREFS_KEY, JSON.stringify({
       tab: state.tab === "job" ? "board" : state.tab,
       boardSort: state.boardSort, histSort: state.histSort,
-      boardQ: state.boardQ, histQ: state.histQ }));
+      boardQ: state.boardQ, histQ: state.histQ, only3d: state.only3d }));
   } catch (e) {}
 }
 function loadPrefs() {
@@ -961,6 +978,7 @@ function loadPrefs() {
     if (p.histSort && typeof p.histSort.col === "number") state.histSort = p.histSort;
     state.boardQ = p.boardQ || "";
     state.histQ = p.histQ || "";
+    state.only3d = !!p.only3d;
   } catch (e) {}
 }
 let toastTimer = null;
@@ -1091,26 +1109,9 @@ function wireJobCells(root) {
     el.onclick = () => selectJob(el.dataset.job));
 }
 
-function copyBtn(path) {
-  return '<button class="copybtn" data-copy="' + esc(path)
-    + '" title="Copy this path — paste it into File Explorer">copy path</button>';
-}
-function wireCopy(root) {
-  root.querySelectorAll("[data-copy]").forEach(b => b.onclick = () => {
-    const t = b.dataset.copy;
-    const done = () => { b.textContent = "copied ✓";
-      setTimeout(() => { b.textContent = "copy path"; }, 1200); };
-    if (navigator.clipboard && navigator.clipboard.writeText)
-      navigator.clipboard.writeText(t).then(done, () => fallbackCopy(t, done));
-    else fallbackCopy(t, done);
-  });
-}
-function fallbackCopy(t, done) {
-  const ta = document.createElement("textarea");
-  ta.value = t; document.body.appendChild(ta); ta.select();
-  try { document.execCommand("copy"); done(); } catch (e) {}
-  ta.remove();
-}
+/* Folder/file access is plain links now (AutoCAD folder, SolidWorks 3D, SO
+   PDF, Quote Run) — a directory link opens the browser's file listing, and
+   every link's hover title still shows the full Z: path. */
 
 /* ------------------------------ Live Queue --------------------------------- */
 const BOARD_COLS = ["Added", "Job #", "Run", "CO#", "Oper", "Design", "Customer",
@@ -1183,7 +1184,10 @@ function renderBoard() {
       { v: bd.ai || "", h: esc(fmtWhen(bd.ai)) },
       { v: jobNum(j), h: '<span class="jobcell" data-job="' + esc(j) + '">'
           + esc(j) + "</span>" },
-      { v: bd.dr ? 1 : "", h: bd.dr ? '<span class="drun">Run</span>' : "" },
+      { v: bd.dr ? 1 : "", h: !bd.dr ? "" : e.qr
+          ? '<a class="drun" href="' + esc(fileUrl(e.qr)) + '" target="_blank" title="'
+            + esc(e.qr) + '">Run</a>'
+          : '<span class="drun">Run</span>' },
       t(e.co), t(bd.op), t(spv(e, "Design")), t(e.c), t(spv(e, "Size")),
       t(spv(e, "Arrangement")), t(bd.as), t(bd.ck), t(bd.no), t(e.e),
       t(bd.ed), t(bd.sd), t(bd.fn), t(bd.pr), t(bd.ru),
@@ -1449,7 +1453,10 @@ function renderJobPane() {
   const meta = [];
   if (e.t) meta.push('<span class="path">' + esc(e.t) + '</span>');
   if (e.d) meta.push('<span class="dwg">custom DWGs: ' + esc(e.d) + '</span>');
-  if (e.f) meta.push('<span class="path">' + esc(e.f) + '</span>' + copyBtn(e.f));
+  if (e.f) meta.push('<a href="' + esc(fileUrl(e.f)) + '" target="_blank" title="'
+    + esc(e.f) + '">AutoCAD folder</a>');
+  if (e.sw) meta.push('<a href="' + esc(fileUrl(e.sw)) + '" target="_blank" title="'
+    + esc(e.sw) + '">SolidWorks 3D</a>');
   const hist = e.h ? '<details class="hist"><summary>CO history ('
     + e.h.length + ')</summary>'
     + e.h.map(x => "<div>" + esc(x) + "</div>").join("") + "</details>" : "";
@@ -1495,6 +1502,8 @@ function renderJobPane() {
     + (e.q ? '<span class="onq">ON BOARD</span>' : "")
     + (e.pdf ? '<a href="' + esc(fileUrl(e.pdf)) + '" target="_blank" title="'
         + esc(e.pdf) + '">Open SO PDF</a>' : "")
+    + (e.qr ? '<a href="' + esc(fileUrl(e.qr)) + '" target="_blank" title="'
+        + esc(e.qr) + '">Open Quote Run</a>' : "")
     + "</div></div>"
     + '<div class="panel-body">'
     + (specs ? '<div class="specs">' + specs + "</div>" : "")
@@ -1522,7 +1531,6 @@ function renderJobPane() {
     state.pinned.has(k) ? state.pinned.delete(k) : state.pinned.add(k);
     render();
   });
-  wireCopy(el);
 }
 
 function renderMatches() {
@@ -1543,7 +1551,8 @@ function renderMatches() {
     const c = compAt(e, state.path);
     return c ? (c.k ? "[" + c.n + "]" : c.n) : "?";
   })();
-  const res = rankMatches(j, items);
+  const resAll = rankMatches(j, items);
+  const res = state.only3d ? resAll.filter(r => DB.jobs[r.j].sw) : resAll;
   const shown = res.slice(0, 25);
   const max = res.length ? res[0].score : 1;
   const chips = [...state.pinned].map(p => {
@@ -1583,9 +1592,14 @@ function renderMatches() {
     }
     const foot = ['<span class="' + (o.d ? "dwg" : "nodwg") + '">'
       + (o.d ? "custom DWGs: " + esc(o.d) : "no custom DWGs") + "</span>"];
-    if (o.f) foot.push('<span class="path">' + esc(o.f) + "</span>" + copyBtn(o.f));
+    if (o.f) foot.push('<a href="' + esc(fileUrl(o.f)) + '" target="_blank" title="'
+      + esc(o.f) + '">AutoCAD folder</a>');
+    if (o.sw) foot.push('<a href="' + esc(fileUrl(o.sw)) + '" target="_blank" title="'
+      + esc(o.sw) + '">SolidWorks 3D</a>');
     if (o.pdf) foot.push('<a href="' + esc(fileUrl(o.pdf))
       + '" target="_blank" title="' + esc(o.pdf) + '">SO PDF</a>');
+    if (o.qr) foot.push('<a href="' + esc(fileUrl(o.qr))
+      + '" target="_blank" title="' + esc(o.qr) + '">Quote Run</a>');
     const theirDesign = spv(o, "Design");
     const designChip = srcDesign && theirDesign
       ? (theirDesign === srcDesign
@@ -1608,22 +1622,31 @@ function renderMatches() {
   el.innerHTML = '<div class="panel-head"><span class="eyebrow">Matching orders</span>'
     + '<span class="m-target">' + esc(target) + '</span>'
     + '<span class="m-cust">on ' + esc(j) + "</span>"
-    + '<span class="m-count">' + res.length + " match"
+    + '<button class="wholebtn' + (state.only3d ? " active" : "") + '" id="only3d" '
+    + 'title="Only orders with SolidWorks 3D files (parts / assemblies / drawings)"'
+    + ">Has 3D</button>"
+    + '<span class="m-count" style="margin-left:0">' + res.length + " match"
     + (res.length === 1 ? "" : "es")
+    + (state.only3d && resAll.length !== res.length
+        ? " (of " + resAll.length + ")" : "")
     + (srcDesign ? " · same fan design (" + esc(srcDesign) + ") ranks first" : "")
     + "</span></div>"
     + (state.pinned.size
         ? '<div class="filterbar"><span class="fl">Required attributes:</span>'
           + chips + "</div>" : "")
     + (res.length ? cards : '<div class="empty"><div class="big">No orders match</div>'
-        + (state.pinned.size ? "Try removing an attribute filter."
-           : "Nothing in the store shares this yet.") + "</div>")
+        + (state.only3d && resAll.length
+            ? "None of the " + resAll.length + " matches has SolidWorks 3D data "
+              + "on file — turn off Has 3D, or run the SolidWorks scan if it "
+              + "has never been run."
+            : state.pinned.size ? "Try removing an attribute filter."
+              : "Nothing in the store shares this yet.") + "</div>")
     + (res.length > 25 ? '<div class="tailnote">…and ' + (res.length - 25)
         + " more — narrow it with an attribute filter</div>" : "");
   el.querySelectorAll(".fchip").forEach(b => b.onclick = () => {
     state.pinned.delete(b.dataset.a); render(); });
   el.querySelectorAll(".m-job").forEach(b => b.onclick = () => selectJob(b.dataset.job));
-  wireCopy(el);
+  $("only3d").onclick = () => { state.only3d = !state.only3d; savePrefs(); render(); };
 }
 
 /* ------------------------------- search ------------------------------------ */

@@ -178,6 +178,13 @@ AUTOCAD_JOBS_DIR = _expand_path(
     (os.environ.get("AUTOCAD_JOBS_DIR") or r"Z:\AUTOCAD\CURRENT\JOBS").strip()
 )
 
+# Root of the per-job SolidWorks folders (solidworks_scan.py — feeds the
+# explorer's "Has 3D" filter). Read-only; the scanner tells you plainly if the
+# default is wrong for your share — set the real root in .env.
+SOLIDWORKS_JOBS_DIR = _expand_path(
+    (os.environ.get("SOLIDWORKS_JOBS_DIR") or r"Z:\SOLIDWORKS").strip()
+)
+
 # Where the per-job sales-order line items live (one JSON store, fed by the
 # daily run, the backfill, and line_items_scan.py; searched by find_orders.py).
 # Defaults under BACKLOG_DIR; created on first save.
