@@ -200,6 +200,11 @@ def test_render_roundtrip_and_safety():
     assert "__SIMILARITY_JS__" not in html
     assert "GLQSimilarity" in html
     assert "0.000..1.000" in html
+    assert "renderOrderPreview" in html
+    assert "previewJob" in html
+    assert "Back to List" in html
+    assert "click order # again to move it to the left" in html
+    assert "red = scored construction difference" in html
     assert "<title>GL Queue Explorer</title>" in html
     print("  render round-trip / embedding safety OK")
 

@@ -880,6 +880,25 @@ _TEMPLATE = r"""<!DOCTYPE html>
     color: var(--faint); white-space: nowrap; }
   .attr-row.pinned { background: var(--accent-soft); }
   .attr-row.pinned .pin { color: var(--accent); font-weight: 700; }
+  .preview-job { font-family: var(--mono); font-size: 19px; font-weight: 700; }
+  .preview-job:hover { color: var(--accent); }
+  .preview-hint { width: 100%; font-size: 11px; color: var(--muted); }
+  .preview-diff { color: var(--bad); }
+  .spec.preview-diff { background: var(--bad-soft); border-radius: 6px;
+    padding: 4px 6px; margin: -4px -6px; }
+  .spec.preview-diff .k, .attr-row.preview-diff .k { color: var(--bad); }
+  .comp.preview-diff { border-color: var(--bad); }
+  .comp.preview-diff > .comp-row { color: var(--bad); background: var(--bad-soft); }
+  .attr-row.preview-diff { background: var(--bad-soft);
+    border: 1px solid rgba(180, 35, 24, .3); }
+  .preview-summary { display: flex; flex-direction: column; gap: 3px;
+    margin: 12px 0 4px; padding: 8px 10px; border: 1px solid var(--bad);
+    border-radius: 7px; color: var(--bad); background: var(--bad-soft);
+    font-size: 11.5px; font-family: var(--mono); }
+  .preview-tree .comp-row:hover { background: var(--panel-2); }
+  .preview-tree .comp.preview-diff > .comp-row:hover { background: var(--bad-soft); }
+  .preview-tree .attr-row:hover { background: transparent; }
+  .preview-tree .attr-row.preview-diff:hover { background: var(--bad-soft); }
   .rev-row { font-size: 12px; color: var(--bad); font-weight: 600; padding: 2px 6px;
     overflow-wrap: anywhere; }
   .src-row { font-size: 11.5px; color: var(--faint); font-family: var(--mono);
@@ -991,7 +1010,7 @@ let DB = null;                 // {gen, today, n_jobs, n_items, jobs, ev, rm, nw
 let IDX = null;                // explanatory line/tag sets, built once per page
 let COSET = new Set();         // jobs a CO# landed on today (red text)
 let NWSET = null;              // the watcher's exact new-today set (null = derive)
-const state = { tab: "board", job: null, path: null, whole: false,
+const state = { tab: "board", job: null, path: null, whole: false, previewJob: null,
                 pinned: new Set(), histQ: "", histN: 500,
                 boardQ: "", boardSort: null, histSort: null, only3d: false };
 
@@ -1301,18 +1320,21 @@ window.addEventListener("popstate", ev => {
   state.path = s.path === undefined ? null : s.path;
   state.whole = !!s.whole;
   state.pinned = new Set(s.pinned || []);
+  state.previewJob = null;
   render();
   POPPING = false;
   updateBackBtn();
 });
 
 function setTab(t) {
+  if (t !== "job") state.previewJob = null;
   if (t !== state.tab) { state.tab = t; pushNav(); }
   savePrefs(); render(); window.scrollTo(0, 0);
 }
 function selectJob(j) {
   /* Opening an order lands on its whole-order matches (the Similar Orders
      view) — a component/attribute click narrows from there. */
+  state.previewJob = null;
   if (state.tab === "job" && state.job === j) { render(); return; }
   state.job = j; state.path = null; state.whole = true; state.pinned.clear();
   state.tab = "job";
@@ -1731,21 +1753,201 @@ function renderJobPane() {
     + '<div class="tree">' + tree + "</div></div>";
 
   $("back").onclick = () => history.length > 1 ? history.back() : setTab("board");
-  $("whole").onclick = () => { state.whole = !state.whole;
+  $("whole").onclick = () => { const hadPreview = !!state.previewJob;
+    state.previewJob = null;
+    if (hadPreview && state.whole) { render(); return; }
+    state.whole = !state.whole;
     if (state.whole) { state.path = null; state.pinned.clear(); } render(); };
   el.querySelectorAll(".comp-row").forEach(b => b.onclick = () => {
-    state.whole = false; state.path = b.dataset.c; state.pinned.clear(); render();
+    state.previewJob = null; state.whole = false; state.path = b.dataset.c;
+    state.pinned.clear(); render();
   });
   /* An attribute click works standalone: it targets the component the
      attribute belongs to and requires the attribute on every match. */
   el.querySelectorAll(".attr-row").forEach(b => b.onclick = () => {
     const k = b.dataset.a, p = b.dataset.p;
+    state.previewJob = null;
     if (state.whole || state.path !== p) {
       state.whole = false; state.path = p; state.pinned.clear();
     }
     state.pinned.has(k) ? state.pinned.delete(k) : state.pinned.add(k);
     render();
   });
+}
+
+/* A match preview deliberately compares only fields used by the bounded
+   construction score.  Commercial metadata remains visible but neutral. */
+const PREVIEW_CORE_FIELDS = new Set(GLQSimilarity.CORE_FIELDS.map(f => f.label));
+
+function previewSpecDiff(label, leftSpecs, rightSpecs) {
+  const left = GLQSimilarity.norm(leftSpecs[label]);
+  const right = GLQSimilarity.norm(rightSpecs[label]);
+  if (left === right) return false;
+  /* Size codes are not comparable across different designs until quote-run
+     integration supplies an effective wheel diameter. */
+  if (label === "Size") {
+    const leftDesign = GLQSimilarity.norm(leftSpecs.Design);
+    const rightDesign = GLQSimilarity.norm(rightSpecs.Design);
+    if (leftDesign && rightDesign && leftDesign !== rightDesign) return false;
+  }
+  return !!(left || right);
+}
+
+function previewQuantity(component) {
+  const raw = component && component.a ? component.a.quantity : "";
+  const match = String(raw || "").match(/\d+(?:\.\d+)?/);
+  return match ? Math.max(1, Number(match[0])) : 1;
+}
+
+function bestPreviewReference(leftOrder, rightComponent) {
+  let best = null, bestScore = -1;
+  for (const component of GLQSimilarity.componentsNamed(leftOrder, rightComponent.n)) {
+    const score = GLQSimilarity.componentSimilarity(component, rightComponent).score;
+    if (score > bestScore) { best = component; bestScore = score; }
+  }
+  return best;
+}
+
+function previewComponentCounts(order) {
+  const counts = new Map();
+  for (const component of GLQSimilarity.flattenComponents(order)) {
+    const slot = GLQSimilarity.componentSlot(component);
+    if (!slot || !slot.weight) continue;
+    const key = GLQSimilarity.norm(component.n);
+    if (!key) continue;
+    const prior = counts.get(key) || { label: component.n, count: 0 };
+    prior.count++;
+    counts.set(key, prior);
+  }
+  return counts;
+}
+
+function renderOrderPreview(leftJob, rightJob) {
+  const el = $("right"), left = DB.jobs[leftJob], right = DB.jobs[rightJob];
+  const leftSpecs = GLQSimilarity.specMap(left);
+  const rightSpecs = GLQSimilarity.specMap(right);
+  const shownSpecs = new Set();
+  let specs = (right.sp || []).map(([label, value]) => {
+    shownSpecs.add(label);
+    const differs = PREVIEW_CORE_FIELDS.has(label)
+      && previewSpecDiff(label, leftSpecs, rightSpecs);
+    return '<div class="spec' + (differs ? " preview-diff" : "") + '">'
+      + '<div class="k">' + esc(label) + '</div><div class="v">'
+      + esc(value) + '</div></div>';
+  }).join("");
+  for (const field of GLQSimilarity.CORE_FIELDS) {
+    const label = field.label;
+    if (shownSpecs.has(label) || !GLQSimilarity.norm(leftSpecs[label])
+        || !previewSpecDiff(label, leftSpecs, rightSpecs)) continue;
+    specs += '<div class="spec preview-diff"><div class="k">' + esc(label)
+      + '</div><div class="v">missing (left: ' + esc(leftSpecs[label])
+      + ')</div></div>';
+  }
+
+  const meta = [];
+  if (right.t) meta.push('<span class="path">' + esc(right.t) + '</span>');
+  if (right.d) meta.push('<span class="dwg">custom DWGs: ' + esc(right.d) + '</span>');
+  if (right.f) meta.push('<a href="' + esc(folderUrl(right.f)) + '" title="'
+    + esc(right.f) + ' — opens in File Explorer">AutoCAD folder</a>');
+  if (right.sw) meta.push('<a href="' + esc(folderUrl(right.sw)) + '" title="'
+    + esc(right.sw) + ' — opens in File Explorer">SolidWorks 3D</a>');
+  const hist = right.h ? '<details class="hist"><summary>CO history ('
+    + right.h.length + ')</summary>'
+    + right.h.map(x => "<div>" + esc(x) + "</div>").join("") + "</details>" : "";
+
+  const leftCounts = previewComponentCounts(left);
+  const rightCounts = previewComponentCounts(right);
+  const countKeys = new Set([...leftCounts.keys(), ...rightCounts.keys()]);
+  const countDiffs = [...countKeys].sort().flatMap(key => {
+    const leftCount = leftCounts.get(key), rightCount = rightCounts.get(key);
+    const a = leftCount ? leftCount.count : 0, b = rightCount ? rightCount.count : 0;
+    if (a === b) return [];
+    return [(leftCount || rightCount).label + ": left " + a + " · this order " + b];
+  });
+  const countSummary = countDiffs.length
+    ? '<div class="preview-summary"><strong>Component count differences</strong>'
+      + countDiffs.map(line => '<span>' + esc(line) + '</span>').join("") + '</div>'
+    : "";
+
+  const compCard = component => {
+    const reference = bestPreviewReference(left, component);
+    const slot = GLQSimilarity.componentSlot(component);
+    const scored = !!(slot && slot.weight);
+    const componentDiff = scored && (!reference
+      || GLQSimilarity.componentSimilarity(reference, component).score < 1);
+    const leftAttrs = reference ? GLQSimilarity.scoredAttrs(reference) : {};
+    const rightAttrs = GLQSimilarity.scoredAttrs(component);
+    const visibleAttrs = new Set();
+    let attrs = Object.entries(component.a || {}).map(([key, value]) => {
+      visibleAttrs.add(key);
+      let differs = false;
+      if (scored && key === "quantity") {
+        differs = !reference || previewQuantity(reference) !== previewQuantity(component);
+      } else if (scored && Object.prototype.hasOwnProperty.call(rightAttrs, key)) {
+        differs = !reference || !(key in leftAttrs)
+          || GLQSimilarity.valueSimilarity(leftAttrs[key], value) < 1;
+      }
+      return '<div class="attr-row' + (differs ? " preview-diff" : "") + '">'
+        + '<span class="k">' + esc(key.replace(/_/g, " ")) + ':</span>'
+        + '<span class="v">' + esc(value) + '</span></div>';
+    }).join("");
+    if (scored && reference) {
+      for (const [key, value] of Object.entries(leftAttrs)) {
+        if (visibleAttrs.has(key)) continue;
+        attrs += '<div class="attr-row preview-diff"><span class="k">'
+          + esc(key.replace(/_/g, " ")) + ':</span><span class="v">missing (left: '
+          + esc(value) + ')</span></div>';
+      }
+      if (!visibleAttrs.has("quantity") && previewQuantity(reference) !== 1)
+        attrs += '<div class="attr-row preview-diff"><span class="k">quantity:</span>'
+          + '<span class="v">missing (left: ' + previewQuantity(reference)
+          + ')</span></div>';
+    }
+    const items = (component.i || []).map(no => itemByNo(right, no)).filter(Boolean);
+    const revs = (component.r || []).map(x => '<div class="rev-row">'
+      + esc(x) + '</div>').join("");
+    const srcs = items.length > 1 ? items.map((row, i) =>
+      '<div class="src-row">' + (i ? "+ " : "") + "#" + row[IT.NO] + " "
+      + esc(row[IT.RAW]) + '</div>').join("") : "";
+    const subs = (component.s || []).map(child =>
+      '<div class="subwrap">' + compCard(child) + '</div>').join("");
+    return '<div class="comp' + (componentDiff ? " preview-diff" : "") + '">'
+      + '<div class="comp-row"><span class="name">'
+      + (component.k ? "[" + esc(component.n) + "]" : esc(component.n)) + '</span>'
+      + '<span class="meta">' + (items.length || "")
+      + (items.length > 1 ? " lines" : items.length === 1 ? " line" : "") + '</span>'
+      + '<span class="price">' + (component.p ? money(component.p) : "") + '</span>'
+      + (componentDiff ? '<span class="go">different</span>' : "") + '</div>'
+      + '<div class="comp-kids">' + attrs + revs + subs + srcs + '</div></div>';
+  };
+  const tree = (right.cp || []).length
+    ? right.cp.map(compCard).join("")
+    : '<div class="empty">No line items captured for this order yet.</div>';
+  const comparison = GLQSimilarity.orderSimilarity(left, right);
+
+  el.innerHTML = '<div class="panel-head">'
+    + '<button class="backlink" id="matchlistback">← Back to List</button>'
+    + '<div class="ohead"><button class="preview-job" id="previewjob" title="'
+    + 'Move this order to the left">' + esc(rightJob) + '</button>'
+    + '<span class="cust">' + esc(right.c) + '</span>'
+    + (right.co ? '<span class="co">' + esc(right.co) + '</span>' : "")
+    + queueBadge(rightJob, right)
+    + (right.pdf ? '<a href="' + esc(fileUrl(right.pdf)) + '" target="_blank" title="'
+        + esc(right.pdf) + '">Open SO PDF</a>' : "")
+    + (right.qr ? '<a href="' + esc(fileUrl(right.qr)) + '" target="_blank" title="'
+        + esc(right.qr) + '">Open Quote Run</a>' : "")
+    + '<span class="preview-hint">click order # again to move it to the left</span>'
+    + '</div></div><div class="panel-body">'
+    + (specs ? '<div class="specs">' + specs + '</div>' : "")
+    + (meta.length ? '<div class="metaline">' + meta.join(" ") + '</div>' : "")
+    + hist + countSummary
+    + '<div class="sectionbar"><span class="eyebrow">Components</span>'
+    + '<span class="hint">red = scored construction difference from ' + esc(leftJob)
+    + '</span><span class="m-score">match ' + comparison.score.toFixed(3) + '</span></div>'
+    + '<div class="tree preview-tree">' + tree + '</div></div>';
+
+  $("matchlistback").onclick = () => { state.previewJob = null; renderMatches(); };
+  $("previewjob").onclick = () => selectJob(rightJob);
 }
 
 function renderMatches() {
@@ -1760,6 +1962,13 @@ function renderMatches() {
     return;
   }
   const j = state.job, e = DB.jobs[j];
+  if (state.previewJob) {
+    if (state.previewJob !== j && DB.jobs[state.previewJob]) {
+      renderOrderPreview(j, state.previewJob);
+      return;
+    }
+    state.previewJob = null;
+  }
   const srcDesign = spv(e, "Design");
   const items = state.whole ? e.it : compItems(e, state.path);
   const targetComp = state.whole ? null : compAt(e, state.path);
@@ -1832,7 +2041,8 @@ function renderMatches() {
       : "";
     return '<div class="match"><div class="m-head">'
       + '<span class="m-rank">' + (i + 1) + ".</span>"
-      + '<button class="m-job" data-job="' + esc(r.j) + '" title="Open this order">'
+      + '<button class="m-job" data-job="' + esc(r.j)
+      + '" title="Preview this order on the right">'
       + esc(r.j) + "</button>"
       + '<span class="m-cust">' + esc(o.c) + (o.co ? " · " + esc(o.co) : "")
       + "</span>" + queueBadge(r.j, o) + designChip
@@ -1872,7 +2082,10 @@ function renderMatches() {
         + " more — narrow it with a required attribute</div>" : "");
   el.querySelectorAll(".fchip").forEach(b => b.onclick = () => {
     state.pinned.delete(b.dataset.a); render(); });
-  el.querySelectorAll(".m-job").forEach(b => b.onclick = () => selectJob(b.dataset.job));
+  el.querySelectorAll(".m-job").forEach(b => b.onclick = () => {
+    state.previewJob = b.dataset.job;
+    renderMatches();
+  });
   $("only3d").onclick = () => { state.only3d = !state.only3d; savePrefs(); render(); };
 }
 

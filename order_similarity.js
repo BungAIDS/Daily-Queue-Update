@@ -366,6 +366,8 @@
     componentSlot,
     componentsBySlot,
     componentsNamed,
+    scoredAttrs,
+    valueSimilarity,
     componentSimilarity,
     componentHasRequired,
     orderSimilarity,

@@ -83,6 +83,18 @@ function testCommercialAndUnclassifiedLinesDoNotMoveWholeScore() {
     "shipping and unclassified prose must not change whole construction");
 }
 
+function testPreviewAttributeScopeMatchesConstructionScore() {
+  const attrs = sim.scoredAttrs(component("MOTOR", {
+    quantity: "2", motor_hp: "40", enclosure: "TEFC",
+    shipping_instruction: "CALL CUSTOMER", note: "commercial note",
+    vendor_quote: "VQ-123",
+  }));
+  assert.deepStrictEqual(attrs, { motor_hp: "40", enclosure: "TEFC" },
+    "preview highlighting must expose construction attributes only");
+  close(sim.valueSimilarity("TEFC | 460V", "460V, TEFC"), 1,
+    "attribute comparison should ignore list order and separators");
+}
+
 function testIndependentCoreWeights() {
   const a = order();
   for (const [label, expected] of [["Design", 0.90], ["Size", 0.90], ["% Width", 0.96]]) {
@@ -150,6 +162,7 @@ function main() {
   testIdenticalConstructionIsOne();
   testOneExtraDamperCostsExactlyItsCap();
   testCommercialAndUnclassifiedLinesDoNotMoveWholeScore();
+  testPreviewAttributeScopeMatchesConstructionScore();
   testIndependentCoreWeights();
   testDifferentDesignDoesNotTreatRawSizeCodeAsComparable();
   testRequiredAttributesStayOnSelectedComponent();
