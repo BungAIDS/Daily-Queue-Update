@@ -894,6 +894,71 @@
       "id": 215,
       "resolution": "Prevented Additional Features references from creating a second silencer component; the order has one [INLET SILENCER].",
       "handled_at": "2026-07-16T14:45:30"
+    },
+    {
+      "id": 216,
+      "resolution": "Grouped all wrapped GM 7E-TA, IEEE841 features-only, Div 2 exception, and added-nameplate wording as complete MOTOR special_attribute facts.",
+      "handled_at": "2026-07-20T10:19:50"
+    },
+    {
+      "id": 217,
+      "resolution": "Kept shaft grounding as a queryable MOTOR attribute and retained the complete unusual AEGIS exception under special_attribute.",
+      "handled_at": "2026-07-20T10:20:12"
+    },
+    {
+      "id": 218,
+      "resolution": "Grouped the complete GM 7E-TA and silicone-free sentence under MOTOR special_attribute instead of leaving a fragment unclassified.",
+      "handled_at": "2026-07-20T10:20:16"
+    },
+    {
+      "id": 219,
+      "resolution": "Promoted explicit inlet screen rows to the top-level INLET SCREEN component.",
+      "handled_at": "2026-07-20T10:20:19"
+    },
+    {
+      "id": 220,
+      "resolution": "Removed the redundant screen_subcategory SCREEN and the redundant INLET used_on link from direct inlet-screen rows.",
+      "handled_at": "2026-07-20T10:20:23"
+    },
+    {
+      "id": 221,
+      "resolution": "Explicit outlet-flange removal now selects flanged NO and punched NO while preserving both source contradictions as engineering review flags.",
+      "handled_at": "2026-07-20T10:20:28"
+    },
+    {
+      "id": 222,
+      "resolution": "Added regression coverage proving hyphenated and spaced silicone-free caulk wording maps identically to SPECIAL CONSTRUCTION caulking.",
+      "handled_at": "2026-07-20T10:20:31"
+    },
+    {
+      "id": 223,
+      "resolution": "Joined both wrapped Toshiba nameplate statements into complete MOTOR special_attribute facts.",
+      "handled_at": "2026-07-20T10:20:35"
+    },
+    {
+      "id": 224,
+      "resolution": "Joined the wrapped GM 7E-TA and silicone-free motor wording into one complete special_attribute fact.",
+      "handled_at": "2026-07-20T10:20:39"
+    },
+    {
+      "id": 225,
+      "resolution": "Joined the wrapped IEEE841 features-only, AEGIS grounding-ring, and Div 2 exception wording into one complete special_attribute fact.",
+      "handled_at": "2026-07-20T10:20:43"
+    },
+    {
+      "id": 226,
+      "resolution": "Verified both orders rescan the wrapped inlet-screen inquiry as 317-24-388 with identical INLET SCREEN attributes and no line review flag.",
+      "handled_at": "2026-07-20T10:20:47"
+    },
+    {
+      "id": 227,
+      "resolution": "Explicit flange removal now wins as flanged NO and punched NO while the original-versus-override conflict remains visible for engineering review.",
+      "handled_at": "2026-07-20T10:20:54"
+    },
+    {
+      "id": 228,
+      "resolution": "Moved the 200,000-hour bearing adder under BEARINGS as bearing_life_adder and bearing_life_hours attributes.",
+      "handled_at": "2026-07-20T10:20:58"
     }
   ]
 }

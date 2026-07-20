@@ -95,6 +95,56 @@ def test_conflicting_single_valued_attribute_is_kept_and_flagged():
                for r in rows)
 
 
+def test_explicit_flange_removal_wins_but_conflict_stays_visible():
+    base = _item(
+        "Outlet, Flanged, Punched L 823.00",
+        "823.00",
+        attrs={"component": "OUTLET", "flanged": "YES", "punched": "YES"},
+    )
+    removal = _item(
+        "Remove outlet flange, Inquiry Num: 317-23-1131 L",
+        attrs={
+            "component": "OUTLET",
+            "flanged": "NO",
+            "punched": "NO",
+            "flange_instruction": "REMOVE",
+            "inquiry_num": "317-23-1131",
+        },
+    )
+    slip = _item(
+        "Outlet, Slip with Custom Extension L 878.00",
+        "878.00",
+        attrs={"component": "OUTLET", "flanged": "NO", "punched": "NO"},
+    )
+    outlet = soh.components([base, slip, removal])[0]
+    assert outlet["attributes"]["flanged"] == "NO"
+    assert outlet["attributes"]["punched"] == "NO"
+    assert outlet["attributes"]["flange_instruction"] == "REMOVE"
+    assert any(
+        row["text"] == "CONFLICTING flanged: NO | YES; USING NO"
+        for row in outlet["review"]
+    )
+    assert any(
+        row["text"] == "CONFLICTING punched: NO | YES; USING NO"
+        for row in outlet["review"]
+    )
+
+
+def test_special_attributes_accumulate_without_becoming_conflicts():
+    first = _item(
+        "Motor L 1,000.00",
+        "1,000.00",
+        attrs={"component": "MOTOR", "special_attribute": ["FIRST", "SECOND"]},
+    )
+    second = _item(
+        "Motor exception L",
+        attrs={"component": "MOTOR", "special_attribute": "THIRD"},
+    )
+    motor = soh.components([first, second])[0]
+    assert motor["attributes"]["special_attribute"] == ["FIRST", "SECOND", "THIRD"]
+    assert not any("CONFLICTING special_attribute" in row["text"] for row in motor["review"])
+
+
 def test_lone_line_stays_its_own_component():
     # A single line referring to a component: no group header, no SOURCE rows —
     # the component row IS the line, keeping its item # and printed price mark.

@@ -63,6 +63,7 @@ from sales_order_validation import (
     failed_acceptance,
     finalize_candidate,
     staging_path,
+    sales_order_sha256,
 )
 
 log = logging.getLogger(__name__)
@@ -411,18 +412,33 @@ def refresh_sales_orders(jobs: List[Dict[str, Any]]) -> int:
 # --------------------------------------------------------------------------- #
 # PDF parsing                                                                 #
 # --------------------------------------------------------------------------- #
-def _recon_lines(page, x_tol: float = 1.5) -> List[str]:
+def _recon_line_records(page, page_number: int,
+                        x_tol: float = 1.5) -> List[Dict[str, Any]]:
     """Rebuild text lines from word positions so spaces survive (plain
-    extraction glues the Notes text together)."""
+    extraction glues the Notes text together), retaining their PDF source."""
     words = page.extract_words(x_tolerance=x_tol, keep_blank_chars=False, use_text_flow=False)
     rows: Dict[int, list] = {}
     for w in words:
         rows.setdefault(round(w["top"]), []).append(w)
-    out = []
-    for top in sorted(rows):
+    out: List[Dict[str, Any]] = []
+    for row_number, top in enumerate(sorted(rows), start=1):
         ws = sorted(rows[top], key=lambda w: w["x0"])
-        out.append(" ".join(w["text"] for w in ws))
+        text = " ".join(w["text"] for w in ws)
+        out.append({
+            "text": text,
+            "source": {
+                "page": page_number,
+                "row": row_number,
+                "top": top,
+                "source_type": "pdf-row",
+                "source_text": text,
+            },
+        })
     return out
+
+
+def _recon_lines(page, x_tol: float = 1.5) -> List[str]:
+    return [record["text"] for record in _recon_line_records(page, 1, x_tol)]
 
 
 def _co_history_from_lines(lines: List[str]) -> List[str]:
@@ -603,7 +619,12 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
                 )
                 return res
             page_tables = [page.extract_tables() for page in pdf.pages]
-            page_recon = [_recon_lines(page) for page in pdf.pages]
+            page_recon_records = [
+                _recon_line_records(page, page_number)
+                for page_number, page in enumerate(pdf.pages, start=1)
+            ]
+            page_recon = [[record["text"] for record in records]
+                          for records in page_recon_records]
             for ln in page_texts[0].splitlines()[:8]:
                 if res["header_co"] is None:
                     m = re.search(r"CO\s*#\s*(\d+)", ln)
@@ -638,12 +659,17 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
             for key, value in _legacy_spec_from_text(plain_lines).items():
                 if not res.get(key) and value:
                     res[key] = value
-            recon_all: List[str] = []
+            recon_all_records: List[Dict[str, Any]] = []
             document_facts: Dict[str, Dict[str, Any]] = {}
-            for tables, recon_lines in zip(page_tables, page_recon):
-                for fact in line_items.document_fact_items_from_tables(tables, recon_lines):
+            for page_number, (tables, recon_lines, recon_records) in enumerate(
+                    zip(page_tables, page_recon, page_recon_records), start=1):
+                for fact in line_items.document_fact_items_from_tables(
+                        tables, recon_lines, page_number=page_number):
                     document_facts.setdefault(str(fact.get("document_fact") or ""), fact)
-                recon_all.extend(line_items.strip_continuation_metadata(recon_lines, tables))
+                recon_all_records.extend(
+                    line_items.strip_continuation_metadata(recon_records, tables)
+                )
+            recon_all = [record["text"] for record in recon_all_records]
             res["co_history"] = _co_history_from_lines(recon_all)
             item_context = line_items.order_context_from_lines(
                 recon_all, arrangement=res["arrangement"]
@@ -654,7 +680,7 @@ def parse_sales_order_pdf(path: str | Path) -> Dict[str, Any]:
             # the "Additional Features"-style lines — normalized + tagged so
             # orders can be looked up by what's on them (see line_items.py).
             res["line_items"] = line_items.extract_items(
-                recon_all,
+                recon_all_records,
                 order_context=item_context,
             ) + list(document_facts.values())
             # Transmittal fields off the same reconstructed text: recipient emails
@@ -1240,6 +1266,19 @@ def enrich_with_sales_orders(jobs: List[Dict[str, Any]], max_passes: int = 2,
                 "arrangement": parsed.get("arrangement", ""),
                 "parts_only": bool(parsed.get("parts_only", False)),
                 "job_number": parsed.get("job_number", ""),
+                "so_design_desc": parsed.get("design_desc", ""),
+                "so_size": parsed.get("size", ""),
+                "so_arrangement": parsed.get("arrangement", ""),
+                "so_motor_pos": parsed.get("motor_pos", ""),
+                "so_class": parsed.get("fan_class", ""),
+                "so_rotation": parsed.get("rotation", ""),
+                "so_discharge": parsed.get("discharge", ""),
+                "so_pct_width": parsed.get("pct_width", ""),
+                "so_wheel_type": parsed.get("wheel_type", ""),
+                "so_design_temp": parsed.get("design_temp", ""),
+                "so_max_temp": parsed.get("max_temp", ""),
+                "so_special_temp": parsed.get("special_temp", ""),
+                "source_pdf_sha256": sales_order_sha256(pdf),
             })
             n_items += len(items)
         j["line_items"] = items

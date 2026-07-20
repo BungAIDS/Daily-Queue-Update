@@ -67,6 +67,13 @@ from config import BACKLOG_DIR, LINE_ITEM_RULES, LINE_ITEMS_STORE
 from process_lock import data_file_lock
 
 log = logging.getLogger(__name__)
+PARSER_VERSION = "2026-07-20-so-review-v2"
+NORMALIZER_VERSION = "2026-07-20-component-facts-v2"
+ORDER_CONTEXT_FIELDS = (
+    "so_design_desc", "so_size", "so_arrangement", "so_motor_pos", "so_class",
+    "so_rotation", "so_discharge", "so_pct_width", "so_wheel_type",
+    "so_design_temp", "so_max_temp", "so_special_temp", "source_pdf_sha256",
+)
 
 # --------------------------------------------------------------------------- #
 # Rules (defaults; an optional LINE_ITEM_RULES json file extends these)        #
@@ -191,7 +198,7 @@ DEFAULT_RULES: Dict[str, Any] = {
         "DAMPER": [r"damper", r"backdraft", r"volume\s*control"],
         "INLET VANES": [r"inlet\s*vane", r"\bVIV\b", r"\bIVC\b",
                         r"variable\s*inlet", r"inlet\s*volume\s*control"],
-        "INLET": [r"\binlet\s+(open|slip|bell|cone|box|tube|flanged|punched)",
+        "INLET": [r"\binlet\s+(open|slip|bell|cone|box|tube|flanged|punched|venturi)",
                   r"\binlet\s+direction"],
         "MIXING BOX": [r"\bmixing\s+box\b"],
         "OUTLET": [r"\boutlet\s+(open|slip|flanged|punched|pressure\s*tap|volume\s*control)",
@@ -209,6 +216,7 @@ DEFAULT_RULES: Dict[str, Any] = {
                         r"quick\s*open"],
         "DRAIN": [r"\bdrain"],
         "BELT GUARD": [r"belt\s*guard"],
+        "FILTER": [r"\bfilter(?:s|\s+box(?:es)?)?\b"],
         "SHAFT/BEARING/COUPLING GUARD": [
             r"\bshaft\b.*\bbearing\b.*\bguard\b",
             r"\bguard\b.*\bshaft\b.*\bbearing\b",
@@ -224,7 +232,7 @@ DEFAULT_RULES: Dict[str, Any] = {
                      r"thomas\s+series", r"\bhalf\s+coupling\b",
                      r"^mounting\s+options?\s*:?[ ]*both\s+halves\b"],
         "UNITARY BASE": [r"unitary\s*base", r"structural\s*(steel\s*)?base",
-                         r"channel\s*base"],
+                         r"channel\s*base", r"\bt\s*rails?\b", r"\boffset\s+base\b"],
         "BEARINGS": [r"^bearings?\s+(standard|split\s+pillow\s+block)\b",
                      r"^repair\s+bearings?\b", r"^spare\s+bearings?\b",
                      r"^bearing\s+adder\b"],
@@ -244,7 +252,9 @@ DEFAULT_RULES: Dict[str, Any] = {
                                  r"plug\s*panel", r"pressure\s*tap",
                                  r"\bconduit\b", r"\boverhang\b",
                                  r"effective\s*diameter", r"threaded\s*plug",
-                                 r"hole\s*diameters?", r"earthing\s*boss"],
+                                 r"hole\s*diameters?", r"panel\s+mounting\s+holes?",
+                                 r"blade\s*side\s+guard", r"piezometer\s+rings?",
+                                 r"earthing\s*boss"],
         "INSPECTION": [r"\binspection\b", r"\bISPM\b"],
         "CERTIFICATION": [r"\bgeneral\s+mill\s+certifications?\b"],
         "DRAWINGS": [r"\bcertified\s*drawings?\b", r"\bprints?\b",
@@ -436,6 +446,10 @@ def normalize_text(raw: str, rules: Dict[str, Any] | None = None, *,
     out: List[str] = []
     for tok in s.split():
         t = tok.strip(".,;:()[]")
+        # Spreadsheet/PDF table exports sometimes leak a literal NaN cell
+        # marker into the description. It is not a sold feature.
+        if t == "NAN":
+            continue
         if t in abbrev:
             out.append(abbrev[t])
             continue
@@ -626,9 +640,10 @@ def inquiry_numbers(item: Dict[str, Any]) -> List[str]:
         primary = primary[:type_tail.start()].rstrip(" ,;:")
     parts = [primary]
     parts += [re.sub(r"\s+", " ", str(d)).strip() for d in item.get("details") or []]
+    inquiry_values = rf"({_INQUIRY_NUM}(?:\s*(?:,|\band\b)\s*{_INQUIRY_NUM})*)"
     patterns = [
-        re.compile(rf"\bInquiry\s*(?:Num(?:ber)?|#)\s*:?\s*({_INQUIRY_NUM})", re.I),
-        re.compile(rf"\bInquiry\b.{{0,80}}?\bNum\s*:?\s*({_INQUIRY_NUM})", re.I),
+        re.compile(rf"\bInquiry\s*(?:Num(?:ber)?|#)\s*:?\s*{inquiry_values}", re.I),
+        re.compile(rf"\bInquiry\b.{{0,80}}?\bNum\s*:?\s*{inquiry_values}", re.I),
     ]
     seen, nums = set(), []
     for i, part in enumerate(parts):
@@ -639,10 +654,11 @@ def inquiry_numbers(item: Dict[str, Any]) -> List[str]:
         for text in candidates:
             for pat in patterns:
                 for m in pat.finditer(text):
-                    num = m.group(1).strip(" .;,()").upper()
-                    if num not in seen:
-                        seen.add(num)
-                        nums.append(num)
+                    for num in re.findall(_INQUIRY_NUM, m.group(1)):
+                        num = num.strip(" .;,()").upper()
+                        if num not in seen:
+                            seen.add(num)
+                            nums.append(num)
     return nums
 
 
@@ -1347,7 +1363,16 @@ def _flange_attributes(primary: str, norm_blob: str, tags: set[str], raw_tags: s
         _add_unique(scopes, "MIXING BOX")
     if scopes:
         attrs["flange_scope"] = ", ".join(scopes)
-    if re.search(r"\bC\s*[- ]?\s*FLANGE\b", norm_blob):
+    flange_removed = bool(re.search(
+        r"\b(?:REMOVE|DELETE|OMIT)\b.{0,35}\bFLANG(?:E|ED)\b|"
+        r"\bWITHOUT\b.{0,25}\bFLANGE\b",
+        norm_blob,
+    ))
+    if flange_removed:
+        attrs["flanged"] = "NO"
+        attrs["punched"] = "NO"
+        attrs["flange_instruction"] = "REMOVE"
+    elif re.search(r"\bC\s*[- ]?\s*FLANGE\b", norm_blob):
         attrs["flange_type"] = "C-FLANGE"
     elif "UNPUNCHED" in norm_blob:      # must beat PUNCHED (its own substring)
         attrs["flange_type"] = "UNPUNCHED"
@@ -1622,13 +1647,65 @@ def _warranty_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
     return attrs
 
 
+_MOTOR_SPECIAL_ATTRIBUTE_START = re.compile(
+    r"^(?:"
+    r"MOTORS?\s+MEET\s+NEMA\s+GM\s*7E[ -]?TA\s+SPEC|"
+    r"MOTORS?\s+WILL\s+BE\s+RE[ -]?NAMEPLATED|"
+    r"WE\s+WILL\s+ADD\b|"
+    r".+?\s+WILL\s+PROVIDE\s+NAMEPLATE\s+TO\s+READ\b|"
+    r".+?\s+STANDARD\s+IS\s+LASER\s+ETCHED\b"
+    r")",
+    re.I,
+)
+_MOTOR_SPECIAL_ATTRIBUTE_STOP = re.compile(
+    r"^(?:VENDOR|PRODUCT|QUOTE\s+(?:NUM|NO|#)|"
+    r"\d+(?:\.\d+)?\s*HP\b|\+\d{2,4}\b)",
+    re.I,
+)
+
+
+def _motor_special_attributes(item: Dict[str, Any]) -> List[str]:
+    """Keep unusual, wrapped motor commitments as complete searchable facts."""
+    groups: List[str] = []
+    current: List[str] = []
+
+    def flush() -> None:
+        if not current:
+            return
+        value = re.sub(r"\s+", " ", " ".join(current)).strip(" ,")
+        value = value.translate({
+            0x2018: "'", 0x2019: "'", 0x201C: '"', 0x201D: '"',
+            0xFFFD: '"',
+        })
+        _add_unique(groups, value.upper())
+        current.clear()
+
+    for detail in (str(value).strip() for value in item.get("details") or []):
+        if not detail:
+            continue
+        upper = re.sub(r"\s+", " ", detail).upper()
+        starts = bool(_MOTOR_SPECIAL_ATTRIBUTE_START.match(upper))
+        if starts:
+            flush()
+            current.append(detail)
+        elif current:
+            if _MOTOR_SPECIAL_ATTRIBUTE_STOP.match(upper):
+                flush()
+                continue
+            current.append(detail)
+        if current and re.search(r"[.!?][\"']?$", detail):
+            flush()
+    flush()
+    return groups
+
+
 def _motor_attributes(item: Dict[str, Any], primary: str, norm_blob: str,
-                      tags: set[str]) -> Dict[str, str]:
+                      tags: set[str]) -> Dict[str, Any]:
     """Core motor nameplate/spec attributes from the item and its detail block."""
     if "MOTOR" not in tags and not re.match(r"^MOTOR\b", primary, re.I):
         return {}
 
-    attrs: Dict[str, str] = {"component": "MOTOR"}
+    attrs: Dict[str, Any] = {"component": "MOTOR"}
     raw_blob = _item_blob(item)
 
     hp_values: List[str] = []
@@ -1846,6 +1923,9 @@ def _motor_attributes(item: Dict[str, Any], primary: str, norm_blob: str,
     orientation = re.search(r"\b(VERTICAL|HORIZONTAL)\s+SHAFT(?:\s+(UP|DOWN))?\b", norm_blob)
     if orientation:
         attrs["motor_orientation"] = " ".join(x for x in orientation.groups() if x)
+    special_attributes = _motor_special_attributes(item)
+    if special_attributes:
+        attrs["special_attribute"] = special_attributes
     return attrs
 
 
@@ -2061,6 +2141,12 @@ def _screen_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str
         or re.search(r"\bSELF\s+TAPPERS?\b.*\bINLET\s+SCREEN\b", primary)
         or re.match(r"^(?:LASER\s*[- ]?\s*CUT|OVERSIZED|STANDARD)\b.*\bSCREEN\b", primary)
     )
+    direct_inlet_screen = bool(
+        re.match(r"^INLET\s+(?:WIRE\s+)?SCREEN\b", primary)
+        or re.search(r"\bINLET\s+SCREEN\s+MOUNTING\s+RING\b", primary)
+        or re.search(r"\bSELF\s+TAPPERS?\b.*\bINLET\s+SCREEN\b", primary)
+    )
+    direct_outlet_screen = bool(re.match(r"^OUTLET\s+(?:WIRE\s+)?SCREEN\b", primary))
 
     if re.search(r"\bTRASH\s+SCREEN\b", norm_blob):
         add_subcategory("TRASH SCREEN")
@@ -2078,7 +2164,7 @@ def _screen_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str
     if re.search(r"\b(RAIN\s*HOOD|RAINHOOD|WEATHER\s+HOOD|WEATHER\s+COVER)\b", norm_blob):
         add_subcategory("RAINHOOD SCREEN")
         add_used_on("WEATHER COVER")
-    if not subcategories:
+    if not subcategories and not direct_screen:
         add_subcategory("SCREEN")
 
     if re.search(r"\bOVERSIZED\b", norm_blob):
@@ -2100,7 +2186,7 @@ def _screen_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str
             add_used_on("INLET")
         if re.search(r"\b(OUTLET|DISCHARGE)\s+SCREEN\b|\bSCREEN\b.{0,20}\b(OUTLET|DISCHARGE)\b", norm_blob):
             add_used_on("OUTLET")
-    else:
+    elif not direct_screen:
         if re.search(r"\bINLET\b.{0,40}\bSCREEN\b|\bSCREEN\b.{0,40}\bINLET\b", norm_blob):
             add_used_on("INLET")
         if re.search(r"\b(OUTLET|DISCHARGE)\b.{0,40}\bSCREEN\b|\bSCREEN\b.{0,40}\b(OUTLET|DISCHARGE)\b", norm_blob):
@@ -2123,7 +2209,12 @@ def _screen_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str
         attrs["screen_size"] = m.group(1)
 
     if direct_screen:
-        attrs["component"] = "SCREEN"
+        if direct_inlet_screen and not direct_outlet_screen:
+            attrs["component"] = "INLET SCREEN"
+        elif direct_outlet_screen and not direct_inlet_screen:
+            attrs["component"] = "OUTLET SCREEN"
+        else:
+            attrs["component"] = "SCREEN"
     if subcategories:
         attrs["screen_subcategory"] = ", ".join(subcategories)
     if features:
@@ -2364,7 +2455,19 @@ def _silencer_attributes(primary: str, norm_blob: str, tags: set[str], product: 
         _add_unique(used_on, "INLET")
     if not used_on and re.search(r"\b(OUTLET|DISCHARGE)\b", norm_blob):
         _add_unique(used_on, "OUTLET")
-    if re.search(r"\bCIRCULAR\s+DISCHARGE\s+SILENCER\b|\bCIB\b", norm_blob):
+    explicit_inlet = bool(re.search(
+        r"\bINLET\s+SILENCER\b|\bCIRCULAR\s+INLET\s+SILENCER\b",
+        primary_context,
+    ))
+    explicit_outlet = bool(re.search(
+        r"\b(?:OUTLET|DISCHARGE)\s+SILENCER\b|\bCIRCULAR\s+DISCHARGE\s+SILENCER\b",
+        primary_context,
+    ))
+    if explicit_inlet:
+        attrs["component"] = "INLET SILENCER"
+        if re.search(r"\bCIRCULAR\s+INLET\s+SILENCER\b", primary_context):
+            attrs["silencer_type"] = "CIRCULAR INLET SILENCER"
+    elif explicit_outlet or re.search(r"\bCIRCULAR\s+DISCHARGE\s+SILENCER\b|\bCIB\b", norm_blob):
         attrs["component"] = "OUTLET SILENCER"
         attrs["silencer_type"] = "CIRCULAR DISCHARGE SILENCER"
     elif "OUTLET" in used_on:
@@ -2594,6 +2697,46 @@ def _unitary_base_attributes(primary: str, norm_blob: str, tags: set[str]) -> Di
         attrs["unitary_base_type"] = ", ".join(types)
     if details:
         attrs["unitary_base_detail"] = ", ".join(details)
+    return attrs
+
+
+def _bounded_fan_detail_attributes(norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    """Classify a small set of recurring fan detail/accessory wordings."""
+    attrs: Dict[str, str] = {}
+
+    if "UNITARY BASE" in tags and re.search(r"\bT\s*RAILS?\b", norm_blob):
+        attrs["component"] = "UNITARY BASE"
+        attrs["unitary_base_type"] = "T RAILS"
+    if "UNITARY BASE" in tags and re.search(r"\bOFFSET\s+BASE\b", norm_blob):
+        attrs["component"] = "UNITARY BASE"
+        attrs["unitary_base_type"] = "OFFSET BASE"
+
+    if re.search(r"\bPANEL\s+MOUNTING\s+HOLES?\b", norm_blob):
+        attrs["component"] = "PANEL MOUNTING HOLES"
+        attrs["mounting_holes"] = "YES"
+    elif re.search(r"\bMOUNTING\s+(?:FEET|LUGS?)\b", norm_blob):
+        attrs["component"] = "MOUNTING"
+        attrs["mounting_type"] = "FEET" if re.search(r"\bFEET\b", norm_blob) else "LUGS"
+
+    if "INLET" in tags and re.search(r"\bINLET\s+VENTURI\b", norm_blob):
+        attrs["component"] = "INLET"
+        attrs["inlet_subcategory"] = "VENTURI"
+
+    if re.search(r"\bBLADE\s*SIDE\s+GUARD\b", norm_blob):
+        attrs["component"] = "BLADE SIDE GUARD"
+        attrs["guard_type"] = "BLADE SIDE"
+
+    if "FILTER" in tags:
+        attrs["component"] = (
+            "FILTER BOX" if re.search(r"\bFILTER\s+BOX(?:ES)?\b", norm_blob)
+            else "FILTER"
+        )
+        attrs["filter_type"] = "FILTER BOX" if attrs["component"] == "FILTER BOX" else "FILTER"
+
+    if re.search(r"\bPIEZOMETER\s+RINGS?\b", norm_blob):
+        attrs["component"] = "PIEZOMETER RING"
+        attrs["piezometer_ring"] = "YES"
+
     return attrs
 
 
@@ -3365,11 +3508,12 @@ def _bearing_attributes(blob: str, norm_blob: str) -> Dict[str, str]:
         ("STANDARD", r"\bBEARINGS?\s+STANDARD\b"),
         ("REPAIR BEARINGS", r"\bREPAIR\s+BEARINGS?\b"),
         ("SPARE BEARINGS", r"\bSPARE\s+BEARINGS?\b"),
-        ("BEARING ADDER", r"\bBEARING\s+ADDER\b"),
     ):
         if re.search(pattern, norm_blob):
             attrs["bearing_type"] = label
             break
+    if re.search(r"\bBEARING\s+ADDER\b", norm_blob):
+        attrs["bearing_life_adder"] = "YES"
 
     m = re.search(
         r"\b(\d+(?:[-\s]\d+/\d+)?|\d+/\d+)\s*(?:\"|in(?:ch(?:es)?)?\.?)?\s*bore\b",
@@ -3378,6 +3522,24 @@ def _bearing_attributes(blob: str, norm_blob: str) -> Dict[str, str]:
     )
     if m:
         attrs["bearing_bore"] = re.sub(r"\s+", "-", m.group(1).strip()) + '"'
+
+    life = re.search(
+        r"\b(\d{1,3})\s*,\s*(\d{2,3})\s+HOURS?\b|"
+        r"\b(\d{4,})\s+HOURS?\b",
+        blob,
+        re.I,
+    )
+    if life:
+        if life.group(3):
+            digits = life.group(3)
+        else:
+            tail = life.group(2)
+            # Several CBC PDFs render 200,000 as 200,00. The complete form is
+            # present on otherwise identical orders, so restore the lost zero.
+            if len(tail) == 2:
+                tail += "0"
+            digits = life.group(1) + tail
+        attrs["bearing_life_hours"] = f"{int(digits):,}"
     return attrs
 
 
@@ -4057,6 +4219,15 @@ def _canonical_component_attrs(item: Dict[str, Any], primary: str, norm_blob: st
     if str(attrs.get("component") or "").upper() == "NAMEPLATE":
         if str(attrs.get("material_scope") or "").strip().upper() == "NAMEPLATE":
             attrs.pop("material_scope", None)
+    component = str(attrs.get("component") or "").upper()
+    if component in {"INLET SCREEN", "OUTLET SCREEN"}:
+        scopes = {
+            value.strip().upper()
+            for value in str(attrs.get("material_scope") or "").split(",")
+            if value.strip()
+        }
+        if scopes and scopes <= {"INLET", "OUTLET", "SCREEN"}:
+            attrs["material_scope"] = component
 
 
 def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Dict[str, str]:
@@ -4075,7 +4246,9 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
 
     inquiries = inquiry_numbers(item)
     if inquiries:
-        attrs["inquiry_num"] = ", ".join(inquiries)
+        # Keep the established scalar shape for the common case; multiple
+        # Inquiry Num values are real separate references, not one identifier.
+        attrs["inquiry_num"] = inquiries[0] if len(inquiries) == 1 else inquiries
     if re.match(r"^SHIP\s+WITH\b", primary):
         attrs.update({"component": "SHIP WITH", "instruction": _source_wording(item)})
         return attrs
@@ -4092,6 +4265,7 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_special_construction_attributes(primary, norm_blob, tags))
     attrs.update(_wheel_attributes(primary, norm_blob, tags, blob))
     attrs.update(_unitary_base_attributes(primary, norm_blob, tags))
+    attrs.update(_bounded_fan_detail_attributes(norm_blob, tags))
     attrs.update(_motor_attributes(item, primary, norm_blob, tags))
     attrs.update(_vfd_attributes(primary, norm_blob, tags))
     attrs.update(_vibration_isolation_attributes(primary, norm_blob, tags, blob))
@@ -4196,7 +4370,10 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
         attrs.update(material_attrs)
 
     attrs.update(_balance_attributes(norm_blob))
-    attrs.update(_bearing_attributes(blob, norm_blob))
+    bearing_attrs = _bearing_attributes(blob, norm_blob)
+    if bearing_attrs:
+        attrs.setdefault("component", "BEARINGS")
+        attrs.update(bearing_attrs)
 
     used_on = "" if _is_ship_via_note(primary, norm_blob) else _used_on_value(norm_blob)
     parent_damper = str(attrs.get("component") or "").upper() in {
@@ -4569,10 +4746,11 @@ _SHIP_TO_COUNTRY = re.compile(
 
 
 def document_fact_item(component: str, attributes: Dict[str, str],
-                       details: Iterable[str]) -> Dict[str, Any]:
+                       details: Iterable[str],
+                       source: Dict[str, Any] | None = None) -> Dict[str, Any]:
     """Build one durable order-level fact in the same store as line items."""
     fact = str(component).strip().upper()
-    source = [str(value).strip() for value in details if str(value).strip()]
+    detail_values = [str(value).strip() for value in details if str(value).strip()]
     values = {str(k): str(v).strip() for k, v in attributes.items()
               if str(k).strip() and str(v).strip()}
     values["component"] = fact
@@ -4583,17 +4761,20 @@ def document_fact_item(component: str, attributes: Dict[str, str],
         "price": "",
         "ptype": "",
         "section": "DOCUMENT FACTS",
-        "details": source,
+        "details": detail_values,
         "tags": [fact],
         "attributes": values,
         "document_fact": fact,
         "document_attributes": {k: v for k, v in values.items() if k != "component"},
     }
+    if source:
+        item["source"] = dict(source)
     return item
 
 
 def document_fact_items_from_tables(tables: Iterable[Any],
-                                    recon_lines: Iterable[str]) -> List[Dict[str, Any]]:
+                                    recon_lines: Iterable[str],
+                                    page_number: int | None = None) -> List[Dict[str, Any]]:
     """Extract the explicit MARK and SHIP TO cells from an SO's page tables.
 
     They are document facts, not accessory rows. MARK is retained verbatim;
@@ -4616,7 +4797,9 @@ def document_fact_items_from_tables(tables: Iterable[Any],
     if mark:
         attrs = {"mark_text": " | ".join(mark)}
         details = list(mark)
-        out.append(document_fact_item("MARK", attrs, details))
+        source = ({"page": page_number, "source_type": "pdf-table",
+                   "source_text": " | ".join(details)} if page_number else None)
+        out.append(document_fact_item("MARK", attrs, details, source))
 
     if ship_to:
         attrs = {"ship_to_company": ship_to[0]}
@@ -4631,12 +4814,22 @@ def document_fact_items_from_tables(tables: Iterable[Any],
             instructions = remaining[country_at + 1:]
             if instructions:
                 attrs["ship_to_instruction"] = " | ".join(instructions)
-        out.append(document_fact_item("SHIP TO", attrs, ship_to))
+        source = ({"page": page_number, "source_type": "pdf-table",
+                   "source_text": " | ".join(ship_to)} if page_number else None)
+        out.append(document_fact_item("SHIP TO", attrs, ship_to, source))
     return out
 
 
-def strip_continuation_metadata(lines: Iterable[str],
-                                tables: Iterable[Any]) -> List[str]:
+def _source_line_text(value: Any) -> str:
+    if isinstance(value, dict):
+        value = value.get("text", value.get("source_text", ""))
+    # A blank spreadsheet/PDF table cell can leak through as literal NaN.
+    return re.sub(r"(?i)(?<![A-Za-z0-9])nan(?![A-Za-z0-9])", " ",
+                  str(value or ""))
+
+
+def strip_continuation_metadata(lines: Iterable[Any],
+                                tables: Iterable[Any]) -> List[Any]:
     """Drop only the wrapped data row under a continuation-page Order header.
 
     pdfplumber's table preserves how many physical lines the Rep Ref. cell
@@ -4661,8 +4854,9 @@ def strip_continuation_metadata(lines: Iterable[str],
     if not value_rows:
         return values
     for index, line in enumerate(values):
-        if (re.match(r"^\s*Order\s*#", str(line), re.I)
-                and re.search(r"\bPage\s*(?:#|\d+\s+of\s+\d+)", str(line), re.I)):
+        text = _source_line_text(line)
+        if (re.match(r"^\s*Order\s*#", text, re.I)
+                and re.search(r"\bPage\s*(?:#|\d+\s+of\s+\d+)", text, re.I)):
             return values[:index + 1] + values[index + 1 + value_rows:]
     return values
 
@@ -4946,7 +5140,22 @@ def extract_items(lines: Iterable[str], rules: Dict[str, Any] | None = None,
     tags, attributes, review_flags}; tags and attributes consider details, and
     uncategorized details become review flags."""
     rules = rules or load_rules()
-    source_lines = [str(line) for line in lines]
+    raw_source_lines = list(lines)
+    source_lines = [re.sub(r"\s+", " ", _source_line_text(line)).strip()
+                    for line in raw_source_lines]
+    source_locations: List[Dict[str, Any] | None] = []
+    for index, value in enumerate(raw_source_lines, start=1):
+        if not isinstance(value, dict):
+            source_locations.append(None)
+            continue
+        location = value.get("source") if isinstance(value.get("source"), dict) else {}
+        location = dict(location)
+        for key in ("page", "line", "row", "top", "table", "source_type"):
+            if key in value and key not in location:
+                location[key] = value[key]
+        location.setdefault("line", index)
+        location["source_text"] = source_lines[index - 1]
+        source_locations.append(location)
     detected = order_context_from_lines(
         source_lines, arrangement=str((order_context or {}).get("arrangement") or "")
     )
@@ -4958,7 +5167,8 @@ def extract_items(lines: Iterable[str], rules: Dict[str, Any] | None = None,
     by_norm: Dict[str, Dict[str, Any]] = {}
     last: Dict[str, Any] | None = None
     section = ""
-    for kind, detail, s in iter_classified(source_lines, rules):
+    for line_index, (kind, detail, s) in enumerate(iter_classified(source_lines, rules)):
+        location = source_locations[line_index]
         if kind == "section-start":
             section, last = detail, None
             continue
@@ -4971,6 +5181,8 @@ def extract_items(lines: Iterable[str], rules: Dict[str, Any] | None = None,
         if kind == "detail":
             if last is not None:
                 last["details"].append(s)
+                if location:
+                    last.setdefault("detail_sources", []).append(location)
             continue
         if kind not in ("item-priced", "item-section"):
             continue
@@ -4985,6 +5197,8 @@ def extract_items(lines: Iterable[str], rules: Dict[str, Any] | None = None,
         if prev is not None:
             if (price or mark) and not prev["price"]:
                 prev["price"] = price or mark
+            if location and location != prev.get("source"):
+                prev.setdefault("additional_sources", []).append(location)
             last = prev
             continue
         last = by_norm[norm] = {
@@ -4998,6 +5212,8 @@ def extract_items(lines: Iterable[str], rules: Dict[str, Any] | None = None,
             "tags": [],
             "attributes": {},
         }
+        if location:
+            last["source"] = location
     # Tags consider the details too — "Product: Damper" under an "IVD" row is
     # what identifies it.
     items = list(by_norm.values())
@@ -5078,6 +5294,11 @@ def load_store(path: Path | None = None) -> Dict[str, Any]:
     if overlay_path == store_path() or not overlay_path.exists():
         return store
     overlay = _load_store_file(overlay_path)
+    return merge_stores(store, overlay)
+
+
+def merge_stores(store: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge an overlay in place; the freshest parse wins and ties favor main."""
     jobs = store.setdefault("jobs", {})
     for job, record in (overlay.get("jobs") or {}).items():
         current = jobs.get(job) or {}
@@ -5178,12 +5399,13 @@ def audit_review(store: Dict[str, Any], limit: int = 50, tag: str = "") -> List[
 def record_job(store: Dict[str, Any], job: str, items: List[Dict[str, Any]],
                customer: str = "", co_number: int | None = None, so_pdf: str = "",
                arrangement: str = "", parts_only: bool | None = None,
-               job_number: str = "") -> None:
+               job_number: str = "",
+               order_metadata: Dict[str, Any] | None = None) -> None:
     """Record (or refresh) one job's line items. The latest parse wins, but
     metadata never regresses: a blank customer/co/pdf from a sparse source
     (e.g. the archive scan, which has no board context) keeps the old value."""
     prev = store["jobs"].get(job) or {}
-    store["jobs"][job] = {
+    record = {
         "customer": customer or prev.get("customer", ""),
         "co_number": co_number if co_number is not None else prev.get("co_number"),
         "so_pdf": so_pdf or prev.get("so_pdf", ""),
@@ -5192,8 +5414,16 @@ def record_job(store: Dict[str, Any], job: str, items: List[Dict[str, Any]],
         "parts_only": (bool(parts_only) if parts_only is not None
                        else bool(prev.get("parts_only", False))),
         "scanned_at": datetime.now().isoformat(timespec="seconds"),
+        "parser_version": PARSER_VERSION,
         "items": items,
     }
+    metadata = dict(order_metadata or {})
+    for key in ORDER_CONTEXT_FIELDS:
+        value = metadata.get(key)
+        if value in (None, "", [], {}):
+            value = prev.get(key, "")
+        record[key] = value
+    store["jobs"][job] = record
 
 
 def record_jobs_atomic(records: Iterable[Dict[str, Any]], path: Path | None = None) -> int:
@@ -5228,6 +5458,11 @@ def record_jobs_atomic(records: Iterable[Dict[str, Any]], path: Path | None = No
                 arrangement=str(row.get("arrangement") or ""),
                 parts_only=(row.get("parts_only") if "parts_only" in row else None),
                 job_number=str(row.get("job_number") or ""),
+                order_metadata={
+                    **{key: row.get(key) for key in ORDER_CONTEXT_FIELDS},
+                    "source_pdf_sha256": row.get("source_pdf_sha256")
+                    or row.get("so_pdf_sha256"),
+                },
             )
             recorded += 1
         save_store(store, destination)
@@ -5332,7 +5567,8 @@ def inquiry_counts(store: Dict[str, Any]) -> List[Tuple[str, int, int, List[str]
         for it in rec.get("items") or []:
             attrs = it.get("attributes") if isinstance(it.get("attributes"), dict) else {}
             inquiry = (attrs or component_attributes(it, rules)).get("inquiry_num", "")
-            for num in [n.strip().upper() for n in str(inquiry).split(",") if n.strip()]:
+            values = inquiry if isinstance(inquiry, list) else str(inquiry).split(",")
+            for num in [str(n).strip().upper() for n in values if str(n).strip()]:
                 jobs.setdefault(num, set()).add(str(job))
                 items[num] = items.get(num, 0) + 1
     return sorted(((n, len(jobs[n]), items[n], sorted(jobs[n], key=_job_sort_key))
@@ -5426,6 +5662,7 @@ def renormalize_store(store: Dict[str, Any]) -> int:
     rules = load_rules(refresh=True)
     n = 0
     for rec in (store.get("jobs") or {}).values():
+        rec["normalizer_version"] = NORMALIZER_VERSION
         context = order_context_from_items(
             rec.get("items") or [],
             arrangement=str(rec.get("arrangement") or ""),
@@ -5439,6 +5676,25 @@ def renormalize_store(store: Dict[str, Any]) -> int:
             rec["job_number"] = context["job_number"]
         kept: List[Dict[str, Any]] = []
         for it in rec.get("items") or []:
+            it["raw"] = re.sub(r"\s+", " ", _source_line_text(it.get("raw", ""))).strip()
+            cleaned_details = []
+            for detail in it.get("details") or []:
+                cleaned = re.sub(r"\s+", " ", _source_line_text(detail)).strip()
+                if cleaned:
+                    cleaned_details.append(cleaned)
+            it["details"] = cleaned_details
+            for source_key in ("source",):
+                source = it.get(source_key)
+                if isinstance(source, dict) and "source_text" in source:
+                    source["source_text"] = re.sub(
+                        r"\s+", " ", _source_line_text(source["source_text"])
+                    ).strip()
+            for source_key in ("detail_sources", "additional_sources"):
+                for source in it.get(source_key) or []:
+                    if isinstance(source, dict) and "source_text" in source:
+                        source["source_text"] = re.sub(
+                            r"\s+", " ", _source_line_text(source["source_text"])
+                        ).strip()
             if _is_skipped_stored_item(it, rules):
                 continue
             it["_order_context"] = context

@@ -87,39 +87,130 @@ def _item_norms(items: List[Dict[str, Any]] | None) -> set:
     return {it.get("norm", "") for it in items or []} - {""}
 
 
+_CONTEXT_KEYS = (
+    "arrangement", "so_design_desc", "so_size", "so_arrangement",
+    "so_motor_pos", "so_class", "so_rotation",
+)
+_NOISE_WORDS = (
+    "admin", "additional", "co number", "customer", "document",
+    "inquiry", "job number", "mark", "note", "rep reference", "review",
+    "ship", "shipping", "ship to", "source", "warranty",
+)
+
+# Tags remain the broad feature signal. Structured engineering facts are more
+# specific, while exact normalized lines are deliberately only a tie-breaker.
+TAG_WEIGHT = 1.0
+CONTEXT_WEIGHT = 1.5
+FACT_WEIGHT = 2.0
+NORM_WEIGHT = 0.5
+
+
+def _fact_text(value: Any) -> str:
+    if isinstance(value, (list, tuple, set)):
+        value = " | ".join(str(x) for x in value)
+    return " ".join(str(value or "").upper().split())
+
+
+def _is_noise_fact(key: str, value: Any) -> bool:
+    text = f"{key}={_fact_text(value)}".lower()
+    return any(word in text for word in _NOISE_WORDS)
+
+
+def _item_facts(items: List[Dict[str, Any]] | None) -> set:
+    """Return engineering component/attribute facts, excluding parser noise."""
+    facts = set()
+    for item in items or []:
+        section = _fact_text(item.get("section"))
+        document_fact = _fact_text(item.get("document_fact"))
+        if (_is_noise_fact("section", section)
+                or (document_fact and _is_noise_fact("document_fact", document_fact))):
+            continue
+        if section:
+            facts.add(f"section={section}")
+        attrs = item.get("attributes")
+        if not isinstance(attrs, dict):
+            continue
+        for key, value in attrs.items():
+            key_text = _fact_text(key)
+            value_text = _fact_text(value)
+            if not key_text or not value_text or _is_noise_fact(key_text, value_text):
+                continue
+            facts.add(f"{key_text}={value_text}")
+    return facts
+
+
+def _job_context(rec: Dict[str, Any]) -> set:
+    context = set()
+    for key in _CONTEXT_KEYS:
+        value = rec.get(key)
+        if value is None or value is False or not _fact_text(value):
+            continue
+        if not _is_noise_fact(key, value):
+            context.add(f"{key}={_fact_text(value)}")
+    if rec.get("parts_only") is True:
+        context.add("parts_only=TRUE")
+    return context
+
+
+def _item_facts_with_context(rec: Dict[str, Any]) -> set:
+    return _item_facts(rec.get("items") or [])
+
+
 def build_index(store: Dict[str, Any],
                 dwg: Dict[str, Dict[str, Any]] | None = None) -> Dict[str, Any]:
-    """One pass over the store: per-job tag/line sets plus how many jobs carry
-    each tag/line (the rarity weights). Build once, then score many orders
-    against it — the watcher calls this once per poll, not once per order."""
+    """One pass over the store, including rarity-weighted engineering facts."""
     job_tags: Dict[str, set] = {}
     job_norms: Dict[str, set] = {}
+    job_context: Dict[str, set] = {}
+    job_facts: Dict[str, set] = {}
     tag_df: Dict[str, int] = {}
     norm_df: Dict[str, int] = {}
+    context_df: Dict[str, int] = {}
+    fact_df: Dict[str, int] = {}
     jobs = store.get("jobs") or {}
     for j, rec in jobs.items():
         items = rec.get("items") or []
         job_tags[j], job_norms[j] = _item_tags(items), _item_norms(items)
+        job_context[j] = _job_context(rec)
+        job_facts[j] = _item_facts_with_context(rec)
         for t in job_tags[j]:
             tag_df[t] = tag_df.get(t, 0) + 1
         for n in job_norms[j]:
             norm_df[n] = norm_df.get(n, 0) + 1
+        for c in job_context[j]:
+            context_df[c] = context_df.get(c, 0) + 1
+        for f in job_facts[j]:
+            fact_df[f] = fact_df.get(f, 0) + 1
     return {"jobs": jobs, "job_tags": job_tags, "job_norms": job_norms,
-            "tag_df": tag_df, "norm_df": norm_df, "dwg": dwg or {}}
+            "job_context": job_context, "job_facts": job_facts,
+            "tag_df": tag_df, "norm_df": norm_df,
+            "context_df": context_df, "fact_df": fact_df,
+            "dwg": dwg or {}}
 
 
 def similar_to_items(index: Dict[str, Any], items: List[Dict[str, Any]] | None,
                      exclude_job: str = "", top: int = 15,
-                     require_dwg: bool = False) -> List[Dict[str, Any]]:
+                     require_dwg: bool = False,
+                     context: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
     """Rank the indexed orders by how much of `items` (one order's SO) they share.
 
-    Rarity-weighted overlap: each shared canonical tag scores 1/(#jobs carrying
-    that tag) and each IDENTICAL normalized line scores 2/(#jobs with that line)
-    — so "TEFLON SHAFT SEAL" on three jobs binds them far more strongly than a
-    MOTOR tag every fan has. With `require_dwg` only jobs whose AutoCAD scan
-    found custom drawings are kept: the DWG-reuse shortlist for a new order."""
+    Rarity-weighted overlap uses tags, job/document context, and engineering
+    component facts. Exact normalized lines remain a lower-weight tie-breaker.
+    With `require_dwg` only jobs whose AutoCAD scan found custom drawings are
+    kept: the DWG-reuse shortlist for a new order."""
     t_tags, t_norms = _item_tags(items), _item_norms(items)
-    tag_df, norm_df, dwg = index["tag_df"], index["norm_df"], index["dwg"]
+    t_facts = _item_facts(items)
+    t_context = set()
+    if context:
+        t_context.update(_job_context(context))
+    for item in items or []:
+        # Unstored orders can carry context on each parsed item.
+        context = item.get("_order_context")
+        if isinstance(context, dict):
+            t_context.update(_job_context(context))
+    tag_df, norm_df = index.get("tag_df", {}), index.get("norm_df", {})
+    context_df, fact_df = index.get("context_df", {}), index.get("fact_df", {})
+    dwg = index.get("dwg", {})
     out: List[Dict[str, Any]] = []
     for j, rec in index["jobs"].items():
         if j == str(exclude_job):
@@ -129,16 +220,22 @@ def similar_to_items(index: Dict[str, Any], items: List[Dict[str, Any]] | None,
             continue
         shared_tags = t_tags & index["job_tags"][j]
         shared_lines = t_norms & index["job_norms"][j]
-        if not shared_tags and not shared_lines:
+        shared_context = t_context & index.get("job_context", {}).get(j, set())
+        shared_facts = t_facts & index.get("job_facts", {}).get(j, set())
+        if not shared_tags and not shared_lines and not shared_context and not shared_facts:
             continue
-        score = (sum(1.0 / tag_df[t] for t in shared_tags)
-                 + sum(2.0 / norm_df[n] for n in shared_lines))
+        score = (TAG_WEIGHT * sum(1.0 / tag_df[t] for t in shared_tags)
+                 + CONTEXT_WEIGHT * sum(1.0 / context_df[c] for c in shared_context)
+                 + FACT_WEIGHT * sum(1.0 / fact_df[f] for f in shared_facts)
+                 + NORM_WEIGHT * sum(1.0 / norm_df[n] for n in shared_lines))
         out.append({
             "job": j, "customer": rec.get("customer", ""),
             "co_number": rec.get("co_number"), "so_pdf": rec.get("so_pdf", ""),
             "score": score,
             "shared_tags": sorted(shared_tags, key=lambda t: (tag_df[t], t)),
             "shared_lines": sorted(shared_lines, key=lambda n: (norm_df[n], n)),
+            "shared_context": sorted(shared_context),
+            "shared_facts": sorted(shared_facts),
             "dwg_extras": extras, "dwg_folder": (dwg.get(j) or {}).get("folder", ""),
         })
     out.sort(key=lambda r: (-r["score"], -_job_num(r["job"])))
@@ -155,7 +252,8 @@ def similar_jobs(store: Dict[str, Any], job: str,
     if not target or not target.get("items"):
         return None
     return similar_to_items(build_index(store, dwg), target["items"],
-                            exclude_job=job, top=top, require_dwg=require_dwg)
+                            exclude_job=job, top=top, require_dwg=require_dwg,
+                            context=target)
 
 
 # --- the live suggester: compact reuse shortlist carried on each job dict --- #
