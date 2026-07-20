@@ -668,6 +668,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .wrap { max-width: 1360px; margin: 0 auto; padding: 0 20px 40px; }
   header.top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
     padding: 16px 0 12px; border-bottom: 2px solid var(--ink); margin-bottom: 16px; }
+  .navback { font-size: 16px; font-weight: 700; line-height: 1; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 8px; padding: 4px 12px; }
+  .navback:hover { color: var(--accent); border-color: var(--accent); }
+  .navback[disabled] { opacity: .35; pointer-events: none; }
   .wordmark { font-family: var(--mono); font-size: 15px; letter-spacing: .14em;
               font-weight: 700; white-space: nowrap; }
   .wordmark .dim { color: var(--muted); font-weight: 400; }
@@ -915,6 +919,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <body>
 <div class="wrap">
   <header class="top">
+    <button class="navback" id="navback" title="Back (Alt+&#8592;)">&#8592;</button>
     <span class="wordmark">GL QUEUE <span class="dim">/</span> EXPLORER</span>
     <nav class="tabs" id="tabs" style="display:none">
       <button class="tabbtn" data-tab="changes">Changes</button>
@@ -1051,7 +1056,9 @@ async function boot() {
     + " orders · " + DB.n_items + " line items";
   loadPrefs();
   restoreState();
-  render();
+  render();                       // also seeds the first history entry (syncNav)
+  $("navback").onclick = () => history.back();
+  updateBackBtn();
   setTimeout(ensureIndex, 50);        // warm the match index off the first paint
   setInterval(pollVersion, 60000);
 }
@@ -1230,13 +1237,57 @@ function render() {
   else if (state.tab === "changes") renderChanges();
   else if (state.tab === "hist") renderHist();
   else { renderJobPane(); renderMatches(); }
+  syncNav();          // refinements (component/pins) update the current entry
 }
-function setTab(t) { state.tab = t; savePrefs(); render(); window.scrollTo(0, 0); }
+
+/* ---- real browser history: every tab switch and order open is an entry, so
+   the header's ← arrow, Alt+Left, and the mouse back button all walk the
+   same chain; in-view refinements update the current entry in place. ------ */
+let NAV_POS = 0, POPPING = false;
+function navSnapshot() {
+  return { tab: state.tab, job: state.job, path: state.path,
+           whole: state.whole, pinned: [...state.pinned], i: NAV_POS };
+}
+function pushNav() {
+  NAV_POS++;
+  try { history.pushState(navSnapshot(), ""); } catch (e) {}
+  updateBackBtn();
+}
+function syncNav() {
+  if (POPPING) return;
+  try { history.replaceState(navSnapshot(), ""); } catch (e) {}
+}
+function updateBackBtn() {
+  $("navback").disabled = NAV_POS <= 0 && history.length <= 1;
+}
+window.addEventListener("popstate", ev => {
+  const s = ev.state;
+  if (!s || !DB) return;
+  POPPING = true;
+  NAV_POS = s.i || 0;
+  state.tab = ["board", "changes", "hist", "job"].includes(s.tab) ? s.tab : "board";
+  state.job = s.job && DB.jobs[s.job] ? s.job : null;
+  if (state.tab === "job" && !state.job) state.tab = "board";
+  state.path = s.path === undefined ? null : s.path;
+  state.whole = !!s.whole;
+  state.pinned = new Set(s.pinned || []);
+  render();
+  POPPING = false;
+  updateBackBtn();
+});
+
+function setTab(t) {
+  if (t !== state.tab) { state.tab = t; pushNav(); }
+  savePrefs(); render(); window.scrollTo(0, 0);
+}
 function selectJob(j) {
   /* Opening an order lands on its whole-order matches (the Similar Orders
      view) — a component/attribute click narrows from there. */
+  if (state.tab === "job" && state.job === j) { render(); return; }
   state.job = j; state.path = null; state.whole = true; state.pinned.clear();
-  setTab("job");
+  state.tab = "job";
+  pushNav();
+  savePrefs(); render(); window.scrollTo(0, 0);
 }
 function wireJobCells(root) {
   root.querySelectorAll("[data-job]").forEach(el =>
@@ -1629,7 +1680,7 @@ function renderJobPane() {
     : '<div class="empty">No line items captured for this order yet.</div>';
 
   el.innerHTML = '<div class="panel-head">'
-    + '<button class="backlink" id="back">← live queue</button>'
+    + '<button class="backlink" id="back">← back</button>'
     + '<div class="ohead"><span class="job">' + esc(j) + '</span>'
     + '<span class="cust">' + esc(e.c) + "</span>"
     + (e.co ? '<span class="co">' + esc(e.co) + "</span>" : "")
@@ -1649,7 +1700,7 @@ function renderJobPane() {
     + '" id="whole">match whole order</button></div>'
     + '<div class="tree">' + tree + "</div></div>";
 
-  $("back").onclick = () => setTab("board");
+  $("back").onclick = () => history.length > 1 ? history.back() : setTab("board");
   $("whole").onclick = () => { state.whole = !state.whole;
     if (state.whole) { state.path = null; state.pinned.clear(); } render(); };
   el.querySelectorAll(".comp-row").forEach(b => b.onclick = () => {
