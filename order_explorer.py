@@ -525,6 +525,7 @@ def maybe_write(master: Dict[str, Any] | None,
     queue = {str(j.get("job")): j for j in lq_jobs or [] if j.get("job")}
     key = (_mtime(li.store_path()), _mtime(autocad_scan.PROGRESS_PATH),
            _mtime(change_log.log_path(today)), _mtime(solidworks_scan.PROGRESS_PATH),
+           _mtime(Path(__file__)),      # a git pull regenerates on the next poll
            today.isoformat(),
            tuple(sorted(queue)), tuple(sorted(str(x) for x in new_ids or ())))
     now = time.time()
@@ -561,16 +562,26 @@ def main(argv: List[str] | None = None) -> int:
                          "solidworks_scan store)")
     ap.add_argument("--open", action="store_true",
                     help="Open the page in an app window (Edge/Chrome --app). "
-                         "An existing page opens as-is — the watcher keeps it "
-                         "fresh; the page is only built here when missing.")
+                         "The page is rebuilt first when it's missing OR older "
+                         "than this code (i.e. right after a git pull); "
+                         "otherwise it opens as-is — the watcher keeps it fresh.")
     args = ap.parse_args(argv)
 
     if args.open:
         out = args.out or default_output_path()
-        if out.exists():
+        try:
+            fresh = (out.exists()
+                     and out.stat().st_mtime >= Path(__file__).stat().st_mtime)
+        except OSError:
+            fresh = False
+        if fresh:
             print(f"Opening {out}")
             return 0 if open_in_app_window(out) else 1
-        print(f"{out} does not exist yet — building it first…")
+        if out.exists():
+            print(f"{out} predates the current code (git pull?) — rebuilding "
+                  "it first, takes a moment…")
+        else:
+            print(f"{out} does not exist yet — building it first…")
 
     import change_log
     import line_items as li
