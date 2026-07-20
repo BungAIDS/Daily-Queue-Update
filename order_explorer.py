@@ -114,7 +114,10 @@ def default_output_path() -> Path:
     like. The workbook/output fallback remains for callers that explicitly set
     EXPLORER_PATH to None."""
     if EXPLORER_PATH:
-        if EXPLORER_PATH.is_dir() or EXPLORER_PATH.suffix.lower() != ".html":
+        # The suffix is enough to distinguish the supported folder/file forms.
+        # Do not stat a network folder here: a background session may be able to
+        # write the file while directory metadata probing is restricted.
+        if EXPLORER_PATH.suffix.lower() != ".html":
             return EXPLORER_PATH / HTML_NAME
         return EXPLORER_PATH
     base = LIVE_WORKBOOK_PATH.parent if LIVE_WORKBOOK_PATH else OUTPUT_DIR
