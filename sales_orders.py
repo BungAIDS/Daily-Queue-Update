@@ -1405,5 +1405,9 @@ def refresh_order_so(order: str, job: Dict[str, Any] | None = None,
     j = dict(job or {})
     j.setdefault("job", str(order))
     enrich_with_sales_orders([j], deep_folders=deep_folders)
+    if not j.get("so_pdf"):
+        raise RuntimeError(
+            f"No current Sales Order could be retrieved for order {order}."
+        )
     _stamp_verified_today(str(order))
     return j
