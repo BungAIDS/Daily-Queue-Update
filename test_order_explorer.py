@@ -222,6 +222,21 @@ def test_vbs_folder_opener():
     print("  vbs folder opener OK")
 
 
+def test_default_output_path_accepts_folder():
+    """EXPLORER_PATH may be the page file OR its folder — a folder (or any
+    non-.html path) gets the standard page name appended."""
+    saved = oe.EXPLORER_PATH
+    try:
+        folder = Path("/z/GL QUEUE LIVE")        # separator-portable stand-in
+        oe.EXPLORER_PATH = folder
+        assert oe.default_output_path() == folder / oe.HTML_NAME
+        oe.EXPLORER_PATH = folder / "My Page.html"
+        assert oe.default_output_path() == folder / "My Page.html"
+    finally:
+        oe.EXPLORER_PATH = saved
+    print("  EXPLORER_PATH folder/file forms OK")
+
+
 def test_write_explorer_files():
     p = oe.build_payload(_store(), _dwg())
     with tempfile.TemporaryDirectory() as td:
@@ -253,6 +268,7 @@ def main() -> int:
     test_render_roundtrip_and_safety()
     test_bat_launcher()
     test_vbs_folder_opener()
+    test_default_output_path_accepts_folder()
     test_write_explorer_files()
     print("All order_explorer tests passed.")
     return 0
