@@ -30,6 +30,9 @@ jobs:
       - run: python test_so_review.py
       - run: python test_quote_run_review.py
       - run: python test_find_orders.py
+      - run: python test_order_explorer.py
+      - run: node test_order_similarity.js
+      - run: python test_solidworks_scan.py
       - run: python test_backfill_serial.py
       - run: python test_sales_order_validation.py
       - run: python test_order_verification_cleanup.py

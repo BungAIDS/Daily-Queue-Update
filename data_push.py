@@ -13,7 +13,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, List, Optional, Sequence
 
@@ -44,13 +44,19 @@ class _PublishedFile:
 def data_files() -> List[Path]:
     """Return existing order-data files in stable publication order."""
     line_items = LINE_ITEMS_STORE if LINE_ITEMS_STORE else BACKLOG_DIR / "line_items.json"
+    today = date.today()
     candidates = [
         SNAPSHOT_DIR / "live_master.json",
+        # Today's + yesterday's field-change logs: the Changes tab's source, so
+        # a page/report built from this branch shows the day's activity too.
+        SNAPSHOT_DIR / f"change_log_{today.isoformat()}.json",
+        SNAPSHOT_DIR / f"change_log_{(today - timedelta(days=1)).isoformat()}.json",
         BACKLOG_DIR / "quote_run_scan_progress.json",
         line_items,
         BACKLOG_DIR / "backfill_line_items.json",
         BACKLOG_DIR / "backfill_progress.json",
         BACKLOG_DIR / "autocad_scan_progress.json",
+        BACKLOG_DIR / "solidworks_scan.json",        # which jobs have 3D data
         BACKLOG_DIR / "so_review_notes.json",
         BACKLOG_DIR / "so_review_parser_metrics.json",
         BACKLOG_DIR / "so_corpus_health.json",

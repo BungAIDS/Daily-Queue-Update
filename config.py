@@ -178,6 +178,13 @@ AUTOCAD_JOBS_DIR = _expand_path(
     (os.environ.get("AUTOCAD_JOBS_DIR") or r"Z:\AUTOCAD\CURRENT\JOBS").strip()
 )
 
+# Root of the per-job SolidWorks folders (solidworks_scan.py — feeds the
+# explorer's "Has 3D" filter). Layout: <type>\<intermediate>\<job>, see
+# solidworks_scan.py for the per-type intermediate rules. Read-only.
+SOLIDWORKS_JOBS_DIR = _expand_path(
+    (os.environ.get("SOLIDWORKS_JOBS_DIR") or r"Z:\Solidworks\Current\JOBS").strip()
+)
+
 # Where the per-job sales-order line items live (one JSON store, fed by the
 # daily run, the backfill, and line_items_scan.py; searched by find_orders.py).
 # Defaults under BACKLOG_DIR; created on first save.
@@ -224,6 +231,15 @@ EMAIL_ALERT_TO = os.environ.get("EMAIL_ALERT_TO") or EMAIL_TO
 # Excel app — which the watcher drives via COM — keeps it synced for coworkers.
 _live_wb_raw = (os.environ.get("LIVE_WORKBOOK_PATH") or "").strip()
 LIVE_WORKBOOK_PATH = _expand_path(_live_wb_raw) if _live_wb_raw else None
+
+# Where the GL Queue Explorer page (order_explorer.py — the clickable HTML
+# search over the line-items store) is written. The canonical default is the
+# shared DAG folder coworkers open as Z:\DAG\GL QUEUE LIVE. Use the UNC path
+# here so the watcher still reaches it when a scheduled/background session has
+# no Z: mapping. EXPLORER_PATH may override this with a folder or .html file.
+DEFAULT_EXPLORER_PATH = r"\\gdh-fs02\engineering\DAG\GL QUEUE LIVE"
+_explorer_raw = (os.environ.get("EXPLORER_PATH") or DEFAULT_EXPLORER_PATH).strip()
+EXPLORER_PATH = _expand_path(_explorer_raw)
 
 # How often to poll the board, in seconds (default 120 = every 2 minutes).
 try:
