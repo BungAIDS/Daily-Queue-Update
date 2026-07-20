@@ -116,7 +116,7 @@ function testDifferentDesignDoesNotTreatRawSizeCodeAsComparable() {
   assert.ok(got.differences.includes("Size not compared across different designs"));
 }
 
-function testRequiredAttributesStayOnSelectedComponent() {
+function testSelectedAttributesStayOnSelectedComponent() {
   const target = component("DAMPER", { operation: "AUTOMATIC", damper_type: "OUTLET" });
   const source = order({ cp: [component("WHEEL"), target] });
   const wrong = order({ cp: [
@@ -125,18 +125,24 @@ function testRequiredAttributesStayOnSelectedComponent() {
     component("MOTOR", { operation: "AUTOMATIC" }),
   ] });
   const wholeWrong = sim.orderSimilarity(source, wrong);
-  assert.strictEqual(
-    sim.focusedSimilarity(wholeWrong, target, wrong, new Set(["operation=AUTOMATIC"])),
-    null,
-    "an attribute on MOTOR must not satisfy a required DAMPER attribute",
-  );
+  const near = sim.focusedSimilarity(wholeWrong, target, wrong,
+    new Set(["operation=AUTOMATIC"]));
+  assert.ok(near, "a selected-attribute miss must NOT eliminate the candidate");
+  assert.strictEqual(near.pinMatched, 0,
+    "an attribute on MOTOR must not satisfy a selected DAMPER attribute");
+  assert.strictEqual(near.pinTotal, 1, "one selected attribute assessed");
+  const hit = near.matches[0].pinHits[0];
+  assert.ok(!hit.ok && hit.have === "MANUAL",
+    "the miss must carry the candidate's own value for the ✗ chip");
 
   const right = copy(wrong);
   right.cp[1].a.operation = "AUTOMATIC";
   const focused = sim.focusedSimilarity(
     sim.orderSimilarity(source, right), target, right, new Set(["operation=AUTOMATIC"]));
-  assert.ok(focused && focused.score >= 0 && focused.score <= 1,
-    "same-component required attribute should yield a bounded focused score");
+  assert.ok(focused && focused.pinMatched === 1,
+    "same-component selected attribute should count as matched");
+  assert.ok(focused.score > near.score,
+    "the full pin match must outrank the near-miss");
 }
 
 function testFocusedMatchIdentifiesTheExactCandidateComponent() {
@@ -197,17 +203,29 @@ function testCombinedAttributesStayTiedToTheirComponents() {
     }),
     component("MOTOR", { operation: "AUTOMATIC", enclosure: "ODP" }),
   ] });
-  assert.strictEqual(sim.combinedFocusedSimilarity(
-    sim.orderSimilarity(source, wrong), requirements, wrong), null,
-    "attributes on different components must not satisfy the combination");
+  const wrongFocused = sim.combinedFocusedSimilarity(
+    sim.orderSimilarity(source, wrong), requirements, wrong);
+  assert.ok(wrongFocused, "pin misses must not eliminate the candidate");
+  assert.strictEqual(wrongFocused.pinMatched, 1,
+    "only the damper_type pin matches — TEFC on the DAMPER and AUTOMATIC on "
+    + "the MOTOR must not satisfy pins selected on the other component");
+  assert.strictEqual(wrongFocused.pinTotal, 3, "three selected attributes assessed");
 
   const partial = order({ cp: [
     component("DAMPER", { operation: "AUTOMATIC", damper_type: "INLET" }),
     component("MOTOR", { enclosure: "TEFC" }),
   ] });
-  assert.strictEqual(sim.combinedFocusedSimilarity(
-    sim.orderSimilarity(source, partial), requirements, partial), null,
-    "every selected attribute on one component must match together");
+  const partialFocused = sim.combinedFocusedSimilarity(
+    sim.orderSimilarity(source, partial), requirements, partial);
+  assert.ok(partialFocused && partialFocused.pinMatched === 2,
+    "two of three selected attributes match on the right components");
+
+  const exact = order({ cp: [copy(damper), copy(motor)] });
+  const exactFocused = sim.combinedFocusedSimilarity(
+    sim.orderSimilarity(source, exact), requirements, exact);
+  assert.ok(exactFocused.score > partialFocused.score
+    && partialFocused.score > wrongFocused.score,
+    "closest-first: 3/3 pins above 2/3 above 1/3");
 }
 
 function testCombinedDuplicateSelectionsNeedDistinctCandidates() {
@@ -244,6 +262,31 @@ function testAlwaysBounded() {
     assert.ok(value >= 0 && value <= 1, `score outside [0,1]: ${value}`);
 }
 
+function testSelectionLeadsTheFocusedRanking() {
+  /* "Find the closest WHEEL": a candidate with a near-identical wheel on an
+     otherwise different fan must outrank a near-identical fan whose wheel
+     differs across the board. */
+  const wheel = component("WHEEL", {
+    material: "CARBON STEEL", wheel_feature: "BACKWARD INCLINED",
+    blade_gauge: "3/16", backplate_gauge: "5/16",
+  });
+  const source = order({ cp: [wheel] });
+  const sameWheelOtherFan = order({ cp: [copy(wheel)] });
+  sameWheelOtherFan.sp = sameWheelOtherFan.sp.map(([k, v]) =>
+    ["Design", "Size", "Rotation", "Discharge"].includes(k) ? [k, "OTHER"] : [k, v]);
+  const sameFanOtherWheel = order({ cp: [component("WHEEL", {
+    material: "STAINLESS", wheel_feature: "AIRFOIL",
+    blade_gauge: "1/4", backplate_gauge: "3/8",
+  })] });
+  const requirements = [{ component: wheel, pins: new Set() }];
+  const near = sim.combinedFocusedSimilarity(
+    sim.orderSimilarity(source, sameWheelOtherFan), requirements, sameWheelOtherFan);
+  const far = sim.combinedFocusedSimilarity(
+    sim.orderSimilarity(source, sameFanOtherWheel), requirements, sameFanOtherWheel);
+  assert.ok(near.score > far.score,
+    "the selected component must dominate the focused ranking");
+}
+
 function main() {
   testPublishedWeightBudgetIsExactlyOne();
   testIdenticalConstructionIsOne();
@@ -252,11 +295,12 @@ function main() {
   testPreviewAttributeScopeMatchesConstructionScore();
   testIndependentCoreWeights();
   testDifferentDesignDoesNotTreatRawSizeCodeAsComparable();
-  testRequiredAttributesStayOnSelectedComponent();
+  testSelectedAttributesStayOnSelectedComponent();
   testFocusedMatchIdentifiesTheExactCandidateComponent();
   testCombinedFocusRequiresEverySelectedComponent();
   testCombinedAttributesStayTiedToTheirComponents();
   testCombinedDuplicateSelectionsNeedDistinctCandidates();
+  testSelectionLeadsTheFocusedRanking();
   testSparseEvidenceCannotLookIdentical();
   testAlwaysBounded();
   console.log("All order similarity tests passed.");

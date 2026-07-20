@@ -1371,6 +1371,8 @@ function rankMatches(srcJob, items, requirements) {
       wholeScore: whole.score,
       coverage: focused ? focused.coverage : whole.coverage,
       componentScore: focused ? focused.componentScore : null,
+      pinMatched: focused ? focused.pinMatched : 0,
+      pinTotal: focused ? focused.pinTotal : 0,
       selectionMatches: focused ? focused.matches : [],
       groups: whole.groups,
       differences: [...new Set([
@@ -1850,11 +1852,12 @@ function renderJobPane() {
       const pin = active && selectedPins.has(key);
       return '<button class="attr-row' + (pin ? " pinned" : "")
         + '" data-a="' + esc(key) + '" data-p="' + path
-        + '" title="Require this ' + esc(c.n)
-        + ' attribute together with every other selected component and attribute">'
+        + '" title="Prefer this ' + esc(c.n)
+        + ' attribute — matches that have it rank first, near-misses stay '
+        + 'listed with the difference shown">'
         + '<span class="k">' + esc(k.replace(/_/g, " ")) + ':</span>'
         + '<span class="v">' + esc(v) + '</span>'
-        + '<span class="pin">' + (pin ? "✕ required" : "add requirement")
+        + '<span class="pin">' + (pin ? "✕ selected" : "add to search")
         + "</span></button>";
     }).join("");
     const revs = (c.r || []).map(x => '<div class="rev-row">' + esc(x) + "</div>").join("");
@@ -1871,7 +1874,7 @@ function renderJobPane() {
         : items.length === 1 ? " line" : "") + "</span>"
       + '<span class="price">' + (c.p ? money(c.p) : "") + "</span>"
       + '<span class="go">' + (active
-        ? (selectedPins.size ? selectedPins.size + " attrs required" : "✕ required")
+        ? (selectedPins.size ? selectedPins.size + " attrs selected" : "✕ selected")
         : "add to search ▸") + '</span></button>'
       + '<div class="comp-kids">' + attrs + revs + subs + srcs + "</div></div>";
   };
@@ -2161,10 +2164,10 @@ function renderMatches() {
   const target = state.whole ? "whole order" : requirements.length === 1
     ? (requirements[0].component.k ? "[" + requirements[0].component.n + "]"
       : requirements[0].component.n)
-      + (attrCount ? " · " + attrCount + " required attr"
+      + (attrCount ? " · " + attrCount + " selected attr"
         + (attrCount === 1 ? "" : "s") : "")
     : requirements.length + " selected components"
-      + (attrCount ? " · " + attrCount + " required attrs" : "");
+      + (attrCount ? " · " + attrCount + " selected attrs" : "");
   const resAll = rankMatches(j, items, requirements);
   const res = state.only3d ? resAll.filter(r => DB.jobs[r.j].sw) : resAll;
   const shown = res.slice(0, 25);
@@ -2178,7 +2181,7 @@ function renderMatches() {
       const ix = pin.indexOf("=");
       return '<button class="fchip" data-kind="attribute" data-p="'
         + esc(requirement.path) + '" data-a="' + esc(pin)
-        + '" title="Remove this required attribute">' + esc(componentName) + " · "
+        + '" title="Remove this attribute from the search">' + esc(componentName) + " · "
         + esc(pin.slice(0, ix).replace(/_/g, " ")) + ": " + esc(pin.slice(ix + 1))
         + " <span>✕</span></button>";
     });
@@ -2199,11 +2202,15 @@ function renderMatches() {
       const componentName = match.targetComponent.k
         ? "[" + match.targetComponent.n + "]" : match.targetComponent.n;
       const componentChip = '<span class="chip same">✓ ' + esc(componentName) + "</span>";
-      const attrs = [...match.pins].map(pin => {
-        const ix = pin.indexOf("=");
-        return '<span class="chip same">✓ ' + esc(componentName) + " · "
-          + esc(pin.slice(0, ix).replace(/_/g, " ")) + ": "
-          + esc(pin.slice(ix + 1)) + "</span>";
+      /* Selected attributes: green ✓ when this candidate has the part, red ✗
+         with the candidate's own value when it differs (or isn't tracked). */
+      const attrs = (match.pinHits || []).map(hit => {
+        const label = esc(componentName) + " · "
+          + esc(hit.key.replace(/_/g, " ")) + ": ";
+        if (hit.ok)
+          return '<span class="chip same">✓ ' + label + esc(hit.wanted) + "</span>";
+        return '<span class="chip diff">✗ ' + label + esc(hit.wanted)
+          + (hit.have ? " — theirs " + esc(hit.have) : " — not tracked") + "</span>";
       });
       return [componentChip, ...attrs];
     });
@@ -2225,7 +2232,8 @@ function renderMatches() {
     const spec = fanSpec(o);
     const g = r.groups;
     const scoreLabel = requirements.length
-      ? "combo " + r.score.toFixed(3) + " · whole " + r.wholeScore.toFixed(3)
+      ? (r.pinTotal ? r.pinMatched + "/" + r.pinTotal + " selected · " : "")
+        + "combo " + r.score.toFixed(3) + " · whole " + r.wholeScore.toFixed(3)
       : "match " + r.score.toFixed(3);
     const breakdown = "core " + g.core.toFixed(2)
       + " · construction " + g.construction.toFixed(2)
@@ -2265,15 +2273,16 @@ function renderMatches() {
     + (requirements.length ? " · bounded combination score" : " · bounded construction score")
     + "</span></div>"
     + (requirements.length
-        ? '<div class="filterbar"><span class="fl">Required combination:</span>'
+        ? '<div class="filterbar"><span class="fl">Searching for (closest first):</span>'
           + chips + "</div>" : "")
     + (res.length ? cards : '<div class="empty"><div class="big">No orders match</div>'
         + (state.only3d && resAll.length
             ? "None of the " + resAll.length + " matches has SolidWorks 3D data "
               + "on file — turn off Has 3D, or run the SolidWorks scan if it "
               + "has never been run."
-            : requirements.length ? "No order contains the full selected combination. "
-              + "Try removing one component or attribute."
+            : requirements.length ? "No other order has the selected component(s) "
+              + "at all — attributes never filter orders out, but the "
+              + "component itself must exist to compare."
               : "Nothing has comparable construction evidence yet.") + "</div>")
     + (res.length > 25 ? '<div class="tailnote">…and ' + (res.length - 25)
         + " more — narrow it with another component or attribute</div>" : "");

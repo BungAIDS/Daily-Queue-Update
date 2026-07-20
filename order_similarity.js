@@ -16,7 +16,12 @@
   "use strict";
 
   const UNKNOWN_SCORE = 0.5;
-  const FOCUS_WHOLE_WEIGHT = 0.65;
+  /* When components are selected, the selection leads the ranking and the
+   * whole order is context — "find the closest WHEEL" must sort by wheels. */
+  const FOCUS_WHOLE_WEIGHT = 0.25;
+  /* Within the selection, pinned attributes outweigh the free comparison:
+   * full pin matches lead, near-misses follow, nothing is eliminated. */
+  const FOCUS_PIN_WEIGHT = 0.65;
   const GROUP_TOTALS = {
     core: 0.50,
     construction: 0.25,
@@ -334,19 +339,40 @@
         && attrMatches(component.a[key], wanted);
     });
   }
+  /* Pins are graded per candidate component, never used to eliminate one:
+   * each selected attribute is a hit or a miss (with the candidate's own
+   * value carried along so the UI can show WHAT differs). */
+  function pinAssessment(component, pins) {
+    const hits = [];
+    let matched = 0;
+    for (const pin of pins || []) {
+      const ix = String(pin).indexOf("=");
+      if (ix < 1) continue;
+      const key = String(pin).slice(0, ix), wanted = String(pin).slice(ix + 1);
+      const have = component && component.a && key in component.a
+        ? component.a[key] : "";
+      const ok = attrMatches(have, wanted);
+      if (ok) matched++;
+      hits.push({ key, wanted, have: String(have == null ? "" : have), ok });
+    }
+    return { hits, matched, total: hits.length };
+  }
   function bestDistinctComponentMatches(requirements, candidates) {
     if (candidates.length < requirements.length) return null;
+    /* Every same-named candidate stays an option; matched pins dominate the
+     * choice (a 9/10 wheel beats an 8/10 wheel with a nicer free score). */
     const options = requirements.map((requirement, requirementIndex) =>
-      candidates.flatMap((candidate, candidateIndex) => {
-        if (!componentHasRequired(candidate, requirement.pins)) return [];
-        return [{ requirementIndex, candidateIndex, candidate,
-                  result: componentSimilarity(requirement.component, candidate) }];
+      candidates.map((candidate, candidateIndex) => {
+        const result = componentSimilarity(requirement.component, candidate);
+        const pins = pinAssessment(candidate, requirement.pins);
+        return { requirementIndex, candidateIndex, candidate, result, pins,
+                 value: pins.matched * 10 + result.score };
       }));
     if (options.some(row => !row.length)) return null;
     if (requirements.length === 1) {
       const best = options[0].reduce((winner, option) => !winner
-        || option.result.score > winner.result.score
-        || (option.result.score === winner.result.score
+        || option.value > winner.value
+        || (option.value === winner.value
           && option.result.coverage > winner.result.coverage) ? option : winner, null);
       return [best];
     }
@@ -356,13 +382,17 @@
      * assignment.  Duplicate components are uncommon, so this stays small. */
     const order = requirements.map((_, index) => index)
       .sort((a, b) => options[a].length - options[b].length || a - b);
+    const maxAfter = new Array(order.length + 1).fill(0);
+    for (let depth = order.length - 1; depth >= 0; depth--)
+      maxAfter[depth] = maxAfter[depth + 1]
+        + Math.max(...options[order[depth]].map(option => option.value));
     const used = new Set(), chosen = new Array(requirements.length);
-    let best = null, bestScore = -1, bestCoverage = -1;
-    const walk = (depth, score, coverage) => {
-      if (score + (requirements.length - depth) < bestScore) return;
+    let best = null, bestValue = -1, bestCoverage = -1;
+    const walk = (depth, value, coverage) => {
+      if (value + maxAfter[depth] < bestValue) return;
       if (depth === order.length) {
-        if (score > bestScore || (score === bestScore && coverage > bestCoverage)) {
-          bestScore = score; bestCoverage = coverage; best = chosen.slice();
+        if (value > bestValue || (value === bestValue && coverage > bestCoverage)) {
+          bestValue = value; bestCoverage = coverage; best = chosen.slice();
         }
         return;
       }
@@ -370,8 +400,7 @@
       for (const option of options[requirementIndex]) {
         if (used.has(option.candidateIndex)) continue;
         used.add(option.candidateIndex); chosen[requirementIndex] = option;
-        walk(depth + 1, score + option.result.score,
-          coverage + option.result.coverage);
+        walk(depth + 1, value + option.value, coverage + option.result.coverage);
         used.delete(option.candidateIndex);
       }
     };
@@ -404,6 +433,9 @@
           targetComponent: requirement.component,
           candidateComponent: option.candidate,
           pins: requirement.pins,
+          pinHits: option.pins.hits,
+          pinMatched: option.pins.matched,
+          pinTotal: option.pins.total,
           score: option.result.score,
           coverage: option.result.coverage,
           differences: option.result.differences,
@@ -414,14 +446,24 @@
       / matches.length;
     const componentCoverage = matches.reduce((sum, match) => sum + match.coverage, 0)
       / matches.length;
+    const pinTotal = matches.reduce((sum, match) => sum + match.pinTotal, 0);
+    const pinMatched = matches.reduce((sum, match) => sum + match.pinMatched, 0);
+    /* Selected attributes are preferences, not gates: they lead the focused
+     * score so full matches rank first and near-misses stay visible. */
+    const componentPart = pinTotal
+      ? (1 - FOCUS_PIN_WEIGHT) * componentScore
+        + FOCUS_PIN_WEIGHT * (pinMatched / pinTotal)
+      : componentScore;
     const componentWeight = 1 - FOCUS_WHOLE_WEIGHT;
     return {
       score: clamp01(FOCUS_WHOLE_WEIGHT * whole.score
-        + componentWeight * componentScore),
+        + componentWeight * componentPart),
       coverage: clamp01(FOCUS_WHOLE_WEIGHT * whole.coverage
         + componentWeight * componentCoverage),
       componentScore,
       componentCoverage,
+      pinMatched,
+      pinTotal,
       candidateComponents: matches.map(match => match.candidateComponent),
       matches,
       differences: [...new Set(matches.flatMap(match => match.differences))],
@@ -439,6 +481,8 @@
     COMPONENT_SLOTS,
     GROUP_TOTALS,
     FOCUS_WHOLE_WEIGHT,
+    FOCUS_PIN_WEIGHT,
+    pinAssessment,
     norm,
     specMap,
     flattenComponents,

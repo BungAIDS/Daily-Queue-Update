@@ -244,7 +244,8 @@ def test_render_roundtrip_and_safety():
     assert "green = selected combination match" in html
     assert "combinedFocusedSimilarity" in html
     assert "state.selections" in html
-    assert "Required combination" in html
+    assert "Searching for (closest first)" in html
+    assert "pinHits" in html          # soft-selection miss chips are wired in
     assert "selected components" in html
     assert "alignComponentStarts" in html
     assert 'class="co-tip"' in html
