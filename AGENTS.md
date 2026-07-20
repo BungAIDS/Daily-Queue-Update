@@ -116,12 +116,15 @@ hashes; (2) incident remediation sweeps whatever the process touched, so a
 future incident can quarantine files inside the live working repo itself and
 silently break the 5 AM job / watcher. Therefore:
 
-- Do not run coding-agent processes on this PC at all. IT has declined any
-  whitelisting (2026-07-20) and the security team has formally adjudicated
-  local agent activity as a threat; every local run risks a new incident and
-  an association sweep. All agent work goes through cloud/web sessions,
-  which write nothing to this machine. The rules below are defense in depth
-  for anything that ever runs locally regardless.
+- Cloud/web sessions are the default for ALL agent work (they write nothing
+  to this machine). DG runs the local desktop agent only as a deliberate
+  exception for machine-bound work. IT has declined any whitelisting
+  (2026-07-20) and the security team has adjudicated local agent activity
+  as a threat, so every local run risks a new incident and an association
+  sweep — keep local sessions short and minimal, follow every rule below
+  strictly, and clean up afterward (stale work-dir clones under
+  `Documents\Codex` and `.codex` temp dirs are exactly what the 2026-07-15
+  sweep caught).
 - Stay inside the pinned Python toolchain: `pip install -r requirements.txt`
   plus `playwright install chromium`, nothing else. Never install or download
   any other toolchain or standalone binary onto this machine — no .NET/NuGet
@@ -146,9 +149,9 @@ silently break the 5 AM job / watcher. Therefore:
   before debugging the code.
 
 Note: because the detection is behavioral and the remediation is by
-association, no instructions file, hash exclusion, or app update can make
-local agent runs safe on this machine — the only compliant configuration is
-cloud-only agent execution. Never add AV exclusions or otherwise touch
-endpoint protection on this managed machine.
+association, no instructions file, hash exclusion, or app update makes local
+agent runs detection-proof — cloud execution is the only configuration that
+carries no risk; local runs accept that risk knowingly. Never add AV
+exclusions or otherwise touch endpoint protection on this managed machine.
 
 <!-- END MANUAL -->
