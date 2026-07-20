@@ -137,8 +137,12 @@ automation. Therefore, for any agent working on the local PC:
 
 Note: flags on the Codex app binary and its bundled plugin files cannot be
 prevented from inside this repo — those files exist the moment the app
-installs or auto-updates. That recurring false positive is resolved in the AV
-console (restore + report false positive / exclusion decision by DG), not by
-agent behavior.
+installs or auto-updates. Company IT has declined AV whitelisting/exclusions
+(2026-07-20), so the only reliable way to stop detections is keeping agent
+execution off the local disk: prefer cloud/web agent sessions (nothing lands
+on this PC) over local desktop runs, and when a local run is unavoidable,
+leave no residue — delete throwaway work-dir clones, `__pycache__`, and temp
+files when the task ends. Never add AV exclusions or otherwise touch endpoint
+protection on this managed machine.
 
 <!-- END MANUAL -->
