@@ -94,24 +94,34 @@ Add project-specific notes here. This section is never auto-modified.
 
 ### Endpoint-security ground rules (agents running on DG's Windows PC)
 
-Background: the PC's antivirus quarantined agent-related files twice
-(2026-07-10 13:37, 2026-07-15 09:44). The quarantine lists were analyzed
-2026-07-20. Every flagged file was one of: the Codex desktop app itself
-(`ChatGPT.exe`, two different auto-updated builds), Codex's bundled plugin
-payloads (the latex plugin's `tectonic.exe`, npm packages `abstract-level` /
-`classic-level` / `node-gyp-build` under the chrome/browser plugins, a temp
-`applypatch.bat` shim), third-party DLLs in the machine-wide NuGet cache
-(PDFsharp/MigraDoc — nothing in this repo is .NET), or a stale
-`__pycache__/line_items.cpython-313.pyc` byte-compiled inside an agent's
-working copy of this repo. All ~20 files in the second event were quarantined
-in the same second — a scheduled heuristic scan sweeping low-reputation /
-newly-written binaries in one pass, not a detection of something an agent
-executed. Two of the "threats" were localization-only `.resources.dll`
-satellites (no executable code), the signature of a false-positive sweep, not
-malware. The binding lesson: every new binary an agent drops on this machine
-is antivirus bait, and a mid-run quarantine can silently break the live
-automation. Therefore, for any agent working on the local PC:
+Background: the org's endpoint security (EDR) flagged local Codex twice,
+confirmed from AV console screenshots 2026-07-20. 2026-07-10 13:37 — a
+behavioral alert on the running app: "Detected suspicious running process"
+(`ChatGPT.exe`). Normal agent conduct — spawning shells, writing and
+executing temp scripts like `applypatch.bat`, mass file writes — matches the
+EDR's malware-behavior heuristics. 2026-07-15 09:43–09:44 — the security
+team classified that activity as a threat ("The security team in your
+organization identified this activity as a threat") and remediated the
+incident: the app binary plus ~20 more files quarantined in one cascade,
+each tagged "Related threat name: ChatGPT.exe". Those files were selected by
+ASSOCIATION — things the flagged process tree had written or touched
+(extracted plugin payloads, the temp `applypatch.bat`, NuGet packages
+restored during some agent session (PDFsharp/MigraDoc — nothing in this repo
+is .NET), and a `__pycache__/line_items.cpython-313.pyc` inside an agent
+working copy of this repo) — not because their content was judged malicious
+(the batch includes localization-only `.resources.dll` satellites and npm
+test scripts). Two binding lessons: (1) the EDR flags agent BEHAVIOR, so any
+local agent run can open a new incident regardless of app version or file
+hashes; (2) incident remediation sweeps whatever the process touched, so a
+future incident can quarantine files inside the live working repo itself and
+silently break the 5 AM job / watcher. Therefore:
 
+- Do not run coding-agent processes on this PC at all. IT has declined any
+  whitelisting (2026-07-20) and the security team has formally adjudicated
+  local agent activity as a threat; every local run risks a new incident and
+  an association sweep. All agent work goes through cloud/web sessions,
+  which write nothing to this machine. The rules below are defense in depth
+  for anything that ever runs locally regardless.
 - Stay inside the pinned Python toolchain: `pip install -r requirements.txt`
   plus `playwright install chromium`, nothing else. Never install or download
   any other toolchain or standalone binary onto this machine — no .NET/NuGet
@@ -135,14 +145,10 @@ automation. Therefore, for any agent working on the local PC:
   mid-run), check the antivirus protection history for a fresh quarantine
   before debugging the code.
 
-Note: flags on the Codex app binary and its bundled plugin files cannot be
-prevented from inside this repo — those files exist the moment the app
-installs or auto-updates. Company IT has declined AV whitelisting/exclusions
-(2026-07-20), so the only reliable way to stop detections is keeping agent
-execution off the local disk: prefer cloud/web agent sessions (nothing lands
-on this PC) over local desktop runs, and when a local run is unavoidable,
-leave no residue — delete throwaway work-dir clones, `__pycache__`, and temp
-files when the task ends. Never add AV exclusions or otherwise touch endpoint
-protection on this managed machine.
+Note: because the detection is behavioral and the remediation is by
+association, no instructions file, hash exclusion, or app update can make
+local agent runs safe on this machine — the only compliant configuration is
+cloud-only agent execution. Never add AV exclusions or otherwise touch
+endpoint protection on this managed machine.
 
 <!-- END MANUAL -->
