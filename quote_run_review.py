@@ -379,6 +379,21 @@ def ingest_edits(review_store: Dict[str, Any],
 # --------------------------------------------------------------------------- #
 # Excel I/O (lazy openpyxl)                                                     #
 # --------------------------------------------------------------------------- #
+def _append_text_row(ws, values) -> None:
+    """ws.append, but a value starting with '=' stays TEXT. openpyxl types any
+    leading-'=' string as a formula, and document lines like '= 23,558' are not
+    valid formulas — Excel then 'repairs' the workbook by deleting those cells
+    (the 'We found a problem with some content' dialog). MISSED/SUSPECT rows
+    carry raw document text, so this can genuinely occur. Only the offending
+    cells are re-touched — indexing whole rows back out of the sheet is
+    quadratic on a 27k-row workbook."""
+    ws.append(values)
+    row = ws._current_row          # the row append just wrote
+    for i, v in enumerate(values, start=1):
+        if isinstance(v, str) and v.startswith("="):
+            ws.cell(row, i).data_type = "s"
+
+
 def write_workbook(path: Path, records: Dict[str, Dict[str, Any]],
                    review_store: Dict[str, Any],
                    field_order: Optional[List[str]] = None) -> int:
@@ -416,8 +431,9 @@ def write_workbook(path: Path, records: Dict[str, Dict[str, Any]],
     for r in rows:
         if r["group_start"]:
             parity ^= 1                                     # flip per order group
-        ws.append([r["order"], r["run"], r["kind"], r["item"], _excel_text(r["value"]),
-                   r["note"], "", r["status"], r["resolution"], parity, r["row_key"]])
+        _append_text_row(ws, [r["order"], r["run"], r["kind"], r["item"],
+                              _excel_text(r["value"]), r["note"], "", r["status"],
+                              r["resolution"], parity, r["row_key"]])
         if r["kind"] == KIND_RUN and r.get("path"):
             cell = ws.cell(ws.max_row, _COL["Item"] + 1)
             cell.hyperlink = r["path"]
@@ -465,7 +481,7 @@ def write_workbook(path: Path, records: Dict[str, Dict[str, Any]],
         reverse=True,
     )
     for n in handled:
-        resolved.append([
+        _append_text_row(resolved, [
             str(n.get("order", "")), str(n.get("run", "")),
             str(n.get("item", "") or n.get("item_text", "")), str(n.get("note", "")),
             str(n.get("resolution", "") or ""), str(n.get("handled_at", "") or ""),

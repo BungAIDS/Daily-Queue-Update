@@ -257,6 +257,42 @@ def test_workbook_write_read_and_sync_roundtrip(tmp: Path):
     print("  ok  test_workbook_write_read_and_sync_roundtrip")
 
 
+def test_leading_equals_text_never_becomes_a_formula(tmp: Path):
+    """The real corpus carries document lines like '= 23,558'. openpyxl types a
+    leading-'=' string as a FORMULA; Excel can't parse it and 'repairs' the
+    workbook by deleting the cell (the popup DG hit). They must stay text."""
+    import zipfile
+    from openpyxl import load_workbook
+
+    records = {"410089": {"job": "410089", "type": "GL", "folder": "Z:\\J\\410089",
+               "runs": [{"file": "QT RUN.txt", "path": "Z:\\J\\410089\\QT RUN.txt",
+                         "template": "cbc_qt_run_text", "status": "OK", "damper": False,
+                         "fields": {"Serial": "410089"}, "summary": "", "mtime": 1.0,
+                         "missed_data": ["= 23,558", "=80240-6773-6056=67,411"]}]}}
+    path = tmp / "quote_run_review.xlsx"
+    store = {"notes": []}
+    qr.record_note(store, "410089", "QT RUN.txt", "CFM", "1", "=SUM note text")
+    qr.mark_handled(store, 1, "= also starts oddly")
+    qr.write_workbook(path, records, store)
+
+    # No <f> (formula) elements may exist in any sheet part.
+    with zipfile.ZipFile(path) as z:
+        for name in z.namelist():
+            if name.startswith("xl/worksheets/") and name.endswith(".xml"):
+                assert b"<f>" not in z.read(name), f"formula leaked into {name}"
+
+    # And the text round-trips intact.
+    wb = load_workbook(str(path))
+    ws = wb[qr.REVIEW_SHEET]
+    values = [str(ws.cell(r, qr.HEADERS.index("Value") + 1).value or "")
+              for r in range(2, ws.max_row + 1)]
+    assert "= 23,558" in values and "=80240-6773-6056=67,411" in values
+    resolved = wb[qr.RESOLVED_SHEET]
+    assert str(resolved.cell(2, 5).value) == "= also starts oddly"
+    wb.close()
+    print("  ok  test_leading_equals_text_never_becomes_a_formula")
+
+
 def test_resolved_tab_keeps_history_off_the_active_row(tmp: Path):
     from openpyxl import load_workbook
 
@@ -292,6 +328,7 @@ def main() -> int:
         test_store_roundtrip,
         test_handled_marks_ledger_roundtrip,
         test_workbook_write_read_and_sync_roundtrip,
+        test_leading_equals_text_never_becomes_a_formula,
         test_resolved_tab_keeps_history_off_the_active_row,
     ]
     for t in tests_no_tmp:

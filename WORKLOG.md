@@ -3,6 +3,18 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
+## 2026-07-16 — Fix: QR review workbook tripped Excel repair (leading-'=' text)
+
+DG's first open hit "We found a problem with some content" / "Removed
+Records: Formula from sheet1.xml". Cause: three MISSED corpus lines start
+with '=' ('= 23,558', '=80240-6773-6056=67,411', '= $9,704.1') and openpyxl
+types ANY leading-'=' string as a FORMULA; Excel can't parse them and deletes
+the cells on repair. `_append_text_row` (quote_run_review) now forces those
+cells back to text — only the offending cells are re-touched (row re-indexing
+was quadratic: first fix attempt took the 27k-row build from ~6s to 3+ min).
+Regression test asserts no <f> element in any saved sheet part; verified NONE
+on the full real-corpus build. DG: Git Update → Update QR Review to rebuild.
+
 ## 2026-07-16 — Quote-Run review loop (the SO-review twin, per DG)
 
 DG: "how is quote run detection doing? could it use a boost? set up a similar
