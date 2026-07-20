@@ -884,6 +884,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .preview-job:hover { color: var(--accent); }
   .preview-hint { width: 100%; font-size: 11px; color: var(--muted); }
   .preview-diff { color: var(--bad); }
+  .attr-row.preview-match { color: var(--ink); }
   .spec.preview-diff { background: var(--bad-soft); border-radius: 6px;
     padding: 4px 6px; margin: -4px -6px; }
   .spec.preview-diff .k, .attr-row.preview-diff .k { color: var(--bad); }
@@ -1983,7 +1984,8 @@ function renderOrderPreview(leftJob, rightJob) {
           || GLQSimilarity.valueSimilarity(leftAttrs[key], value) < 1;
       }
       return '<div class="attr-row' + (differs ? " preview-diff" : "")
-        + (relevant ? " preview-relevant" : "") + '">'
+        + (relevant ? " preview-relevant" : "")
+        + (!differs && !relevant ? " preview-match" : "") + '">'
         + '<span class="k">' + esc(key.replace(/_/g, " ")) + ':</span>'
         + '<span class="v">' + esc(value) + '</span>'
         + (relevant ? '<span class="pin">selected match</span>' : "") + '</div>';

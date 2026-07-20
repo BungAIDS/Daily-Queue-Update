@@ -206,6 +206,7 @@ def test_render_roundtrip_and_safety():
     assert "click order # again to move it to the left" in html
     assert "red = scored construction difference" in html
     assert "preview-relevant" in html
+    assert "preview-match" in html
     assert "green = selected combination match" in html
     assert "combinedFocusedSimilarity" in html
     assert "state.selections" in html
