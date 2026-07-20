@@ -1065,6 +1065,10 @@ async function boot() {
   document.querySelector("footer").style.display = "";
   $("stamp").textContent = "generated " + DB.gen + " · " + DB.n_jobs
     + " orders · " + DB.n_items + " line items";
+  try {   // hover the stamp to see WHICH copy of the page this is
+    $("stamp").title = decodeURIComponent(location.pathname.replace(/^\//, ""))
+      .replace(/\//g, "\\");
+  } catch (e) {}
   loadPrefs();
   restoreState();
   render();                       // also seeds the first history entry (syncNav)
