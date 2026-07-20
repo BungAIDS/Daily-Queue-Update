@@ -159,6 +159,73 @@ function testFocusedMatchIdentifiesTheExactCandidateComponent() {
     "preview green highlight must follow the candidate chosen by focused ranking");
 }
 
+function testCombinedFocusRequiresEverySelectedComponent() {
+  const wheel = component("WHEEL", { material: "CARBON STEEL" });
+  const motor = component("MOTOR", { motor_hp: "40", enclosure: "TEFC" });
+  const source = order({ cp: [wheel, motor] });
+  const requirements = [
+    { component: wheel, pins: new Set() },
+    { component: motor, pins: new Set() },
+  ];
+  const missingMotor = order({ cp: [copy(wheel)] });
+  assert.strictEqual(sim.combinedFocusedSimilarity(
+    sim.orderSimilarity(source, missingMotor), requirements, missingMotor), null,
+  "every selected component must exist on the candidate order");
+
+  const complete = order({ cp: [copy(wheel), copy(motor)] });
+  const focused = sim.combinedFocusedSimilarity(
+    sim.orderSimilarity(source, complete), requirements, complete);
+  assert.ok(focused && focused.matches.length === 2,
+    "all selected components should contribute to one combination score");
+}
+
+function testCombinedAttributesStayTiedToTheirComponents() {
+  const damper = component("DAMPER", {
+    operation: "AUTOMATIC", damper_type: "OUTLET",
+  });
+  const motor = component("MOTOR", { enclosure: "TEFC" });
+  const source = order({ cp: [damper, motor] });
+  const requirements = [
+    { component: damper, pins: new Set([
+      "operation=AUTOMATIC", "damper_type=OUTLET",
+    ]) },
+    { component: motor, pins: new Set(["enclosure=TEFC"]) },
+  ];
+  const wrong = order({ cp: [
+    component("DAMPER", {
+      operation: "MANUAL", damper_type: "OUTLET", enclosure: "TEFC",
+    }),
+    component("MOTOR", { operation: "AUTOMATIC", enclosure: "ODP" }),
+  ] });
+  assert.strictEqual(sim.combinedFocusedSimilarity(
+    sim.orderSimilarity(source, wrong), requirements, wrong), null,
+    "attributes on different components must not satisfy the combination");
+
+  const partial = order({ cp: [
+    component("DAMPER", { operation: "AUTOMATIC", damper_type: "INLET" }),
+    component("MOTOR", { enclosure: "TEFC" }),
+  ] });
+  assert.strictEqual(sim.combinedFocusedSimilarity(
+    sim.orderSimilarity(source, partial), requirements, partial), null,
+    "every selected attribute on one component must match together");
+}
+
+function testCombinedDuplicateSelectionsNeedDistinctCandidates() {
+  const first = component("DAMPER", { location: "INLET" });
+  const second = component("DAMPER", { location: "OUTLET" });
+  const source = order({ cp: [first, second] });
+  const requirements = [
+    { component: first, pins: new Set(["location=INLET"]) },
+    { component: second, pins: new Set(["location=OUTLET"]) },
+  ];
+  const oneDamper = order({ cp: [component("DAMPER", {
+    location: "INLET | OUTLET",
+  })] });
+  assert.strictEqual(sim.combinedFocusedSimilarity(
+    sim.orderSimilarity(source, oneDamper), requirements, oneDamper), null,
+  "one candidate component cannot satisfy two selected component instances");
+}
+
 function testSparseEvidenceCannotLookIdentical() {
   const a = { sp: [["Design", "BC-220"]], it: [], cp: [] };
   const b = copy(a);
@@ -187,6 +254,9 @@ function main() {
   testDifferentDesignDoesNotTreatRawSizeCodeAsComparable();
   testRequiredAttributesStayOnSelectedComponent();
   testFocusedMatchIdentifiesTheExactCandidateComponent();
+  testCombinedFocusRequiresEverySelectedComponent();
+  testCombinedAttributesStayTiedToTheirComponents();
+  testCombinedDuplicateSelectionsNeedDistinctCandidates();
   testSparseEvidenceCannotLookIdentical();
   testAlwaysBounded();
   console.log("All order similarity tests passed.");

@@ -334,25 +334,104 @@
         && attrMatches(component.a[key], wanted);
     });
   }
-  function focusedSimilarity(whole, targetComponent, candidate, pins) {
-    const eligible = componentsNamed(candidate, targetComponent.n)
-      .filter(c => componentHasRequired(c, pins));
-    if (!eligible.length) return null;
-    let best = null, bestComponent = null;
-    for (const c of eligible) {
-      const got = componentSimilarity(targetComponent, c);
-      if (!best || got.score > best.score) { best = got; bestComponent = c; }
+  function bestDistinctComponentMatches(requirements, candidates) {
+    if (candidates.length < requirements.length) return null;
+    const options = requirements.map((requirement, requirementIndex) =>
+      candidates.flatMap((candidate, candidateIndex) => {
+        if (!componentHasRequired(candidate, requirement.pins)) return [];
+        return [{ requirementIndex, candidateIndex, candidate,
+                  result: componentSimilarity(requirement.component, candidate) }];
+      }));
+    if (options.some(row => !row.length)) return null;
+    if (requirements.length === 1) {
+      const best = options[0].reduce((winner, option) => !winner
+        || option.result.score > winner.result.score
+        || (option.result.score === winner.result.score
+          && option.result.coverage > winner.result.coverage) ? option : winner, null);
+      return [best];
     }
+
+    /* Conflicts only occur among requirements with the same normalized name.
+     * Explore the most constrained requirement first and keep the best unique
+     * assignment.  Duplicate components are uncommon, so this stays small. */
+    const order = requirements.map((_, index) => index)
+      .sort((a, b) => options[a].length - options[b].length || a - b);
+    const used = new Set(), chosen = new Array(requirements.length);
+    let best = null, bestScore = -1, bestCoverage = -1;
+    const walk = (depth, score, coverage) => {
+      if (score + (requirements.length - depth) < bestScore) return;
+      if (depth === order.length) {
+        if (score > bestScore || (score === bestScore && coverage > bestCoverage)) {
+          bestScore = score; bestCoverage = coverage; best = chosen.slice();
+        }
+        return;
+      }
+      const requirementIndex = order[depth];
+      for (const option of options[requirementIndex]) {
+        if (used.has(option.candidateIndex)) continue;
+        used.add(option.candidateIndex); chosen[requirementIndex] = option;
+        walk(depth + 1, score + option.result.score,
+          coverage + option.result.coverage);
+        used.delete(option.candidateIndex);
+      }
+    };
+    walk(0, 0, 0);
+    return best;
+  }
+  function combinedFocusedSimilarity(whole, requirements, candidate) {
+    if (!requirements || !requirements.length) return null;
+    const normalized = requirements.map((requirement, index) => ({
+      index,
+      component: requirement && (requirement.component || requirement.targetComponent),
+      pins: new Set((requirement && requirement.pins) || []),
+    }));
+    if (normalized.some(requirement => !requirement.component)) return null;
+    const groups = new Map();
+    for (const requirement of normalized) {
+      const key = norm(requirement.component.n);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(requirement);
+    }
+
+    const matches = new Array(normalized.length);
+    for (const [name, group] of groups) {
+      const candidates = componentsNamed(candidate, name);
+      const assigned = bestDistinctComponentMatches(group, candidates);
+      if (!assigned) return null;
+      for (const option of assigned) {
+        const requirement = group[option.requirementIndex];
+        matches[requirement.index] = {
+          targetComponent: requirement.component,
+          candidateComponent: option.candidate,
+          pins: requirement.pins,
+          score: option.result.score,
+          coverage: option.result.coverage,
+          differences: option.result.differences,
+        };
+      }
+    }
+    const componentScore = matches.reduce((sum, match) => sum + match.score, 0)
+      / matches.length;
+    const componentCoverage = matches.reduce((sum, match) => sum + match.coverage, 0)
+      / matches.length;
     const componentWeight = 1 - FOCUS_WHOLE_WEIGHT;
     return {
-      score: clamp01(FOCUS_WHOLE_WEIGHT * whole.score + componentWeight * best.score),
+      score: clamp01(FOCUS_WHOLE_WEIGHT * whole.score
+        + componentWeight * componentScore),
       coverage: clamp01(FOCUS_WHOLE_WEIGHT * whole.coverage
-        + componentWeight * best.coverage),
-      componentScore: best.score,
-      componentCoverage: best.coverage,
-      candidateComponent: bestComponent,
-      differences: best.differences,
+        + componentWeight * componentCoverage),
+      componentScore,
+      componentCoverage,
+      candidateComponents: matches.map(match => match.candidateComponent),
+      matches,
+      differences: [...new Set(matches.flatMap(match => match.differences))],
     };
+  }
+  function focusedSimilarity(whole, targetComponent, candidate, pins) {
+    const combined = combinedFocusedSimilarity(whole,
+      [{ component: targetComponent, pins }], candidate);
+    if (!combined) return null;
+    return { ...combined, candidateComponent: combined.candidateComponents[0] };
   }
 
   return {
@@ -371,6 +450,7 @@
     componentSimilarity,
     componentHasRequired,
     orderSimilarity,
+    combinedFocusedSimilarity,
     focusedSimilarity,
   };
 }));

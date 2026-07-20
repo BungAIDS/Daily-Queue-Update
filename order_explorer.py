@@ -1019,8 +1019,8 @@ let DB = null;                 // {gen, today, n_jobs, n_items, jobs, ev, rm, nw
 let IDX = null;                // explanatory line/tag sets, built once per page
 let COSET = new Set();         // jobs a CO# landed on today (red text)
 let NWSET = null;              // the watcher's exact new-today set (null = derive)
-const state = { tab: "board", job: null, path: null, whole: false, previewJob: null,
-                pinned: new Set(), histQ: "", histN: 500,
+const state = { tab: "board", job: null, whole: false, previewJob: null,
+                selections: new Map(), histQ: "", histN: 500,
                 boardQ: "", boardSort: null, histSort: null, only3d: false };
 
 const $ = id => document.getElementById(id);
@@ -1137,8 +1137,8 @@ function pollVersion() {
 function reloadFresh() {
   try {
     sessionStorage.setItem(STATE_KEY, JSON.stringify({
-      tab: state.tab, job: state.job, path: state.path, whole: state.whole,
-      pinned: [...state.pinned], histQ: state.histQ, y: window.scrollY,
+      tab: state.tab, job: state.job, selections: encodeSelections(),
+      whole: state.whole, histQ: state.histQ, y: window.scrollY,
       refreshed: 1 }));
   } catch (e) {}
   location.reload();
@@ -1149,8 +1149,11 @@ function restoreState() {
         sessionStorage.removeItem(STATE_KEY); } catch (e) {}
   if (!saved) return;
   if (saved.job && DB.jobs[saved.job]) {
-    state.job = saved.job; state.path = saved.path; state.whole = !!saved.whole;
-    state.pinned = new Set(saved.pinned || []);
+    state.job = saved.job; state.whole = !!saved.whole;
+    state.selections = decodeSelections(saved.selections, saved.path, saved.pinned);
+    for (const path of state.selections.keys())
+      if (!compAt(DB.jobs[saved.job], path)) state.selections.delete(path);
+    if (state.selections.size) state.whole = false;
   }
   state.tab = ["board", "changes", "hist", "job"].includes(saved.tab)
     ? saved.tab : "board";
@@ -1229,22 +1232,47 @@ function compItems(entry, path) {
   }
   return nos.map(no => itemByNo(entry, no)).filter(Boolean);
 }
-function findCompByName(entry, name) {
-  const walk = list => {
-    for (const c of list || []) {
-      if (c.n === name) return c;
-      const hit = walk(c.s);
-      if (hit) return hit;
+function encodeSelections() {
+  return [...state.selections].map(([path, pins]) => [path, [...pins]]);
+}
+function decodeSelections(raw, legacyPath, legacyPins) {
+  const out = new Map();
+  if (Array.isArray(raw)) {
+    for (const row of raw) {
+      if (!Array.isArray(row) || row.length < 1) continue;
+      out.set(String(row[0]), new Set(Array.isArray(row[1]) ? row[1] : []));
     }
-    return null;
-  };
-  return walk(entry.cp);
+  } else if (legacyPath !== null && legacyPath !== undefined) {
+    /* Migrate an open page refreshed from the former single-selection state. */
+    out.set(String(legacyPath), new Set(legacyPins || []));
+  }
+  return out;
+}
+function selectedRequirements(entry) {
+  const requirements = [];
+  for (const [path, pins] of state.selections) {
+    const component = compAt(entry, path);
+    if (component) requirements.push({ path, component, pins });
+  }
+  return requirements;
+}
+function selectedItems(entry, requirements) {
+  const seen = new Set(), rows = [];
+  for (const requirement of requirements) {
+    for (const row of compItems(entry, requirement.path)) {
+      const key = row[IT.NO];
+      if (seen.has(key)) continue;
+      seen.add(key); rows.push(row);
+    }
+  }
+  return rows;
 }
 /* ---- bounded construction matching.  GLQSimilarity is the exact standalone
    module embedded above and directly exercised by test_order_similarity.js. */
-function rankMatches(srcJob, items, targetComponent) {
+function rankMatches(srcJob, items, requirements) {
   const { sets } = ensureIndex();
   const source = DB.jobs[srcJob];
+  const hasFocus = !!requirements.length;
   const tTags = new Set(), tNorms = new Set();
   for (const row of items) {
     for (const tg of row[IT.TAGS]) tTags.add(tg);
@@ -1255,11 +1283,11 @@ function rankMatches(srcJob, items, targetComponent) {
     if (j === srcJob) continue;
     const candidate = DB.jobs[j];
     const whole = GLQSimilarity.orderSimilarity(source, candidate);
-    if (!targetComponent && !whole.sharedEvidence) continue;
-    const focused = targetComponent
-      ? GLQSimilarity.focusedSimilarity(whole, targetComponent, candidate, state.pinned)
+    if (!hasFocus && !whole.sharedEvidence) continue;
+    const focused = hasFocus
+      ? GLQSimilarity.combinedFocusedSimilarity(whole, requirements, candidate)
       : null;
-    if (targetComponent && !focused) continue;
+    if (hasFocus && !focused) continue;
     const s = sets[j];
     const sharedNorms = [];
     for (const n of tNorms) if (s.n.has(n)) sharedNorms.push(n);
@@ -1270,7 +1298,7 @@ function rankMatches(srcJob, items, targetComponent) {
       wholeScore: whole.score,
       coverage: focused ? focused.coverage : whole.coverage,
       componentScore: focused ? focused.componentScore : null,
-      matchedComponent: focused ? focused.candidateComponent : null,
+      selectionMatches: focused ? focused.matches : [],
       groups: whole.groups,
       differences: [...new Set([
         ...(focused ? focused.differences : []), ...whole.differences,
@@ -1303,8 +1331,8 @@ function render() {
    same chain; in-view refinements update the current entry in place. ------ */
 let NAV_POS = 0, POPPING = false;
 function navSnapshot() {
-  return { tab: state.tab, job: state.job, path: state.path,
-           whole: state.whole, pinned: [...state.pinned], i: NAV_POS };
+  return { tab: state.tab, job: state.job, selections: encodeSelections(),
+           whole: state.whole, i: NAV_POS };
 }
 function pushNav() {
   NAV_POS++;
@@ -1326,9 +1354,13 @@ window.addEventListener("popstate", ev => {
   state.tab = ["board", "changes", "hist", "job"].includes(s.tab) ? s.tab : "board";
   state.job = s.job && DB.jobs[s.job] ? s.job : null;
   if (state.tab === "job" && !state.job) state.tab = "board";
-  state.path = s.path === undefined ? null : s.path;
   state.whole = !!s.whole;
-  state.pinned = new Set(s.pinned || []);
+  state.selections = decodeSelections(s.selections, s.path, s.pinned);
+  if (state.job) {
+    for (const path of state.selections.keys())
+      if (!compAt(DB.jobs[state.job], path)) state.selections.delete(path);
+  }
+  if (state.selections.size) state.whole = false;
   state.previewJob = null;
   render();
   POPPING = false;
@@ -1345,7 +1377,7 @@ function selectJob(j) {
      view) — a component/attribute click narrows from there. */
   state.previewJob = null;
   if (state.tab === "job" && state.job === j) { render(); return; }
-  state.job = j; state.path = null; state.whole = true; state.pinned.clear();
+  state.job = j; state.whole = true; state.selections.clear();
   state.tab = "job";
   pushNav();
   savePrefs(); render(); window.scrollTo(0, 0);
@@ -1708,18 +1740,20 @@ function renderJobPane() {
     + e.h.map(x => "<div>" + esc(x) + "</div>").join("") + "</details>" : "";
 
   const compCard = (c, path) => {
-    const active = !state.whole && state.path === path;
+    const selectedPins = state.selections.get(path);
+    const active = !state.whole && !!selectedPins;
     const items = c.i.map(no => itemByNo(e, no)).filter(Boolean);
     const attrs = Object.entries(c.a).map(([k, v]) => {
       const key = k + "=" + v;
-      const pin = state.pinned.has(key) && !state.whole && state.path === path;
+      const pin = active && selectedPins.has(key);
       return '<button class="attr-row' + (pin ? " pinned" : "")
         + '" data-a="' + esc(key) + '" data-p="' + path
-        + '" title="Find orders whose ' + esc(c.n)
-        + ' has this attribute — most similar fans first">'
+        + '" title="Require this ' + esc(c.n)
+        + ' attribute together with every other selected component and attribute">'
         + '<span class="k">' + esc(k.replace(/_/g, " ")) + ':</span>'
         + '<span class="v">' + esc(v) + '</span>'
-        + '<span class="pin">' + (pin ? "✕ required" : "find matches") + "</span></button>";
+        + '<span class="pin">' + (pin ? "✕ required" : "add requirement")
+        + "</span></button>";
     }).join("");
     const revs = (c.r || []).map(x => '<div class="rev-row">' + esc(x) + "</div>").join("");
     const srcs = items.length > 1 ? items.map((row, i) =>
@@ -1728,12 +1762,15 @@ function renderJobPane() {
     const subs = (c.s || []).map((ch, ix) =>
       '<div class="subwrap">' + compCard(ch, path + "." + ix) + "</div>").join("");
     return '<div class="comp' + (active ? " active" : "") + '">'
-      + '<button class="comp-row" data-c="' + path + '">'
+      + '<button class="comp-row" data-c="' + path
+      + '" title="Add or remove this component from the combination search">'
       + '<span class="name">' + (c.k ? "[" + esc(c.n) + "]" : esc(c.n)) + "</span>"
       + '<span class="meta">' + (items.length || "") + (items.length > 1 ? " lines"
         : items.length === 1 ? " line" : "") + "</span>"
       + '<span class="price">' + (c.p ? money(c.p) : "") + "</span>"
-      + '<span class="go">find matches ▸</span></button>'
+      + '<span class="go">' + (active
+        ? (selectedPins.size ? selectedPins.size + " attrs required" : "✕ required")
+        : "add to search ▸") + '</span></button>'
       + '<div class="comp-kids">' + attrs + revs + subs + srcs + "</div></div>";
   };
   const tree = e.cp.length
@@ -1756,7 +1793,9 @@ function renderJobPane() {
     + (meta.length ? '<div class="metaline">' + meta.join(" ") + "</div>" : "")
     + hist
     + '<div class="sectionbar"><span class="eyebrow">Components</span>'
-    + '<span class="hint">click one to rank past orders that share it</span>'
+    + '<span class="hint">select any combination of components and attributes (AND)</span>'
+    + (state.selections.size ? '<span class="hint">' + state.selections.size
+        + " component" + (state.selections.size === 1 ? "" : "s") + " selected</span>" : "")
     + '<button class="wholebtn' + (state.whole ? " active" : "")
     + '" id="whole">match whole order</button></div>'
     + '<div class="tree">' + tree + "</div></div>";
@@ -1766,20 +1805,23 @@ function renderJobPane() {
     state.previewJob = null;
     if (hadPreview && state.whole) { render(); return; }
     state.whole = !state.whole;
-    if (state.whole) { state.path = null; state.pinned.clear(); } render(); };
+    if (state.whole) state.selections.clear();
+    render(); };
   el.querySelectorAll(".comp-row").forEach(b => b.onclick = () => {
-    state.previewJob = null; state.whole = false; state.path = b.dataset.c;
-    state.pinned.clear(); render();
+    state.previewJob = null; state.whole = false;
+    state.selections.has(b.dataset.c)
+      ? state.selections.delete(b.dataset.c)
+      : state.selections.set(b.dataset.c, new Set());
+    render();
   });
-  /* An attribute click works standalone: it targets the component the
-     attribute belongs to and requires the attribute on every match. */
+  /* Attribute requirements remain attached to their own component, while
+     selections on other components stay active as one AND combination. */
   el.querySelectorAll(".attr-row").forEach(b => b.onclick = () => {
     const k = b.dataset.a, p = b.dataset.p;
-    state.previewJob = null;
-    if (state.whole || state.path !== p) {
-      state.whole = false; state.path = p; state.pinned.clear();
-    }
-    state.pinned.has(k) ? state.pinned.delete(k) : state.pinned.add(k);
+    state.previewJob = null; state.whole = false;
+    if (!state.selections.has(p)) state.selections.set(p, new Set());
+    const pins = state.selections.get(p);
+    pins.has(k) ? pins.delete(k) : pins.add(k);
     render();
   });
 }
@@ -1836,20 +1878,20 @@ function renderOrderPreview(leftJob, rightJob) {
   const leftSpecs = GLQSimilarity.specMap(left);
   const rightSpecs = GLQSimilarity.specMap(right);
   const comparison = GLQSimilarity.orderSimilarity(left, right);
-  const selectedComponent = !state.whole && state.path !== null
-    ? compAt(left, state.path) : null;
-  const focused = selectedComponent
-    ? GLQSimilarity.focusedSimilarity(
-        comparison, selectedComponent, right, state.pinned)
+  const requirements = state.whole ? [] : selectedRequirements(left);
+  const focused = requirements.length
+    ? GLQSimilarity.combinedFocusedSimilarity(comparison, requirements, right)
     : null;
-  const relevantComponent = focused ? focused.candidateComponent : null;
-  const relevantPins = [...state.pinned].flatMap(raw => {
-    const ix = raw.indexOf("=");
-    return ix > 0 ? [{ raw, key: raw.slice(0, ix) }] : [];
-  });
-  const isRelevantAttr = (component, key) => component === relevantComponent
-    && relevantPins.some(pin => pin.key === key
-      && GLQSimilarity.componentHasRequired(component, new Set([pin.raw])));
+  const relevantMatches = new Map((focused ? focused.matches : [])
+    .map(match => [match.candidateComponent, match]));
+  const isRelevantAttr = (component, key) => {
+    const match = relevantMatches.get(component);
+    return !!match && [...match.pins].some(pin => {
+      const ix = pin.indexOf("=");
+      return ix > 0 && pin.slice(0, ix) === key
+        && GLQSimilarity.componentHasRequired(component, new Set([pin]));
+    });
+  };
   const shownSpecs = new Set();
   let specs = (right.sp || []).map(([label, value]) => {
     shownSpecs.add(label);
@@ -1894,9 +1936,10 @@ function renderOrderPreview(leftJob, rightJob) {
     : "";
 
   const compCard = component => {
-    const componentRelevant = component === relevantComponent;
-    const reference = componentRelevant && selectedComponent
-      ? selectedComponent : bestPreviewReference(left, component);
+    const relevantMatch = relevantMatches.get(component);
+    const componentRelevant = !!relevantMatch;
+    const reference = componentRelevant
+      ? relevantMatch.targetComponent : bestPreviewReference(left, component);
     const slot = GLQSimilarity.componentSlot(component);
     const scored = !!(slot && slot.weight);
     const componentDiff = scored && (!reference
@@ -1954,9 +1997,11 @@ function renderOrderPreview(leftJob, rightJob) {
   const tree = (right.cp || []).length
     ? right.cp.map(compCard).join("")
     : '<div class="empty">No line items captured for this order yet.</div>';
-  const comparisonHint = relevantComponent
-    ? "green = selected component/attribute match · red = other scored difference from "
+  const comparisonHint = relevantMatches.size
+    ? "green = selected combination match · red = other scored difference from "
     : "red = scored construction difference from ";
+  const previewScore = focused ? focused.score : comparison.score;
+  const previewScoreLabel = focused ? "combo " : "match ";
 
   el.innerHTML = '<div class="panel-head">'
     + '<button class="backlink" id="matchlistback">← Back to List</button>'
@@ -1976,7 +2021,8 @@ function renderOrderPreview(leftJob, rightJob) {
     + hist + countSummary
     + '<div class="sectionbar"><span class="eyebrow">Components</span>'
     + '<span class="hint">' + comparisonHint + esc(leftJob)
-    + '</span><span class="m-score">match ' + comparison.score.toFixed(3) + '</span></div>'
+    + '</span><span class="m-score">' + previewScoreLabel
+    + previewScore.toFixed(3) + '</span></div>'
     + '<div class="tree preview-tree">' + tree + '</div></div>';
 
   $("matchlistback").onclick = () => { state.previewJob = null; renderMatches(); };
@@ -1985,7 +2031,9 @@ function renderOrderPreview(leftJob, rightJob) {
 
 function renderMatches() {
   const el = $("right");
-  const ready = state.job && (state.whole || state.path !== null);
+  const j = state.job, e = j ? DB.jobs[j] : null;
+  const requirements = e && !state.whole ? selectedRequirements(e) : [];
+  const ready = e && (state.whole || requirements.length);
   if (!ready) {
     el.innerHTML = '<div class="panel-head"><span class="eyebrow">Matching orders</span></div>'
       + '<div class="empty"><div class="big">'
@@ -1994,7 +2042,6 @@ function renderMatches() {
       + "with the line items that made it a match.</div>";
     return;
   }
-  const j = state.job, e = DB.jobs[j];
   if (state.previewJob) {
     if (state.previewJob !== j && DB.jobs[state.previewJob]) {
       renderOrderPreview(j, state.previewJob);
@@ -2003,20 +2050,34 @@ function renderMatches() {
     state.previewJob = null;
   }
   const srcDesign = spv(e, "Design");
-  const items = state.whole ? e.it : compItems(e, state.path);
-  const targetComp = state.whole ? null : compAt(e, state.path);
-  const target = state.whole ? "whole order" : (() => {
-    const c = compAt(e, state.path);
-    return c ? (c.k ? "[" + c.n + "]" : c.n) : "?";
-  })();
-  const resAll = rankMatches(j, items, targetComp);
+  const items = state.whole ? e.it : selectedItems(e, requirements);
+  const attrCount = requirements.reduce((sum, requirement) =>
+    sum + requirement.pins.size, 0);
+  const target = state.whole ? "whole order" : requirements.length === 1
+    ? (requirements[0].component.k ? "[" + requirements[0].component.n + "]"
+      : requirements[0].component.n)
+      + (attrCount ? " · " + attrCount + " required attr"
+        + (attrCount === 1 ? "" : "s") : "")
+    : requirements.length + " selected components"
+      + (attrCount ? " · " + attrCount + " required attrs" : "");
+  const resAll = rankMatches(j, items, requirements);
   const res = state.only3d ? resAll.filter(r => DB.jobs[r.j].sw) : resAll;
   const shown = res.slice(0, 25);
-  const chips = [...state.pinned].map(p => {
-    const ix = p.indexOf("=");
-    return '<button class="fchip" data-a="' + esc(p) + '" title="Remove this filter">'
-      + esc(p.slice(0, ix).replace(/_/g, " ")) + ": " + esc(p.slice(ix + 1))
-      + " <span>✕</span></button>";
+  const chips = requirements.flatMap(requirement => {
+    const componentName = requirement.component.k
+      ? "[" + requirement.component.n + "]" : requirement.component.n;
+    const componentChip = '<button class="fchip" data-kind="component" data-p="'
+      + esc(requirement.path) + '" title="Remove this component and its attributes">'
+      + esc(componentName) + " <span>✕</span></button>";
+    const attrChips = [...requirement.pins].map(pin => {
+      const ix = pin.indexOf("=");
+      return '<button class="fchip" data-kind="attribute" data-p="'
+        + esc(requirement.path) + '" data-a="' + esc(pin)
+        + '" title="Remove this required attribute">' + esc(componentName) + " · "
+        + esc(pin.slice(0, ix).replace(/_/g, " ")) + ": " + esc(pin.slice(ix + 1))
+        + " <span>✕</span></button>";
+    });
+    return [componentChip, ...attrChips];
   }).join("");
 
   const cards = shown.map((r, i) => {
@@ -2029,23 +2090,20 @@ function renderMatches() {
       + esc(row[IT.PRICE]) + "</span></div>").join("");
     const more = lines.length > 4
       ? '<div class="m-more">+ ' + (lines.length - 4) + " more shared lines</div>" : "";
-    let chipsHtml = "";
-    if (targetComp) {
-      const theirs = r.matchedComponent || findCompByName(o, targetComp.n);
-      if (theirs) {
-        const same = [], diff = [];
-        for (const [k, v] of Object.entries(targetComp.a)) {
-          if (!(k in theirs.a)) continue;
-          if (theirs.a[k] === v) same.push(k.replace(/_/g, " ") + ": " + v);
-          else diff.push(k.replace(/_/g, " ") + ": theirs " + theirs.a[k]);
-        }
-        if (same.length || diff.length)
-          chipsHtml = '<div class="m-chips">'
-            + same.map(a => '<span class="chip same">✓ ' + esc(a) + "</span>").join("")
-            + diff.map(a => '<span class="chip diff">≠ ' + esc(a) + "</span>").join("")
-            + "</div>";
-      }
-    }
+    const selectedChips = r.selectionMatches.flatMap(match => {
+      const componentName = match.targetComponent.k
+        ? "[" + match.targetComponent.n + "]" : match.targetComponent.n;
+      const componentChip = '<span class="chip same">✓ ' + esc(componentName) + "</span>";
+      const attrs = [...match.pins].map(pin => {
+        const ix = pin.indexOf("=");
+        return '<span class="chip same">✓ ' + esc(componentName) + " · "
+          + esc(pin.slice(0, ix).replace(/_/g, " ")) + ": "
+          + esc(pin.slice(ix + 1)) + "</span>";
+      });
+      return [componentChip, ...attrs];
+    });
+    const chipsHtml = selectedChips.length
+      ? '<div class="m-chips">' + selectedChips.join("") + "</div>" : "";
     const foot = ['<span class="' + (o.d ? "dwg" : "nodwg") + '">'
       + (o.d ? "custom DWGs: " + esc(o.d) : "no custom DWGs") + "</span>"];
     if (o.f) foot.push('<a href="' + esc(folderUrl(o.f)) + '" title="'
@@ -2061,8 +2119,8 @@ function renderMatches() {
       ? '<span class="chip same">✓ design ' + esc(srcDesign) + "</span>" : "";
     const spec = fanSpec(o);
     const g = r.groups;
-    const scoreLabel = targetComp
-      ? "focus " + r.score.toFixed(3) + " · whole " + r.wholeScore.toFixed(3)
+    const scoreLabel = requirements.length
+      ? "combo " + r.score.toFixed(3) + " · whole " + r.wholeScore.toFixed(3)
       : "match " + r.score.toFixed(3);
     const breakdown = "core " + g.core.toFixed(2)
       + " · construction " + g.construction.toFixed(2)
@@ -2099,22 +2157,29 @@ function renderMatches() {
     + (res.length === 1 ? "" : "es")
     + (state.only3d && resAll.length !== res.length
         ? " (of " + resAll.length + ")" : "")
-    + " · bounded construction score"
+    + (requirements.length ? " · bounded combination score" : " · bounded construction score")
     + "</span></div>"
-    + (state.pinned.size
-        ? '<div class="filterbar"><span class="fl">Required attributes:</span>'
+    + (requirements.length
+        ? '<div class="filterbar"><span class="fl">Required combination:</span>'
           + chips + "</div>" : "")
     + (res.length ? cards : '<div class="empty"><div class="big">No orders match</div>'
         + (state.only3d && resAll.length
             ? "None of the " + resAll.length + " matches has SolidWorks 3D data "
               + "on file — turn off Has 3D, or run the SolidWorks scan if it "
               + "has never been run."
-            : state.pinned.size ? "Try removing a required attribute."
+            : requirements.length ? "No order contains the full selected combination. "
+              + "Try removing one component or attribute."
               : "Nothing has comparable construction evidence yet.") + "</div>")
     + (res.length > 25 ? '<div class="tailnote">…and ' + (res.length - 25)
-        + " more — narrow it with a required attribute</div>" : "");
+        + " more — narrow it with another component or attribute</div>" : "");
   el.querySelectorAll(".fchip").forEach(b => b.onclick = () => {
-    state.pinned.delete(b.dataset.a); render(); });
+    if (b.dataset.kind === "component") state.selections.delete(b.dataset.p);
+    else {
+      const pins = state.selections.get(b.dataset.p);
+      if (pins) pins.delete(b.dataset.a);
+    }
+    render();
+  });
   el.querySelectorAll(".m-job").forEach(b => b.onclick = () => {
     state.previewJob = b.dataset.job;
     renderMatches();
