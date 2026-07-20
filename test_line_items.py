@@ -707,6 +707,48 @@ def test_motor_core_attributes_and_unclassified_detail_review():
     ]
 
 
+def test_motor_special_attributes_join_wrapped_nameplate_commitments():
+    motor = li.extract_items([
+        "Motor (Model 0604XDSB41A-P) C 11,435.83",
+        "Vendor: Toshiba",
+        "60 HP, 1800 RPM, Enclosure: TEFC Premium",
+        "364T, Cast Iron, Foot Mounted, 3/60/460, F1,",
+        "1.15 SF",
+        "Motors meet NEMA GM 7E-TA spec and are",
+        "silicone free.",
+        'Motors will be re-nameplated as "IEEE841',
+        'features only" due to the AEGIS shaft',
+        "grounding ring, which voids Div 2 capabilities.",
+        'We will ADD "Meets GM 7E-TA Spec"',
+        "nameplate.",
+    ])[0]
+    attrs = motor["attributes"]
+    assert attrs["motor_shaft_grounding"] == "SHAFT GROUNDING RING"
+    assert attrs["motor_duty"] == "IEEE 841 FEATURES ONLY"
+    assert attrs["special_attribute"] == [
+        "MOTORS MEET NEMA GM 7E-TA SPEC AND ARE SILICONE FREE.",
+        'MOTORS WILL BE RE-NAMEPLATED AS "IEEE841 FEATURES ONLY" DUE TO THE '
+        "AEGIS SHAFT GROUNDING RING, WHICH VOIDS DIV 2 CAPABILITIES.",
+        'WE WILL ADD "MEETS GM 7E-TA SPEC" NAMEPLATE.',
+    ]
+    assert not motor.get("review_flags")
+
+    exception = li.extract_items([
+        "Motor C 10,000.00",
+        "Toshiba will provide nameplate to read:",
+        "\ufffdCOMPLIANCE WITH GM7E-TA WITH",
+        "EXCEPTION PER TIC-2025-02-SGM7A-TE-R02\ufffd.",
+        "Toshiba standard is laser etched not raised",
+        "letters.",
+    ])[0]
+    assert exception["attributes"]["special_attribute"] == [
+        'TOSHIBA WILL PROVIDE NAMEPLATE TO READ: "COMPLIANCE WITH GM7E-TA WITH '
+        'EXCEPTION PER TIC-2025-02-SGM7A-TE-R02".',
+        "TOSHIBA STANDARD IS LASER ETCHED NOT RAISED LETTERS.",
+    ]
+    assert not exception.get("review_flags")
+
+
 def test_selected_drive_table_attributes():
     items = li.extract_items([
         "1515/1515 B116 3 3TB80 Q1 3B5V94 B 1.49 45.24 436.00",
@@ -1489,6 +1531,23 @@ def test_unpunched_flange_is_not_punched():
     assert inlet["attributes"]["punched"] == "NO"
     assert "flange_type" not in inlet["attributes"]
     assert "inlet_subcategory" not in inlet["attributes"]
+
+    removed = li.extract_items([
+        "Remove outlet flange, Inquiry Num: 317-23-1131 L",
+    ])[0]
+    assert removed["attributes"]["component"] == "OUTLET"
+    assert removed["attributes"]["flanged"] == "NO"
+    assert removed["attributes"]["punched"] == "NO"
+    assert removed["attributes"]["flange_instruction"] == "REMOVE"
+    assert "flange_type" not in removed["attributes"]
+
+    removed_flanged = li.extract_items([
+        "Remove flanged Outlet, Inquiry Num: 317-25-1715 L",
+    ])[0]
+    assert removed_flanged["attributes"]["component"] == "OUTLET"
+    assert removed_flanged["attributes"]["flanged"] == "NO"
+    assert removed_flanged["attributes"]["punched"] == "NO"
+    assert "flange_type" not in removed_flanged["attributes"]
     # The punched wording keeps its original attributes.
     punched = li.extract_items(["Outlet, Flanged, Punched L STD"])[0]
     assert punched["attributes"]["punched"] == "YES"
@@ -1857,6 +1916,7 @@ def test_bearing_attributes():
 
     split = li.extract_items(["Bearings, Split Pillow Block L 2,387.00"])[0]
     assert "BEARINGS" in split["tags"]
+    assert split["attributes"]["component"] == "BEARINGS"
     assert split["attributes"]["bearing_type"] == "SPLIT PILLOW BLOCK"
 
     spare = li.extract_items(["Spare Bearings, Inquiry Num: 340-26-1112 L 3,583.00"])[0]
@@ -1866,7 +1926,13 @@ def test_bearing_attributes():
 
     adder = li.extract_items(["Bearing ADDER for 200,00 hours, Inquiry Num: L"])[0]
     assert "BEARINGS" in adder["tags"]
-    assert adder["attributes"]["bearing_type"] == "BEARING ADDER"
+    assert adder["attributes"]["component"] == "BEARINGS"
+    assert adder["attributes"]["bearing_life_adder"] == "YES"
+    assert "bearing_type" not in adder["attributes"]
+    assert adder["attributes"]["bearing_life_hours"] == "200,000"
+
+    complete = li.extract_items(["Bearing adder for 200,000 hours L 400.00"])[0]
+    assert complete["attributes"]["bearing_life_hours"] == "200,000"
 
 
 def test_shaft_bearing_guard_tag_uses_primary_line():
@@ -2415,16 +2481,28 @@ def test_screen_and_shaft_cooler_attributes():
     inlet = li.extract_items(["Inlet Screen, Standard, 304 SS Construction L 975.00"])[0]
     attrs = inlet["attributes"]
     assert "SCREEN" in inlet["tags"]
-    assert attrs["component"] == "SCREEN"
-    assert attrs["screen_subcategory"] == "SCREEN"
+    assert attrs["component"] == "INLET SCREEN"
+    assert "screen_subcategory" not in attrs
     assert attrs["screen_feature"] == "STANDARD"
-    assert attrs["used_on"] == "INLET"
-    assert attrs["material_scope"] == "INLET, SCREEN"
+    assert "used_on" not in attrs
+    assert attrs["material_scope"] == "INLET SCREEN"
 
     outlet = li.extract_items(["Outlet Screen, Outlet Screen (Shipped Loose) N 55.00"])[0]
-    assert outlet["attributes"]["component"] == "SCREEN"
-    assert outlet["attributes"]["used_on"] == "OUTLET"
+    assert outlet["attributes"]["component"] == "OUTLET SCREEN"
+    assert "used_on" not in outlet["attributes"]
     assert outlet["attributes"]["shipping_state"] == "SHIPPED LOOSE"
+
+    wrapped = li.extract_items([
+        "Inlet Screen, Standard (Inlet Screen, Oversized L 781.00",
+        "(D10 size 33, D51 size 365), Inquiry Num: 317-24-",
+        "388)",
+    ])[0]
+    assert wrapped["attributes"]["component"] == "INLET SCREEN"
+    assert wrapped["attributes"]["screen_feature"] == "OVERSIZED, STANDARD"
+    assert wrapped["attributes"]["inquiry_num"] == "317-24-388"
+    assert "screen_subcategory" not in wrapped["attributes"]
+    assert "used_on" not in wrapped["attributes"]
+    assert not wrapped.get("review_flags")
 
     silencer = li.extract_items([
         "VAW Inlet Silencer With Piezometer tube C 5,716.00",
@@ -2634,6 +2712,14 @@ def test_special_construction_stainless_and_testing_attributes():
     assert weld["attributes"]["special_construction_type"] == "CONTINUOUS WELD"
     assert weld["attributes"]["special_construction_scope"] == "AIRSTREAM"
 
+    for wording in ("Silicone-Free Caulk", "Silicone-free Caulk", "Silicone Free Caulking"):
+        caulk = li.extract_items([f"{wording}, Inquiry Num: 317-24-1723 L"])[0]
+        assert "SPECIAL CONSTRUCTION" in caulk["tags"]
+        assert caulk["attributes"]["special_construction_type"] == "CAULKING"
+        assert caulk["attributes"]["special_construction_detail"] == "SILICONE-FREE"
+        assert caulk["attributes"]["inquiry_num"] == "317-24-1723"
+        assert not caulk.get("review_flags")
+
     code_weld = li.extract_items(["AWS D14.6 Code Welding on Rotating Components L 3,357.00"])[0]
     assert code_weld["attributes"]["special_construction_type"] == "CODE WELDING"
     assert code_weld["attributes"]["special_construction_scope"] == "ROTATING COMPONENTS"
@@ -2834,6 +2920,66 @@ def test_tag_counts():
     counts = {t: (j, i) for t, j, i in li.tag_counts(store)}
     assert counts["SHAFT SEAL"][0] == 2   # both jobs
     assert counts["SPARK RESISTANT"][0] == 1
+
+
+def test_bounded_corpus_parser_improvements():
+    silencer = li.extract_items([
+        "INLET SILENCER C 1,000.00",
+        "CIB - Circular Inlet silencer",
+        "Product: Inlet Silencer",
+    ])[0]
+    assert silencer["attributes"]["component"] == "INLET SILENCER"
+
+    multi = li.derive_item_fields({
+        "raw": "Filter Box, Inquiry Num: 123-26-1234, 456-26-5678 L 100.00",
+        "details": [],
+    })
+    assert multi["attributes"]["inquiry_num"] == ["123-26-1234", "456-26-5678"]
+    single = li.derive_item_fields({
+        "raw": "Filter, Inquiry Num: 123-26-1234 L 100.00",
+        "details": [],
+    })
+    assert single["attributes"]["inquiry_num"] == "123-26-1234"
+    assert "NAN" not in li.normalize_text("Filter NaN Box L 100.00")
+
+    cases = {
+        "T Rails": ("UNITARY BASE", "unitary_base_type", "T RAILS"),
+        "Offset Base": ("UNITARY BASE", "unitary_base_type", "OFFSET BASE"),
+        "Panel Mounting Holes": ("PANEL MOUNTING HOLES", "mounting_holes", "YES"),
+        "Mounting Feet": ("MOUNTING", "mounting_type", "FEET"),
+        "Mounting Lugs": ("MOUNTING", "mounting_type", "LUGS"),
+        "Inlet Venturi": ("INLET", "inlet_subcategory", "VENTURI"),
+        "Blade Side Guard": ("BLADE SIDE GUARD", "guard_type", "BLADE SIDE"),
+        "Filter Box": ("FILTER BOX", "filter_type", "FILTER BOX"),
+        "Piezometer Ring": ("PIEZOMETER RING", "piezometer_ring", "YES"),
+    }
+    for wording, (component, key, value) in cases.items():
+        attrs = li.derive_item_fields({"raw": wording, "details": []})["attributes"]
+        assert attrs["component"] == component, wording
+        assert attrs[key] == value, wording
+
+
+def test_structured_pdf_rows_preserve_item_and_detail_sources():
+    rows = [
+        {"text": "Inlet Damper Actuator L 1,000.00",
+         "source": {"page": 2, "row": 11, "top": 110}},
+        {"text": "Vendor: Siemens", "source": {"page": 2, "row": 12, "top": 120}},
+    ]
+    item = li.extract_items(rows)[0]
+    assert item["source"]["page"] == 2
+    assert item["source"]["row"] == 11
+    assert item["source"]["source_text"] == "Inlet Damper Actuator L 1,000.00"
+    assert item["details"] == ["Vendor: Siemens"]
+    assert item["detail_sources"][0]["row"] == 12
+
+
+def test_nan_cells_do_not_survive_in_raw_or_details():
+    items = li.extract_items([
+        "Filter NaN Box L 100.00",
+        "Vendor: NaN Greenheck",
+    ])
+    assert "NAN" not in items[0]["raw"].upper()
+    assert all("NAN" not in detail.upper() for detail in items[0]["details"])
 
 
 def test_inventory_xlsx(tmp: Path):

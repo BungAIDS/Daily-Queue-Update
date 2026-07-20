@@ -461,14 +461,30 @@ def process_one(page, context, job: str, folder: str = "",
                     "so_design_temp": p.get("design_temp", ""), "so_max_temp": p.get("max_temp", ""),
                     "so_special_temp": p.get("special_temp", ""),
                     "so_pdf": so_pdf,
+                    "so_pdf_sha256": sales_order_sha256(so_pdf),
                     "so_verified_at": rec["scanned_at"],
+                    "parts_only": bool(p.get("parts_only", False)),
+                    "job_number": p.get("job_number", ""),
                 })
                 items = p.get("line_items") or []
                 rec["line_item_count"] = len(items)
                 if li_store is not None:
                     line_items.apply_ai_cache(items, li_store)
-                    line_items.record_job(li_store, job, items,
-                                          co_number=rec.get("co_number"), so_pdf=so_pdf)
+                    line_items.record_job(
+                        li_store,
+                        job,
+                        items,
+                        customer=str(rec.get("customer") or ""),
+                        co_number=rec.get("co_number"),
+                        so_pdf=so_pdf,
+                        arrangement=str(rec.get("so_arrangement") or ""),
+                        parts_only=bool(rec.get("parts_only", False)),
+                        job_number=str(rec.get("job_number") or ""),
+                        order_metadata={
+                            **{key: rec.get(key) for key in line_items.ORDER_CONTEXT_FIELDS},
+                            "source_pdf_sha256": rec.get("so_pdf_sha256"),
+                        },
+                    )
 
         runs = _run_docs(docs) if not so or so_pdf else []
         dr_count = 0
@@ -894,7 +910,10 @@ async def process_one_async(page, context, job: str, folder: str = "",
                     "so_design_temp": p.get("design_temp", ""), "so_max_temp": p.get("max_temp", ""),
                     "so_special_temp": p.get("special_temp", ""),
                     "so_pdf": so_pdf,
+                    "so_pdf_sha256": sales_order_sha256(so_pdf),
                     "so_verified_at": rec["scanned_at"],
+                    "parts_only": bool(p.get("parts_only", False)),
+                    "job_number": p.get("job_number", ""),
                 })
                 items = p.get("line_items") or []
                 rec["line_item_count"] = len(items)
@@ -948,9 +967,16 @@ def _commit_line_items(job: str, rec: Dict[str, Any]) -> None:
     line_items.record_jobs_atomic([{
         "job": job,
         "items": items,
+        "customer": rec.get("customer", ""),
         "co_number": rec.get("co_number"),
         "so_pdf": rec.get("so_pdf", ""),
+        "arrangement": rec.get("so_arrangement", ""),
+        "parts_only": bool(rec.get("parts_only", False)),
+        "job_number": rec.get("job_number", ""),
+        **{key: rec.get(key) for key in line_items.ORDER_CONTEXT_FIELDS},
+        "source_pdf_sha256": rec.get("so_pdf_sha256", ""),
     }], line_items.backfill_store_path())
+    rec["line_item_store_committed_at"] = datetime.now().isoformat(timespec="seconds")
 
 
 def _publish_checkpoint() -> bool:
@@ -1507,8 +1533,39 @@ def main(argv: Optional[List[str]] = None) -> int:
         targets = sorted(targets, key=_job_num_key, reverse=True)
     log.info("Backfill target set: %d job(s).", len(targets))
     records = {} if args.rescan else load_progress()
+    missing_store_jobs: set[str] = set()
     if not args.rescan:
         annotate_progress_document_kinds(records)
+        try:
+            import so_corpus_health
+
+            before = so_corpus_health.audit_corpus(records)
+            if before["missing_store_jobs"]:
+                log.warning(
+                    "Corpus invariant found %d trusted Sales Order job(s) without "
+                    "line-item records. Repairing from validated archived PDFs before fetch...",
+                    len(before["missing_store_jobs"]),
+                )
+                repair = so_corpus_health.repair_missing_line_items(
+                    records,
+                    progress_path=PROGRESS_PATH,
+                )
+                if repair["repaired"]:
+                    log.info(
+                        "Recovered %d missing line-item job(s) from archived PDFs.",
+                        len(repair["repaired"]),
+                    )
+                missing_store_jobs = set(repair["remaining_missing"])
+                if missing_store_jobs:
+                    log.warning(
+                        "%d trusted job(s) could not be repaired locally and will be "
+                        "included in the CBC retry set: %s",
+                        len(missing_store_jobs),
+                        ", ".join(sorted(missing_store_jobs)[:20]),
+                    )
+        except Exception as exc:  # noqa: BLE001 - a failed repair must not hide pending jobs
+            log.exception("Sales Order corpus reconciliation failed: %s", exc)
+            return 1
     dwg = autocad_scan.load_progress()  # read-only merge of the DWG scan, if it's been run
     if dwg:
         log.info("Merging AutoCAD DWG scan for %d job(s).", len(dwg))
@@ -1521,14 +1578,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     for job in targets:
         if args.limit and len(pending) >= args.limit:
             break
-        if not args.rescan and not args.force and _is_done(records.get(job, {}),
-                                                           retry_not_found=args.retry_not_found):
+        if (job not in missing_store_jobs
+                and not args.rescan and not args.force
+                and _is_done(records.get(job, {}), retry_not_found=args.retry_not_found)):
             continue
         pending.append(job)
 
     trusted_done = sum(
         1 for job in targets
-        if not args.rescan and not args.force
+        if job not in missing_store_jobs and not args.rescan and not args.force
         and _is_done(records.get(job, {}), retry_not_found=args.retry_not_found)
     )
     log.info("Resume checkpoint: %d trusted complete; %d pending this run%s.",
@@ -1562,6 +1620,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     if (args.publish_every > 0
             and run_state.get("last_published") != run_state["processed"]):
         _publish_checkpoint()
+    try:
+        import so_corpus_health
+
+        final_health = so_corpus_health.audit_corpus(records)
+        so_corpus_health.save_audit(final_health)
+        if final_health["missing_store_jobs"]:
+            rc = 1
+            log.error(
+                "Corpus invariant failed: %d trusted job(s) still have no line-item "
+                "store record. Run `python so_corpus_health.py --repair-missing`.",
+                len(final_health["missing_store_jobs"]),
+            )
+    except Exception as exc:  # noqa: BLE001
+        rc = 1
+        log.exception("Final Sales Order corpus audit failed: %s", exc)
     by_status: Dict[str, int] = {}
     for r in records.values():
         by_status[r.get("status", "?")] = by_status.get(r.get("status", "?"), 0) + 1

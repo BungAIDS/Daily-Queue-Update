@@ -209,6 +209,18 @@ def scan(targets: List[Tuple[str, Path, int]], rescan: bool, limit: int) -> int:
             "arrangement": parsed.get("arrangement", ""),
             "parts_only": bool(parsed.get("parts_only", False)),
             "job_number": parsed.get("job_number", ""),
+            "so_design_desc": parsed.get("design_desc", ""),
+            "so_size": parsed.get("size", ""),
+            "so_arrangement": parsed.get("arrangement", ""),
+            "so_motor_pos": parsed.get("motor_pos", ""),
+            "so_class": parsed.get("fan_class", ""),
+            "so_rotation": parsed.get("rotation", ""),
+            "so_discharge": parsed.get("discharge", ""),
+            "so_pct_width": parsed.get("pct_width", ""),
+            "so_wheel_type": parsed.get("wheel_type", ""),
+            "so_design_temp": parsed.get("design_temp", ""),
+            "so_max_temp": parsed.get("max_temp", ""),
+            "so_special_temp": parsed.get("special_temp", ""),
         })
         done += 1
         log.info("  %d  %s -> %d item(s)", done, job, len(items))

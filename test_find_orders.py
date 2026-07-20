@@ -40,8 +40,8 @@ def test_similar_ranks_identical_rare_line_first():
     assert res[0]["score"] > res[1]["score"]
     assert "TEFLON SHAFT SEAL" in res[0]["shared_lines"]
     assert res[0]["shared_tags"] == ["SHAFT SEAL", "MOTOR"]  # rarest tag first
-    # The common MOTOR overlap alone scores 1/3-tag + 2/3-line:
-    assert abs(res[1]["score"] - 1.0) < 1e-9
+    # The common MOTOR overlap is now tag weight + a lower-weight line tie-breaker.
+    assert abs(res[1]["score"] - 0.5) < 1e-9
 
 
 def test_similar_require_dwg_keeps_only_drawn_jobs():
@@ -72,6 +72,47 @@ def test_similar_to_items_matches_unstored_order():
     res = fo.similar_to_items(idx, items, exclude_job="999999", top=0)
     assert [r["job"] for r in res][:2] == ["421001", "421000"]  # both carry the line
     assert res[0]["shared_lines"] == ["TEFLON SHAFT SEAL"]
+
+
+def test_similar_uses_job_context_and_component_facts_before_exact_lines():
+    store = {"jobs": {
+        "500000": {"arrangement": "ARRANGEMENT 3", "so_class": "CLASS 2", "items": [
+            {"norm": "TARGET LINE", "tags": [], "section": "ACCESSORIES",
+             "attributes": {"component": "INLET SILENCER", "material": "304 SS"}},
+        ]},
+        "500001": {"arrangement": "ARRANGEMENT 3", "so_class": "CLASS 2", "items": [
+            {"norm": "DIFFERENT LINE", "tags": [], "section": "ACCESSORIES",
+             "attributes": {"component": "INLET SILENCER", "material": "304 SS"}},
+        ]},
+        "500002": {"arrangement": "ARRANGEMENT 9", "so_class": "CLASS 9", "items": [
+            {"norm": "TARGET LINE", "tags": [], "section": "ACCESSORIES",
+             "attributes": {"component": "OTHER COMPONENT", "material": "CARBON STEEL"}},
+        ]},
+    }}
+    res = fo.similar_jobs(store, "500000", top=0)
+    assert [r["job"] for r in res] == ["500001", "500002"]
+    assert "COMPONENT=INLET SILENCER" in res[0]["shared_facts"]
+    assert "arrangement=ARRANGEMENT 3" in res[0]["shared_context"]
+    assert res[0]["score"] > res[1]["score"]
+
+
+def test_similarity_excludes_document_shipping_and_review_noise():
+    store = {"jobs": {
+        "510000": {"items": [
+            {"norm": "ENGINEERING ITEM", "tags": [], "attributes": {
+                "component": "FAN", "mark_text": "PROJECT ALPHA",
+                "ship_to_company": "ACME", "additional_note": "HANDLE CAREFULLY",
+                "material_review": "CHECK"},
+             "document_fact": "MARK"},
+        ]},
+        "510001": {"items": [
+            {"norm": "ADMINISTRATIVE ITEM", "tags": [], "attributes": {
+                "mark_text": "PROJECT ALPHA", "ship_to_company": "ACME",
+                "additional_note": "HANDLE CAREFULLY", "material_review": "CHECK"},
+             "document_fact": "SHIP TO"},
+        ]},
+    }}
+    assert fo.similar_jobs(store, "510000", top=0) == []
 
 
 def test_reuse_suggestions_threshold_and_trim():

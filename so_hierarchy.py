@@ -110,6 +110,28 @@ def _attrs(item: Dict[str, Any]) -> Dict[str, Any]:
     return a if isinstance(a, dict) else {}
 
 
+def _explicit_negative_construction(key: str, item: Dict[str, Any], value: Any) -> bool:
+    """Whether a NO value is an explicit construction override, not a default."""
+    if str(value).strip().upper() != "NO":
+        return False
+    text = " ".join(
+        [line_text(item)] + [str(detail) for detail in item.get("details") or []]
+    ).upper()
+    if key == "flanged":
+        return bool(re.search(
+            r"\b(?:REMOVE|DELETE|OMIT)\b.{0,35}\bFLANG(?:E|ED)\b|"
+            r"\bWITHOUT\b.{0,25}\bFLANGE\b|\bUNFLANGED\b",
+            text,
+        ))
+    if key == "punched":
+        return bool(re.search(
+            r"\bUNPUNCHED\b|\bWITHOUT\b.{0,25}\bPUNCH|"
+            r"\b(?:REMOVE|DELETE|OMIT)\b.{0,35}\bFLANG(?:E|ED)\b",
+            text,
+        ))
+    return False
+
+
 # Fan locations that ARE a component in their own right when a standalone line
 # describes one (e.g. "Outlet, Flanged, Punched"). Used only as a fallback, when
 # the extractor didn't already tie the line to a component/used_on — so two
@@ -266,7 +288,9 @@ def components(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             name = key if keyed else (line_text(views[idxs[0]]) or "?")
         primary = max(idxs, key=lambda i: parse_price(views[i].get("price")))
         attributes: Dict[str, Any] = {}
+        attribute_sources: Dict[str, Dict[str, Any]] = {}
         conflict_keys: List[str] = []
+        conflict_values: Dict[str, List[str]] = {}
         review: List[Dict[str, Any]] = []
         sources: List[Dict[str, Any]] = []
         for i in [primary] + [i for i in idxs if i != primary]:
@@ -284,14 +308,17 @@ def components(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 v = _attrs(it)[k]
                 if not v or k in _NON_ATTRIBUTE_KEYS or k.endswith("_review"):
                     continue
-                if k == "note":
-                    notes = attributes.setdefault(k, [])
-                    if str(v) not in notes:
-                        notes.append(str(v))
+                if k in {"note", "special_attribute"}:
+                    values = v if isinstance(v, list) else [v]
+                    collected = attributes.setdefault(k, [])
+                    for value in values:
+                        if str(value) not in collected:
+                            collected.append(str(value))
                     continue
                 have = attributes.get(k)
                 if have is None:
                     attributes[k] = v
+                    attribute_sources[k] = it
                     continue
                 if k == "handle_location":
                     merged = _merged_handle_location(have, v)
@@ -306,6 +333,7 @@ def components(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                     if (have_model == "RPED" and new_model.startswith("RPED")
                             and new_model != "RPED"):
                         attributes[k] = v
+                        attribute_sources[k] = it
                         continue
                     if (new_model == "RPED" and have_model.startswith("RPED")
                             and have_model != "RPED"):
@@ -314,17 +342,32 @@ def components(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                     equivalents = {str(have).upper(), str(v).upper()}
                     if equivalents <= {"N/A", "NOT AVAILABLE"}:
                         attributes[k] = "NOT AVAILABLE"
+                        attribute_sources[k] = it
                         continue
                 seen = [x.strip() for x in re.split(r"[|,]", str(have))]
                 for part in (str(v).split(", ") if _accumulative(k) else [str(v)]):
                     if part.strip() in seen:
+                        if _explicit_negative_construction(k, it, part):
+                            attributes[k] = part
+                            attribute_sources[k] = it
                         continue
                     if i != primary and _paid_inquiry_override(k, views[primary], it):
                         continue
                     if _accumulative(k):
                         attributes[k] = f"{attributes[k]}, {part}"
                     else:
-                        attributes[k] = f"{attributes[k]} | {part}"
+                        values = conflict_values.setdefault(k, [])
+                        for value in (str(have), str(part)):
+                            if value not in values:
+                                values.append(value)
+                        current_source = attribute_sources.get(k) or views[primary]
+                        if _explicit_negative_construction(k, it, part):
+                            attributes[k] = part
+                            attribute_sources[k] = it
+                        elif _explicit_negative_construction(k, current_source, have):
+                            pass
+                        else:
+                            attributes[k] = f"{attributes[k]} | {part}"
                         if k not in conflict_keys:
                             conflict_keys.append(k)
                     seen.append(part.strip())
@@ -332,10 +375,13 @@ def components(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 entry = {"text": str(flag), "item_no": item_no}
                 if entry not in review:
                     review.append(entry)
-        conflicts = [
-            {"text": f"CONFLICTING {k}: {attributes[k]}", "item_no": ""}
-            for k in conflict_keys
-        ]
+        conflicts = []
+        for key in conflict_keys:
+            evidence = " | ".join(conflict_values.get(key) or [str(attributes[key])])
+            text = f"CONFLICTING {key}: {evidence}"
+            if str(attributes[key]) != evidence:
+                text += f"; USING {attributes[key]}"
+            conflicts.append({"text": text, "item_no": ""})
         records.append({
             "name": name,
             "keyed": keyed,
