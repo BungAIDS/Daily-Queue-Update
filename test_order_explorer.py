@@ -173,6 +173,38 @@ def test_quote_run_and_solidworks_links():
     print("  quote-run / solidworks links OK")
 
 
+def test_wheel_component_from_quote_run():
+    """A parsed quote run yields the synthetic [WHEEL (QUOTE RUN)] component:
+    blade type from the SO spec, one attribute + pseudo-item per tracked wheel
+    part, numbering continuing after the real items."""
+    qjob = {"job": "421966", "customer": "X", "line_items": _IVC_ITEMS,
+            "so_wheel_type": "BC",
+            "drive_run": {"Blade Gauge": "0.075 (14)", "Number of Blades": "12",
+                          "Backplate Material": "ASTM CQ HRS A36",
+                          "Hub": "19-5-1057", "Wheel Weight Lb": "199"}}
+    p = oe.build_payload(_store(), queue_jobs={"421966": qjob})
+    e = p["jobs"]["421966"]
+    comp = e["cp"][0]
+    assert comp["n"] == oe.WHEEL_COMP_NAME and comp["k"] == 1 and comp["hs"] == 1
+    a = comp["a"]
+    assert a["blade type"] == "BC" and a["blades"] == "12", a       # alias merged
+    assert a["blade gauge"] == "0.075 (14)" and a["hub"] == "19-5-1057", a
+    assert "wheel weight lb" not in a, "performance stats must stay out"
+    # Pseudo-items: contiguous numbering after the 3 real items, stable norms.
+    wheel_rows = [r for r in e["it"] if r[4] == "QUOTE RUN"]
+    assert [r[0] for r in wheel_rows] == [4, 5, 6, 7, 8], wheel_rows
+    assert comp["i"] == [4, 5, 6, 7, 8], comp["i"]
+    norms = {r[5] for r in wheel_rows}
+    assert "WHEEL BLADE TYPE BC" in norms and "WHEEL BLADES 12" in norms, norms
+    assert "WHEEL BLADE GAUGE 0 075 14" in norms, norms
+    assert all(r[6] == ["WHEEL RUN"] for r in wheel_rows)
+    # No run -> no wheel component.
+    p2 = oe.build_payload(_store(), queue_jobs={"421966": {"job": "421966",
+                          "line_items": _IVC_ITEMS, "so_wheel_type": "BC"}})
+    assert all(c["n"] != oe.WHEEL_COMP_NAME for c in p2["jobs"]["421966"]["cp"])
+    print("  quote-run wheel component OK")
+
+
 def test_master_orders_fallback_queue():
     master_orders = {"421314": {"on_queue": True, "added": "2026-07-15T08:30:00",
                                 "job": {"job": "421314", "customer": "Bayside",
@@ -287,6 +319,7 @@ def main() -> int:
     test_events_and_removed()
     test_spec_values_tidied()
     test_quote_run_and_solidworks_links()
+    test_wheel_component_from_quote_run()
     test_master_orders_fallback_queue()
     test_render_roundtrip_and_safety()
     test_bat_launcher()

@@ -50,6 +50,7 @@ import base64
 import gzip
 import json
 import logging
+import re
 import sys
 import time
 from datetime import date, datetime
@@ -154,6 +155,68 @@ def _spec_value(key: str, v: str) -> str:
     return v
 
 
+# Wheel construction from the parsed quote run: the tracked wheel parts, each
+# becoming one attribute of a synthetic [WHEEL (QUOTE RUN)] component AND one
+# normalized pseudo-line-item — so wheel facts rank, pin, and compare exactly
+# like printed SO lines. Only orders with a parsed run get the component.
+# (label shown, quote-run keys tried in order — templates name a few of them
+# differently across fan types)
+WHEEL_RUN_FIELDS = [
+    ("Blades", ("Blades", "Number of Blades", "Blade Count")),
+    ("Blade Material", ("Blade Material",)),
+    ("Blade Gauge", ("Blade Gauge",)),
+    ("Sideplate Material", ("Sideplate Material",)),
+    ("Sideplate Gauge", ("Sideplate Gauge",)),
+    ("Backplate Material", ("Backplate Material",)),
+    ("Backplate Gauge", ("Backplate Gauge",)),
+    ("Hub", ("Hub",)),
+    ("Hub Bore", ("Hub Bore",)),
+    ("Hub Bushing", ("Hub Bushing",)),
+    ("Wheel Material", ("Wheel Material", "Non-Std Wheel Materials")),
+    ("Effective Wheel Dia", ("Effective Wheel Dia",)),
+    ("STH", ("STH",)),
+]
+WHEEL_COMP_NAME = "WHEEL (QUOTE RUN)"
+
+
+def _wheel_norm(label: str, value: str) -> str:
+    """The identical-across-orders form a wheel fact matches on (2/df when two
+    orders share it, like any identical line)."""
+    s = f"WHEEL {label} {value}".upper()
+    return re.sub(r"\s+", " ", re.sub(r"[^A-Z0-9 ]", " ", s)).strip()
+
+
+def _wheel_component(mjob: Dict[str, Any], next_no: int):
+    """(component entry, synthetic item rows) for an order's quote-run wheel,
+    or (None, []) when the order has no parsed run / no wheel facts. Blade
+    type (BC/AF/...) comes from the SO spec; the parts from the run."""
+    run = mjob.get("drive_run")
+    if not isinstance(run, dict) or not run:
+        return None, []
+    facts = []
+    wt = str(mjob.get("so_wheel_type") or "").strip()
+    if wt and wt.upper() not in ("N/A", "NONE"):
+        facts.append(("Blade Type", wt))
+    for label, aliases in WHEEL_RUN_FIELDS:
+        for key in aliases:
+            v = str(run.get(key) or "").strip()
+            if v:
+                facts.append((label, v))
+                break
+    if not facts:
+        return None, []
+    items, nos = [], []
+    for i, (label, v) in enumerate(facts):
+        no = next_no + i
+        items.append([no, f"Wheel · {label}: {v}", "", "", "QUOTE RUN",
+                      _wheel_norm(label, v), ["WHEEL RUN"]])
+        nos.append(no)
+    comp = {"n": WHEEL_COMP_NAME, "k": 1, "p": 0,
+            "a": {label.lower(): v for label, v in facts},
+            "r": [], "i": nos, "s": [], "hs": 1}   # hs: attrs ARE the sources
+    return comp, items
+
+
 def _board_fields(j: Dict[str, Any], added: str = "") -> Dict[str, Any]:
     """The churny Live Queue columns for one on-board order, keys matched to
     the page's Board table. `added` is the master entry's arrival timestamp —
@@ -242,6 +305,10 @@ def build_payload(store: Dict[str, Any],
         co_desc = _co_change_desc(mjob, co_num) if co_num else ""
         if co_desc:
             entry["cd"] = co_desc[:400]
+        wheel_comp, wheel_items = _wheel_component(mjob, len(entry["it"]) + 1)
+        if wheel_comp:
+            entry["it"] += wheel_items
+            entry["cp"].insert(0, wheel_comp)   # the custom wheel leads the tree
         qr = (mjob.get("drive_run_pdf") or "").strip()
         if qr:
             entry["qr"] = qr
@@ -1791,7 +1858,7 @@ function renderJobPane() {
         + "</span></button>";
     }).join("");
     const revs = (c.r || []).map(x => '<div class="rev-row">' + esc(x) + "</div>").join("");
-    const srcs = items.length > 1 ? items.map((row, i) =>
+    const srcs = (!c.hs && items.length > 1) ? items.map((row, i) =>
       '<div class="src-row">' + (i ? "+ " : "") + "#" + row[IT.NO] + " "
       + esc(row[IT.RAW]) + "</div>").join("") : "";
     const subs = (c.s || []).map((ch, ix) =>
