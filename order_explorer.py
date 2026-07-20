@@ -103,9 +103,12 @@ def default_output_path() -> Path:
 
 
 def _dwg_label(extras: Dict[str, str] | None) -> str:
-    """'-07 (DWG), -51 (PDF+DWG)' — same form as find_orders._dwg_label."""
-    return ", ".join(f"-{s} ({fmt})" if fmt else f"-{s}"
-                     for s, fmt in (extras or {}).items())
+    """'-07, -51, -95' — just the custom suffixes, numerically ordered. The
+    file-format detail find_orders shows ('(PDF+DWG)') is noise here; the
+    folder link sits right next to the label anyway."""
+    def _key(s: str):
+        return (0, int(s), s) if str(s).isdigit() else (1, 0, str(s))
+    return ", ".join(f"-{s}" for s in sorted(extras or {}, key=_key))
 
 
 def _attr_str(v: Any) -> str:

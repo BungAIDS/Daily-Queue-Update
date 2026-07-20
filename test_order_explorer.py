@@ -63,7 +63,7 @@ def test_payload_components_merge():
     assert ivc["p"] == 3956.0, ivc["p"]          # 3,531 + 425
     # DWG enrichment lands on the other job.
     e2 = p["jobs"]["421314"]
-    assert e2["d"] == "-07 (DWG), -51 (PDF+DWG)", e2.get("d")
+    assert e2["d"] == "-07, -51", e2.get("d")
     assert e2["f"].endswith("421314"), e2.get("f")
     assert e2["t"] == "BC", e2.get("t")
     print("  payload components/enrichment OK")
