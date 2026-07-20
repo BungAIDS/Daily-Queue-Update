@@ -139,6 +139,26 @@ function testRequiredAttributesStayOnSelectedComponent() {
     "same-component required attribute should yield a bounded focused score");
 }
 
+function testFocusedMatchIdentifiesTheExactCandidateComponent() {
+  const target = component("DAMPER", {
+    operation: "AUTOMATIC", damper_type: "OUTLET",
+  });
+  const source = order({ cp: [component("WHEEL"), target] });
+  const manual = component("DAMPER", {
+    operation: "MANUAL", damper_type: "OUTLET",
+  });
+  const automatic = component("DAMPER", {
+    operation: "AUTOMATIC", damper_type: "OUTLET",
+  });
+  const candidate = order({ cp: [component("WHEEL"), manual, automatic] });
+  const focused = sim.focusedSimilarity(
+    sim.orderSimilarity(source, candidate), target, candidate,
+    new Set(["operation=AUTOMATIC"]),
+  );
+  assert.strictEqual(focused.candidateComponent, automatic,
+    "preview green highlight must follow the candidate chosen by focused ranking");
+}
+
 function testSparseEvidenceCannotLookIdentical() {
   const a = { sp: [["Design", "BC-220"]], it: [], cp: [] };
   const b = copy(a);
@@ -166,6 +186,7 @@ function main() {
   testIndependentCoreWeights();
   testDifferentDesignDoesNotTreatRawSizeCodeAsComparable();
   testRequiredAttributesStayOnSelectedComponent();
+  testFocusedMatchIdentifiesTheExactCandidateComponent();
   testSparseEvidenceCannotLookIdentical();
   testAlwaysBounded();
   console.log("All order similarity tests passed.");

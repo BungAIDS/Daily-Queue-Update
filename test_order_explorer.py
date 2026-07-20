@@ -205,6 +205,8 @@ def test_render_roundtrip_and_safety():
     assert "Back to List" in html
     assert "click order # again to move it to the left" in html
     assert "red = scored construction difference" in html
+    assert "preview-relevant" in html
+    assert "green = selected component/attribute match" in html
     assert "<title>GL Queue Explorer</title>" in html
     print("  render round-trip / embedding safety OK")
 

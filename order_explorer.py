@@ -891,14 +891,23 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .comp.preview-diff > .comp-row { color: var(--bad); background: var(--bad-soft); }
   .attr-row.preview-diff { background: var(--bad-soft);
     border: 1px solid rgba(180, 35, 24, .3); }
+  .comp.preview-relevant { border-color: var(--good);
+    box-shadow: 0 0 0 1px var(--good); }
+  .comp.preview-relevant > .comp-row { color: var(--good); background: var(--good-soft); }
+  .attr-row.preview-relevant { color: var(--good); background: var(--good-soft);
+    border: 1px solid rgba(31, 122, 69, .35); }
+  .attr-row.preview-relevant .k, .attr-row.preview-relevant .pin {
+    color: var(--good); font-weight: 700; }
   .preview-summary { display: flex; flex-direction: column; gap: 3px;
     margin: 12px 0 4px; padding: 8px 10px; border: 1px solid var(--bad);
     border-radius: 7px; color: var(--bad); background: var(--bad-soft);
     font-size: 11.5px; font-family: var(--mono); }
   .preview-tree .comp-row:hover { background: var(--panel-2); }
   .preview-tree .comp.preview-diff > .comp-row:hover { background: var(--bad-soft); }
+  .preview-tree .comp.preview-relevant > .comp-row:hover { background: var(--good-soft); }
   .preview-tree .attr-row:hover { background: transparent; }
   .preview-tree .attr-row.preview-diff:hover { background: var(--bad-soft); }
+  .preview-tree .attr-row.preview-relevant:hover { background: var(--good-soft); }
   .rev-row { font-size: 12px; color: var(--bad); font-weight: 600; padding: 2px 6px;
     overflow-wrap: anywhere; }
   .src-row { font-size: 11.5px; color: var(--faint); font-family: var(--mono);
@@ -1826,6 +1835,21 @@ function renderOrderPreview(leftJob, rightJob) {
   const el = $("right"), left = DB.jobs[leftJob], right = DB.jobs[rightJob];
   const leftSpecs = GLQSimilarity.specMap(left);
   const rightSpecs = GLQSimilarity.specMap(right);
+  const comparison = GLQSimilarity.orderSimilarity(left, right);
+  const selectedComponent = !state.whole && state.path !== null
+    ? compAt(left, state.path) : null;
+  const focused = selectedComponent
+    ? GLQSimilarity.focusedSimilarity(
+        comparison, selectedComponent, right, state.pinned)
+    : null;
+  const relevantComponent = focused ? focused.candidateComponent : null;
+  const relevantPins = [...state.pinned].flatMap(raw => {
+    const ix = raw.indexOf("=");
+    return ix > 0 ? [{ raw, key: raw.slice(0, ix) }] : [];
+  });
+  const isRelevantAttr = (component, key) => component === relevantComponent
+    && relevantPins.some(pin => pin.key === key
+      && GLQSimilarity.componentHasRequired(component, new Set([pin.raw])));
   const shownSpecs = new Set();
   let specs = (right.sp || []).map(([label, value]) => {
     shownSpecs.add(label);
@@ -1870,7 +1894,9 @@ function renderOrderPreview(leftJob, rightJob) {
     : "";
 
   const compCard = component => {
-    const reference = bestPreviewReference(left, component);
+    const componentRelevant = component === relevantComponent;
+    const reference = componentRelevant && selectedComponent
+      ? selectedComponent : bestPreviewReference(left, component);
     const slot = GLQSimilarity.componentSlot(component);
     const scored = !!(slot && slot.weight);
     const componentDiff = scored && (!reference
@@ -1880,6 +1906,7 @@ function renderOrderPreview(leftJob, rightJob) {
     const visibleAttrs = new Set();
     let attrs = Object.entries(component.a || {}).map(([key, value]) => {
       visibleAttrs.add(key);
+      const relevant = isRelevantAttr(component, key);
       let differs = false;
       if (scored && key === "quantity") {
         differs = !reference || previewQuantity(reference) !== previewQuantity(component);
@@ -1887,9 +1914,11 @@ function renderOrderPreview(leftJob, rightJob) {
         differs = !reference || !(key in leftAttrs)
           || GLQSimilarity.valueSimilarity(leftAttrs[key], value) < 1;
       }
-      return '<div class="attr-row' + (differs ? " preview-diff" : "") + '">'
+      return '<div class="attr-row' + (differs ? " preview-diff" : "")
+        + (relevant ? " preview-relevant" : "") + '">'
         + '<span class="k">' + esc(key.replace(/_/g, " ")) + ':</span>'
-        + '<span class="v">' + esc(value) + '</span></div>';
+        + '<span class="v">' + esc(value) + '</span>'
+        + (relevant ? '<span class="pin">selected match</span>' : "") + '</div>';
     }).join("");
     if (scored && reference) {
       for (const [key, value] of Object.entries(leftAttrs)) {
@@ -1911,19 +1940,23 @@ function renderOrderPreview(leftJob, rightJob) {
       + esc(row[IT.RAW]) + '</div>').join("") : "";
     const subs = (component.s || []).map(child =>
       '<div class="subwrap">' + compCard(child) + '</div>').join("");
-    return '<div class="comp' + (componentDiff ? " preview-diff" : "") + '">'
+    const marker = componentRelevant ? "selected match" : componentDiff ? "different" : "";
+    return '<div class="comp' + (componentDiff ? " preview-diff" : "")
+      + (componentRelevant ? " preview-relevant" : "") + '">'
       + '<div class="comp-row"><span class="name">'
       + (component.k ? "[" + esc(component.n) + "]" : esc(component.n)) + '</span>'
       + '<span class="meta">' + (items.length || "")
       + (items.length > 1 ? " lines" : items.length === 1 ? " line" : "") + '</span>'
       + '<span class="price">' + (component.p ? money(component.p) : "") + '</span>'
-      + (componentDiff ? '<span class="go">different</span>' : "") + '</div>'
+      + (marker ? '<span class="go">' + marker + '</span>' : "") + '</div>'
       + '<div class="comp-kids">' + attrs + revs + subs + srcs + '</div></div>';
   };
   const tree = (right.cp || []).length
     ? right.cp.map(compCard).join("")
     : '<div class="empty">No line items captured for this order yet.</div>';
-  const comparison = GLQSimilarity.orderSimilarity(left, right);
+  const comparisonHint = relevantComponent
+    ? "green = selected component/attribute match · red = other scored difference from "
+    : "red = scored construction difference from ";
 
   el.innerHTML = '<div class="panel-head">'
     + '<button class="backlink" id="matchlistback">← Back to List</button>'
@@ -1942,7 +1975,7 @@ function renderOrderPreview(leftJob, rightJob) {
     + (meta.length ? '<div class="metaline">' + meta.join(" ") + '</div>' : "")
     + hist + countSummary
     + '<div class="sectionbar"><span class="eyebrow">Components</span>'
-    + '<span class="hint">red = scored construction difference from ' + esc(leftJob)
+    + '<span class="hint">' + comparisonHint + esc(leftJob)
     + '</span><span class="m-score">match ' + comparison.score.toFixed(3) + '</span></div>'
     + '<div class="tree preview-tree">' + tree + '</div></div>';
 
