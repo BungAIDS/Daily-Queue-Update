@@ -1322,8 +1322,33 @@ function render() {
   if (state.tab === "board") renderBoard();
   else if (state.tab === "changes") renderChanges();
   else if (state.tab === "hist") renderHist();
-  else { renderJobPane(); renderMatches(); }
+  else { renderJobPane(); renderMatches(); wireComponentAlignment(); }
   syncNav();          // refinements (component/pins) update the current entry
+}
+
+/* Keep the first component cards level while the two orders are side by side.
+   Difference summaries and wrapping metadata can make either preamble taller. */
+function alignComponentStarts() {
+  const leftBar = $("leftcomponents"), rightBar = $("rightcomponents");
+  const leftTree = $("leftcomponenttree"), rightTree = $("rightcomponenttree");
+  if (leftBar) leftBar.style.marginTop = "";
+  if (rightBar) rightBar.style.marginTop = "";
+  if (!leftBar || !rightBar || !leftTree || !rightTree) return;
+  const leftPanel = $("left").getBoundingClientRect();
+  const rightPanel = $("right").getBoundingClientRect();
+  if (Math.abs(leftPanel.top - rightPanel.top) > 2) return; // stacked/mobile layout
+  const delta = rightTree.getBoundingClientRect().top
+    - leftTree.getBoundingClientRect().top;
+  if (Math.abs(delta) < 1) return;
+  const earlierBar = delta > 0 ? leftBar : rightBar;
+  const baseMargin = parseFloat(getComputedStyle(earlierBar).marginTop) || 0;
+  earlierBar.style.marginTop = (baseMargin + Math.abs(delta)) + "px";
+}
+function wireComponentAlignment() {
+  alignComponentStarts();
+  document.querySelectorAll("#left details.hist, #right details.hist")
+    .forEach(details => details.ontoggle = alignComponentStarts);
+  requestAnimationFrame(alignComponentStarts);
 }
 
 /* ---- real browser history: every tab switch and order open is an entry, so
@@ -1792,13 +1817,13 @@ function renderJobPane() {
     + (specs ? '<div class="specs">' + specs + "</div>" : "")
     + (meta.length ? '<div class="metaline">' + meta.join(" ") + "</div>" : "")
     + hist
-    + '<div class="sectionbar"><span class="eyebrow">Components</span>'
+    + '<div class="sectionbar" id="leftcomponents"><span class="eyebrow">Components</span>'
     + '<span class="hint">select any combination of components and attributes (AND)</span>'
     + (state.selections.size ? '<span class="hint">' + state.selections.size
         + " component" + (state.selections.size === 1 ? "" : "s") + " selected</span>" : "")
     + '<button class="wholebtn' + (state.whole ? " active" : "")
     + '" id="whole">match whole order</button></div>'
-    + '<div class="tree">' + tree + "</div></div>";
+    + '<div class="tree" id="leftcomponenttree">' + tree + "</div></div>";
 
   $("back").onclick = () => history.length > 1 ? history.back() : setTab("board");
   $("whole").onclick = () => { const hadPreview = !!state.previewJob;
@@ -2019,13 +2044,15 @@ function renderOrderPreview(leftJob, rightJob) {
     + (specs ? '<div class="specs">' + specs + '</div>' : "")
     + (meta.length ? '<div class="metaline">' + meta.join(" ") + '</div>' : "")
     + hist + countSummary
-    + '<div class="sectionbar"><span class="eyebrow">Components</span>'
+    + '<div class="sectionbar" id="rightcomponents"><span class="eyebrow">Components</span>'
     + '<span class="hint">' + comparisonHint + esc(leftJob)
     + '</span><span class="m-score">' + previewScoreLabel
     + previewScore.toFixed(3) + '</span></div>'
-    + '<div class="tree preview-tree">' + tree + '</div></div>';
+    + '<div class="tree preview-tree" id="rightcomponenttree">' + tree + '</div></div>';
 
-  $("matchlistback").onclick = () => { state.previewJob = null; renderMatches(); };
+  $("matchlistback").onclick = () => {
+    state.previewJob = null; renderMatches(); wireComponentAlignment();
+  };
   $("previewjob").onclick = () => selectJob(rightJob);
 }
 
@@ -2182,7 +2209,7 @@ function renderMatches() {
   });
   el.querySelectorAll(".m-job").forEach(b => b.onclick = () => {
     state.previewJob = b.dataset.job;
-    renderMatches();
+    renderMatches(); wireComponentAlignment();
   });
   $("only3d").onclick = () => { state.only3d = !state.only3d; savePrefs(); render(); };
 }
@@ -2264,6 +2291,9 @@ document.addEventListener("click", ev => {
 });
 document.querySelectorAll(".tabbtn").forEach(b =>
   b.onclick = () => setTab(b.dataset.tab));
+window.addEventListener("resize", () => {
+  if (DB && state.tab === "job") alignComponentStarts();
+});
 
 boot().catch(err => {
   $("boot").textContent = "Could not load the embedded data (" + err

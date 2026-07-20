@@ -211,6 +211,10 @@ def test_render_roundtrip_and_safety():
     assert "state.selections" in html
     assert "Required combination" in html
     assert "selected components" in html
+    assert "alignComponentStarts" in html
+    assert 'id="leftcomponenttree"' in html
+    assert 'id="rightcomponenttree"' in html
+    assert "ontoggle = alignComponentStarts" in html
     assert "<title>GL Queue Explorer</title>" in html
     print("  render round-trip / embedding safety OK")
 
