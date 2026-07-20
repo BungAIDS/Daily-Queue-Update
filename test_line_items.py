@@ -724,6 +724,7 @@ def test_motor_special_attributes_join_wrapped_nameplate_commitments():
     ])[0]
     attrs = motor["attributes"]
     assert attrs["motor_shaft_grounding"] == "SHAFT GROUNDING RING"
+    assert attrs["motor_duty"] == "IEEE 841 FEATURES ONLY"
     assert attrs["special_attribute"] == [
         "MOTORS MEET NEMA GM 7E-TA SPEC AND ARE SILICONE FREE.",
         'MOTORS WILL BE RE-NAMEPLATED AS "IEEE841 FEATURES ONLY" DUE TO THE '

@@ -1793,10 +1793,15 @@ def _motor_attributes(item: Dict[str, Any], primary: str, norm_blob: str,
                     break
 
     duties: List[str] = []
+    ieee_841_duty = (
+        "IEEE 841 FEATURES ONLY"
+        if re.search(r"\bIEEE\s*841\s+FEATURES?\s+ONLY\b", norm_blob)
+        else "IEEE 841"
+    )
     for value, pattern in (
         ("SEVERE DUTY", r"\bSEVERE\s+DUTY\b"),
         ("INVERTER DUTY", r"\bINVERTER\s+DUTY\b"),
-        ("IEEE 841", r"\bIEEE\s*841\b"),
+        (ieee_841_duty, r"\bIEEE\s*841\b"),
         ("CONTINUOUS DUTY", r"\bCONTINUOUS\s+DUTY\b"),
         ("WASHDOWN DUTY", r"\bWASH\s*DOWN\s+DUTY\b"),
         ("MILL AND CHEMICAL DUTY", r"\bMILL\s+(?:AND|&)\s+CHEMICAL\s+DUTY\b"),
