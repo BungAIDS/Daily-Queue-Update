@@ -231,14 +231,17 @@ def build_payload(store: Dict[str, Any],
         mjob = qjob or ment.get("job") or {}
         items = (qjob.get("line_items") if qjob else None) or rec.get("items") or []
 
+        co_num = mjob.get("co_number") or rec.get("co_number")
         entry: Dict[str, Any] = {
             "c": mjob.get("customer") or rec.get("customer") or "",
-            "co": (lambda n: f"CO#{n}" if n else "")(
-                mjob.get("co_number") or rec.get("co_number")),
+            "co": f"CO#{co_num}" if co_num else "",
             "pdf": (mjob.get("so_pdf") or rec.get("so_pdf") or "").strip(),
             "it": _item_rows(items),
             "cp": [_comp_entry(c) for c in so_hierarchy.components(items)],
         }
+        co_desc = _co_change_desc(mjob, co_num) if co_num else ""
+        if co_desc:
+            entry["cd"] = co_desc[:400]
         qr = (mjob.get("drive_run_pdf") or "").strip()
         if qr:
             entry["qr"] = qr
@@ -757,6 +760,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .gt tr.rowbtn:hover td { outline: 1px solid var(--accent); outline-offset: -1px; }
   .gt .jobcell { font-family: var(--mono); font-weight: 700; cursor: pointer; }
   .gt .jobcell:hover { color: var(--accent); text-decoration: underline; }
+  .gt .co-tip { cursor: help; text-decoration: underline dotted;
+    text-underline-offset: 3px; }
   .gt td.num { text-align: right; }
   .gt td.ctr { text-align: center; }
   .totrow td { font-weight: 700; border-top: 2px solid var(--ink); border-bottom: none;
@@ -1484,6 +1489,9 @@ function renderBoard() {
   let rows = onq.map(j => {
     const e = DB.jobs[j], bd = e.bd || {};
     const t = s => ({ v: s || "", h: esc(s || "") });
+    const coTip = e.co ? '<span class="co-tip" title="' + esc(e.co + ": "
+      + (e.cd || "No change-order description was captured.")) + '">'
+      + esc(e.co) + '</span>' : "";
     const c = [
       { v: bd.ai || "", h: esc(fmtWhen(bd.ai)) },
       { v: jobNum(j), h: '<span class="jobcell" data-job="' + esc(j) + '">'
@@ -1492,7 +1500,8 @@ function renderBoard() {
           ? '<a class="drun" href="' + esc(fileUrl(e.qr)) + '" target="_blank" title="'
             + esc(e.qr) + '">Run</a>'
           : '<span class="drun">Run</span>' },
-      t(e.co), t(bd.op), t(spv(e, "Design")), t(e.c), t(spv(e, "Size")),
+      { v: e.co || "", h: coTip }, t(bd.op), t(spv(e, "Design")), t(e.c),
+      t(spv(e, "Size")),
       t(spv(e, "Arrangement")), t(bd.as), t(bd.ck), t(bd.no), t(e.e),
       t(bd.ed), t(bd.sd), t(bd.fn), t(bd.pr), t(bd.ru),
       { v: bd.ps || "", h: String(bd.ps || "") },

@@ -80,11 +80,13 @@ def test_queue_jobs_take_master_items():
             "status": "AT WC", "oper": "23", "end_date": "7/16/2026",
             "total_price": "$47,763.00", "has_drive_run": True, "_cbc_pos": 3,
             "_added_iso": "2026-07-17T06:01:00",
-            "co_history": ["CO#4 rev", "CO#3 " + "x" * 500]}
+            "co_history": ["CO#4 071726 DG - ADDED VFD CONTROLS",
+                           "CO#3 " + "x" * 500]}
     p = oe.build_payload(_store(), queue_jobs={"421966": qjob})
     e = p["jobs"]["421966"]
     assert e.get("q") == 1, e
     assert e["co"] == "CO#4", e["co"]                    # master beats store
+    assert e["cd"] == "ADDED VFD CONTROLS", e.get("cd")
     assert len(e["it"]) == 1 and e["it"][0][5] == "MOTOR 40 HP TEFC", e["it"]
     assert ["Design", "BC-3660"] in e["sp"] and ["Size", "366"] in e["sp"], e["sp"]
     assert len(e["h"]) == 2 and len(e["h"][1]) <= 160, e["h"]
@@ -213,6 +215,8 @@ def test_render_roundtrip_and_safety():
     assert "Required combination" in html
     assert "selected components" in html
     assert "alignComponentStarts" in html
+    assert 'class="co-tip"' in html
+    assert "No change-order description was captured." in html
     assert 'id="leftcomponenttree"' in html
     assert 'id="rightcomponenttree"' in html
     assert "ontoggle = alignComponentStarts" in html
