@@ -50,6 +50,7 @@ def _dwg():
 
 def test_payload_components_merge():
     p = oe.build_payload(_store(), _dwg())
+    assert isinstance(p["v"], str), "code version stamp missing"
     e = p["jobs"]["421966"]
     assert e["c"] == "Meridian Foundry", e["c"]
     assert e["co"] == "CO#2", e["co"]

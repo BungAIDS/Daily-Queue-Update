@@ -89,6 +89,23 @@ _HIST_MAX = 8            # CO-history entries kept per on-board job
 _HIST_CLIP = 160         # ...each clipped to this many chars (some run to pages)
 
 
+def code_version() -> str:
+    """branch@commit of the code that built the page (the launcher header's
+    form), '' when git isn't reachable. Shown in the page footer so 'which
+    version am I looking at' is answerable at a glance."""
+    import subprocess
+    try:
+        repo = Path(__file__).resolve().parent
+        def _git(*args: str) -> str:
+            return subprocess.run(["git", *args], cwd=repo, capture_output=True,
+                                  text=True, timeout=10).stdout.strip()
+        commit = _git("rev-parse", "--short", "HEAD")
+        branch = _git("rev-parse", "--abbrev-ref", "HEAD")
+        return f"{branch}@{commit}" if commit else ""
+    except Exception:  # noqa: BLE001 - the stamp is informational only
+        return ""
+
+
 def default_output_path() -> Path:
     """EXPLORER_PATH from .env when set; else next to the live workbook (the
     shared location coworkers already know); else the local output folder.
@@ -353,6 +370,7 @@ def build_payload(store: Dict[str, Any],
 
     payload = {
         "gen": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "v": code_version(),
         "today": today.isoformat(),
         "n_jobs": len(jobs),
         "n_items": sum(len(e["it"]) for e in jobs.values()),
@@ -1183,7 +1201,8 @@ async function boot() {
   $("tabs").style.display = "";
   document.querySelector("footer").style.display = "";
   $("stamp").textContent = "generated " + DB.gen + " · " + DB.n_jobs
-    + " orders · " + DB.n_items + " line items";
+    + " orders · " + DB.n_items + " line items"
+    + (DB.v ? " · " + DB.v : "");
   try {   // hover the stamp to see WHICH copy of the page this is
     $("stamp").title = decodeURIComponent(location.pathname.replace(/^\//, ""))
       .replace(/\//g, "\\");
@@ -2204,6 +2223,7 @@ function renderMatches() {
       const componentChip = '<span class="chip same">✓ ' + esc(componentName) + "</span>";
       /* Selected attributes: green ✓ when this candidate has the part, red ✗
          with the candidate's own value when it differs (or isn't tracked). */
+      const pinnedKeys = new Set((match.pinHits || []).map(hit => hit.key));
       const attrs = (match.pinHits || []).map(hit => {
         const label = esc(componentName) + " · "
           + esc(hit.key.replace(/_/g, " ")) + ": ";
@@ -2212,7 +2232,21 @@ function renderMatches() {
         return '<span class="chip diff">✗ ' + label + esc(hit.wanted)
           + (hit.have ? " — theirs " + esc(hit.have) : " — not tracked") + "</span>";
       });
-      return [componentChip, ...attrs];
+      /* The component's remaining attributes compare too, so a bare component
+         selection still paints the full green/red part-by-part picture. */
+      const theirs = (match.candidateComponent && match.candidateComponent.a) || {};
+      const free = Object.entries(GLQSimilarity.scoredAttrs(match.targetComponent))
+        .filter(([key]) => !pinnedKeys.has(key))
+        .map(([key, value]) => {
+          const label = esc(componentName) + " · "
+            + esc(key.replace(/_/g, " ")) + ": ";
+          const have = key in theirs ? theirs[key] : "";
+          if (have !== "" && GLQSimilarity.valueSimilarity(value, have) === 1)
+            return '<span class="chip same">✓ ' + label + esc(value) + "</span>";
+          return '<span class="chip diff">✗ ' + label + esc(value)
+            + (have ? " — theirs " + esc(have) : " — not tracked") + "</span>";
+        });
+      return [componentChip, ...attrs, ...free];
     });
     const chipsHtml = selectedChips.length
       ? '<div class="m-chips">' + selectedChips.join("") + "</div>" : "";
