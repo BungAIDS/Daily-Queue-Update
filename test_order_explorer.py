@@ -294,6 +294,12 @@ def test_default_output_path_accepts_folder():
     print("  EXPLORER_PATH folder/file forms OK")
 
 
+def test_default_output_path_is_coworker_share():
+    expected = Path(r"\\gdh-fs02\engineering\DAG\GL QUEUE LIVE") / oe.HTML_NAME
+    assert oe.default_output_path() == expected, oe.default_output_path()
+    print("  default Explorer path is the canonical coworker share")
+
+
 def test_write_explorer_files():
     p = oe.build_payload(_store(), _dwg())
     with tempfile.TemporaryDirectory() as td:
@@ -327,6 +333,7 @@ def main() -> int:
     test_bat_launcher()
     test_vbs_folder_opener()
     test_default_output_path_accepts_folder()
+    test_default_output_path_is_coworker_share()
     test_write_explorer_files()
     print("All order_explorer tests passed.")
     return 0

@@ -233,11 +233,13 @@ _live_wb_raw = (os.environ.get("LIVE_WORKBOOK_PATH") or "").strip()
 LIVE_WORKBOOK_PATH = _expand_path(_live_wb_raw) if _live_wb_raw else None
 
 # Where the GL Queue Explorer page (order_explorer.py — the clickable HTML
-# search over the line-items store) is written. Blank = next to the live
-# workbook (so coworkers find it where the workbook already lives), falling
-# back to OUTPUT_DIR when no workbook path is configured.
-_explorer_raw = (os.environ.get("EXPLORER_PATH") or "").strip()
-EXPLORER_PATH = _expand_path(_explorer_raw) if _explorer_raw else None
+# search over the line-items store) is written. The canonical default is the
+# shared DAG folder coworkers open as Z:\DAG\GL QUEUE LIVE. Use the UNC path
+# here so the watcher still reaches it when a scheduled/background session has
+# no Z: mapping. EXPLORER_PATH may override this with a folder or .html file.
+DEFAULT_EXPLORER_PATH = r"\\gdh-fs02\engineering\DAG\GL QUEUE LIVE"
+_explorer_raw = (os.environ.get("EXPLORER_PATH") or DEFAULT_EXPLORER_PATH).strip()
+EXPLORER_PATH = _expand_path(_explorer_raw)
 
 # How often to poll the board, in seconds (default 120 = every 2 minutes).
 try:

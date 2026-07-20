@@ -107,11 +107,12 @@ def code_version() -> str:
 
 
 def default_output_path() -> Path:
-    """EXPLORER_PATH from .env when set; else next to the live workbook (the
-    shared location coworkers already know); else the local output folder.
-    EXPLORER_PATH may name either the page FILE or its FOLDER — a directory
-    (or any path without a .html suffix) gets the standard page name appended,
-    so 'EXPLORER_PATH=Z:\\DAG\\GL QUEUE LIVE' does what it looks like."""
+    """The configured canonical Explorer file path. EXPLORER_PATH may name
+    either the page FILE or its FOLDER — a directory (or any path without an
+    .html suffix) gets the standard page name appended, so the default UNC
+    folder and 'EXPLORER_PATH=Z:\\DAG\\GL QUEUE LIVE' both do what they look
+    like. The workbook/output fallback remains for callers that explicitly set
+    EXPLORER_PATH to None."""
     if EXPLORER_PATH:
         if EXPLORER_PATH.is_dir() or EXPLORER_PATH.suffix.lower() != ".html":
             return EXPLORER_PATH / HTML_NAME
@@ -624,7 +625,9 @@ def maybe_write(master: Dict[str, Any] | None,
     queue = {str(j.get("job")): j for j in lq_jobs or [] if j.get("job")}
     key = (_mtime(li.store_path()), _mtime(autocad_scan.PROGRESS_PATH),
            _mtime(change_log.log_path(today)), _mtime(solidworks_scan.PROGRESS_PATH),
-           _mtime(Path(__file__)),      # a git pull regenerates on the next poll
+           _mtime(Path(__file__)),
+           _mtime(Path(__file__).with_name(SIMILARITY_JS_NAME)),
+           # Any Explorer/scoring git pull regenerates on the next poll.
            today.isoformat(),
            tuple(sorted(queue)), tuple(sorted(str(x) for x in new_ids or ())))
     now = time.time()
@@ -669,8 +672,10 @@ def main(argv: List[str] | None = None) -> int:
     if args.open:
         out = args.out or default_output_path()
         try:
-            fresh = (out.exists()
-                     and out.stat().st_mtime >= Path(__file__).stat().st_mtime)
+            scorer = Path(__file__).with_name(SIMILARITY_JS_NAME)
+            source_mtime = max(Path(__file__).stat().st_mtime,
+                               scorer.stat().st_mtime)
+            fresh = out.exists() and out.stat().st_mtime >= source_mtime
         except OSError:
             fresh = False
         if fresh:
