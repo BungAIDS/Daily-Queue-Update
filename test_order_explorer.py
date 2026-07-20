@@ -197,6 +197,9 @@ def test_render_roundtrip_and_safety():
     back = json.loads(gzip.decompress(base64.b64decode(m.group(1))).decode("utf-8"))
     assert back == p, "payload did not round-trip"
     assert html.count("__B64__") == 0
+    assert "__SIMILARITY_JS__" not in html
+    assert "GLQSimilarity" in html
+    assert "0.000..1.000" in html
     assert "<title>GL Queue Explorer</title>" in html
     print("  render round-trip / embedding safety OK")
 

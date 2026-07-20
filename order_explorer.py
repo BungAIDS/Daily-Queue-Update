@@ -25,10 +25,10 @@ no internet, no install): coworkers double-click it — or the app-mode launcher
                  a DOM can't).
   Job view       click any job # anywhere: its parsed spec, CO history, and
                  component hierarchy (so_hierarchy's rollup). Click a component
-                 to rank every other order sharing it (find_orders' rarity-
-                 weighted scoring — shared tag 1/df, identical line 2/df —
-                 computed on click), pin attributes to filter, or match the
-                 whole order (the Similar Orders view, uncapped).
+                 to rank every other order sharing it with a bounded 0..1
+                 construction score, pin component-bound required attributes,
+                 or match the whole order. SolidWorks 3D stays a filter,
+                 never part of physical similarity.
 
 AUTO-REFRESH: every write also updates `gl_queue_explorer_version.js` beside
 the page. Open pages poll that stamp each minute via a <script> tag (the only
@@ -40,9 +40,8 @@ build_payload / render_html are pure and unit-tested (test_order_explorer.py);
 store loads live only in maybe_write() and the CLI. The watcher calls
 maybe_write() each poll — it regenerates only when a store file, the day's
 change log, or the board membership changed (hourly floor), so the usual poll
-adds nothing. The scoring formula is duplicated in the page's JS by necessity
-(no Python inside a browser) — if find_orders.similar_to_items' weights ever
-change, update the JS to match.
+adds nothing. `order_similarity.js` is both the browser's embedded scorer and
+the directly-tested Node module, so its weight table has one source of truth.
 """
 from __future__ import annotations
 
@@ -72,6 +71,7 @@ BAT_NAME = "Open GL Queue Explorer.bat"
 VERSION_NAME = "gl_queue_explorer_version.js"
 VBS_NAME = "glq_open.vbs"
 ENABLE_NAME = "Enable Folder Links.bat"
+SIMILARITY_JS_NAME = "order_similarity.js"
 
 # The parsed SO spec fields shown in the job header and the Order History
 # columns (mirrors live_sheets.SO_SUMMARY_COLUMNS / OH_DATA_COLUMNS).
@@ -304,7 +304,10 @@ def render_html(payload: Dict[str, Any]) -> str:
     hazards) and ~7x smaller than raw JSON — kinder to the shared drive."""
     raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
     b64 = base64.b64encode(gzip.compress(raw.encode("utf-8"), 9)).decode("ascii")
-    return _TEMPLATE.replace("__B64__", b64)
+    similarity_js = Path(__file__).with_name(SIMILARITY_JS_NAME).read_text(
+        encoding="utf-8")
+    return (_TEMPLATE.replace("__SIMILARITY_JS__", similarity_js)
+            .replace("__B64__", b64))
 
 
 def version_js(payload: Dict[str, Any]) -> str:
@@ -906,6 +909,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .m-scorebar { height: 3px; border-radius: 2px; background: var(--chip);
     margin: 6px 0 8px 32px; overflow: hidden; }
   .m-scorebar i { display: block; height: 100%; background: var(--accent); }
+  .m-break { margin: 2px 0 7px 32px; color: var(--muted); font-size: 10.5px;
+    font-family: var(--mono); line-height: 1.45; }
+  .m-diffs { margin: 5px 0 0 32px; color: var(--bad); font-size: 10.5px;
+    line-height: 1.4; }
   .m-lines { margin-left: 32px; display: flex; flex-direction: column; gap: 3px; }
   .m-line { font-family: var(--mono); font-size: 12px; display: flex; gap: 8px;
     align-items: baseline; }
@@ -964,13 +971,16 @@ _TEMPLATE = r"""<!DOCTYPE html>
   </main>
   <footer class="note" style="display:none">
     <span>One file, no install, no internet &mdash; the watcher regenerates it and open
-      pages refresh themselves. Scores: rare shared features count highest,
-      identical Sales-Order lines double.</span>
+      pages refresh themselves. Scores are bounded 0.000&ndash;1.000 construction
+      similarity; SolidWorks 3D availability is a separate filter.</span>
     <span class="mono" id="stamp"></span>
   </footer>
   <div id="toast" role="status"></div>
 </div>
 
+<script>
+__SIMILARITY_JS__
+</script>
 <script>
 "use strict";
 const PAYLOAD_B64 = "__B64__";
@@ -978,7 +988,7 @@ const VERSION_FILE = "gl_queue_explorer_version.js";
 const STATE_KEY = "glq_state";
 
 let DB = null;                 // {gen, today, n_jobs, n_items, jobs, ev, rm, nw?}
-let IDX = null;                // {tagDF, normDF, sets: {job -> {t:Set, n:Set}}}
+let IDX = null;                // explanatory line/tag sets, built once per page
 let COSET = new Set();         // jobs a CO# landed on today (red text)
 let NWSET = null;              // the watcher's exact new-today set (null = derive)
 const state = { tab: "board", job: null, path: null, whole: false,
@@ -1155,7 +1165,7 @@ function toast(msg) {
 
 function ensureIndex() {
   if (IDX) return IDX;
-  const tagDF = {}, normDF = {}, sets = {};
+  const sets = {};
   for (const j in DB.jobs) {
     const t = new Set(), n = new Set();
     for (const row of DB.jobs[j].it) {
@@ -1163,10 +1173,8 @@ function ensureIndex() {
       if (row[IT.NORM]) n.add(row[IT.NORM]);
     }
     sets[j] = { t, n };
-    for (const x of t) tagDF[x] = (tagDF[x] || 0) + 1;
-    for (const x of n) normDF[x] = (normDF[x] || 0) + 1;
   }
-  IDX = { tagDF, normDF, sets };
+  IDX = { sets };
   return IDX;
 }
 
@@ -1204,22 +1212,11 @@ function findCompByName(entry, name) {
   };
   return walk(entry.cp);
 }
-function anyAttrMatch(entry, key, val) {
-  const walk = list => (list || []).some(c => {
-    const have = c.a[key];
-    if (have && (have === val || have.split(" | ").includes(val))) return true;
-    return walk(c.s);
-  });
-  return walk(entry.cp);
-}
-
-/* ---- matching: rarity-weighted overlap (find_orders.similar_to_items),
-   plus a fan-design bonus — an order of the SAME design that shares content
-   outranks an equally-shared order of a different design. ------------------- */
-const DESIGN_BONUS = 1.5;
-function rankMatches(srcJob, items) {
-  const { tagDF, normDF, sets } = ensureIndex();
-  const srcDesign = spv(DB.jobs[srcJob], "Design");
+/* ---- bounded construction matching.  GLQSimilarity is the exact standalone
+   module embedded above and directly exercised by test_order_similarity.js. */
+function rankMatches(srcJob, items, targetComponent) {
+  const { sets } = ensureIndex();
+  const source = DB.jobs[srcJob];
   const tTags = new Set(), tNorms = new Set();
   for (const row of items) {
     for (const tg of row[IT.TAGS]) tTags.add(tg);
@@ -1228,24 +1225,34 @@ function rankMatches(srcJob, items) {
   const out = [];
   for (const j in DB.jobs) {
     if (j === srcJob) continue;
+    const candidate = DB.jobs[j];
+    const whole = GLQSimilarity.orderSimilarity(source, candidate);
+    if (!targetComponent && !whole.sharedEvidence) continue;
+    const focused = targetComponent
+      ? GLQSimilarity.focusedSimilarity(whole, targetComponent, candidate, state.pinned)
+      : null;
+    if (targetComponent && !focused) continue;
     const s = sets[j];
-    let score = 0;
     const sharedNorms = [];
-    for (const n of tNorms) if (s.n.has(n)) { score += 2 / normDF[n]; sharedNorms.push(n); }
-    for (const t of tTags) if (s.t.has(t)) score += 1 / tagDF[t];
-    if (!score) continue;
-    if (srcDesign && spv(DB.jobs[j], "Design") === srcDesign) score += DESIGN_BONUS;
-    if (state.pinned.size) {
-      let ok = true;
-      for (const p of state.pinned) {
-        const ix = p.indexOf("=");
-        if (!anyAttrMatch(DB.jobs[j], p.slice(0, ix), p.slice(ix + 1))) { ok = false; break; }
-      }
-      if (!ok) continue;
-    }
-    out.push({ j, score, sharedNorms: new Set(sharedNorms), tTags });
+    for (const n of tNorms) if (s.n.has(n)) sharedNorms.push(n);
+    const sharedTags = new Set([...tTags].filter(t => s.t.has(t)));
+    out.push({
+      j,
+      score: focused ? focused.score : whole.score,
+      wholeScore: whole.score,
+      coverage: focused ? focused.coverage : whole.coverage,
+      componentScore: focused ? focused.componentScore : null,
+      matchedComponent: focused ? focused.candidateComponent : null,
+      groups: whole.groups,
+      differences: [...new Set([
+        ...(focused ? focused.differences : []), ...whole.differences,
+      ])].slice(0, 4),
+      sharedNorms: new Set(sharedNorms),
+      tTags: sharedTags,
+    });
   }
-  out.sort((a, b) => b.score - a.score || jobNum(b.j) - jobNum(a.j));
+  out.sort((a, b) => b.score - a.score || b.coverage - a.coverage
+    || jobNum(b.j) - jobNum(a.j));
   return out;
 }
 
@@ -1755,14 +1762,14 @@ function renderMatches() {
   const j = state.job, e = DB.jobs[j];
   const srcDesign = spv(e, "Design");
   const items = state.whole ? e.it : compItems(e, state.path);
+  const targetComp = state.whole ? null : compAt(e, state.path);
   const target = state.whole ? "whole order" : (() => {
     const c = compAt(e, state.path);
     return c ? (c.k ? "[" + c.n + "]" : c.n) : "?";
   })();
-  const resAll = rankMatches(j, items);
+  const resAll = rankMatches(j, items, targetComp);
   const res = state.only3d ? resAll.filter(r => DB.jobs[r.j].sw) : resAll;
   const shown = res.slice(0, 25);
-  const max = res.length ? res[0].score : 1;
   const chips = [...state.pinned].map(p => {
     const ix = p.indexOf("=");
     return '<button class="fchip" data-a="' + esc(p) + '" title="Remove this filter">'
@@ -1770,7 +1777,6 @@ function renderMatches() {
       + " <span>✕</span></button>";
   }).join("");
 
-  const targetComp = state.whole ? null : compAt(e, state.path);
   const cards = shown.map((r, i) => {
     const o = DB.jobs[r.j];
     const lines = o.it.filter(row => r.sharedNorms.has(row[IT.NORM])
@@ -1783,7 +1789,7 @@ function renderMatches() {
       ? '<div class="m-more">+ ' + (lines.length - 4) + " more shared lines</div>" : "";
     let chipsHtml = "";
     if (targetComp) {
-      const theirs = findCompByName(o, targetComp.n);
+      const theirs = r.matchedComponent || findCompByName(o, targetComp.n);
       if (theirs) {
         const same = [], diff = [];
         for (const [k, v] of Object.entries(targetComp.a)) {
@@ -1812,18 +1818,32 @@ function renderMatches() {
     const designChip = srcDesign && theirDesign === srcDesign
       ? '<span class="chip same">✓ design ' + esc(srcDesign) + "</span>" : "";
     const spec = fanSpec(o);
+    const g = r.groups;
+    const scoreLabel = targetComp
+      ? "focus " + r.score.toFixed(3) + " · whole " + r.wholeScore.toFixed(3)
+      : "match " + r.score.toFixed(3);
+    const breakdown = "core " + g.core.toFixed(2)
+      + " · construction " + g.construction.toFixed(2)
+      + " · motor/drive " + g.motor.toFixed(2)
+      + " · accessories " + g.accessories.toFixed(2)
+      + " · evidence " + Math.round(100 * r.coverage) + "%";
+    const differences = r.differences.length
+      ? '<div class="m-diffs">Differences: ' + esc(r.differences.join("; ")) + "</div>"
+      : "";
     return '<div class="match"><div class="m-head">'
       + '<span class="m-rank">' + (i + 1) + ".</span>"
       + '<button class="m-job" data-job="' + esc(r.j) + '" title="Open this order">'
       + esc(r.j) + "</button>"
       + '<span class="m-cust">' + esc(o.c) + (o.co ? " · " + esc(o.co) : "")
       + "</span>" + queueBadge(r.j, o) + designChip
-      + '<span class="m-score">score ' + r.score.toFixed(2) + "</span></div>"
+      + '<span class="m-score">' + scoreLabel + "</span></div>"
       + (spec ? '<div class="m-spec">' + esc(spec) + "</div>" : "")
       + '<div class="m-scorebar"><i style="width:'
-      + Math.max(6, 100 * r.score / max) + '%"></i></div>'
+      + Math.max(2, 100 * r.score) + '%"></i></div>'
+      + '<div class="m-break">' + breakdown + "</div>"
       + '<div class="m-lines">' + head + more + "</div>"
-      + chipsHtml + '<div class="m-foot">' + foot.join(" ") + "</div></div>";
+      + chipsHtml + differences
+      + '<div class="m-foot">' + foot.join(" ") + "</div></div>";
   }).join("");
 
   el.innerHTML = '<div class="panel-head"><span class="eyebrow">Matching orders</span>'
@@ -1836,7 +1856,7 @@ function renderMatches() {
     + (res.length === 1 ? "" : "es")
     + (state.only3d && resAll.length !== res.length
         ? " (of " + resAll.length + ")" : "")
-    + (srcDesign ? " · same fan design (" + esc(srcDesign) + ") ranks first" : "")
+    + " · bounded construction score"
     + "</span></div>"
     + (state.pinned.size
         ? '<div class="filterbar"><span class="fl">Required attributes:</span>'
@@ -1846,10 +1866,10 @@ function renderMatches() {
             ? "None of the " + resAll.length + " matches has SolidWorks 3D data "
               + "on file — turn off Has 3D, or run the SolidWorks scan if it "
               + "has never been run."
-            : state.pinned.size ? "Try removing an attribute filter."
-              : "Nothing in the store shares this yet.") + "</div>")
+            : state.pinned.size ? "Try removing a required attribute."
+              : "Nothing has comparable construction evidence yet.") + "</div>")
     + (res.length > 25 ? '<div class="tailnote">…and ' + (res.length - 25)
-        + " more — narrow it with an attribute filter</div>" : "");
+        + " more — narrow it with a required attribute</div>" : "");
   el.querySelectorAll(".fchip").forEach(b => b.onclick = () => {
     state.pinned.delete(b.dataset.a); render(); });
   el.querySelectorAll(".m-job").forEach(b => b.onclick = () => selectJob(b.dataset.job));
