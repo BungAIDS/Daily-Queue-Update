@@ -67,6 +67,9 @@ def test_payload_components_merge():
     assert e2["d"] == "-07, -51", e2.get("d")
     assert e2["f"].endswith("421314"), e2.get("f")
     assert e2["t"] == "BC", e2.get("t")
+    # Each custom drawing carries its own [suffix, ext] link pair (DWG when a
+    # DWG exists for that suffix, else PDF), numerically ordered.
+    assert e2["dl"] == [["07", "dwg"], ["51", "dwg"]], e2.get("dl")
     print("  payload components/enrichment OK")
 
 
@@ -276,7 +279,22 @@ def test_vbs_folder_opener():
     assert text.endswith("\r\n") and "\r\n" in text
     assert "DecodeUrl" in text and "explorer.exe" in text
     assert 'LCase(Left(u, 8)) = "glqueue:"' in text
+    # find? mode resolves the real drawing filename (revision letter) at click.
+    assert 'LCase(Left(u, 5)) = "find?"' in text
+    assert "FindDrawing" in text and "QueryParam" in text
     print("  vbs folder opener OK")
+
+
+def test_dwg_links_render_as_links():
+    p = oe.build_payload(_store(), _dwg())
+    html = oe.render_html(p)
+    assert "a.dwglink" in html                 # style present
+    assert 'glqueue:find?dir=' in html or 'dwgUrl' in html
+    assert "dwgListHtml" in html
+    # PDF-only suffix prefers pdf; DWG/PDF+DWG prefer dwg.
+    links = oe._dwg_links({"07": "PDF", "51": "PDF+DWG", "12": "DWG"})
+    assert links == [["07", "pdf"], ["12", "dwg"], ["51", "dwg"]], links
+    print("  dwg links OK")
 
 
 def test_default_output_path_accepts_folder():
@@ -332,6 +350,7 @@ def main() -> int:
     test_render_roundtrip_and_safety()
     test_bat_launcher()
     test_vbs_folder_opener()
+    test_dwg_links_render_as_links()
     test_default_output_path_accepts_folder()
     test_default_output_path_is_coworker_share()
     test_write_explorer_files()
