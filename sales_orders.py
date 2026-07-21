@@ -327,6 +327,32 @@ def refresh_autocad_folders(jobs: List[Dict[str, Any]]) -> int:
     return n
 
 
+def rescan_departed_autocad(jobs: List[str]) -> int:
+    """A job just left the engineering queue: it's (almost certainly) finished, so
+    all of its drawings are on disk now. Capture its final custom-DWG set into the
+    corpus matrix (autocad_scan_progress.json) — the store the full sweep keeps and
+    that queries like "which jobs have a -51 DWG" read, but which the on-board
+    enrichment never writes to. Deep lookup so a non-standard folder is still found.
+    Returns how many departed jobs were scanned and stored."""
+    wanted = [str(j).strip() for j in jobs if str(j).strip()]
+    if not wanted:
+        return 0
+    index = _find_autocad_folders(wanted, deep=True)
+    scans = []
+    for jn in wanted:
+        info = index.get(jn)
+        if info and info.get("path"):
+            scans.append((jn, info.get("type", ""), info["path"]))
+    if not scans:
+        return 0
+    try:
+        stored = autocad_scan.store_job_scans(scans)
+    except OSError as e:  # noqa: BLE001 - a store update must never sink a poll
+        log.warning("Could not update the DWG matrix for departed job(s) (%s)", e)
+        return 0
+    return len(stored)
+
+
 # Matches both the current '… CO2.pdf' naming and the legacy '… CO#2.pdf' one
 # (the '#' had to go — Excel hyperlinks can't hold a '#' in a file path).
 _CO_IN_SO_NAME = re.compile(r"CO#?(\d+)", re.I)
