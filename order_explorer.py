@@ -138,13 +138,14 @@ def _dwg_label(extras: Dict[str, str] | None) -> str:
 def _dwg_links(extras: Dict[str, str] | None) -> List[List[str]]:
     """[suffix, ext] per custom drawing, numerically ordered — each becomes an
     individual link the page opens via the glqueue: handler. `ext` is the file
-    to prefer: 'dwg' whenever a DWG exists for that suffix, else 'pdf'. The
-    actual on-disk filename (with its revision letter) is resolved at click
-    time, so we never guess '-51' vs '-51B'."""
+    to prefer: 'pdf' whenever a PDF exists for that suffix (the quick viewer),
+    else 'dwg'. The handler still falls back to the other format if the
+    preferred one isn't on disk, and resolves the real filename (with its
+    revision letter) at click time, so we never guess '-51' vs '-51B'."""
     out = []
     for s in sorted(extras or {}, key=_dwg_key):
         fmt = str((extras or {}).get(s) or "").upper()
-        out.append([s, "dwg" if "DWG" in fmt else "pdf"])
+        out.append([s, "pdf" if "PDF" in fmt else "dwg"])
     return out
 
 
@@ -527,9 +528,15 @@ def vbs_text() -> str:
         '  dir = Replace(QueryParam(qs, "dir"), "/", "\\")',
         '  nm = QueryParam(qs, "name")',
         '  ext = QueryParam(qs, "ext")',
-        '  If ext = "" Then ext = "dwg"',
+        '  If ext = "" Then ext = "pdf"',
         "  target = FindDrawing(dir, nm, ext)",
-        '  If target = "" And LCase(ext) <> "pdf" Then target = FindDrawing(dir, nm, "pdf")',
+        '  If target = "" Then',   # preferred format missing -> try the other one
+        '    If LCase(ext) = "pdf" Then',
+        '      target = FindDrawing(dir, nm, "dwg")',
+        "    Else",
+        '      target = FindDrawing(dir, nm, "pdf")',
+        "    End If",
+        "  End If",
         '  If target = "" Then target = dir',
         "  OpenPath target",
         "Else",

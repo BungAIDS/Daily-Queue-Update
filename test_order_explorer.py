@@ -67,9 +67,9 @@ def test_payload_components_merge():
     assert e2["d"] == "-07, -51", e2.get("d")
     assert e2["f"].endswith("421314"), e2.get("f")
     assert e2["t"] == "BC", e2.get("t")
-    # Each custom drawing carries its own [suffix, ext] link pair (DWG when a
-    # DWG exists for that suffix, else PDF), numerically ordered.
-    assert e2["dl"] == [["07", "dwg"], ["51", "dwg"]], e2.get("dl")
+    # Each custom drawing carries its own [suffix, ext] link pair (PDF when a
+    # PDF exists for that suffix, else DWG), numerically ordered.
+    assert e2["dl"] == [["07", "dwg"], ["51", "pdf"]], e2.get("dl")
     print("  payload components/enrichment OK")
 
 
@@ -291,9 +291,9 @@ def test_dwg_links_render_as_links():
     assert "a.dwglink" in html                 # style present
     assert 'glqueue:find?dir=' in html or 'dwgUrl' in html
     assert "dwgListHtml" in html
-    # PDF-only suffix prefers pdf; DWG/PDF+DWG prefer dwg.
+    # PDF or PDF+DWG suffixes prefer pdf; DWG-only prefers dwg.
     links = oe._dwg_links({"07": "PDF", "51": "PDF+DWG", "12": "DWG"})
-    assert links == [["07", "pdf"], ["12", "dwg"], ["51", "dwg"]], links
+    assert links == [["07", "pdf"], ["12", "dwg"], ["51", "pdf"]], links
     print("  dwg links OK")
 
 
