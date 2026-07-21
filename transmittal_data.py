@@ -373,12 +373,11 @@ def build_transmittal_data(
     flags: str = "",
     imi_number: str = "",
     suffix: str = CW_SUFFIX,
-    force_step: bool = False,
+    so_is_current: bool = True,
 ) -> TransmittalData:
     """The pure core: SO text lines (+ a few board-known fields) -> TransmittalData.
-    No file or network I/O, so this is what the tests exercise. `force_step`
-    adds the 3D STEP row even when the SO text doesn't show it (e.g. the daily
-    run's line-item store has it tagged)."""
+    No file or network I/O, so this is what the tests exercise. The current SO
+    text is the sole authority for whether a 3D STEP drawing was requested."""
     d = TransmittalData(order=str(order))
     d.customer = customer or parse_customer(lines)
     d.po = parse_po(lines)
@@ -386,7 +385,7 @@ def build_transmittal_data(
     d.design_no, d.design_desc = parse_design(lines)
     d.box, d.released, d.box_evidence = parse_approval_evidence(lines, flags)
     d.fan_checklist = parse_fan_drawings(lines)
-    d.include_step = has_step(lines) or bool(force_step)
+    d.include_step = has_step(lines) and so_is_current
     d.imi_number = imi_number
     d.drawing_rows = build_drawing_rows(
         order=d.order, design_no=d.design_no, design_desc=d.design_desc,
@@ -502,20 +501,6 @@ def board_unapproved(order: str, ref: Optional[date] = None) -> Optional[bool]:
     return bool(job.get("unapproved"))
 
 
-def step_tagged_in_store(order: str) -> bool:
-    """True when the daily run's line-item store has the '3D STEP DRAWINGS' tag
-    for this order — a cross-check that catches a STEP mention the SO-text scan
-    missed (or a stale archived PDF)."""
-    try:
-        import line_items  # import-light (pure logic + a JSON read)
-        entry = (line_items.load_store().get("jobs") or {}).get(str(order)) or {}
-        return any("3D STEP" in t
-                   for it in entry.get("items") or []
-                   for t in it.get("tags") or [])
-    except Exception:  # noqa: BLE001 - the store is a bonus signal only
-        return False
-
-
 def so_read_today(order: str, ref: Optional[date] = None) -> bool:
     """True if the watcher read this order's SO today (per the recorded
     verified_at). The transmittal should be built from a SO confirmed current
@@ -549,29 +534,44 @@ def find_so_pdf(job: str) -> Optional[Path]:
     return max(pdfs, key=_key)
 
 
-def find_attachments(folder: Optional[Path], order: str, imi_number: str = "") -> List[Path]:
-    """Candidate files to attach from the AutoCAD folder: the order's drawings
-    (DWG/PDF/STEP for any suffix) and the O&M manual PDF. STEP exports are also
-    matched loosely — any .stp/.step carrying the order number in its name, in
-    the folder or one subfolder down (they're often named '<order> 3D STEP.stp'
-    or parked in a STEP/3D subfolder rather than '<order>-NN.stp'). The engineer
-    confirms this list in preview mode before anything is attached."""
+def find_attachments(
+    folder: Optional[Path],
+    order: str,
+    imi_number: str = "",
+    *,
+    drawing_suffix: str = CW_SUFFIX,
+    include_step: bool = False,
+) -> List[Path]:
+    """Files approved for the transmittal from the AutoCAD folder.
+
+    Only the selected standard assembly drawing (-01 CW or -02 CCW) is included,
+    in DWG/PDF form, plus the requested O&M manual. STEP exports are considered
+    only when the current Sales Order explicitly requested 3D STEP drawings; in
+    that case loose STEP names are accepted in the folder or one level below it.
+    """
     if not folder or not folder.exists():
         return []
+    if drawing_suffix not in (CW_SUFFIX, CCW_SUFFIX):
+        raise ValueError(f"unsupported transmittal drawing suffix: {drawing_suffix}")
+
+    import autocad_scan
+
     out: List[Path] = []
-    exts = {".dwg", ".pdf", ".step", ".stp"}
     step_exts = {".step", ".stp"}
     for f in sorted(folder.glob("*")):
         if not f.is_file():
             continue
-        if re.match(rf"{re.escape(str(order))}-\d+", f.stem, re.IGNORECASE) and f.suffix.lower() in exts:
+        drawing = autocad_scan.parse_drawing(f.name, str(order))
+        if drawing and drawing[0] == drawing_suffix:
             out.append(f)
         elif imi_number and f.stem.lower() == imi_number.lower() and f.suffix.lower() == ".pdf":
             out.append(f)
-    for f in sorted(list(folder.glob("*")) + list(folder.glob("*/*"))):
-        if (f.is_file() and f.suffix.lower() in step_exts
-                and str(order) in f.stem and f not in out):
-            out.append(f)
+    if include_step:
+        order_in_name = re.compile(rf"(?<!\d){re.escape(str(order))}(?!\d)")
+        for f in sorted(list(folder.glob("*")) + list(folder.glob("*/*"))):
+            if (f.is_file() and f.suffix.lower() in step_exts
+                    and order_in_name.search(f.stem) and f not in out):
+                out.append(f)
     return out
 
 
@@ -591,7 +591,8 @@ def _refresh_so(order: str) -> bool:
 
 
 def gather(order: str, customer: str = "", flags: str = "",
-           refresh_stale: bool = True) -> TransmittalData:
+           refresh_stale: bool = True,
+           require_current_so_for_step: bool = True) -> TransmittalData:
     """Full pipeline for one order: locate the SO PDF + AutoCAD folder, read the
     IMI number and candidate attachments, and build the TransmittalData. Picks
     the assembly suffix (-01 CW / -02 CCW) by which drawing the folder actually
@@ -599,7 +600,8 @@ def gather(order: str, customer: str = "", flags: str = "",
 
     If the order's SO hasn't been re-read today (per the watcher's verified_at)
     and `refresh_stale` is set, it fetches a fresh SO first so the transmittal is
-    built from the latest revision."""
+    built from the latest revision. Live preparation also withholds STEP unless
+    that current read succeeded; historical backtests can explicitly opt out."""
     order = str(order)
 
     # Confirm today's SO; if stale, pull a fresh one before reading anything.
@@ -621,20 +623,22 @@ def gather(order: str, customer: str = "", flags: str = "",
             suffix = CCW_SUFFIX
 
     lines = load_so_lines(so_pdf) if so_pdf else []
-    step_store = step_tagged_in_store(order)
+    current_so = so_read_today(order)
+    step_source_allowed = current_so or not require_current_so_for_step
     d = build_transmittal_data(lines, order, customer=customer, flags=flags,
-                               imi_number=imi, suffix=suffix, force_step=step_store)
-    if step_store and not has_step(lines):
-        d.warn("3D STEP wasn't found in the archived SO text, but the daily run's "
-               "line-item store has it tagged for this order — added the STEP row "
-               "(verify against the current SO).")
+                               imi_number=imi, suffix=suffix,
+                               so_is_current=step_source_allowed)
+    if has_step(lines) and require_current_so_for_step and not current_so:
+        d.warn("The archived SO mentions 3D STEP, but this order's SO was not "
+               "successfully re-read today — the STEP row and file were withheld.")
 
     # Today's board state beats a stale/misread SO for the approval box.
     apply_board_approval(d, board_unapproved(order))
 
     d.so_pdf = str(so_pdf) if so_pdf else None
     d.folder = str(folder) if folder else None
-    d.attachments = [str(p) for p in find_attachments(folder, order, imi)]
+    d.attachments = [str(p) for p in find_attachments(
+        folder, order, imi, drawing_suffix=suffix, include_step=d.include_step)]
     if d.include_step and not any(a.lower().endswith((".stp", ".step")) for a in d.attachments):
         d.warn("3D STEP is on the order but no .stp/.step file was found in the "
                "AutoCAD folder — export/attach the STEP file manually.")
@@ -706,7 +710,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Back-test diffs history offline; otherwise refresh a stale SO before reading.
     refresh = not (args.backtest or args.no_refresh)
     for order in args.orders:
-        d = gather(order, customer=args.customer, refresh_stale=refresh)
+        d = gather(order, customer=args.customer, refresh_stale=refresh,
+                   require_current_so_for_step=not args.backtest)
         print_summary(d)
     return 0
 

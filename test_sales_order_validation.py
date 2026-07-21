@@ -343,6 +343,45 @@ def test_async_backfill_rejection_cannot_save_co_or_so_data():
     assert "line_item_count" not in record
 
 
+def test_refresh_order_so_does_not_stamp_failed_fetch():
+    import sales_orders
+
+    stamped = []
+
+    with (
+        patch("sales_orders.enrich_with_sales_orders", return_value=None),
+        patch("sales_orders._stamp_verified_today", side_effect=stamped.append),
+    ):
+        try:
+            sales_orders.refresh_order_so("421968")
+        except RuntimeError as error:
+            assert "No current Sales Order" in str(error)
+            assert "421968" in str(error)
+        else:
+            raise AssertionError("A failed Sales Order fetch must fail closed")
+
+    assert stamped == []
+
+
+def test_refresh_order_so_stamps_successful_fetch():
+    import sales_orders
+
+    stamped = []
+
+    def enrich(jobs, deep_folders=False):
+        assert deep_folders is False
+        jobs[0]["so_pdf"] = r"C:\Sales Orders\421968.pdf"
+
+    with (
+        patch("sales_orders.enrich_with_sales_orders", side_effect=enrich),
+        patch("sales_orders._stamp_verified_today", side_effect=stamped.append),
+    ):
+        refreshed = sales_orders.refresh_order_so("421968")
+
+    assert refreshed["so_pdf"].endswith("421968.pdf")
+    assert stamped == ["421968"]
+
+
 def main() -> int:
     passed = 0
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:

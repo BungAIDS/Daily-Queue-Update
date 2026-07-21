@@ -9,11 +9,13 @@ from __future__ import annotations
 import base64
 import gzip
 import json
+import os
 import re
 import tempfile
 from pathlib import Path
 
 import order_explorer as oe
+import prepare_transmittal_link as ptl
 
 
 # The docstring example from so_hierarchy: three printed lines, one real IVC.
@@ -258,6 +260,14 @@ def test_render_roundtrip_and_safety():
     assert 'id="rightcomponenttree"' in html
     assert "ontoggle = alignComponentStarts" in html
     assert "<title>GL Queue Explorer</title>" in html
+    assert html.count("Prepare Transmittal") == 2
+    assert 'class="prepare-transmittal"' in html
+    assert "const transmittalUrl" in html and "glqtransmittal:" in html
+    # In both order headers the action is immediately after that order's customer.
+    assert re.search(r"esc\(e\.c\).*?prepare-transmittal.*?transmittalUrl\(j\)",
+                     html, re.DOTALL)
+    assert re.search(r"esc\(right\.c\).*?prepare-transmittal.*?transmittalUrl\(rightJob\)",
+                     html, re.DOTALL)
     print("  render round-trip / embedding safety OK")
 
 
@@ -295,6 +305,62 @@ def test_dwg_links_render_as_links():
     links = oe._dwg_links({"07": "PDF", "51": "PDF+DWG", "12": "DWG"})
     assert links == [["07", "pdf"], ["12", "dwg"], ["51", "pdf"]], links
     print("  dwg links OK")
+
+
+def test_transmittal_protocol_accepts_only_a_numeric_order():
+    assert ptl.parse_order_uri("glqtransmittal:421968") == "421968"
+    assert ptl.parse_order_uri("GLQTRANSMITTAL:421968") == "421968"
+    for bad in (
+        "glqtransmittal:", "glqtransmittal://421968",
+        "glqtransmittal:421968&send=1", "glqtransmittal:421968/anything",
+        "glqueue:421968", "glqtransmittal:abc",
+    ):
+        try:
+            ptl.parse_order_uri(bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"unsafe transmittal URI was accepted: {bad}")
+    command = ptl.protocol_command(Path(r"C:\CBC INSIDER GL QUEUE CHECKER"),
+                                   Path(r"C:\Python\python.exe"))
+    assert "prepare_transmittal_link.py" in command and "%1" in command
+    print("  transmittal protocol validation OK")
+
+
+def test_transmittal_protocol_runs_existing_review_flow_and_logs():
+    seen = []
+    original_cwd = Path.cwd()
+
+    def fake_fill_main(args):
+        seen.append((args, Path.cwd()))
+        print("review form prepared; Send remains disabled")
+        return 0
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / ".launcher_state.json").write_text(json.dumps({
+            "options": {"email_drawings": {"initials": "JZ"}},
+        }), encoding="utf-8")
+        assert ptl.run_transmittal("421968", root=root,
+                                   fill_main=fake_fill_main) == 0
+        logs = list((root / "launcher_logs").glob("*_email_drawings.log"))
+        assert len(logs) == 1
+        text = logs[0].read_text(encoding="utf-8")
+        assert "fill_transmittal_insider.py 421968 --initials JZ" in text
+        assert "Preparing transmittal for order 421968" in text
+        assert "Send remains disabled" in text
+        assert seen == [(["421968", "--initials", "JZ"], root.resolve())]
+    assert Path.cwd() == original_cwd
+    print("  transmittal protocol review handoff / logging OK")
+
+
+def test_transmittal_protocol_is_single_instance_on_windows():
+    if os.name == "nt":
+        with ptl.transmittal_instance_lock() as first:
+            assert first is True
+            with ptl.transmittal_instance_lock() as second:
+                assert second is False
+    print("  transmittal protocol single-instance gate OK")
 
 
 def test_default_output_path_accepts_folder():
@@ -351,6 +417,9 @@ def main() -> int:
     test_bat_launcher()
     test_vbs_folder_opener()
     test_dwg_links_render_as_links()
+    test_transmittal_protocol_accepts_only_a_numeric_order()
+    test_transmittal_protocol_runs_existing_review_flow_and_logs()
+    test_transmittal_protocol_is_single_instance_on_windows()
     test_default_output_path_accepts_folder()
     test_default_output_path_is_coworker_share()
     test_write_explorer_files()

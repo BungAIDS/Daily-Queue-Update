@@ -73,6 +73,7 @@ VERSION_NAME = "gl_queue_explorer_version.js"
 VBS_NAME = "glq_open.vbs"
 ENABLE_NAME = "Enable Folder Links.bat"
 SIMILARITY_JS_NAME = "order_similarity.js"
+TRANSMITTAL_SCHEME = "glqtransmittal"
 
 # The parsed SO spec fields shown in the job header and the Order History
 # columns (mirrors live_sheets.SO_SUMMARY_COLUMNS / OH_DATA_COLUMNS).
@@ -656,6 +657,33 @@ def _ensure_folder_link_handler(page_dir: Path) -> None:
         subprocess.run(cmd, capture_output=True, check=False)
 
 
+def _ensure_transmittal_link_handler() -> None:
+    """Register the local, per-user order-page transmittal action (no admin).
+
+    Unlike the shared folder-link VBS, this handler must point at the user's
+    local checkout because that is where the authenticated browser session,
+    Python environment, and transmittal code live.
+    """
+    import os
+    import subprocess
+    if os.name != "nt":
+        return
+    import prepare_transmittal_link as transmittal_link
+
+    handler = Path(transmittal_link.__file__).resolve()
+    if not handler.exists():
+        return
+    base = rf"HKCU\Software\Classes\{TRANSMITTAL_SCHEME}"
+    for cmd in (
+        ["reg", "add", base, "/ve", "/t", "REG_SZ",
+         "/d", "URL:GL Queue Prepare Transmittal", "/f"],
+        ["reg", "add", base, "/v", "URL Protocol", "/t", "REG_SZ", "/d", "", "/f"],
+        ["reg", "add", base + r"\shell\open\command", "/ve", "/t", "REG_SZ",
+         "/d", transmittal_link.protocol_command(), "/f"],
+    ):
+        subprocess.run(cmd, capture_output=True, check=False)
+
+
 def open_in_app_window(page: Path) -> bool:
     """Open the page as a clean app window (no tabs/address bar): Edge first
     (ships with Windows), then Chrome, then the OS default handler. The same
@@ -666,6 +694,7 @@ def open_in_app_window(page: Path) -> bool:
         print(f"Open this file in a Chromium browser: {page}")
         return False
     _ensure_folder_link_handler(page.parent)
+    _ensure_transmittal_link_handler()
     url = "file:///" + str(page).replace("\\", "/")
     candidates = (
         ("ProgramFiles(x86)", r"Microsoft\Edge\Application\msedge.exe"),
@@ -733,6 +762,10 @@ def maybe_write(master: Dict[str, Any] | None,
                             today=today, new_ids=new_ids,
                             sw=solidworks_scan.load_progress())
     path = write_explorer(payload, out)
+    # A watcher restart after a git update can refresh an already-open page;
+    # register the matching local action then too, without requiring the user
+    # to close the Explorer and reopen it through the launcher first.
+    _ensure_transmittal_link_handler()
     _CACHE.update(key=key, at=now)
     return path
 
@@ -1003,6 +1036,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .ohead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; flex: 1; }
   .ohead .job { font-family: var(--mono); font-size: 19px; font-weight: 700; }
   .ohead .cust { font-size: 13px; color: var(--muted); }
+  .ohead .prepare-transmittal { align-self: center; padding: 4px 9px;
+    border: 1px solid var(--accent); border-radius: 5px; background: var(--accent);
+    color: #fff; font-size: 12px; font-weight: 650; text-decoration: none;
+    white-space: nowrap; }
+  .ohead .prepare-transmittal:hover { filter: brightness(.92); }
   .ohead .co { font-family: var(--mono); font-size: 11.5px; color: var(--muted);
     border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; }
   /* IN QUEUE badge: filled with the job's own row color from the Live Queue
@@ -1226,8 +1264,8 @@ const fileUrl = p => "file:///" + encodeURI(String(p).replace(/\\/g, "/"))
 const folderUrl = p => "glqueue:" + encodeURI(String(p).replace(/\\/g, "/"))
   .replace(/#/g, "%23");
 /* One custom-drawing link: the glq handler globs <job>-<suffix>*.<ext> in the
-   job folder at click time (revision letter resolved live) and opens the DWG
-   in AutoCAD (or the PDF viewer). */
+   job folder at click time (revision letter resolved live) and opens the PDF
+   (or the DWG in AutoCAD when there's no PDF). */
 const dwgUrl = (folder, job, suffix, ext) =>
   "glqueue:find?dir=" + encodeURIComponent(String(folder).replace(/\\/g, "/"))
   + "&name=" + encodeURIComponent(job + "-" + suffix) + "&ext=" + ext;
@@ -1245,6 +1283,9 @@ function dwgListHtml(job, e) {
   }).join(", ");
   return '<span class="dwg">custom DWGs: ' + links + "</span>";
 }
+/* The Windows handler validates this payload again as digits-only, then opens
+   the existing review-only Email Drawings workflow for this exact order. */
+const transmittalUrl = j => "glqtransmittal:" + String(j);
 const spv = (e, label) => { const kv = (e.sp || []).find(x => x[0] === label);
   return kv ? kv[1] : ""; };
 
@@ -2024,6 +2065,9 @@ function renderJobPane() {
     + '<button class="backlink" id="back">← back</button>'
     + '<div class="ohead"><span class="job">' + esc(j) + '</span>'
     + '<span class="cust">' + esc(e.c) + "</span>"
+    + '<a class="prepare-transmittal" href="' + esc(transmittalUrl(j))
+    + '" title="Open the reviewed Email Drawings form for order ' + esc(j)
+    + '">Prepare Transmittal</a>'
     + (e.co ? '<span class="co">' + esc(e.co) + "</span>" : "")
     + queueBadge(j, e)
     + (e.pdf ? '<a href="' + esc(fileUrl(e.pdf)) + '" target="_blank" title="'
@@ -2252,6 +2296,9 @@ function renderOrderPreview(leftJob, rightJob) {
     + '<div class="ohead"><button class="preview-job" id="previewjob" title="'
     + 'Move this order to the left">' + esc(rightJob) + '</button>'
     + '<span class="cust">' + esc(right.c) + '</span>'
+    + '<a class="prepare-transmittal" href="' + esc(transmittalUrl(rightJob))
+    + '" title="Open the reviewed Email Drawings form for order ' + esc(rightJob)
+    + '">Prepare Transmittal</a>'
     + (right.co ? '<span class="co">' + esc(right.co) + '</span>' : "")
     + queueBadge(rightJob, right)
     + (right.pdf ? '<a href="' + esc(fileUrl(right.pdf)) + '" target="_blank" title="'

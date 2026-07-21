@@ -196,11 +196,17 @@ def test_has_step_tolerates_variant_spellings():
     assert td.has_step(["Stepped inlet cone", "3 D-rings"]) is False
 
 
-def test_force_step_adds_row_without_so_mention():
+def test_step_requires_explicit_current_so_mention():
     lines = [ln for ln in SO_473 if "STEP" not in ln.upper()]
-    d = td.build_transmittal_data(lines, order="421473", force_step=True)
-    assert d.include_step is True
-    assert any("3D STEP" in r.description for r in d.drawing_rows)
+    d = td.build_transmittal_data(lines, order="421473")
+    assert d.include_step is False
+    assert not any("3D STEP" in r.description for r in d.drawing_rows)
+
+
+def test_step_is_withheld_when_so_was_not_read_today():
+    d = td.build_transmittal_data(SO_473, order="421473", so_is_current=False)
+    assert d.include_step is False
+    assert not any("3D STEP" in r.description for r in d.drawing_rows)
 
 
 def test_build_drawing_rows_matches_421693_recipe():
@@ -247,21 +253,41 @@ def test_warns_when_om_but_no_imi():
     assert any("IMI" in w for w in d.warnings)
 
 
-def test_find_attachments_matches_loose_step_names():
+def test_421968_attachments_use_selected_standard_suffix_and_so_step_decision():
     with tempfile.TemporaryDirectory() as tmp:
         folder = Path(tmp)
-        for name in ["421395-01.dwg", "421395-01.pdf", "421395 3D STEP.stp",
-                     "OTHER 421999.stp", "readme.txt"]:
+        for name in [
+            "421968-01.dwg", "421968-01.pdf", "421968-01A.pdf",
+            "421968-02.dwg", "421968-02.pdf", "421968-51.pdf",
+            "421968-010.pdf", "IMI-GL 2021.pdf", "421968 3D STEP.stp",
+            "OTHER 421999.stp", "X4219689.step", "readme.txt",
+        ]:
             (folder / name).write_bytes(b"")
         sub = folder / "STEP"
         sub.mkdir()
-        (sub / "421395.step").write_bytes(b"")
-        got = [p.name for p in td.find_attachments(folder, "421395")]
-        assert "421395-01.dwg" in got and "421395-01.pdf" in got
-        assert "421395 3D STEP.stp" in got          # loose top-level STEP name
-        assert "421395.step" in got                 # STEP subfolder, one level down
-        assert "OTHER 421999.stp" not in got        # different order
-        assert "readme.txt" not in got
+        (sub / "421968.step").write_bytes(b"")
+
+        got = [p.name for p in td.find_attachments(
+            folder, "421968", "IMI-GL 2021", drawing_suffix="01")]
+        assert got == [
+            "421968-01.dwg", "421968-01.pdf", "421968-01A.pdf",
+            "IMI-GL 2021.pdf",
+        ]
+
+        got_ccw = [p.name for p in td.find_attachments(
+            folder, "421968", "IMI-GL 2021", drawing_suffix="02")]
+        assert got_ccw == [
+            "421968-02.dwg", "421968-02.pdf", "IMI-GL 2021.pdf",
+        ]
+
+        got_with_step = [p.name for p in td.find_attachments(
+            folder, "421968", "IMI-GL 2021",
+            drawing_suffix="01", include_step=True)]
+        assert "421968 3D STEP.stp" in got_with_step
+        assert "421968.step" in got_with_step
+        assert "421968-51.pdf" not in got_with_step
+        assert "421968-02.pdf" not in got_with_step
+        assert "X4219689.step" not in got_with_step
 
 
 def test_board_unapproved_reads_live_state():
