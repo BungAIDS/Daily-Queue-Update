@@ -570,10 +570,11 @@ def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce
     # all of its drawings are on disk now — capture its final custom-DWG set into
     # the corpus matrix (autocad_scan_progress.json) the moment it departs. The
     # everyday enrichment only scans on-board jobs, so without this the full-corpus
-    # DWG store goes stale for completed work until the next manual sweep. Baseline
-    # departures (differences vs yesterday's master) are left to the periodic sweep.
+    # DWG store goes stale for completed work until the next manual sweep. Runs on
+    # every poll, baseline included, so overnight departures (jobs on the board at
+    # the last session's end but gone by this morning's first poll) are caught too.
     captured_departed = 0
-    if deltas["removed"] and not baseline:
+    if deltas["removed"]:
         captured_departed = rescan_departed_autocad(deltas["removed"])
         if captured_departed:
             log.info("Captured the final drawing set for %d departed order(s) "
