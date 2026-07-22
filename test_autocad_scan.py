@@ -143,6 +143,33 @@ def test_workbook_color_cells(tmp: Path):
     assert (hasnt.fill.fgColor.rgb or "").endswith("FFC7CE"), hasnt.fill.fgColor.rgb  # red
 
 
+def test_store_job_scans(tmp: Path):
+    # Departed-job capture: scan a job folder and upsert it into the progress store,
+    # preserving jobs already recorded (the watcher folds one job in at a time).
+    a.PROGRESS_PATH = tmp / "dep_progress.json"
+    a.save_progress({"400000": a.build_record(
+        "400000", "GL", "/old", a.scan_files(["400000-01.dwg"], "400000"))})
+
+    jobdir = tmp / "DEPART" / "AXIAL" / "4213" / "421314"
+    jobdir.mkdir(parents=True)
+    for fn in ["421314-01.dwg", "421314-02.dwg", "421314-51.dwg"]:
+        (jobdir / fn).write_text("x")
+
+    done = a.store_job_scans([("421314", "AXIAL", jobdir)])
+    assert set(done) == {"421314"} and done["421314"]["extras"] == {"51": "DWG"}
+
+    store = a.load_progress()
+    assert set(store) == {"400000", "421314"}            # upsert preserved the old job
+    assert store["421314"]["cw"] == "DWG" and store["421314"]["ccw"] == "DWG"
+
+    # Re-running after a drawing is added overwrites just that job's record.
+    (jobdir / "421314-07.pdf").write_text("x")
+    a.store_job_scans([("421314", "AXIAL", jobdir)])
+    assert set(a.load_progress()["421314"]["extras"]) == {"07", "51"}
+
+    assert a.store_job_scans([]) == {}                   # nothing to do, no crash
+
+
 def main() -> int:
     passed = 0
     with tempfile.TemporaryDirectory() as d:
