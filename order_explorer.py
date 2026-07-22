@@ -59,6 +59,7 @@ from typing import Any, Dict, List, Optional
 
 import engineers
 import so_hierarchy
+import so_review
 from config import EXPLORER_PATH, LIVE_WORKBOOK_PATH, OUTPUT_DIR
 # Pure display helpers shared with the Excel tabs, so CO descriptions and the
 # tidy Size / Arrangement forms never diverge between the two.
@@ -74,6 +75,7 @@ VBS_NAME = "glq_open.vbs"
 ENABLE_NAME = "Enable Folder Links.bat"
 SIMILARITY_JS_NAME = "order_similarity.js"
 TRANSMITTAL_SCHEME = "glqtransmittal"
+NOTE_SCHEME = "glqnote"
 
 # The parsed SO spec fields shown in the job header and the Order History
 # columns (mirrors live_sheets.SO_SUMMARY_COLUMNS / OH_DATA_COLUMNS).
@@ -303,7 +305,8 @@ def build_payload(store: Dict[str, Any],
                   events: List[Dict[str, Any]] | None = None,
                   today: date | None = None,
                   new_ids: set | None = None,
-                  sw: Dict[str, Dict[str, Any]] | None = None) -> Dict[str, Any]:
+                  sw: Dict[str, Dict[str, Any]] | None = None,
+                  review_store: Dict[str, Any] | None = None) -> Dict[str, Any]:
     """The page's embedded data: every order the store OR the master log knows
     (the master-only ones carry no line items but fill Order History), with
     items + derived component tree, DWG-scan facts, board fields for on-board
@@ -321,6 +324,19 @@ def build_payload(store: Dict[str, Any],
         for j, rec in master_orders.items():
             if rec.get("on_queue") and isinstance(rec.get("job"), dict):
                 queue_jobs[str(j)] = rec["job"]
+
+    notes_by_order: Dict[str, List[Dict[str, Any]]] = {}
+    if review_store:
+        for n in so_review.open_notes(review_store):
+            order = str(n.get("order") or "").strip()
+            if order:
+                notes_by_order.setdefault(order, []).append({
+                    "id": n.get("id"), "item_no": str(n.get("item_no") or ""),
+                    "item_text": str(n.get("item_text") or ""),
+                    "note": str(n.get("note") or ""),
+                    "row_key": str(n.get("row_key") or ""),
+                    "created_at": str(n.get("created_at") or ""),
+                })
 
     jobs: Dict[str, Any] = {}
     all_jns = (set(store.get("jobs") or {}) | set(queue_jobs)
@@ -378,6 +394,8 @@ def build_payload(store: Dict[str, Any],
         if ment:      # in the master log -> an Order History row
             entry["oh"] = [1 if ment.get("on_queue") else 0,
                            str(ment.get("added") or ""), str(ment.get("left") or "")]
+        if notes_by_order.get(str(jn)):
+            entry["nt"] = notes_by_order[str(jn)]
         if qjob:
             entry["q"] = 1
             entry["bd"] = _board_fields(qjob, added=str(ment.get("added") or ""))
@@ -684,6 +702,28 @@ def _ensure_transmittal_link_handler() -> None:
         subprocess.run(cmd, capture_output=True, check=False)
 
 
+def _ensure_note_link_handler() -> None:
+    """Register the local, per-user order-review note action (no admin)."""
+    import os
+    import subprocess
+    if os.name != "nt":
+        return
+    import prepare_so_review_note_link as note_link
+
+    handler = Path(note_link.__file__).resolve()
+    if not handler.exists():
+        return
+    base = rf"HKCU\Software\Classes\{NOTE_SCHEME}"
+    for cmd in (
+        ["reg", "add", base, "/ve", "/t", "REG_SZ",
+         "/d", "URL:GL Queue SO Review Note", "/f"],
+        ["reg", "add", base, "/v", "URL Protocol", "/t", "REG_SZ", "/d", "", "/f"],
+        ["reg", "add", base + r"\shell\open\command", "/ve", "/t", "REG_SZ",
+         "/d", note_link.protocol_command(), "/f"],
+    ):
+        subprocess.run(cmd, capture_output=True, check=False)
+
+
 def open_in_app_window(page: Path) -> bool:
     """Open the page as a clean app window (no tabs/address bar): Edge first
     (ships with Windows), then Chrome, then the OS default handler. The same
@@ -695,6 +735,7 @@ def open_in_app_window(page: Path) -> bool:
         return False
     _ensure_folder_link_handler(page.parent)
     _ensure_transmittal_link_handler()
+    _ensure_note_link_handler()
     url = "file:///" + str(page).replace("\\", "/")
     candidates = (
         ("ProgramFiles(x86)", r"Microsoft\Edge\Application\msedge.exe"),
@@ -748,6 +789,7 @@ def maybe_write(master: Dict[str, Any] | None,
            _mtime(change_log.log_path(today)), _mtime(solidworks_scan.PROGRESS_PATH),
            _mtime(Path(__file__)),
            _mtime(Path(__file__).with_name(SIMILARITY_JS_NAME)),
+           _mtime(so_review.REVIEW_STORE_PATH),
            # Any Explorer/scoring git pull regenerates on the next poll.
            today.isoformat(),
            tuple(sorted(queue)), tuple(sorted(str(x) for x in new_ids or ())))
@@ -760,12 +802,14 @@ def maybe_write(master: Dict[str, Any] | None,
                             master_orders=(master or {}).get("orders"),
                             queue_jobs=queue, events=change_log.load(today),
                             today=today, new_ids=new_ids,
-                            sw=solidworks_scan.load_progress())
+                            sw=solidworks_scan.load_progress(),
+                            review_store=so_review.load_store())
     path = write_explorer(payload, out)
     # A watcher restart after a git update can refresh an already-open page;
     # register the matching local action then too, without requiring the user
     # to close the Explorer and reopen it through the launcher first.
     _ensure_transmittal_link_handler()
+    _ensure_note_link_handler()
     _CACHE.update(key=key, at=now)
     return path
 
@@ -846,7 +890,8 @@ def main(argv: List[str] | None = None) -> int:
         sw = solidworks_scan.load_progress()
 
     payload = build_payload(store, dwg, master_orders=master.get("orders"),
-                            events=events, today=today, sw=sw)
+                            events=events, today=today, sw=sw,
+                            review_store=so_review.load_store())
     out = write_explorer(payload, args.out)
     n_q = sum(1 for e in payload["jobs"].values() if e.get("q"))
     print(f"Wrote {out}  ({payload['n_jobs']} orders, {payload['n_items']} line "
@@ -1079,6 +1124,33 @@ _TEMPLATE = r"""<!DOCTYPE html>
     margin-left: auto; }
   .wholebtn:hover, .wholebtn.active { background: var(--accent);
     color: var(--accent-ink); }
+  .order-body { display: grid; grid-template-columns: 28px minmax(0, 1fr);
+    gap: 10px; align-items: stretch; }
+  .order-body.notes-open { grid-template-columns: minmax(210px, 280px) minmax(0, 1fr); }
+  .notes-rail { border: 1px solid var(--line); border-radius: 9px;
+    background: var(--panel-2); overflow: hidden; }
+  .notes-toggle { width: 100%; height: 100%; min-height: 280px; color: var(--accent);
+    font-weight: 800; border-right: 4px solid var(--accent); }
+  .notes-panel { display: none; padding: 8px; }
+  .order-body.notes-open .notes-toggle { height: auto; min-height: 0;
+    border-right: none; border-bottom: 1px solid var(--line); padding: 6px; }
+  .order-body.notes-open .notes-panel { display: block; }
+  .notes-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .notes-head .title { font-weight: 800; font-size: 12px; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--muted); }
+  .notes-mode { margin-left: auto; border: 1px solid var(--accent);
+    border-radius: 999px; color: var(--accent); font-weight: 700; padding: 2px 8px; }
+  .notes-mode.write { background: var(--accent); color: var(--accent-ink); }
+  .note-cell { border-top: 1px solid var(--line); padding: 7px 0; }
+  .note-target { font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+    overflow-wrap: anywhere; }
+  .note-list { font-size: 12px; margin: 3px 0; display: flex; flex-direction: column; gap: 3px; }
+  .note-list .empty-note { color: var(--faint); font-style: italic; }
+  .note-input { width: 100%; min-height: 54px; resize: vertical; margin-top: 4px;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+    color: var(--ink); padding: 5px 7px; font: 12px/1.35 var(--sans); }
+  .note-add { margin-top: 4px; border: 1px solid var(--good); border-radius: 6px;
+    color: var(--good); font-size: 11px; font-weight: 700; padding: 2px 8px; }
 
   .tree { display: flex; flex-direction: column; gap: 6px; }
   .comp { border: 1px solid var(--line); border-radius: 9px; overflow: hidden;
@@ -1249,7 +1321,8 @@ let COSET = new Set();         // jobs a CO# landed on today (red text)
 let NWSET = null;              // the watcher's exact new-today set (null = derive)
 const state = { tab: "board", job: null, whole: false, previewJob: null,
                 selections: new Map(), histQ: "", histN: 500,
-                boardQ: "", boardSort: null, histSort: null, only3d: false };
+                boardQ: "", boardSort: null, histSort: null, only3d: false,
+                notesOpen: false, notesWrite: false };
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c =>
@@ -1286,6 +1359,9 @@ function dwgListHtml(job, e) {
 /* The Windows handler validates this payload again as digits-only, then opens
    the existing review-only Email Drawings workflow for this exact order. */
 const transmittalUrl = j => "glqtransmittal:" + String(j);
+const noteUrl = payload => "glqnote:?"
+  + Object.entries(payload).map(([k, v]) =>
+    encodeURIComponent(k) + "=" + encodeURIComponent(String(v || ""))).join("&");
 const spv = (e, label) => { const kv = (e.sp || []).find(x => x[0] === label);
   return kv ? kv[1] : ""; };
 
@@ -1322,6 +1398,47 @@ function fillClass(j, e) {
     if (ed <= soon) return isNew ? "xf-snn" : "xf-sn";
   }
   return isNew ? "xf-nw" : "";
+}
+function noteStoreKey(job) { return "glq_notes_" + job; }
+function orderNotes(job) {
+  const embedded = (DB.jobs[job].nt || []).map(n => ({...n, local: false}));
+  let local = [];
+  try { local = JSON.parse(localStorage.getItem(noteStoreKey(job)) || "[]"); }
+  catch (e) { local = []; }
+  const seen = new Set();
+  return [...embedded, ...local].filter(n => {
+    const key = [n.row_key || "", n.item_no || "", n.note || ""].join("\u0001");
+    if (seen.has(key)) return false;
+    seen.add(key); return true;
+  });
+}
+function notesForTarget(job, target) {
+  return orderNotes(job).filter(n => {
+    if (target.row_key && n.row_key) return n.row_key === target.row_key;
+    if (target.item_no && n.item_no) return String(n.item_no) === String(target.item_no);
+    return (n.item_text || "").trim() === target.item_text.trim();
+  });
+}
+function rememberLocalNote(job, payload) {
+  let notes = [];
+  try { notes = JSON.parse(localStorage.getItem(noteStoreKey(job)) || "[]"); }
+  catch (e) { notes = []; }
+  notes.push({...payload, created_at: new Date().toISOString(), local: true});
+  localStorage.setItem(noteStoreKey(job), JSON.stringify(notes.slice(-500)));
+}
+function noteTargetHtml(job, target) {
+  const notes = notesForTarget(job, target);
+  const body = notes.length
+    ? notes.map(n => '<div>' + esc(n.note) + (n.local ? ' <span class="hint">(pending)</span>' : "") + "</div>").join("")
+    : '<div class="empty-note">No notes</div>';
+  return '<div class="note-cell" data-note-row="' + esc(target.row_key)
+    + '" data-note-item="' + esc(target.item_no || "")
+    + '" data-note-text="' + esc(target.item_text) + '">'
+    + '<div class="note-target">' + esc(target.label) + '</div>'
+    + '<div class="note-list">' + body + '</div>'
+    + (state.notesWrite ? '<textarea class="note-input" placeholder="Add note"></textarea>'
+      + '<button class="note-add">Add to list</button>' : "")
+    + '</div>';
 }
 /* The IN QUEUE badge, filled with the job's current row color on the queue. */
 function queueBadge(j, e) {
@@ -2022,12 +2139,20 @@ function renderJobPane() {
     + e.h.length + ')</summary>'
     + e.h.map(x => "<div>" + esc(x) + "</div>").join("") + "</details>" : "";
 
+  const noteTargets = [];
   const compCard = (c, path) => {
     const selectedPins = state.selections.get(path);
     const active = !state.whole && !!selectedPins;
     const items = c.i.map(no => itemByNo(e, no)).filter(Boolean);
+    const itemNo = items.length === 1 ? String(items[0][IT.NO]) : "";
+    const compRowKey = itemNo ? "item:" + itemNo : "component|" + path + "|" + c.n;
+    noteTargets.push({ row_key: compRowKey, item_no: itemNo, item_text: c.n,
+      label: (c.k ? "[" + c.n + "]" : c.n) });
     const attrs = Object.entries(c.a).map(([k, v]) => {
       const key = k + "=" + v;
+      noteTargets.push({ row_key: "attr|" + path + "|" + key, item_no: itemNo,
+        item_text: c.n + " · " + k.replace(/_/g, " ") + ": " + v,
+        label: c.n + " · " + k.replace(/_/g, " ") });
       const pin = active && selectedPins.has(key);
       return '<button class="attr-row' + (pin ? " pinned" : "")
         + '" data-a="' + esc(key) + '" data-p="' + path
@@ -2061,6 +2186,14 @@ function renderJobPane() {
     ? e.cp.map((c, ix) => compCard(c, String(ix))).join("")
     : '<div class="empty">No line items captured for this order yet.</div>';
 
+  const notesHtml = '<aside class="notes-rail"><button class="notes-toggle" id="notestoggle" '
+    + 'title="Expand order notes">' + (state.notesOpen ? "◂ Notes" : "▸") + '</button>'
+    + '<div class="notes-panel"><div class="notes-head"><span class="title">SO Review Notes</span>'
+    + '<button class="notes-mode' + (state.notesWrite ? " write" : "") + '" id="notesmode">'
+    + (state.notesWrite ? "Write" : "Read") + '</button></div>'
+    + '<div class="hint">Notes attach to Sales Order components and attributes, not Quote Run facts.</div>'
+    + noteTargets.map(t => noteTargetHtml(j, t)).join("") + '</div></aside>';
+
   el.innerHTML = '<div class="panel-head">'
     + '<button class="backlink" id="back">← back</button>'
     + '<div class="ohead"><span class="job">' + esc(j) + '</span>'
@@ -2079,15 +2212,31 @@ function renderJobPane() {
     + (specs ? '<div class="specs">' + specs + "</div>" : "")
     + (meta.length ? '<div class="metaline">' + meta.join(" ") + "</div>" : "")
     + hist
-    + '<div class="sectionbar" id="leftcomponents"><span class="eyebrow">Components</span>'
+    + '<div class="order-body' + (state.notesOpen ? " notes-open" : "") + '">' + notesHtml
+    + '<div><div class="sectionbar" id="leftcomponents"><span class="eyebrow">Components</span>'
     + '<span class="hint">select any combination of components and attributes (AND)</span>'
     + (state.selections.size ? '<span class="hint">' + state.selections.size
         + " component" + (state.selections.size === 1 ? "" : "s") + " selected</span>" : "")
     + '<button class="wholebtn' + (state.whole ? " active" : "")
     + '" id="whole">match whole order</button></div>'
-    + '<div class="tree" id="leftcomponenttree">' + tree + "</div></div>";
+    + '<div class="tree" id="leftcomponenttree">' + tree + "</div></div></div></div>";
 
   $("back").onclick = () => history.length > 1 ? history.back() : setTab("board");
+  $("notestoggle").onclick = () => { state.notesOpen = !state.notesOpen; render(); };
+  const notesMode = $("notesmode");
+  if (notesMode) notesMode.onclick = () => { state.notesWrite = !state.notesWrite; render(); };
+  el.querySelectorAll(".note-add").forEach(b => b.onclick = () => {
+    const cell = b.closest(".note-cell"), input = cell.querySelector(".note-input");
+    const text = (input.value || "").trim();
+    if (!text) { toast("Type a note first"); return; }
+    const payload = { order: j, item_no: cell.dataset.noteItem || "",
+      item_text: cell.dataset.noteText || "", row_key: cell.dataset.noteRow || "",
+      note: text };
+    rememberLocalNote(j, payload);
+    location.href = noteUrl(payload);
+    toast("Note added to local list and sent to SO review queue");
+    render();
+  });
   $("whole").onclick = () => { const hadPreview = !!state.previewJob;
     state.previewJob = null;
     if (hadPreview && state.whole) { render(); return; }
