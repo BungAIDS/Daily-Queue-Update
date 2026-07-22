@@ -584,6 +584,16 @@ def test_maybe_write_only_publishes_on_new_data():
     print("  maybe_write publishes only on new data OK")
 
 
+def test_explorer_search_supports_multi_part_scored_queries():
+    html = oe.render_html({"gen": "now", "jobs": {}, "n_items": 0})
+    assert "function searchParts" in html
+    assert "function scoreSearchEntry" in html
+    assert "complete matches first" in html
+    assert "score ' + h.score.toFixed(2)" in html
+    assert "multiple features: D16, S245, access door" in html
+    print("  multi-part scored Explorer search UI OK")
+
+
 def main() -> int:
     test_payload_components_merge()
     test_queue_jobs_take_master_items()
@@ -593,6 +603,7 @@ def main() -> int:
     test_wheel_component_from_quote_run()
     test_master_orders_fallback_queue()
     test_render_roundtrip_and_safety()
+    test_explorer_search_supports_multi_part_scored_queries()
     test_bat_launcher()
     test_vbs_folder_opener()
     test_dwg_links_render_as_links()
