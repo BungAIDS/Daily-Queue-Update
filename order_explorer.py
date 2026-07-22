@@ -609,17 +609,17 @@ def bat_text(html_name: str = HTML_NAME) -> str:
         'set "EDGE=%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe"',
         'if not exist "%EDGE%" set "EDGE=%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe"',
         'if exist "%EDGE%" (',
-        '    start "" "%EDGE%" --start-maximized --app="file:///%PAGE%"',
+        '    start "" "%EDGE%" --start-maximized --window-position=0,0 --window-size=3840,2160 --app="file:///%PAGE%"',
         "    exit /b 0",
         ")",
         "",
         'set "CHROME=%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe"',
         'if not exist "%CHROME%" set "CHROME=%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe"',
         'if exist "%CHROME%" (',
-        '    start "" "%CHROME%" --start-maximized --app="file:///%PAGE%"',
+        '    start "" "%CHROME%" --start-maximized --window-position=0,0 --window-size=3840,2160 --app="file:///%PAGE%"',
         "    exit /b 0",
         ")",
-        'start "" msedge --start-maximized --app="file:///%PAGE%"',
+        'start "" msedge --start-maximized --window-position=0,0 --window-size=3840,2160 --app="file:///%PAGE%"',
         "",
     ]
     return "\r\n".join(lines)
@@ -765,7 +765,10 @@ def open_in_app_window(page: Path) -> bool:
         base = os.environ.get(env)
         exe = Path(base) / sub if base else None
         if exe and exe.exists():
-            subprocess.Popen([str(exe), "--start-maximized", f"--app={url}"], close_fds=True)
+            subprocess.Popen([
+                str(exe), "--start-maximized", "--window-position=0,0",
+                "--window-size=3840,2160", f"--app={url}",
+            ], close_fds=True)
             return True
     try:
         os.startfile(str(page))          # plain browser tab as a last resort
@@ -1618,6 +1621,12 @@ async function boot() {
   $("boot").style.display = "none";
   $("tabs").style.display = "";
   document.querySelector("footer").style.display = "";
+  try {
+    if (window.screen && screen.availWidth && screen.availHeight) {
+      window.moveTo(0, 0);
+      window.resizeTo(screen.availWidth, screen.availHeight);
+    }
+  } catch (e) {}
   $("stamp").textContent = "generated " + DB.gen + " · " + DB.n_jobs
     + " orders · " + DB.n_items + " line items"
     + (DB.v ? " · " + DB.v : "");
@@ -1663,8 +1672,8 @@ function reloadFresh() {
   try {
     sessionStorage.setItem(STATE_KEY, JSON.stringify({
       tab: state.tab, job: state.job, selections: encodeSelections(),
-      whole: state.whole, histQ: state.histQ, y: window.scrollY,
-      refreshed: 1 }));
+      whole: state.whole, boardQ: state.boardQ, histQ: state.histQ,
+      y: window.scrollY, refreshed: 1 }));
   } catch (e) {}
   location.reload();
 }
@@ -1683,6 +1692,7 @@ function restoreState() {
   state.tab = ["board", "changes", "hist", "job"].includes(saved.tab)
     ? saved.tab : "board";
   if (state.tab === "job" && !state.job) state.tab = "board";
+  state.boardQ = saved.boardQ || "";
   state.histQ = saved.histQ || "";
   if (saved.y) setTimeout(() => window.scrollTo(0, saved.y), 60);
   if (saved.refreshed) toast("Refreshed — new data as of " + DB.gen);
@@ -1696,7 +1706,7 @@ function savePrefs() {
     localStorage.setItem(PREFS_KEY, JSON.stringify({
       tab: state.tab === "job" ? "board" : state.tab,
       boardSort: state.boardSort, histSort: state.histSort,
-      boardQ: state.boardQ, histQ: state.histQ, only3d: state.only3d }));
+      histQ: state.histQ, only3d: state.only3d }));
   } catch (e) {}
 }
 function loadPrefs() {
@@ -1708,7 +1718,7 @@ function loadPrefs() {
     state.tab = "board";
     if (p.boardSort && typeof p.boardSort.col === "number") state.boardSort = p.boardSort;
     if (p.histSort && typeof p.histSort.col === "number") state.histSort = p.histSort;
-    state.boardQ = p.boardQ || "";
+    state.boardQ = "";
     state.histQ = p.histQ || "";
     state.only3d = !!p.only3d;
   } catch (e) {}
