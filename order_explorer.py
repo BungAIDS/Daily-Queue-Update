@@ -38,9 +38,12 @@ stop auto-refreshing; nothing breaks.
 
 build_payload / render_html are pure and unit-tested (test_order_explorer.py);
 store loads live only in maybe_write() and the CLI. The watcher calls
-maybe_write() each poll — it regenerates only when a store file, the day's
-change log, or the board membership changed (hourly floor), so the usual poll
-adds nothing. `order_similarity.js` is both the browser's embedded scorer and
+maybe_write() each poll — it republishes only when the data the page renders
+actually changed (new orders, line items, tags, events, or queue membership),
+never merely because the watcher ran or an hour passed; churn confined to the
+volatile board columns is ignored. Opening the Explorer (the CLI / launcher
+Open button) always rebuilds unconditionally, so it shows everything current.
+`order_similarity.js` is both the browser's embedded scorer and
 the directly-tested Node module, so its weight table has one source of truth.
 """
 from __future__ import annotations
@@ -48,6 +51,7 @@ from __future__ import annotations
 import argparse
 import base64
 import gzip
+import hashlib
 import json
 import logging
 import re
@@ -760,18 +764,50 @@ def open_in_app_window(page: Path) -> bool:
 # --------------------------------------------------------------------------- #
 # Watcher hook: regenerate only when something it shows could have changed     #
 # --------------------------------------------------------------------------- #
-_CACHE: Dict[str, Any] = {"key": None, "at": 0.0}
-_MAX_AGE_SECONDS = 3600     # regenerate at least hourly regardless
+_CACHE: Dict[str, Any] = {"touch": None, "content": None, "at": 0.0}
+
+
+def _content_fingerprint(payload: Dict[str, Any]) -> str:
+    """A stable hash of only the data the page renders, so the page is
+    republished exactly when there is genuinely new data to show — new orders,
+    line items, tags, events, removed rows, the new-today set, or queue
+    membership. Two things are deliberately excluded: the build timestamp
+    (`gen`, which changes every build) and each order's churny board columns
+    (`bd`: status, assignee, live queue position, ...), which wiggle on almost
+    every poll and which the watcher has never rebuilt the page for. Opening the
+    Explorer rebuilds unconditionally, so those columns still refresh on
+    demand."""
+    jobs = {
+        jid: {k: v for k, v in (entry or {}).items() if k != "bd"}
+        for jid, entry in (payload.get("jobs") or {}).items()
+    }
+    stable = {k: v for k, v in payload.items() if k != "gen"}
+    stable["jobs"] = jobs
+    raw = json.dumps(stable, separators=(",", ":"), ensure_ascii=False,
+                     sort_keys=True)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
 def maybe_write(master: Dict[str, Any] | None,
                 lq_jobs: List[Dict[str, Any]] | None,
                 new_ids: set | None = None,
                 force: bool = False) -> Optional[Path]:
-    """Called by the watcher each poll. Cheap unless the line-items/DWG store
-    files or today's change log changed on disk, the board membership changed,
-    or an hour passed — then the page is rebuilt from the real stores. Returns
-    the path written, or None when the page was already current."""
+    """Called by the watcher each poll — the incremental publish path (opening
+    the Explorer rebuilds unconditionally; see main).
+
+    Two stages keep it both cheap and quiet:
+      1. A cheap pre-check over the source-file mtimes, the date, the board
+         membership and the new-today set. When none of those moved, nothing
+         could have added data, so the poll returns immediately without loading
+         or building anything.
+      2. When something did move, the page is built in memory and rewritten to
+         disk ONLY if its content fingerprint changed. A store re-save that
+         carried no new line items, or churn confined to the volatile board
+         columns, therefore leaves the published page — and every open browser —
+         untouched. There is no time-based floor: the page is never rewritten
+         just because the watcher ran or an hour passed.
+
+    Returns the path written, or None when nothing new needed publishing."""
     import autocad_scan
     import change_log
     import line_items as li
@@ -785,32 +821,42 @@ def maybe_write(master: Dict[str, Any] | None,
             return 0.0
     today = date.today()
     queue = {str(j.get("job")): j for j in lq_jobs or [] if j.get("job")}
-    key = (_mtime(li.store_path()), _mtime(autocad_scan.PROGRESS_PATH),
-           _mtime(change_log.log_path(today)), _mtime(solidworks_scan.PROGRESS_PATH),
-           _mtime(Path(__file__)),
-           _mtime(Path(__file__).with_name(SIMILARITY_JS_NAME)),
-           _mtime(so_review.REVIEW_STORE_PATH),
-           # Any Explorer/scoring git pull regenerates on the next poll.
-           today.isoformat(),
-           tuple(sorted(queue)), tuple(sorted(str(x) for x in new_ids or ())))
-    now = time.time()
-    if (not force and out.exists() and _CACHE["key"] == key
-            and now - _CACHE["at"] < _MAX_AGE_SECONDS):
+    # Stage 1 — cheap pre-check. If no input file's mtime, the date, the board
+    # membership or the new-today set moved since the last poll, nothing could
+    # have added data; skip without loading the stores or building the page.
+    touch = (_mtime(li.store_path()), _mtime(autocad_scan.PROGRESS_PATH),
+             _mtime(change_log.log_path(today)), _mtime(solidworks_scan.PROGRESS_PATH),
+             _mtime(Path(__file__)),
+             _mtime(Path(__file__).with_name(SIMILARITY_JS_NAME)),
+             _mtime(so_review.REVIEW_STORE_PATH),
+             today.isoformat(),
+             tuple(sorted(queue)), tuple(sorted(str(x) for x in new_ids or ())))
+    if not force and out.exists() and _CACHE["touch"] == touch:
         return None
 
+    # Stage 2 — a source touched (or first run / forced). Build the page and
+    # publish it only when the data it renders actually changed.
     payload = build_payload(li.load_store(), autocad_scan.load_progress(),
                             master_orders=(master or {}).get("orders"),
                             queue_jobs=queue, events=change_log.load(today),
                             today=today, new_ids=new_ids,
                             sw=solidworks_scan.load_progress(),
                             review_store=so_review.load_store())
+    fingerprint = _content_fingerprint(payload)
+    if not force and out.exists() and _CACHE["content"] == fingerprint:
+        # Something was re-saved but nothing the page shows changed. Record the
+        # fresh mtimes so the next polls skip cheaply instead of rebuilding this
+        # same unchanged payload every time.
+        _CACHE.update(touch=touch, at=time.time())
+        return None
+
     path = write_explorer(payload, out)
     # A watcher restart after a git update can refresh an already-open page;
     # register the matching local action then too, without requiring the user
     # to close the Explorer and reopen it through the launcher first.
     _ensure_transmittal_link_handler()
     _ensure_note_link_handler()
-    _CACHE.update(key=key, at=now)
+    _CACHE.update(touch=touch, content=fingerprint, at=time.time())
     return path
 
 
@@ -833,28 +879,17 @@ def main(argv: List[str] | None = None) -> int:
                          "solidworks_scan store)")
     ap.add_argument("--open", action="store_true",
                     help="Open the page in an app window (Edge/Chrome --app). "
-                         "The page is rebuilt first when it's missing OR older "
-                         "than this code (i.e. right after a git pull); "
-                         "otherwise it opens as-is — the watcher keeps it fresh.")
+                         "The page is always rebuilt from the latest data first, "
+                         "so opening the Explorer shows everything current.")
     args = ap.parse_args(argv)
 
     if args.open:
-        out = args.out or default_output_path()
-        try:
-            scorer = Path(__file__).with_name(SIMILARITY_JS_NAME)
-            source_mtime = max(Path(__file__).stat().st_mtime,
-                               scorer.stat().st_mtime)
-            fresh = out.exists() and out.stat().st_mtime >= source_mtime
-        except OSError:
-            fresh = False
-        if fresh:
-            print(f"Opening {out}")
-            return 0 if open_in_app_window(out) else 1
-        if out.exists():
-            print(f"{out} predates the current code (git pull?) — rebuilding "
-                  "it first, takes a moment…")
-        else:
-            print(f"{out} does not exist yet — building it first…")
+        # Opening always fully rebuilds from the current stores: the launcher's
+        # Open button is the user's "show me everything now" action, so it must
+        # never serve a stale page. (The incremental watcher path is
+        # maybe_write, which republishes only on genuinely new data.)
+        print(f"Rebuilding {args.out or default_output_path()} from the latest "
+              "data before opening…")
 
     import change_log
     import line_items as li

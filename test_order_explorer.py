@@ -448,6 +448,103 @@ def test_write_explorer_files():
     print("  write_explorer files OK")
 
 
+def test_content_fingerprint_ignores_volatile_columns():
+    qjob = {"job": "421966", "status": "IN PROCESS", "_cbc_pos": 3,
+            "total_price": "10,000", "assigned_to": "JZ"}
+    base = oe.build_payload(_store(), queue_jobs={"421966": qjob})
+    fp = oe._content_fingerprint
+    baseline = fp(base)
+
+    # The build timestamp never affects the fingerprint.
+    bumped = json.loads(json.dumps(base))
+    bumped["gen"] = "2099-01-01 00:00"
+    assert fp(bumped) == baseline
+
+    # Neither do the churny board columns (status / live position / price).
+    moved = json.loads(json.dumps(base))
+    assert "bd" in moved["jobs"]["421966"], "expected board fields on a queued job"
+    moved["jobs"]["421966"]["bd"] = {"st": "SHIPPED", "ps": 99, "pr": "1"}
+    assert fp(moved) == baseline
+
+    # But genuinely new line-item data does change it...
+    newdata = json.loads(json.dumps(base))
+    newdata["jobs"]["421966"]["it"].append(["EVASE", "Discharge Evase"])
+    assert fp(newdata) != baseline
+
+    # ...as do a new change event and a queue-membership change.
+    ev = json.loads(json.dumps(base))
+    ev["ev"] = [{"job": "421966", "kind": "added"}]
+    assert fp(ev) != baseline
+    left = json.loads(json.dumps(base))
+    assert left["jobs"]["421966"].get("q") == 1, "queued job should carry q=1"
+    del left["jobs"]["421966"]["q"]
+    assert fp(left) != baseline
+    print("  content fingerprint ignores gen/board churn OK")
+
+
+def test_maybe_write_only_publishes_on_new_data():
+    """The watcher hook republishes on genuinely new data only: unchanged polls
+    and no-op store re-saves never rewrite the page (which would reload every
+    open browser)."""
+    import line_items as li
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        out = tmp / "explorer.html"
+        store_file = tmp / "line_items.json"
+        store_file.write_text("{}", encoding="utf-8")
+
+        saved = {name: getattr(oe, name) for name in (
+            "default_output_path", "build_payload", "write_explorer",
+            "_ensure_transmittal_link_handler", "_ensure_note_link_handler")}
+        saved_store_path, saved_cache = li.store_path, dict(oe._CACHE)
+        writes: list = []
+        payload_box = {"p": {"gen": "t0", "jobs": {}, "n_items": 0}}
+
+        def _bump_store(seconds: int) -> None:
+            st = store_file.stat()
+            os.utime(store_file, (st.st_atime, st.st_mtime + seconds))
+
+        try:
+            oe.default_output_path = lambda: out
+            li.store_path = lambda: store_file
+            oe.build_payload = lambda *a, **k: payload_box["p"]
+            oe._ensure_transmittal_link_handler = lambda *a, **k: None
+            oe._ensure_note_link_handler = lambda *a, **k: None
+
+            def _fake_write(payload, o):
+                writes.append(payload)
+                Path(o).write_text("page", encoding="utf-8")
+                return Path(o)
+            oe.write_explorer = _fake_write
+            oe._CACHE = {"touch": None, "content": None, "at": 0.0}
+
+            # First poll — nothing published yet, so it writes.
+            assert oe.maybe_write(None, []) == out
+            assert len(writes) == 1
+
+            # Same inputs, nothing touched -> stage-1 skip, no rebuild.
+            assert oe.maybe_write(None, []) is None
+            assert len(writes) == 1
+
+            # A store re-save that carried no new data (only a fresh gen):
+            # stage 1 proceeds, but the content fingerprint is unchanged.
+            payload_box["p"] = {"gen": "t0-resave", "jobs": {}, "n_items": 0}
+            _bump_store(100)
+            assert oe.maybe_write(None, []) is None
+            assert len(writes) == 1
+
+            # Genuinely new data + another re-save -> republishes.
+            payload_box["p"] = {"gen": "t1", "jobs": {"9": {"it": [1]}}, "n_items": 1}
+            _bump_store(200)
+            assert oe.maybe_write(None, []) == out
+            assert len(writes) == 2
+        finally:
+            for name, fn in saved.items():
+                setattr(oe, name, fn)
+            li.store_path, oe._CACHE = saved_store_path, saved_cache
+    print("  maybe_write publishes only on new data OK")
+
+
 def main() -> int:
     test_payload_components_merge()
     test_queue_jobs_take_master_items()
@@ -467,6 +564,8 @@ def main() -> int:
     test_default_output_path_accepts_folder()
     test_default_output_path_is_coworker_share()
     test_write_explorer_files()
+    test_content_fingerprint_ignores_volatile_columns()
+    test_maybe_write_only_publishes_on_new_data()
     print("All order_explorer tests passed.")
     return 0
 
