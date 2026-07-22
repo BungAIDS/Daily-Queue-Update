@@ -16,6 +16,7 @@ from pathlib import Path
 
 import order_explorer as oe
 import prepare_transmittal_link as ptl
+import prepare_so_review_note_link as pnl
 
 
 # The docstring example from so_hierarchy: three printed lines, one real IVC.
@@ -263,6 +264,12 @@ def test_render_roundtrip_and_safety():
     assert html.count("Prepare Transmittal") == 2
     assert 'class="prepare-transmittal"' in html
     assert "const transmittalUrl" in html and "glqtransmittal:" in html
+    assert "noteTargetHtml" in html and "wireInlineNotes" in html
+    assert "data-note-target" in html and "data-note-id" in html
+    assert "state.heldVersion" in html and "refresh paused while note editing" in html
+    assert "noteDraftKey" in html and "hasNoteDrafts" in html
+    assert "note-del" in html and "action: \"delete\"" in html
+    assert "noteSelections" in html and "review|" in html and "data-r=" in html
     # In both order headers the action is immediately after that order's customer.
     assert re.search(r"esc\(e\.c\).*?prepare-transmittal.*?transmittalUrl\(j\)",
                      html, re.DOTALL)
@@ -326,6 +333,42 @@ def test_transmittal_protocol_accepts_only_a_numeric_order():
     assert "prepare_transmittal_link.py" in command and "%1" in command
     print("  transmittal protocol validation OK")
 
+
+
+def test_note_protocol_records_review_note(tmp_path: Path):
+    uri = "glqnote:?order=421968&item_no=2&item_text=WHEEL&row_key=item%3A2&note=Check%20material"
+    parsed = pnl.parse_note_uri(uri)
+    assert parsed["order"] == "421968"
+    assert parsed["row_key"] == "item:2"
+    assert parsed["note"] == "Check material"
+    deleted = pnl.parse_note_uri("glqnote:?action=delete&order=421968&note_id=7")
+    assert deleted["action"] == "delete" and deleted["note_id"] == "7"
+    assert "prepare_so_review_note_link.py" in pnl.protocol_command(Path("/tmp/repo"), "python")
+
+    calls = []
+    orig_load, orig_record, orig_save = (
+        pnl.so_review.load_store, pnl.so_review.record_note, pnl.so_review.save_store)
+    orig_publish = pnl.publish_review_notes
+    try:
+        pnl.so_review.load_store = lambda: {"notes": []}
+        pnl.so_review.record_note = lambda store, order, item, text, note, row_key="": calls.append(
+            (order, item, text, note, row_key)) or {"id": 1}
+        pnl.so_review.save_store = lambda store: calls.append(("save", len(store["notes"])))
+        pnl.publish_review_notes = lambda: calls.append(("push",)) or True
+        added, pushed = pnl.record_from_uri(uri)
+        store = {"notes": [{"id": 7, "order": "421968", "note": "old"},
+                           {"id": 8, "order": "421968", "note": "keep"}]}
+        assert pnl.delete_note(store, "421968", "7")
+        assert [n["id"] for n in store["notes"]] == [8]
+    finally:
+        pnl.so_review.load_store = orig_load
+        pnl.so_review.record_note = orig_record
+        pnl.so_review.save_store = orig_save
+        pnl.publish_review_notes = orig_publish
+    assert added and pushed
+    assert ("421968", "2", "WHEEL", "Check material", "item:2") in calls
+    assert ("push",) in calls
+    print("  note protocol validation / immediate publish OK")
 
 def test_transmittal_protocol_runs_existing_review_flow_and_logs():
     seen = []
@@ -418,6 +461,7 @@ def main() -> int:
     test_vbs_folder_opener()
     test_dwg_links_render_as_links()
     test_transmittal_protocol_accepts_only_a_numeric_order()
+    test_note_protocol_records_review_note(Path(tempfile.mkdtemp()))
     test_transmittal_protocol_runs_existing_review_flow_and_logs()
     test_transmittal_protocol_is_single_instance_on_windows()
     test_default_output_path_accepts_folder()

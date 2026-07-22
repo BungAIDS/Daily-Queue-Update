@@ -30,8 +30,11 @@ submit block AND flip the guard) — not something a stray call can trigger.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
+import os
 import sys
+import time
 from pathlib import Path
 from typing import List, Optional
 from urllib.parse import urljoin
@@ -48,6 +51,27 @@ log = logging.getLogger(__name__)
 # Belt-and-suspenders kill switch. While True, no submit/send can run — and the
 # submit code below is also commented out, so this is the second of two locks.
 _SEND_HARD_DISABLED = True
+
+# The review holds the browser open (and the single-instance lock) until the
+# reviewer closes the window. This safety timeout guarantees a hard end so a
+# forgotten review window can never pin the lock forever. Override in .env.
+try:
+    REVIEW_TIMEOUT_MIN = max(1, int(os.environ.get("TRANSMITTAL_REVIEW_TIMEOUT_MIN", "60")))
+except ValueError:
+    REVIEW_TIMEOUT_MIN = 60
+
+
+def _wait_for_review(browser, page) -> None:
+    """Hold the review open until the reviewer CLOSES the browser window — a
+    visible, natural 'I'm done' that ends the script and releases the
+    single-instance lock — or until REVIEW_TIMEOUT_MIN elapses. Never blocks on a
+    hidden console prompt, so the process can't be orphaned holding the lock."""
+    deadline = time.monotonic() + REVIEW_TIMEOUT_MIN * 60
+    try:
+        while browser.is_connected() and time.monotonic() < deadline:
+            page.wait_for_timeout(500)
+    except Exception:  # noqa: BLE001 - page/browser closed mid-poll, or teardown race
+        pass
 
 
 def _popup(title: str, message: str) -> None:
@@ -407,9 +431,12 @@ def prepare(order: str, emails: List[str], files: List[str], headless: bool = Fa
                   f"({len(emails)} recipient(s), {len(files)} file(s)).")
             print("SEND is disabled — review the form and submit it yourself if it's correct.")
             if not headless:
-                input("Press Enter to close the window...")
+                print(f"When you're done, CLOSE the browser window to finish "
+                      f"(auto-closes after {REVIEW_TIMEOUT_MIN} min).")
+                _wait_for_review(browser, page)
         finally:
-            browser.close()
+            with contextlib.suppress(Exception):
+                browser.close()
 
 
 # --------------------------------------------------------------------------- #
