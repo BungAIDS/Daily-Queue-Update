@@ -191,6 +191,29 @@ def save_progress(records: Dict[str, Dict[str, Any]]) -> None:
     tmp.replace(PROGRESS_PATH)  # atomic: a crash mid-write never corrupts the store
 
 
+def store_job_scans(scans: List[Tuple[str, str, Path]],
+                    recursive: bool = False) -> Dict[str, Dict[str, Any]]:
+    """Scan each (job, type, folder) and upsert it into the persisted progress
+    store in a single load/save, returning {job: record} for those scanned.
+
+    Lets the live watcher fold a departed job's final drawing set into the corpus
+    matrix the moment it leaves the queue, without a full re-sweep. The everyday
+    on-board enrichment only scans jobs while they're on the queue (into the live
+    master), never this store — so without this the full-corpus DWG matrix goes
+    stale for completed work until the next manual sweep."""
+    prepared = [(str(job), str(jtype or ""), Path(folder)) for job, jtype, folder in scans]
+    if not prepared:
+        return {}
+    records = load_progress()
+    done: Dict[str, Dict[str, Any]] = {}
+    for job, jtype, folder in prepared:
+        rec = scan_one(job, jtype, folder, recursive)
+        records[job] = rec
+        done[job] = rec
+    save_progress(records)
+    return done
+
+
 # --------------------------------------------------------------------------- #
 # Excel matrix                                                                #
 # --------------------------------------------------------------------------- #

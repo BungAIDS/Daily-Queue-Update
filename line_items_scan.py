@@ -36,7 +36,7 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from config import SALES_ORDER_DIR
 import line_items as li
@@ -98,7 +98,15 @@ def _iter_archive(root: Path) -> List[Tuple[str, Path, int]]:
     if not root.is_dir():
         log.error("Sales-order archive not reachable: %s (set SALES_ORDER_DIR in .env)", root)
         return out
-    for d in sorted(root.iterdir()):
+    folders = sorted(root.iterdir())
+    total = len(folders)
+    log.info("Checking %d sales-order archive entries for latest SO PDFs...", total)
+    for idx, d in enumerate(folders, start=1):
+        if idx == 1 or idx % 100 == 0 or idx == total:
+            log.info(
+                "Archive discovery progress: %d/%d entries checked, %d target(s) found",
+                idx, total, len(out),
+            )
         if d.is_dir() and re.fullmatch(r"\d{4,}[A-Za-z]?", d.name.strip()):
             hit = _latest_so_pdf(d)
             if hit:
@@ -194,11 +202,37 @@ def scan(targets: List[Tuple[str, Path, int]], rescan: bool, limit: int) -> int:
     known_jobs = set(store.get("jobs") or {})
     pending: List[Dict[str, Any]] = []
     done = 0
-    for job, pdf, co in targets:
+    skipped = 0
+    total = len(targets)
+    target_desc = f" up to {limit}" if limit else ""
+    log.info(
+        "Line-item scan starting: %d target(s)%s%s",
+        total,
+        target_desc,
+        "; rescanning stored jobs" if rescan else "; skipping already stored jobs",
+    )
+    last_idx = 0
+    for idx, (job, pdf, co) in enumerate(targets, start=1):
         if limit and done >= limit:
+            log.info(
+                "Line-item scan limit reached after %d scanned order(s); stopping early.",
+                done,
+            )
             break
+        last_idx = idx
         if not rescan and job in known_jobs:
+            skipped += 1
+            if skipped == 1 or skipped % 100 == 0 or idx == total:
+                log.info(
+                    "Line-item scan progress: %d/%d target(s), %d scanned, %d skipped "
+                    "(latest skip: %s already stored)",
+                    idx, total, done, skipped, job,
+                )
             continue
+        log.info(
+            "Line-item scan progress: %d/%d target(s), scanning %s (CO#%s) from %s",
+            idx, total, job, co, pdf,
+        )
         parsed = parse_sales_order_pdf(pdf)
         items = parsed.get("line_items") or []
         pending.append({
@@ -223,14 +257,27 @@ def scan(targets: List[Tuple[str, Path, int]], rescan: bool, limit: int) -> int:
             "so_special_temp": parsed.get("special_temp", ""),
         })
         done += 1
-        log.info("  %d  %s -> %d item(s)", done, job, len(items))
+        log.info(
+            "Line-item scan progress: %d/%d target(s), %d scanned, %d skipped; "
+            "%s -> %d item(s)",
+            idx, total, done, skipped, job, len(items),
+        )
         if len(pending) >= 50:
+            log.info("Saving line-item scan checkpoint after %d scanned order(s)...", done)
             li.record_jobs_atomic(pending)
             pending.clear()
+    if pending:
+        log.info(
+            "Saving final line-item scan checkpoint with %d pending order(s)...",
+            len(pending),
+        )
     li.record_jobs_atomic(pending)
     store = li.load_store()
-    log.info("Scanned %d order(s) this run; store now holds %d job(s) -> %s",
-             done, len(store["jobs"]), li.store_path())
+    log.info(
+        "Line-item scan complete: %d scanned, %d skipped, %d target(s) considered; "
+        "store now holds %d job(s) -> %s",
+        done, skipped, last_idx, len(store["jobs"]), li.store_path(),
+    )
     return 0
 
 
