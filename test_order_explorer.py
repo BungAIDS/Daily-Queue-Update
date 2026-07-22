@@ -269,6 +269,7 @@ def test_render_roundtrip_and_safety():
     assert "state.heldVersion" in html and "refresh paused while note editing" in html
     assert "noteDraftKey" in html and "hasNoteDrafts" in html
     assert "note-del" in html and "action: \"delete\"" in html
+    assert "noteSelections" in html and "review|" in html and "data-r=" in html
     # In both order headers the action is immediately after that order's customer.
     assert re.search(r"esc\(e\.c\).*?prepare-transmittal.*?transmittalUrl\(j\)",
                      html, re.DOTALL)

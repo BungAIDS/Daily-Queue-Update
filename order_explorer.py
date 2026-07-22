@@ -1196,7 +1196,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .preview-tree .attr-row.preview-diff:hover { background: var(--bad-soft); }
   .preview-tree .attr-row.preview-relevant:hover { background: var(--good-soft); }
   .rev-row { font-size: 12px; color: var(--bad); font-weight: 600; padding: 2px 6px;
-    overflow-wrap: anywhere; }
+    overflow-wrap: anywhere; border-radius: 5px; text-align: left; }
+  .rev-row:hover, .rev-row.note-active { background: var(--bad-soft); }
   .src-row { font-size: 11.5px; color: var(--faint); font-family: var(--mono);
     padding: 1px 6px; overflow-wrap: anywhere; }
   .subwrap { margin: 6px 0 2px; border: 1px solid var(--line); border-radius: 8px;
@@ -1307,7 +1308,7 @@ let IDX = null;                // explanatory line/tag sets, built once per page
 let COSET = new Set();         // jobs a CO# landed on today (red text)
 let NWSET = null;              // the watcher's exact new-today set (null = derive)
 const state = { tab: "board", job: null, whole: false, previewJob: null,
-                selections: new Map(), histQ: "", histN: 500,
+                selections: new Map(), noteSelections: new Set(), histQ: "", histN: 500,
                 boardQ: "", boardSort: null, histSort: null, only3d: false,
                 heldVersion: null };
 
@@ -1852,7 +1853,7 @@ function selectJob(j) {
      view) — a component/attribute click narrows from there. */
   state.previewJob = null;
   if (state.tab === "job" && state.job === j) { render(); return; }
-  state.job = j; state.whole = true; state.selections.clear();
+  state.job = j; state.whole = true; state.selections.clear(); state.noteSelections.clear();
   state.tab = "job";
   pushNav();
   savePrefs(); render(); window.scrollTo(0, 0);
@@ -2249,7 +2250,18 @@ function renderJobPane() {
         + "</span></button>"
         + (pin ? noteTargetHtml(j, attrTarget) : "");
     }).join("");
-    const revs = (c.r || []).map(x => '<div class="rev-row">' + esc(x) + "</div>").join("");
+    const revs = (c.r || []).map((x, rix) => {
+      const revNoteId = "r" + noteTargets.length;
+      const revTarget = { id: revNoteId, row_key: "review|" + path + "|" + rix + "|" + x,
+        item_no: itemNo, item_text: c.n + " · review: " + x,
+        label: c.n + " · review" };
+      noteTargets.push(revTarget);
+      const activeReview = state.noteSelections.has(revTarget.row_key);
+      return '<button class="rev-row' + (activeReview ? " note-active" : "")
+        + '" data-r="' + esc(revTarget.row_key) + '" data-note-target="' + esc(revNoteId)
+        + '" title="Add a note for this review/conflict line">' + esc(x) + '</button>'
+        + (activeReview ? noteTargetHtml(j, revTarget) : "");
+    }).join("");
     const srcs = (!c.hs && items.length > 1) ? items.map((row, i) =>
       '<div class="src-row">' + (i ? "+ " : "") + "#" + row[IT.NO] + " "
       + esc(row[IT.RAW]) + "</div>").join("") : "";
@@ -2323,6 +2335,11 @@ function renderJobPane() {
     if (!state.selections.has(p)) state.selections.set(p, new Set());
     const pins = state.selections.get(p);
     pins.has(k) ? pins.delete(k) : pins.add(k);
+    render();
+  });
+  el.querySelectorAll(".rev-row").forEach(b => b.onclick = () => {
+    const key = b.dataset.r;
+    state.noteSelections.has(key) ? state.noteSelections.delete(key) : state.noteSelections.add(key);
     render();
   });
 }
