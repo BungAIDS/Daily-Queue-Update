@@ -90,13 +90,13 @@ def data_files() -> List[Path]:
 
 
 def _git(args: List[str]) -> subprocess.CompletedProcess:
-    env = {**os.environ, **_IDENTITY}
+    env = {**os.environ, **_IDENTITY, "GIT_TERMINAL_PROMPT": "0"}
     return subprocess.run(["git", *args], cwd=_REPO, env=env,
                           capture_output=True, text=True, timeout=120)
 
 
 def _git_stdin(args: List[str], data: bytes) -> subprocess.CompletedProcess:
-    env = {**os.environ, **_IDENTITY}
+    env = {**os.environ, **_IDENTITY, "GIT_TERMINAL_PROMPT": "0"}
     return subprocess.run(["git", *args], cwd=_REPO, env=env, input=data,
                           capture_output=True, timeout=120)
 

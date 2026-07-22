@@ -59,6 +59,7 @@ from typing import Any, Dict, List, Optional
 
 import engineers
 import so_hierarchy
+import so_review
 from config import EXPLORER_PATH, LIVE_WORKBOOK_PATH, OUTPUT_DIR
 # Pure display helpers shared with the Excel tabs, so CO descriptions and the
 # tidy Size / Arrangement forms never diverge between the two.
@@ -74,6 +75,7 @@ VBS_NAME = "glq_open.vbs"
 ENABLE_NAME = "Enable Folder Links.bat"
 SIMILARITY_JS_NAME = "order_similarity.js"
 TRANSMITTAL_SCHEME = "glqtransmittal"
+NOTE_SCHEME = "glqnote"
 
 # The parsed SO spec fields shown in the job header and the Order History
 # columns (mirrors live_sheets.SO_SUMMARY_COLUMNS / OH_DATA_COLUMNS).
@@ -303,7 +305,8 @@ def build_payload(store: Dict[str, Any],
                   events: List[Dict[str, Any]] | None = None,
                   today: date | None = None,
                   new_ids: set | None = None,
-                  sw: Dict[str, Dict[str, Any]] | None = None) -> Dict[str, Any]:
+                  sw: Dict[str, Dict[str, Any]] | None = None,
+                  review_store: Dict[str, Any] | None = None) -> Dict[str, Any]:
     """The page's embedded data: every order the store OR the master log knows
     (the master-only ones carry no line items but fill Order History), with
     items + derived component tree, DWG-scan facts, board fields for on-board
@@ -321,6 +324,19 @@ def build_payload(store: Dict[str, Any],
         for j, rec in master_orders.items():
             if rec.get("on_queue") and isinstance(rec.get("job"), dict):
                 queue_jobs[str(j)] = rec["job"]
+
+    notes_by_order: Dict[str, List[Dict[str, Any]]] = {}
+    if review_store:
+        for n in so_review.open_notes(review_store):
+            order = str(n.get("order") or "").strip()
+            if order:
+                notes_by_order.setdefault(order, []).append({
+                    "id": n.get("id"), "item_no": str(n.get("item_no") or ""),
+                    "item_text": str(n.get("item_text") or ""),
+                    "note": str(n.get("note") or ""),
+                    "row_key": str(n.get("row_key") or ""),
+                    "created_at": str(n.get("created_at") or ""),
+                })
 
     jobs: Dict[str, Any] = {}
     all_jns = (set(store.get("jobs") or {}) | set(queue_jobs)
@@ -378,6 +394,8 @@ def build_payload(store: Dict[str, Any],
         if ment:      # in the master log -> an Order History row
             entry["oh"] = [1 if ment.get("on_queue") else 0,
                            str(ment.get("added") or ""), str(ment.get("left") or "")]
+        if notes_by_order.get(str(jn)):
+            entry["nt"] = notes_by_order[str(jn)]
         if qjob:
             entry["q"] = 1
             entry["bd"] = _board_fields(qjob, added=str(ment.get("added") or ""))
@@ -684,6 +702,28 @@ def _ensure_transmittal_link_handler() -> None:
         subprocess.run(cmd, capture_output=True, check=False)
 
 
+def _ensure_note_link_handler() -> None:
+    """Register the local, per-user order-review note action (no admin)."""
+    import os
+    import subprocess
+    if os.name != "nt":
+        return
+    import prepare_so_review_note_link as note_link
+
+    handler = Path(note_link.__file__).resolve()
+    if not handler.exists():
+        return
+    base = rf"HKCU\Software\Classes\{NOTE_SCHEME}"
+    for cmd in (
+        ["reg", "add", base, "/ve", "/t", "REG_SZ",
+         "/d", "URL:GL Queue SO Review Note", "/f"],
+        ["reg", "add", base, "/v", "URL Protocol", "/t", "REG_SZ", "/d", "", "/f"],
+        ["reg", "add", base + r"\shell\open\command", "/ve", "/t", "REG_SZ",
+         "/d", note_link.protocol_command(), "/f"],
+    ):
+        subprocess.run(cmd, capture_output=True, check=False)
+
+
 def open_in_app_window(page: Path) -> bool:
     """Open the page as a clean app window (no tabs/address bar): Edge first
     (ships with Windows), then Chrome, then the OS default handler. The same
@@ -695,6 +735,7 @@ def open_in_app_window(page: Path) -> bool:
         return False
     _ensure_folder_link_handler(page.parent)
     _ensure_transmittal_link_handler()
+    _ensure_note_link_handler()
     url = "file:///" + str(page).replace("\\", "/")
     candidates = (
         ("ProgramFiles(x86)", r"Microsoft\Edge\Application\msedge.exe"),
@@ -748,6 +789,7 @@ def maybe_write(master: Dict[str, Any] | None,
            _mtime(change_log.log_path(today)), _mtime(solidworks_scan.PROGRESS_PATH),
            _mtime(Path(__file__)),
            _mtime(Path(__file__).with_name(SIMILARITY_JS_NAME)),
+           _mtime(so_review.REVIEW_STORE_PATH),
            # Any Explorer/scoring git pull regenerates on the next poll.
            today.isoformat(),
            tuple(sorted(queue)), tuple(sorted(str(x) for x in new_ids or ())))
@@ -760,12 +802,14 @@ def maybe_write(master: Dict[str, Any] | None,
                             master_orders=(master or {}).get("orders"),
                             queue_jobs=queue, events=change_log.load(today),
                             today=today, new_ids=new_ids,
-                            sw=solidworks_scan.load_progress())
+                            sw=solidworks_scan.load_progress(),
+                            review_store=so_review.load_store())
     path = write_explorer(payload, out)
     # A watcher restart after a git update can refresh an already-open page;
     # register the matching local action then too, without requiring the user
     # to close the Explorer and reopen it through the launcher first.
     _ensure_transmittal_link_handler()
+    _ensure_note_link_handler()
     _CACHE.update(key=key, at=now)
     return path
 
@@ -846,7 +890,8 @@ def main(argv: List[str] | None = None) -> int:
         sw = solidworks_scan.load_progress()
 
     payload = build_payload(store, dwg, master_orders=master.get("orders"),
-                            events=events, today=today, sw=sw)
+                            events=events, today=today, sw=sw,
+                            review_store=so_review.load_store())
     out = write_explorer(payload, args.out)
     n_q = sum(1 for e in payload["jobs"].values() if e.get("q"))
     print(f"Wrote {out}  ({payload['n_jobs']} orders, {payload['n_items']} line "
@@ -1079,6 +1124,20 @@ _TEMPLATE = r"""<!DOCTYPE html>
     margin-left: auto; }
   .wholebtn:hover, .wholebtn.active { background: var(--accent);
     color: var(--accent-ink); }
+  .note-cell { margin: 4px 0 8px 18px; border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 8px; background: var(--panel-2); }
+  .note-target { font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+    overflow-wrap: anywhere; }
+  .note-list { font-size: 12px; margin: 2px 0; display: flex; flex-direction: column; gap: 3px; }
+  .note-entry { display: flex; gap: 5px; align-items: baseline; }
+  .note-entry-text { flex: 1; overflow-wrap: anywhere; }
+  .note-del { color: var(--bad); font-size: 10.5px; font-family: var(--mono); }
+  .note-list .empty-note { color: var(--faint); font-style: italic; }
+  .note-input { width: 100%; min-height: 42px; resize: vertical; margin-top: 4px;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+    color: var(--ink); padding: 4px 6px; font: 12px/1.35 var(--sans); }
+  .note-add { margin-top: 4px; border: 1px solid var(--good); border-radius: 6px;
+    color: var(--good); font-size: 11px; font-weight: 700; padding: 2px 8px; }
 
   .tree { display: flex; flex-direction: column; gap: 6px; }
   .comp { border: 1px solid var(--line); border-radius: 9px; overflow: hidden;
@@ -1137,7 +1196,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .preview-tree .attr-row.preview-diff:hover { background: var(--bad-soft); }
   .preview-tree .attr-row.preview-relevant:hover { background: var(--good-soft); }
   .rev-row { font-size: 12px; color: var(--bad); font-weight: 600; padding: 2px 6px;
-    overflow-wrap: anywhere; }
+    overflow-wrap: anywhere; border-radius: 5px; text-align: left; }
+  .rev-row:hover, .rev-row.note-active { background: var(--bad-soft); }
   .src-row { font-size: 11.5px; color: var(--faint); font-family: var(--mono);
     padding: 1px 6px; overflow-wrap: anywhere; }
   .subwrap { margin: 6px 0 2px; border: 1px solid var(--line); border-radius: 8px;
@@ -1248,8 +1308,9 @@ let IDX = null;                // explanatory line/tag sets, built once per page
 let COSET = new Set();         // jobs a CO# landed on today (red text)
 let NWSET = null;              // the watcher's exact new-today set (null = derive)
 const state = { tab: "board", job: null, whole: false, previewJob: null,
-                selections: new Map(), histQ: "", histN: 500,
-                boardQ: "", boardSort: null, histSort: null, only3d: false };
+                selections: new Map(), noteSelections: new Set(), histQ: "", histN: 500,
+                boardQ: "", boardSort: null, histSort: null, only3d: false,
+                heldVersion: null };
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c =>
@@ -1286,6 +1347,9 @@ function dwgListHtml(job, e) {
 /* The Windows handler validates this payload again as digits-only, then opens
    the existing review-only Email Drawings workflow for this exact order. */
 const transmittalUrl = j => "glqtransmittal:" + String(j);
+const noteUrl = payload => "glqnote:?"
+  + Object.entries(payload).map(([k, v]) =>
+    encodeURIComponent(k) + "=" + encodeURIComponent(String(v || ""))).join("&");
 const spv = (e, label) => { const kv = (e.sp || []).find(x => x[0] === label);
   return kv ? kv[1] : ""; };
 
@@ -1322,6 +1386,132 @@ function fillClass(j, e) {
     if (ed <= soon) return isNew ? "xf-snn" : "xf-sn";
   }
   return isNew ? "xf-nw" : "";
+}
+function noteStoreKey(job) { return "glq_notes_" + job; }
+function noteDraftKey(job) { return "glq_note_drafts_" + job; }
+function noteDeletedKey(job) { return "glq_note_deleted_" + job; }
+function noteKey(target) { return target.row_key || target.item_no || target.item_text || target.id; }
+function readNoteDrafts(job) {
+  if (!job) return {};
+  try { return JSON.parse(localStorage.getItem(noteDraftKey(job)) || "{}"); }
+  catch (e) { return {}; }
+}
+function writeNoteDraft(job, key, value) {
+  const drafts = readNoteDrafts(job);
+  if (value) drafts[key] = value;
+  else delete drafts[key];
+  localStorage.setItem(noteDraftKey(job), JSON.stringify(drafts));
+}
+function clearNoteDraft(job, key) {
+  const drafts = readNoteDrafts(job);
+  delete drafts[key];
+  localStorage.setItem(noteDraftKey(job), JSON.stringify(drafts));
+}
+function hasNoteDrafts(job) {
+  return Object.values(readNoteDrafts(job)).some(v => String(v || "").trim());
+}
+function readDeletedNotes(job) {
+  try { return new Set(JSON.parse(localStorage.getItem(noteDeletedKey(job)) || "[]")); }
+  catch (e) { return new Set(); }
+}
+function rememberDeletedNote(job, key) {
+  const deleted = readDeletedNotes(job);
+  deleted.add(String(key));
+  localStorage.setItem(noteDeletedKey(job), JSON.stringify([...deleted].slice(-500)));
+}
+function localNoteKey(n) { return [n.row_key || "", n.item_no || "", n.note || ""].join("\u0001"); }
+function removeLocalNote(job, key) {
+  let notes = [];
+  try { notes = JSON.parse(localStorage.getItem(noteStoreKey(job)) || "[]"); }
+  catch (e) { notes = []; }
+  localStorage.setItem(noteStoreKey(job), JSON.stringify(notes.filter(n => localNoteKey(n) !== key)));
+}
+function orderNotes(job) {
+  const embedded = (DB.jobs[job].nt || []).map(n => ({...n, local: false}));
+  let local = [];
+  try { local = JSON.parse(localStorage.getItem(noteStoreKey(job)) || "[]"); }
+  catch (e) { local = []; }
+  const seen = new Set(), deleted = readDeletedNotes(job);
+  return [...embedded, ...local].filter(n => {
+    const key = localNoteKey(n);
+    const idKey = n.id ? "id:" + n.id : "";
+    if (deleted.has(key) || (idKey && deleted.has(idKey))) return false;
+    if (seen.has(key)) return false;
+    seen.add(key); return true;
+  });
+}
+function notesForTarget(job, target) {
+  return orderNotes(job).filter(n => {
+    if (target.row_key && n.row_key) return n.row_key === target.row_key;
+    if (target.item_no && n.item_no) return String(n.item_no) === String(target.item_no);
+    return (n.item_text || "").trim() === target.item_text.trim();
+  });
+}
+function rememberLocalNote(job, payload) {
+  let notes = [];
+  try { notes = JSON.parse(localStorage.getItem(noteStoreKey(job)) || "[]"); }
+  catch (e) { notes = []; }
+  notes.push({...payload, created_at: new Date().toISOString(), local: true});
+  localStorage.setItem(noteStoreKey(job), JSON.stringify(notes.slice(-500)));
+}
+function noteTargetHtml(job, target) {
+  const notes = notesForTarget(job, target);
+  const key = noteKey(target);
+  const draft = readNoteDrafts(job)[key] || "";
+  const body = notes.length
+    ? notes.map(n => {
+        const key = localNoteKey(n);
+        const deleteAttrs = ' data-delete-key="' + esc(key) + '"'
+          + ' data-delete-id="' + esc(n.id || "") + '"';
+        return '<div class="note-entry"><span class="note-entry-text">' + esc(n.note)
+          + (n.local ? ' <span class="hint">(pending)</span>' : "") + '</span>'
+          + '<button class="note-del"' + deleteAttrs + '>delete</button>'
+          + '</div>';
+      }).join("")
+    : '<div class="empty-note">No notes</div>';
+  return '<div class="note-cell" data-note-id="' + esc(target.id)
+    + '" data-note-key="' + esc(key)
+    + '" data-note-row="' + esc(target.row_key)
+    + '" data-note-item="' + esc(target.item_no || "")
+    + '" data-note-text="' + esc(target.item_text) + '">'
+    + '<div class="note-target">' + esc(target.label) + '</div>'
+    + '<div class="note-list">' + body + '</div>'
+    + '<textarea class="note-input" placeholder="Add note">'
+    + esc(draft) + '</textarea><button class="note-add">Add to list</button>'
+    + '</div>';
+}
+function wireInlineNotes(job, root) {
+  root.querySelectorAll(".note-input").forEach(input => input.oninput = () => {
+    const cell = input.closest(".note-cell");
+    writeNoteDraft(job, cell.dataset.noteKey, input.value);
+  });
+  root.querySelectorAll(".note-add").forEach(b => b.onclick = () => {
+    const cell = b.closest(".note-cell"), input = cell.querySelector(".note-input");
+    const text = (input.value || "").trim();
+    if (!text) { toast("Type a note first"); return; }
+    const payload = { order: job, item_no: cell.dataset.noteItem || "",
+      item_text: cell.dataset.noteText || "", row_key: cell.dataset.noteRow || "",
+      note: text };
+    rememberLocalNote(job, payload);
+    clearNoteDraft(job, cell.dataset.noteKey);
+    location.href = noteUrl(payload);
+    toast("Note added to local list and sent to SO review queue");
+    render();
+  });
+  root.querySelectorAll(".note-del").forEach(b => b.onclick = () => {
+    const noteId = b.dataset.deleteId || "";
+    const key = b.dataset.deleteKey || "";
+    if (noteId) {
+      rememberDeletedNote(job, "id:" + noteId);
+      location.href = noteUrl({ action: "delete", order: job, note_id: noteId });
+      toast("Note deleted locally and sent to SO review queue");
+    } else if (key) {
+      rememberDeletedNote(job, key);
+      removeLocalNote(job, key);
+      toast("Pending note deleted");
+    }
+    render();
+  });
 }
 /* The IN QUEUE badge, filled with the job's current row color on the queue. */
 function queueBadge(j, e) {
@@ -1381,8 +1571,15 @@ function pollVersion() {
   const s = document.createElement("script");
   s.src = VERSION_FILE + "?t=" + Date.now();   // query defeats any file cache
   s.onload = () => { s.remove();
-    if (window.__GLQ_VERSION__ && DB && window.__GLQ_VERSION__ !== DB.gen)
-      reloadFresh(); };
+    if (window.__GLQ_VERSION__ && DB && window.__GLQ_VERSION__ !== DB.gen) {
+      if (hasNoteDrafts(state.job)) {
+        state.heldVersion = window.__GLQ_VERSION__;
+        toast("Update ready — refresh paused while note editing is active");
+      } else {
+        reloadFresh();
+      }
+    }
+  };
   s.onerror = () => s.remove();                // stamp missing -> feature off
   document.head.appendChild(s);
 }
@@ -1656,7 +1853,7 @@ function selectJob(j) {
      view) — a component/attribute click narrows from there. */
   state.previewJob = null;
   if (state.tab === "job" && state.job === j) { render(); return; }
-  state.job = j; state.whole = true; state.selections.clear();
+  state.job = j; state.whole = true; state.selections.clear(); state.noteSelections.clear();
   state.tab = "job";
   pushNav();
   savePrefs(); render(); window.scrollTo(0, 0);
@@ -2022,14 +2219,27 @@ function renderJobPane() {
     + e.h.length + ')</summary>'
     + e.h.map(x => "<div>" + esc(x) + "</div>").join("") + "</details>" : "";
 
+  const noteTargets = [];
   const compCard = (c, path) => {
     const selectedPins = state.selections.get(path);
     const active = !state.whole && !!selectedPins;
     const items = c.i.map(no => itemByNo(e, no)).filter(Boolean);
+    const itemNo = items.length === 1 ? String(items[0][IT.NO]) : "";
+    const compRowKey = itemNo ? "item:" + itemNo : "component|" + path + "|" + c.n;
+    const compNoteId = "c" + noteTargets.length;
+    const compTarget = { id: compNoteId, row_key: compRowKey, item_no: itemNo, item_text: c.n,
+      label: (c.k ? "[" + c.n + "]" : c.n) };
+    noteTargets.push(compTarget);
     const attrs = Object.entries(c.a).map(([k, v]) => {
       const key = k + "=" + v;
+      const attrNoteId = "a" + noteTargets.length;
+      const attrTarget = { id: attrNoteId, row_key: "attr|" + path + "|" + key, item_no: itemNo,
+        item_text: c.n + " · " + k.replace(/_/g, " ") + ": " + v,
+        label: c.n + " · " + k.replace(/_/g, " ") };
+      noteTargets.push(attrTarget);
       const pin = active && selectedPins.has(key);
       return '<button class="attr-row' + (pin ? " pinned" : "")
+        + '" data-note-target="' + esc(attrNoteId)
         + '" data-a="' + esc(key) + '" data-p="' + path
         + '" title="Prefer this ' + esc(c.n)
         + ' attribute — matches that have it rank first, near-misses stay '
@@ -2037,16 +2247,29 @@ function renderJobPane() {
         + '<span class="k">' + esc(k.replace(/_/g, " ")) + ':</span>'
         + '<span class="v">' + esc(v) + '</span>'
         + '<span class="pin">' + (pin ? "✕ selected" : "add to search")
-        + "</span></button>";
+        + "</span></button>"
+        + (pin ? noteTargetHtml(j, attrTarget) : "");
     }).join("");
-    const revs = (c.r || []).map(x => '<div class="rev-row">' + esc(x) + "</div>").join("");
+    const revs = (c.r || []).map((x, rix) => {
+      const revNoteId = "r" + noteTargets.length;
+      const revTarget = { id: revNoteId, row_key: "review|" + path + "|" + rix + "|" + x,
+        item_no: itemNo, item_text: c.n + " · review: " + x,
+        label: c.n + " · review" };
+      noteTargets.push(revTarget);
+      const activeReview = state.noteSelections.has(revTarget.row_key);
+      return '<button class="rev-row' + (activeReview ? " note-active" : "")
+        + '" data-r="' + esc(revTarget.row_key) + '" data-note-target="' + esc(revNoteId)
+        + '" title="Add a note for this review/conflict line">' + esc(x) + '</button>'
+        + (activeReview ? noteTargetHtml(j, revTarget) : "");
+    }).join("");
     const srcs = (!c.hs && items.length > 1) ? items.map((row, i) =>
       '<div class="src-row">' + (i ? "+ " : "") + "#" + row[IT.NO] + " "
       + esc(row[IT.RAW]) + "</div>").join("") : "";
     const subs = (c.s || []).map((ch, ix) =>
       '<div class="subwrap">' + compCard(ch, path + "." + ix) + "</div>").join("");
     return '<div class="comp' + (active ? " active" : "") + '">'
-      + '<button class="comp-row" data-c="' + path
+      + '<button class="comp-row" data-note-target="' + esc(compNoteId)
+      + '" data-c="' + path
       + '" title="Add or remove this component from the combination search">'
       + '<span class="name">' + (c.k ? "[" + esc(c.n) + "]" : esc(c.n)) + "</span>"
       + '<span class="meta">' + (items.length || "") + (items.length > 1 ? " lines"
@@ -2055,11 +2278,13 @@ function renderJobPane() {
       + '<span class="go">' + (active
         ? (selectedPins.size ? selectedPins.size + " attrs selected" : "✕ selected")
         : "add to search ▸") + '</span></button>'
+      + (active ? noteTargetHtml(j, compTarget) : "")
       + '<div class="comp-kids">' + attrs + revs + subs + srcs + "</div></div>";
   };
   const tree = e.cp.length
     ? e.cp.map((c, ix) => compCard(c, String(ix))).join("")
     : '<div class="empty">No line items captured for this order yet.</div>';
+
 
   el.innerHTML = '<div class="panel-head">'
     + '<button class="backlink" id="back">← back</button>'
@@ -2088,6 +2313,7 @@ function renderJobPane() {
     + '<div class="tree" id="leftcomponenttree">' + tree + "</div></div>";
 
   $("back").onclick = () => history.length > 1 ? history.back() : setTab("board");
+  wireInlineNotes(j, el);
   $("whole").onclick = () => { const hadPreview = !!state.previewJob;
     state.previewJob = null;
     if (hadPreview && state.whole) { render(); return; }
@@ -2109,6 +2335,11 @@ function renderJobPane() {
     if (!state.selections.has(p)) state.selections.set(p, new Set());
     const pins = state.selections.get(p);
     pins.has(k) ? pins.delete(k) : pins.add(k);
+    render();
+  });
+  el.querySelectorAll(".rev-row").forEach(b => b.onclick = () => {
+    const key = b.dataset.r;
+    state.noteSelections.has(key) ? state.noteSelections.delete(key) : state.noteSelections.add(key);
     render();
   });
 }
