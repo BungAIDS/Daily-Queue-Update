@@ -1,6 +1,6 @@
 # Launcher debug report
-generated: 2026-07-20T06:47:11
-code version: branch claude/intelligent-ritchie-lcf8d1 @ commit f32697f430
+generated: 2026-07-22T15:03:39
+code version: branch main @ commit cc7d3adba8
 os.name: nt   platform: win32
 python (launcher): C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\pythonw.exe
 python (for scripts): C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe
@@ -12,177 +12,172 @@ python process lines seen: 3
 detected running outside launcher: none
 
 ### python process command lines (up to 40)
-  pid=44324 C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\pythonw.exe "C:\CBC INSIDER GL QUEUE CHECKER\launcher.py"
-  pid=44648 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
-  pid=34632 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
+  pid=1752 C:\Users\dgroth\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\pythonw.exe "C:\CBC INSIDER GL QUEUE CHECKER\launcher.py"
+  pid=73744 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
+  pid=58584 "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
 
 ## Launcher-started processes
-  watch: pid=44648 alive=True started=2026-07-20 06:42:54
+  watch: pid=73744 alive=True started=2026-07-22 14:55:56
       cmd: "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" watch.py
 
 ## Last exit codes
   open_explorer: 0
 
 ## Last Email Drawings run (tail of its per-run log)
-  [20260706_163651_email_drawings.log]
-  $ "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" fill_transmittal_insider.py 421395 --initials LDL
+  [20260722_101508_899759_38420_email_drawings.log]
+  $ "C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe" "C:\CBC INSIDER GL QUEUE CHECKER\fill_transmittal_insider.py" 422029
   
-  Ticked the 'record' box: 	For record only, certified � and released for fabrication.
-  Wrote transmittal: Z:\AUTOCAD\CURRENT\JOBS\GENERAL LINE\421\421395\TRANSMITTAL\AUTO-GENERATED\421395 DWG TRANSMITTAL-02.doc
-  Loading with saved session: https://www.cbcinsider.com/intranet/engineering/transmittal.aspx
-  Attached 5 file(s) via the Attach File button.
+  [order page] Preparing transmittal for order 422029.
   
-  === Transmittal data for order 421395 ===
-    Customer : ASPHALT CUTBACKS, INC. Later - Will Advise
-    P.O. #   : 6970
-    Emails   : kathy.bizoukas@asphaltcutbacks.com; elleng@airprocesssystems.com
+  === Transmittal data for order 422029 ===
+    Customer : FILTERS PLUS INC NAUTIQUE BOAT CO INC
+    P.O. #   : 1239
+    Emails   : ANDY@FILTERSPLUS.COM
     Box      : record  (released=True)
-    Because  : Splits: # 339 (Air Process Systems & Conveyors % Released for fabrication
-    3D STEP  : yes
-    Design   : 39 SQI Stainless Steel SW 304L Airstream
+    Because  : Released for fabrication
+    3D STEP  : no
+    Design   : 95 Backward Curved SW
     IMI #    : IMI-GL 2021
-    Checklist: {'fan_drawings': 'Both', 'om': 'X', 'motor_prints': 'X', 'motor_data': 'X', 'buyout_prints': 'X', 'other': ''}
+    Checklist: {'fan_drawings': 'Both', 'om': 'X', 'motor_prints': '', 'motor_data': 'X', 'buyout_prints': '', 'other': ''}
     Drawing table:
-       [E��] 421395-02      DESIGN 39 SQI Stainless Steel SW 304L Airstream FAN ASSEMBLY (AUTOCAD/PDF)
-       [E��] IMI-GL 2021    FAN OPERATING AND MAINTENANCE MANUAL
-       [E��] 421395-02      3D STEP DRAWING
-       [���] (blank)        MOTOR DOCUMENTS TO FOLLOW
-    Attachments (4):
-       - Z:\AUTOCAD\CURRENT\JOBS\GENERAL LINE\421\421395\421395-02.dwg
-       - Z:\AUTOCAD\CURRENT\JOBS\GENERAL LINE\421\421395\421395-02.pdf
-       - Z:\AUTOCAD\CURRENT\JOBS\GENERAL LINE\421\421395\IMI-GL 2021.pdf
-       - Z:\AUTOCAD\CURRENT\JOBS\GENERAL LINE\421\421395\3D STEP\421395-02.step
-    SO today : yes  (last verified: 2026-07-06T15:50:42)
-    SO PDF   : Z:\DAG\SALES ORDERS FOR DAILY QUEUE\421395\421395 - Sales Order CO2.pdf
-    Folder   : Z:\AUTOCAD\CURRENT\JOBS\GENERAL LINE\421\421395
+       [E··] 422029-01      DESIGN 95 Backward Curved SW FAN ASSEMBLY (AUTOCAD/PDF)
+       [E··] IMI-GL 2021    FAN OPERATING AND MAINTENANCE MANUAL
+       [···] (blank)        MOTOR DOCUMENTS TO FOLLOW
+    Attachments (3):
+       - Z:\AUTOCAD\CURRENT\JOBS\GENERAL LINE\422\422029\422029-01.dwg
+       - Z:\AUTOCAD\CURRENT\JOBS\GENERAL LINE\422\422029\422029-01.pdf
+       - Z:\AUTOCAD\CURRENT\JOBS\GENERAL LINE\422\422029\IMI-GL 2021.pdf
+    SO today : yes  (last verified: 2026-07-22T10:06:49)
+    SO PDF   : Z:\DAG\SALES ORDERS FOR DAILY QUEUE\422029\422029 - Sales Order (original).pdf
+    Folder   : Z:\AUTOCAD\CURRENT\JOBS\GENERAL LINE\422\422029
+  Ticked the 'record' box: 	For record only, certified – and released for fabrication.
+  ! Could not fill the transmittal doc ((-2147352567, 'Exception occurred.', (0, 'Microsoft Word', 'Word cannot give a document the same name as an open document.\nType a different name for the document you want to save.\r (\\\\...\\422029 DWG TRANSMITTAL-01.doc)', 'wdmain11.chm', 24633, -2146823135), None)); attaching drawings only.
+  Loading with saved session: https://www.cbcinsider.com/intranet/engineering/transmittal.aspx
+  Attached 3 file(s) via the Attach File button.
   
-  *** Motor print not attached: This order has Motor Prints checked on the Sales Order, but automatic motor-print attachment isn't supported yet. Attach the motor print manually before sending if it's needed. ***
-  
-  Filled transmittal: Z:\AUTOCAD\CURRENT\JOBS\GENERAL LINE\421\421395\TRANSMITTAL\AUTO-GENERATED\421395 DWG TRANSMITTAL-02.doc
-    ! Existing transmittal in the folder (left as-is): 421395 DWG TRANSMITTAL-01.doc
-  
-  Pre-filled the Email Drawings form for order 421395 (2 recipient(s), 5 file(s)).
-  SEND is disabled � review the form and submit it yourself if it's correct.
+  Pre-filled the Email Drawings form for order 422029 (1 recipient(s), 3 file(s)).
+  SEND is disabled — review the form and submit it yourself if it's correct.
+  When you're done, CLOSE the browser window to finish (auto-closes after 60 min).
 
 ## Tail of launcher_debug.log (last 120 lines)
-  2026-07-15 16:03:56 relaunching launcher; closing this instance
-  2026-07-15 16:04:00 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@6fa7bb0f)
-  2026-07-15 16:04:05 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-15 16:04:05 pending restart: restarted=['Run Live Watcher All Day', 'Backfill Historical Orders'] skipped=[] failed=[]
-  2026-07-15 17:01:43 status scan: method=wmic error=none python_lines=5 detected=['watch']
-  2026-07-15 17:01:51 status scan: method=wmic error=none python_lines=3 detected=none
-  2026-07-15 17:17:04 status scan: method=wmic error=none python_lines=6 detected=['line_items_scan']
-  2026-07-15 17:17:12 status scan: method=wmic error=none python_lines=3 detected=none
-  2026-07-15 18:09:02 status scan: method=wmic error=none python_lines=6 detected=['line_items_scan']
-  2026-07-15 18:09:10 status scan: method=wmic error=none python_lines=3 detected=none
-  2026-07-15 18:10:06 status scan: method=wmic error=none python_lines=6 detected=['line_items_scan']
-  2026-07-15 18:10:15 status scan: method=powershell-cim error=none python_lines=6 detected=['line_items_scan']
-  2026-07-15 18:10:30 status scan: method=wmic error=none python_lines=6 detected=['line_items_scan']
-  2026-07-15 18:11:03 status scan: method=powershell-cim error=none python_lines=6 detected=['line_items_scan']
-  2026-07-15 18:13:43 status scan: method=powershell-cim error=none python_lines=3 detected=none
-  2026-07-15 18:47:33 status scan: method=wmic error=none python_lines=3 detected=none
-  2026-07-15 18:50:59 relaunching launcher; closing this instance
-  2026-07-15 18:51:03 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@0db6d192)
-  2026-07-15 18:51:08 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-15 18:51:08 pending restart: restarted=['Backfill Historical Orders'] skipped=[] failed=[]
-  2026-07-16 05:00:05 status scan: method=wmic error=none python_lines=5 detected=['watch']
-  2026-07-16 06:46:26 status scan: method=wmic error=none python_lines=3 detected=none
-  2026-07-16 07:53:54 status scan: method=wmic error=none python_lines=6 detected=['line_items_scan']
-  2026-07-16 07:54:18 status scan: method=wmic error=none python_lines=3 detected=none
-  2026-07-16 08:04:48 relaunching launcher; closing this instance
-  2026-07-16 08:04:54 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@50499d5f)
-  2026-07-16 08:05:00 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-16 08:05:00 pending restart: restarted=['Backfill Historical Orders'] skipped=[] failed=[]
-  2026-07-16 08:52:10 status scan: method=powershell-cim error=none python_lines=5 detected=none
-  2026-07-16 08:52:25 status scan: method=wmic error=none python_lines=5 detected=none
-  2026-07-16 09:24:13 relaunching launcher; closing this instance
-  2026-07-16 09:24:18 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@73257e81)
-  2026-07-16 09:24:24 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-16 09:24:24 pending restart: restarted=['Backfill Historical Orders', 'Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-16 13:45:29 relaunching launcher; closing this instance
-  2026-07-16 13:45:36 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@73257e81)
-  2026-07-16 13:45:43 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-16 13:45:43 pending restart: restarted=['Backfill Historical Orders', 'Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-16 13:52:12 relaunching launcher; closing this instance
-  2026-07-16 13:52:19 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/quote-run-detection-review-n0dy4q@bc75de8d)
-  2026-07-16 13:52:26 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-16 13:52:26 pending restart: restarted=['Backfill Historical Orders', 'Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-16 14:59:27 status scan: method=powershell-cim error=none python_lines=8 detected=none
-  2026-07-16 14:59:57 status scan: method=wmic error=none python_lines=8 detected=none
-  2026-07-16 15:09:48 relaunching launcher; closing this instance
-  2026-07-16 15:09:54 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/branch-concern-9svhjj@6bcf9fc0)
-  2026-07-16 15:10:01 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-16 15:10:01 pending restart: restarted=['Backfill Historical Orders', 'Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-16 15:24:07 relaunching launcher; closing this instance
-  2026-07-16 15:24:13 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@b2527fac)
-  2026-07-16 15:24:20 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-16 15:24:20 pending restart: restarted=['Backfill Historical Orders', 'Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-16 16:22:46 status scan: method=wmic error=none python_lines=7 detected=['watch']
-  2026-07-16 16:22:54 status scan: method=wmic error=none python_lines=5 detected=none
-  2026-07-16 16:46:41 relaunching launcher; closing this instance
-  2026-07-16 16:46:49 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@3c0ed052)
-  2026-07-16 16:46:57 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-16 16:46:57 pending restart: restarted=['Backfill Historical Orders'] skipped=[] failed=[]
-  2026-07-17 05:00:10 status scan: method=wmic error=none python_lines=5 detected=['watch']
-  2026-07-17 07:23:17 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
-  2026-07-17 07:23:31 status scan: method=wmic error=none python_lines=3 detected=['watch']
-  2026-07-17 07:23:41 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
-  2026-07-17 07:23:56 status scan: method=wmic error=none python_lines=3 detected=['watch']
-  2026-07-17 07:28:21 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
-  2026-07-17 07:28:51 status scan: method=wmic error=none python_lines=3 detected=['watch']
-  2026-07-17 07:35:33 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
-  2026-07-17 07:35:48 status scan: method=wmic error=none python_lines=3 detected=['watch']
-  2026-07-17 07:37:49 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
-  2026-07-17 07:38:04 status scan: method=wmic error=none python_lines=3 detected=['watch']
-  2026-07-17 07:39:01 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
-  2026-07-17 07:39:33 status scan: method=wmic error=none python_lines=3 detected=['watch']
-  2026-07-17 07:40:05 status scan: method=powershell-cim error=none python_lines=9 detected=['watch']
-  2026-07-17 08:01:03 status scan: method=wmic error=none python_lines=3 detected=['watch']
-  2026-07-17 10:26:14 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
-  2026-07-17 10:27:33 status scan: method=wmic error=none python_lines=3 detected=['watch']
-  2026-07-17 10:27:42 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
-  2026-07-17 10:28:29 status scan: method=wmic error=none python_lines=3 detected=['watch']
-  2026-07-17 10:29:10 status scan: method=powershell-cim error=none python_lines=3 detected=['watch']
-  2026-07-17 10:29:40 status scan: method=wmic error=none python_lines=3 detected=['watch']
-  2026-07-17 10:29:58 close: publishing debug report to debug/launcher
-  2026-07-17 10:30:07 close publish ok: pushed d5cd8517d1 to origin/debug/launcher
-  2026-07-17 10:41:30 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@3c0ed052)
-  2026-07-17 10:41:30 status scan: method=wmic error=none python_lines=2 detected=none
-  2026-07-17 15:02:25 relaunching launcher; closing this instance
-  2026-07-17 15:02:26 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/intelligent-ritchie-lcf8d1@13d768dd)
-  2026-07-17 15:02:27 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-17 15:02:27 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-17 15:20:22 relaunching launcher; closing this instance
-  2026-07-17 15:20:23 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/intelligent-ritchie-lcf8d1@439917cf)
-  2026-07-17 15:20:23 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-17 15:20:24 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-17 15:24:28 relaunching launcher; closing this instance
-  2026-07-17 15:24:29 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/intelligent-ritchie-lcf8d1@34981b98)
-  2026-07-17 15:24:30 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-17 15:24:31 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-17 15:31:44 relaunching launcher; closing this instance
-  2026-07-17 15:31:45 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/intelligent-ritchie-lcf8d1@5b85d529)
-  2026-07-17 15:31:46 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-17 15:31:47 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-17 15:51:58 relaunching launcher; closing this instance
-  2026-07-17 15:51:59 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/intelligent-ritchie-lcf8d1@198fb73d)
-  2026-07-17 15:52:01 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-17 15:52:01 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-20 05:00:04 status scan: method=wmic error=none python_lines=3 detected=['watch']
-  2026-07-20 06:20:38 relaunching launcher; closing this instance
-  2026-07-20 06:20:41 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/intelligent-ritchie-lcf8d1@386d99fe)
-  2026-07-20 06:20:45 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-20 06:20:45 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-20 06:35:53 relaunching launcher; closing this instance
-  2026-07-20 06:35:56 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/intelligent-ritchie-lcf8d1@f32697f4)
-  2026-07-20 06:36:00 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-20 06:36:00 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-20 06:42:30 relaunching launcher; closing this instance
-  2026-07-20 06:42:33 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/intelligent-ritchie-lcf8d1@f32697f4)
-  2026-07-20 06:42:37 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-20 06:42:37 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
-  2026-07-20 06:42:47 relaunching launcher; closing this instance
-  2026-07-20 06:42:50 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/intelligent-ritchie-lcf8d1@f32697f4)
-  2026-07-20 06:42:54 status scan: method=wmic error=none python_lines=1 detected=none
-  2026-07-20 06:42:54 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-20 08:45:18 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-20 09:00:38 status scan: method=wmic error=none python_lines=3 detected=['watch']
+  2026-07-20 09:00:39 relaunching launcher; closing this instance
+  2026-07-20 09:00:43 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/intelligent-ritchie-lcf8d1@42d4b62b)
+  2026-07-20 09:00:48 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-20 09:00:48 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-20 09:21:40 relaunching launcher; closing this instance
+  2026-07-20 09:21:43 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/intelligent-ritchie-lcf8d1@7ecb3324)
+  2026-07-20 09:21:48 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-20 09:21:48 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-20 09:28:17 relaunching launcher; closing this instance
+  2026-07-20 09:28:21 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/intelligent-ritchie-lcf8d1@45226d0f)
+  2026-07-20 09:28:25 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-20 09:28:25 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-20 09:41:01 relaunching launcher; closing this instance
+  2026-07-20 09:41:05 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/intelligent-ritchie-lcf8d1@cd33f232)
+  2026-07-20 09:41:09 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-20 09:41:09 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-20 09:43:08 status scan: method=wmic error=none python_lines=3 detected=['watch']
+  2026-07-20 09:43:09 relaunching launcher; closing this instance
+  2026-07-20 09:43:12 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/intelligent-ritchie-lcf8d1@1d05669e)
+  2026-07-20 09:43:17 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-20 09:43:17 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-20 09:55:17 status scan: method=wmic error=none python_lines=6 detected=['line_items_scan']
+  2026-07-20 09:55:25 status scan: method=wmic error=none python_lines=3 detected=none
+  2026-07-20 10:14:46 status scan: method=wmic error=none python_lines=6 detected=['line_items_scan']
+  2026-07-20 10:14:54 status scan: method=wmic error=none python_lines=3 detected=none
+  2026-07-20 10:16:30 status scan: method=wmic error=none python_lines=6 detected=['line_items_scan']
+  2026-07-20 10:16:38 status scan: method=wmic error=none python_lines=3 detected=none
+  2026-07-20 10:17:34 status scan: method=wmic error=none python_lines=6 detected=['line_items_scan']
+  2026-07-20 10:17:42 status scan: method=wmic error=none python_lines=3 detected=none
+  2026-07-20 10:18:01 relaunching launcher; closing this instance
+  2026-07-20 10:18:05 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/intelligent-ritchie-lcf8d1@f38497fb)
+  2026-07-20 10:18:10 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-20 10:18:10 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-20 10:18:49 status scan: method=wmic error=none python_lines=6 detected=['line_items_scan']
+  2026-07-20 10:19:05 status scan: method=wmic error=none python_lines=5 detected=none
+  2026-07-20 10:34:03 status scan: method=wmic error=none python_lines=6 detected=['line_items_scan']
+  2026-07-20 10:34:11 status scan: method=wmic error=none python_lines=3 detected=none
+  2026-07-20 10:38:14 relaunching launcher; closing this instance
+  2026-07-20 10:38:20 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/intelligent-ritchie-lcf8d1@91cd7867)
+  2026-07-20 10:38:26 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-20 10:38:26 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-20 11:15:15 status scan: method=wmic error=none python_lines=5 detected=['watch']
+  2026-07-20 11:48:21 relaunching launcher; closing this instance
+  2026-07-20 11:48:25 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=claude/intelligent-ritchie-lcf8d1@ba33b48e)
+  2026-07-20 11:48:30 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-20 11:48:30 pending restart: restarted=['Prepare Email Drawings Form', 'Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-20 12:51:40 relaunching launcher; closing this instance
+  2026-07-20 12:51:45 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@7bbc7637)
+  2026-07-20 12:51:50 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-20 12:51:50 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-21 05:00:12 status scan: method=wmic error=none python_lines=5 detected=['watch']
+  2026-07-21 14:30:14 relaunching launcher; closing this instance
+  2026-07-21 14:30:20 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@5e24519d)
+  2026-07-21 14:30:27 status scan: method=wmic error=none python_lines=5 detected=none
+  2026-07-21 14:30:27 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-21 15:00:54 status scan: method=powershell-cim error=none python_lines=7 detected=none
+  2026-07-21 15:01:08 status scan: method=wmic error=none python_lines=7 detected=none
+  2026-07-21 15:14:29 status scan: method=wmic error=none python_lines=7 detected=['watch']
+  2026-07-21 15:14:36 status scan: method=wmic error=none python_lines=5 detected=none
+  2026-07-21 16:11:07 close: publishing debug report to debug/launcher
+  2026-07-21 16:11:28 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@5e24519d)
+  2026-07-21 16:11:36 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-07-21 16:13:51 status scan: method=wmic error=none python_lines=6 detected=['watch']
+  2026-07-21 16:13:58 status scan: method=wmic error=none python_lines=4 detected=none
+  2026-07-21 17:02:14 status scan: method=wmic error=none python_lines=4 detected=['watch']
+  2026-07-21 17:02:21 status scan: method=wmic error=none python_lines=2 detected=none
+  2026-07-22 05:00:13 status scan: method=wmic error=none python_lines=4 detected=['watch']
+  2026-07-22 07:02:44 relaunching launcher; closing this instance
+  2026-07-22 07:02:50 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=codex/find-out-how-to-create-a-git-branch@78b4d5fa)
+  2026-07-22 07:02:57 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-22 07:02:57 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-22 07:52:30 status scan: method=powershell-cim error=none python_lines=3 detected=none
+  2026-07-22 07:52:43 status scan: method=wmic error=none python_lines=3 detected=none
+  2026-07-22 07:56:22 status scan: method=powershell-cim error=none python_lines=3 detected=none
+  2026-07-22 07:56:36 status scan: method=wmic error=none python_lines=3 detected=none
+  2026-07-22 07:57:58 relaunching launcher; closing this instance
+  2026-07-22 07:58:04 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=codex/find-out-how-to-create-a-git-branch@78b4d5fa)
+  2026-07-22 07:58:11 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-22 07:58:11 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-22 08:11:10 status scan: method=powershell-cim error=none python_lines=3 detected=none
+  2026-07-22 08:11:24 status scan: method=wmic error=none python_lines=3 detected=none
+  2026-07-22 08:19:50 relaunching launcher; closing this instance
+  2026-07-22 08:19:57 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=codex/find-out-how-to-create-a-git-branch@78b4d5fa)
+  2026-07-22 08:20:05 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-22 08:20:05 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-22 08:20:30 status scan: method=powershell-cim error=none python_lines=3 detected=none
+  2026-07-22 08:20:44 status scan: method=wmic error=none python_lines=3 detected=none
+  2026-07-22 08:24:09 relaunching launcher; closing this instance
+  2026-07-22 08:24:11 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=codex/find-out-how-to-create-a-git-branch@695358f0)
+  2026-07-22 08:24:14 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-22 08:24:14 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-22 08:25:57 relaunching launcher; closing this instance
+  2026-07-22 08:25:59 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=codex/find-out-how-to-create-a-git-branch-nky5w9@ea42bccc)
+  2026-07-22 08:26:02 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-22 08:26:02 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-22 08:46:08 relaunching launcher; closing this instance
+  2026-07-22 08:46:10 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=codex/find-out-how-to-create-a-git-branch-nky5w9@0b21ffd7)
+  2026-07-22 08:46:13 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-22 08:46:13 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-22 09:18:36 relaunching launcher; closing this instance
+  2026-07-22 09:18:38 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=codex/find-out-how-to-create-a-git-branch-nky5w9@75f701ee)
+  2026-07-22 09:18:41 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-22 09:18:41 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-22 09:35:45 status scan: method=wmic error=none python_lines=3 detected=['watch']
+  2026-07-22 09:35:46 relaunching launcher; closing this instance
+  2026-07-22 09:35:48 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@dad1763d)
+  2026-07-22 09:35:51 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-22 09:35:51 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-22 09:48:07 status scan: method=wmic error=none python_lines=5 detected=['line_items_scan']
+  2026-07-22 09:48:15 status scan: method=wmic error=none python_lines=3 detected=none
+  2026-07-22 14:07:27 relaunching launcher; closing this instance
+  2026-07-22 14:07:29 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@cc7d3adb)
+  2026-07-22 14:07:31 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-22 14:07:31 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
+  2026-07-22 14:55:52 relaunching launcher; closing this instance
+  2026-07-22 14:55:54 launcher started (os=nt, python=C:\CBC INSIDER GL QUEUE CHECKER\venv\Scripts\python.exe, version=main@cc7d3adb)
+  2026-07-22 14:55:56 status scan: method=wmic error=none python_lines=1 detected=none
+  2026-07-22 14:55:56 pending restart: restarted=['Run Live Watcher All Day'] skipped=[] failed=[]
 
