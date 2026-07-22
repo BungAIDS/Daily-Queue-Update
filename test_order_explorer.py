@@ -127,6 +127,10 @@ def test_events_and_removed():
          "field": "CO#", "old": "1", "new": "2"},
         {"time": "2026-07-17T09:00:00", "job": "421966", "customer": "Meridian",
          "field": "End Date", "old": "7/10/2026", "new": "7/20/2026"},
+        {"time": "2026-07-17T09:00:00", "job": "421966", "customer": "Meridian",
+         "field": "Features", "old": "ACCESS DOOR", "new": "ACCESS DOOR, EVASE"},
+        {"time": "2026-07-17T09:00:00", "job": "421966", "customer": "Meridian",
+         "field": "Line Items", "old": "old raw parser blob", "new": "new raw parser blob"},
     ]
     from datetime import date as _date
     p = oe.build_payload(_store(), master_orders=master_orders, events=events,
@@ -134,6 +138,7 @@ def test_events_and_removed():
     assert p["today"] == "2026-07-17"
     # Newest first; the CO event carries its co_history description.
     assert [e["f"] for e in p["ev"]] == ["End Date", "CO#"], p["ev"]
+    assert all(e["f"] not in ("Features", "Line Items") for e in p["ev"])
     co = p["ev"][1]
     assert co["d"] == "ADDED SHAFT COOLER", co
     # Only the departure dated today lands in the removed list.
@@ -248,6 +253,8 @@ def test_render_roundtrip_and_safety():
     assert "red = scored construction difference" in html
     assert "preview-relevant" in html
     assert "preview-match" in html
+    assert "changeHeaders" in html and "Field #" in html
+    assert "chgfield" in html
     assert "green = selected combination match" in html
     assert "combinedFocusedSimilarity" in html
     assert "state.selections" in html

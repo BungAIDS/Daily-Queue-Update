@@ -96,6 +96,7 @@ SPEC_FIELDS = [
 ]
 _HIST_MAX = 8            # CO-history entries kept per on-board job
 _HIST_CLIP = 160         # ...each clipped to this many chars (some run to pages)
+_EXPLORER_CHANGE_EXCLUDE = {"features", "line items", "line item tags", "line_items", "line_item_tags"}
 
 
 def code_version() -> str:
@@ -292,8 +293,11 @@ def _events_payload(events: List[Dict[str, Any]],
     Excel Changes tab)."""
     out = []
     for e in sorted(events or [], key=lambda x: x.get("time", ""), reverse=True):
+        field = str(e.get("field", ""))
+        if field.strip().casefold() in _EXPLORER_CHANGE_EXCLUDE:
+            continue
         row = {"t": e.get("time", ""), "j": str(e.get("job", "")),
-               "c": e.get("customer", ""), "f": e.get("field", ""),
+               "c": e.get("customer", ""), "f": field,
                "o": str(e.get("old", "")), "n": str(e.get("new", ""))}
         if row["f"] == "CO#":
             order = (master_orders.get(row["j"]) or {}).get("job") or {}
@@ -1124,6 +1128,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .secttitle { font-weight: 700; font-size: 13px; padding: 14px 16px 6px; }
   .secttitle .cnt { color: var(--muted); font-weight: 400; }
   .sectnote { padding: 0 16px 8px; font-size: 12px; color: var(--muted); }
+  .chgfield { min-width: 220px; white-space: normal; }
+  .chgfield .fname { font-weight: 700; }
+  .chgfield .from, .chgfield .to { font-family: var(--mono); }
   .histbar { display: flex; gap: 10px; align-items: center; padding: 10px 16px;
     border-bottom: 1px solid var(--line); background: var(--panel-2); flex-wrap: wrap; }
   .histbar input { padding: 6px 10px; border: 1.5px solid var(--line);
@@ -2126,19 +2133,39 @@ function renderChanges() {
     if (!byJob.has(x.j)) byJob.set(x.j, []);
     byJob.get(x.j).push(x);
   }
-  const chRows = [];
+  const changeInstances = [];
   for (const [j, evs] of byJob) {
+    const byTime = new Map();
+    for (const x of evs) {
+      const key = x.t || "";
+      if (!byTime.has(key)) byTime.set(key, []);
+      byTime.get(key).push(x);
+    }
+    for (const [t, changes] of byTime) changeInstances.push({ j, t, changes });
+  }
+  const maxChangeFields = Math.max(1, ...changeInstances.map(g => g.changes.length));
+  const changeHeaders = ["Time"].concat(Array.from(
+    { length: maxChangeFields }, (_x, i) => "Field #" + (i + 1)));
+  const chRows = [];
+  const changesByJob = new Map();
+  for (const g of changeInstances) {
+    if (!changesByJob.has(g.j)) changesByJob.set(g.j, []);
+    changesByJob.get(g.j).push(g);
+  }
+  for (const [j, groups] of changesByJob) {
     const e = DB.jobs[j] || {};
-    chRows.push('<tr><td colspan="5" style="font-weight:700">'
+    chRows.push('<tr><td colspan="' + changeHeaders.length + '" style="font-weight:700">'
       + '<span class="jobcell" data-job="' + esc(j) + '">' + esc(j) + "</span>"
       + '&nbsp; <span style="font-weight:400;color:var(--muted)">'
-      + esc(evs[0].c || e.c || "") + "</span></td></tr>");
-    evs.forEach((x, i) => {
+      + esc((groups[0].changes[0] || {}).c || e.c || "") + "</span></td></tr>");
+    groups.forEach((group, i) => {
       const shade = "chg" + Math.min(i + 1, 4);   // darker per later instance
-      chRows.push('<tr class="' + shade + '"><td>' + esc(fmtWhen(x.t)) + "</td>"
-        + "<td>" + esc(x.f) + "</td>"
-        + "<td>" + esc(x.o) + "</td><td>&rarr;</td>"
-        + "<td style='font-weight:600'>" + esc(x.n) + "</td></tr>");
+      const cells = group.changes.map(x => '<td class="chgfield"><span class="fname">'
+        + esc(x.f) + '</span>: <span class="from">' + esc(x.o)
+        + '</span> &rarr; <span class="to">' + esc(x.n) + '</span></td>');
+      while (cells.length < maxChangeFields) cells.push('<td></td>');
+      chRows.push('<tr class="' + shade + '"><td>' + esc(fmtWhen(group.t))
+        + "</td>" + cells.join("") + "</tr>");
     });
   }
 
@@ -2163,17 +2190,15 @@ function renderChanges() {
     + ")</span></div>"
     + miniTable(["Time", "Job #", "CO#", "Design", "Customer", "Note", "End Date",
                  "Price"], newRows)
+    + '<div class="secttitle">Removed / completed today <span class="cnt">('
+    + rmRows.length + ")</span></div>"
+    + miniTable(["Time", "Job #", "CO#", "Design", "Customer"], rmRows)
     + '<div class="secttitle">Change orders today <span class="cnt">(' + coRows.length
     + ")</span></div>"
     + miniTable(["Time", "Job #", "CO#", "Design", "Customer", "What changed"], coRows)
     + '<div class="secttitle">Orders that changed today <span class="cnt">('
     + byJob.size + ")</span></div>"
-    + (chRows.length
-        ? miniTable(["Time", "Field", "Old", "", "New"], chRows)
-        : '<div class="sectnote">(none)</div>')
-    + '<div class="secttitle">Removed / completed today <span class="cnt">('
-    + rmRows.length + ")</span></div>"
-    + miniTable(["Time", "Job #", "CO#", "Design", "Customer"], rmRows)
+    + (chRows.length ? miniTable(changeHeaders, chRows) : '<div class="sectnote">(none)</div>')
     + '<div style="height:10px"></div>';
   wireJobCells(el);
 }
