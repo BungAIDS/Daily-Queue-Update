@@ -609,17 +609,17 @@ def bat_text(html_name: str = HTML_NAME) -> str:
         'set "EDGE=%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe"',
         'if not exist "%EDGE%" set "EDGE=%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe"',
         'if exist "%EDGE%" (',
-        '    start "" "%EDGE%" --app="file:///%PAGE%"',
+        '    start "" "%EDGE%" --start-maximized --app="file:///%PAGE%"',
         "    exit /b 0",
         ")",
         "",
         'set "CHROME=%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe"',
         'if not exist "%CHROME%" set "CHROME=%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe"',
         'if exist "%CHROME%" (',
-        '    start "" "%CHROME%" --app="file:///%PAGE%"',
+        '    start "" "%CHROME%" --start-maximized --app="file:///%PAGE%"',
         "    exit /b 0",
         ")",
-        'start "" msedge --app="file:///%PAGE%"',
+        'start "" msedge --start-maximized --app="file:///%PAGE%"',
         "",
     ]
     return "\r\n".join(lines)
@@ -765,7 +765,7 @@ def open_in_app_window(page: Path) -> bool:
         base = os.environ.get(env)
         exe = Path(base) / sub if base else None
         if exe and exe.exists():
-            subprocess.Popen([str(exe), f"--app={url}"], close_fds=True)
+            subprocess.Popen([str(exe), "--start-maximized", f"--app={url}"], close_fds=True)
             return True
     try:
         os.startfile(str(page))          # plain browser tab as a last resort
@@ -893,7 +893,6 @@ def maybe_write(master: Dict[str, Any] | None,
     _CACHE.update(touch=touch, full=fingerprint, at=time.time())
     return path
 
-
 def main(argv: List[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -1019,7 +1018,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   button:focus-visible, input:focus-visible, a:focus-visible {
     outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 
-  .wrap { max-width: 1360px; margin: 0 auto; padding: 0 20px 40px; }
+  .wrap { width: calc(100% - 32px); max-width: none; margin: 0 auto; padding: 0 0 40px; }
   header.top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
     padding: 16px 0 12px; border-bottom: 2px solid var(--ink); margin-bottom: 16px; }
   .navback { font-size: 16px; font-weight: 700; line-height: 1; color: var(--muted);
@@ -1035,7 +1034,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .tabbtn:hover { border-color: var(--accent); color: var(--accent); }
   .tabbtn.active { background: var(--accent); color: var(--accent-ink);
     border-color: var(--accent); }
-  .searchbox { position: relative; flex: 1 1 300px; max-width: 520px; margin-left: auto; }
+  .searchbox { position: relative; flex: 1 1 420px; max-width: 720px; margin-left: auto; }
   .searchbox input[type=search] { width: 100%; padding: 8px 12px 8px 34px;
     font-size: 13.5px; color: var(--ink); background: var(--panel);
     border: 1.5px solid var(--line); border-radius: 8px; }
@@ -1141,7 +1140,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   /* The Order view is a grid ONLY while active — a bare `main.cols`
      display rule would outrank `.view`'s hide and bleed under other tabs. */
-  main.cols { grid-template-columns: minmax(0, 11fr) minmax(0, 9fr);
+  main.cols { grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
     gap: 18px; align-items: start; }
   main.cols.view.on { display: grid; }
   @media (max-width: 920px) { main.cols { grid-template-columns: 1fr; } }
@@ -1545,7 +1544,7 @@ function noteTargetHtml(job, target) {
     + '" data-note-text="' + esc(target.item_text) + '">'
     + '<div class="note-target">' + esc(target.label) + '</div>'
     + '<div class="note-list">' + body + '</div>'
-    + '<textarea class="note-input" placeholder="Add note">'
+    + '<textarea class="note-input" placeholder="Add note for Danny to review on how the SO parser might be improved to help better categorize our orders.">'
     + esc(draft) + '</textarea><button class="note-add">Add to list</button>'
     + '</div>';
 }
@@ -1704,7 +1703,9 @@ function loadPrefs() {
   try {
     const p = JSON.parse(localStorage.getItem(PREFS_KEY) || "null");
     if (!p) return;
-    if (["board", "changes", "hist"].includes(p.tab)) state.tab = p.tab;
+    // Fresh opens always start on Live Queue; sessionStorage still restores
+    // the current tab across auto-refreshes in restoreState().
+    state.tab = "board";
     if (p.boardSort && typeof p.boardSort.col === "number") state.boardSort = p.boardSort;
     if (p.histSort && typeof p.histSort.col === "number") state.histSort = p.histSort;
     state.boardQ = p.boardQ || "";
