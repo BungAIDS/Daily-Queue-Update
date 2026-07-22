@@ -366,6 +366,52 @@ def test_tagging():
     assert li.tag_item("SOMETHING NOBODY EVER ORDERED") == []
 
 
+def test_normalize_folds_accents():
+    # Accented spellings must converge on their ASCII form so search and
+    # tagging see one word, not a mangled token.
+    assert li.normalize_text("Évasé") == "EVASE"
+    assert li.normalize_text("Discharge Evasé w/ Drain") == "DISCHARGE EVASE WITH DRAIN"
+    assert li.normalize_text("Manufacturé") == "MANUFACTURE"
+    # ASCII text is unchanged by the fold.
+    assert li.normalize_text("316SS sleeve") == "316 STAINLESS STEEL SLEEVE"
+
+
+def test_evase_tagging():
+    for wording in ("Evase", "Évasé", "Discharge Evasé", "Outlet Evasee",
+                    "Fan Discharge Evasé Stack", "316SS Evasé"):
+        assert "EVASE" in li.tag_item(li.normalize_text(wording)), wording
+    # Not a false positive on unrelated words that merely start with "evas".
+    assert "EVASE" not in li.tag_item(li.normalize_text("Evasive maneuvers"))
+
+
+def test_evase_component_and_features():
+    items = {it["norm"]: it for it in li.extract_items([
+        "Discharge Evasé w/ Drain, Bolted, Flanged  L  350.00",
+        "Aluminum Evasee  L  210.00",
+        "Drain for Evasé  L  40.00",
+    ])}
+    evase = items["DISCHARGE EVASE WITH DRAIN BOLTED FLANGED"]
+    assert "EVASE" in evase["tags"]
+    # The evasé owns the row even though the same line also names a drain and
+    # flange — those are captured as its sub-features, not the component.
+    assert evase["attributes"]["component"] == "EVASE"
+    assert evase["attributes"]["evase_feature"] == "DRAIN, BOLTED, FLANGED"
+    # A material-adjective evasé is still an evasé.
+    assert items["ALUMINUM EVASEE"]["attributes"]["component"] == "EVASE"
+    # But an evasé named only as another part's mounting target does not claim
+    # the component slot — the drain does.
+    assert items["DRAIN FOR EVASE"]["attributes"]["component"] == "DRAIN"
+
+
+def test_search_isolates_evase_jobs():
+    store = li.load_store(Path("/nonexistent/line_items.json"))
+    li.record_job(store, "430001", li.extract_items(["Discharge Evasé  L  300.00"]))
+    li.record_job(store, "430002", li.extract_items(["Inlet Bell Mouth  L  120.00"]))
+    # Both the canonical tag and a plain accent-free term isolate the evasé job.
+    assert {h["job"] for h in li.search(store, [], tag="EVASE")} == {"430001"}
+    assert {h["job"] for h in li.search(store, ["evase"])} == {"430001"}
+
+
 def test_tags_label():
     items = li.extract_items(SO_LINES)
     label = li.tags_label(items)
