@@ -20,18 +20,30 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-SEP = "─" * 60
+RULE = "=" * 62
+ANSWER_OPEN = ">>>>>>>>>>  TYPE YOUR ANSWER ON THE BLANK LINES BELOW  >>>>>>>>>>"
+
+
+def _answer_close(note_id: int) -> str:
+    return f"<<<<<<<<<<  (end of answer for note #{note_id})  <<<<<<<<<<"
+
+
 HEADER = """\
 # SALES-ORDER REVIEW — CLARIFICATIONS NEEDED
 #
 # I couldn't confidently apply the notes below, so I left them OPEN and I'm
-# asking instead of guessing. Type your answer on the line(s) after each
-# "ANSWER>". Write as much as you like; blank lines inside an answer are fine.
-# Leave an answer empty to skip that one for now.
+# asking instead of guessing.
 #
-# When done: save, close, and upload with the launcher's "Publish Order Data".
-# Do not change the "NOTE #..." lines — they tell me which note your answer maps
-# to. Everything starting with "#" is a comment and is ignored.
+# HOW TO ANSWER: for each note, type on the blank lines in the box between the
+#   >>>>>  TYPE YOUR ANSWER ...  >>>>>
+#   ...your answer here...
+#   <<<<<  (end of answer ...)  <<<<<
+# markers. Write as much as you like; blank lines inside your answer are fine.
+# To skip a note for now, just leave its box empty.
+#
+# When done: save, close, and click "Send Clarifications" in the launcher.
+# Don't edit the "NOTE #..." or ">>>>>"/"<<<<<" marker lines — they tell me
+# which answer goes with which note. Lines starting with "#" are ignored.
 #
 # Generated: {when}
 """
@@ -48,17 +60,25 @@ def main() -> int:
     for it in items:
         lines = [
             "",
-            SEP,
-            f"NOTE #{it['id']}   (order {it.get('order','')}, row: {it.get('row','')})",
-            f"Your note : {it.get('note','')}",
+            RULE,
+            f" NOTE #{it['id']}   ·   order {it.get('order','')}   ·   row: {it.get('row','')}",
+            RULE,
+            f" Your note : {it.get('note','')}",
         ]
         if it.get("current"):
-            lines.append(f"Parses now: {it['current']}")
-        lines.append(f"My question: {it.get('question','')}")
-        lines.append("")
-        lines.append("ANSWER> ")
+            lines.append(f" Parses now: {it['current']}")
+        lines.append(" My question:")
+        for qline in str(it.get("question", "")).splitlines() or [""]:
+            lines.append(f"   {qline}")
+        lines += [
+            "",
+            ANSWER_OPEN,
+            "",
+            "",
+            "",
+            _answer_close(it["id"]),
+        ]
         blocks.append("\n".join(lines))
-    blocks.append("\n" + SEP + "\n")
 
     out.write_text("\n".join(blocks) + "\n", encoding="utf-8")
     print(f"Wrote {out} with {len(items)} clarification(s).")

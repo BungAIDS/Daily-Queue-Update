@@ -44,6 +44,24 @@ defer.
 
 ## Workflow
 
+### 0. First, pick up any answered clarifications
+
+Before triaging fresh notes, check whether the user has answered a previous
+round of your questions:
+
+```
+python .claude/skills/apply-so-review-notes/scripts/read_clarifications.py
+```
+
+This reads the answered clarification file from `order-data` and prints
+`{id: answer}` for every note the user filled in. Those answers unblock notes you
+deferred last time — fold them into your triage below (usually straight into
+*implement now*). After you apply and resolve them, **clear the request**:
+regenerate `so_review_clarifications.md` with only the notes that are *still*
+deferred (an empty list writes a header with no `NOTE` blocks, which the launcher
+reads as "nothing pending") and commit it, so answered questions don't come back.
+If nothing is published yet, this just prints nothing — carry on.
+
 ### 1. Read the open notes
 
 ```
@@ -86,8 +104,10 @@ Sort each open note into one of three buckets:
   unclear ("all these" on a Ship To block — all of *what*? drop them from
   capture? which rows?), or it needs a product decision (naming, whether a
   distinction matters, how two options should merge). Do **not** implement a
-  best-guess. Leave the note OPEN (do not `handle` it) and collect a specific
-  question for the user.
+  best-guess. Leave the note OPEN (do not `handle` it) and collect a concrete
+  question — these become the clarification file in step 7. Deferring is a
+  first-class outcome, not a failure: a wrong parser change corrupts the whole
+  corpus on the next re-normalize; a deferred note costs a round-trip.
 - **Noise / placeholder** — "test", empty, obviously not a parser instruction.
   Leave OPEN and mention it; don't invent work. If unsure whether it's noise,
   treat it as *defer and ask*.
@@ -150,19 +170,42 @@ behavior**, not "done". Good: *"`Vibration Base` now groups as its own
 VIBRATION ISOLATION."* Do **not** run `handle` for deferred or noise notes — they
 must stay open.
 
-### 7. Commit, and ask about the deferred ones
+### 7. Ask about the deferred ones (the clarification round-trip)
 
-Commit `line_items.py`, `test_line_items.py`, and `so_review_handled.json` to the
-working branch and push (follow the session's branch rules). Then close the loop
-with the user:
+Turn every deferred note into a question in the standard clarification document,
+so the user answers on their own time and it comes back deterministically. Build
+a JSON array of the deferred items — each `{"id", "order", "row", "note",
+"current", "question"}`, where `current` is how the row parses today and
+`question` states your best guess and exactly what you need decided — then:
 
-- **Report** what you implemented and resolved (id → change).
-- **For every deferred note, ask a specific question** with the context you
-  gathered — the real line, how it parses now, and exactly what's ambiguous — so
-  the user can answer without digging. Use `AskUserQuestion` when the choices are
-  enumerable (e.g. "make `[SHIP TO]` a skipped non-component, or keep it but
-  rename?"). Those notes stay OPEN so they come back next run once clarified.
-- Briefly note anything you treated as noise.
+```
+python .claude/skills/apply-so-review-notes/scripts/write_clarifications.py \
+    <deferred.json> so_review_clarifications.md
+```
+
+Write `so_review_clarifications.md` at the **repo root** (it's tracked, like
+`so_review_handled.json`) so it rides down to the user on their next Git Update.
+Then, on their machine:
+
+1. **"Answer Clarifications"** (launcher) copies the request into an editable
+   working file next to the workbook and opens it. The user types inside each
+   `>>>>>` box, saves, closes.
+2. **"Send Clarifications"** (launcher) publishes the answered file up the
+   `order-data` branch with the rest of the order data.
+
+The deferred notes stay OPEN — you do **not** `handle` them until their answers
+come back. If the user is actively in the chat, `AskUserQuestion` is a fine fast
+path for an enumerable choice; the file is the durable, asynchronous channel and
+the one the launcher buttons are built around.
+
+### 8. Commit and report
+
+Commit `line_items.py`, `test_line_items.py`, `so_review_handled.json`, and
+(when there are deferrals) `so_review_clarifications.md` to the working branch and
+push (follow the session's branch rules). Then tell the user: what you
+implemented and resolved (id → change), that a clarification file is waiting if
+you deferred any (point them at "Answer Clarifications"), and anything you treated
+as noise.
 
 ## Worked example (the shape to aim for)
 

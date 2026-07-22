@@ -588,6 +588,27 @@ def base_actions() -> list[LauncherAction]:
             default_args=("refresh",),
         ),
         LauncherAction(
+            "so_review_clarify_open",
+            "Sales Order Review",
+            "Answer Clarifications",
+            "Opens the questions Claude left for the notes it couldn't confidently "
+            "apply — it leaves those notes open and asks instead of guessing. Type "
+            "your answer inside each >>>>> box, then save and close. Run after a Git "
+            "Update; if nothing is pending it just says so.",
+            "so_review.py",
+            default_args=("clarify-open",),
+        ),
+        LauncherAction(
+            "so_review_clarify_send",
+            "Sales Order Review",
+            "Send Clarifications",
+            "Publishes your answered clarifications up to the 'order-data' branch "
+            "(together with the current order data) so Claude can read them and "
+            "finish the notes it deferred. Run after you've answered and saved.",
+            "so_review.py",
+            default_args=("clarify-send",),
+        ),
+        LauncherAction(
             "so_review_reparse",
             "Sales Order Review",
             "Re-parse + Refresh SO Review",

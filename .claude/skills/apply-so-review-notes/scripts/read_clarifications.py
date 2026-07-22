@@ -37,17 +37,14 @@ def _load(argv: list[str]) -> str | None:
     return r.stdout
 
 
-def _is_separator(s: str) -> bool:
-    return bool(s) and set(s) <= {"─", "-"}
-
-
 def parse(text: str) -> dict[str, str]:
-    """Capture only what the user typed after each note's `ANSWER>` marker.
+    """Capture only what the user typed inside each note's answer box.
 
-    Within a `NOTE #<id>` block the metadata lines (Your note / Parses now / My
-    question) are ignored; capture starts at `ANSWER>` and runs until the next
-    separator or the next `NOTE #`. Blank answers are dropped, so the result is
-    exactly the notes the user actually answered.
+    Each note is `NOTE #<id> ...` followed by a box delimited by a `>>>>>` open
+    marker and a `<<<<<` close marker. The metadata lines (Your note / Parses
+    now / My question) sit before the box and are ignored; capture runs strictly
+    between the markers. Blank boxes are dropped, so the result is exactly the
+    notes the user actually answered.
     """
     answers: dict[str, str] = {}
     current: str | None = None
@@ -60,6 +57,7 @@ def parse(text: str) -> dict[str, str]:
             ans = "\n".join(buf).strip()
             if ans:
                 answers[current] = ans
+        capturing = False
 
     for raw in text.splitlines():
         line = raw.rstrip("\n")
@@ -67,20 +65,16 @@ def parse(text: str) -> dict[str, str]:
         m = NOTE_RE.match(stripped)
         if m:
             flush()
-            current, capturing, buf = m.group(1), False, []
+            current, buf = m.group(1), []
             continue
-        if _is_separator(stripped):
+        if stripped.startswith(">>>"):        # answer box opens
+            capturing, buf = True, []
+            continue
+        if stripped.startswith("<<<"):        # answer box closes
             flush()
-            current, capturing, buf = None, False, []
             continue
-        if current is None or stripped.startswith("#"):
-            continue
-        if "ANSWER>" in line:
-            capturing = True
-            buf.append(line.split("ANSWER>", 1)[1])
-        elif capturing:
+        if capturing:
             buf.append(line)
-        # lines before ANSWER> (the metadata) are ignored
     flush()
     return answers
 
