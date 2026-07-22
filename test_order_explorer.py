@@ -436,11 +436,14 @@ def test_write_explorer_files():
         bat = Path(td) / oe.BAT_NAME
         assert bat.exists(), "launcher .bat not written"
         assert (Path(td) / oe.VBS_NAME).exists(), "glq_open.vbs not written"
-        # The auto-refresh stamp open pages poll, matching the page's gen.
+        # The auto-refresh stamp open pages poll: the data fingerprint drives
+        # the all-tab reload, the board fingerprint the Live-Queue-only reload.
         ver = Path(td) / oe.VERSION_NAME
         assert ver.exists(), "version stamp not written"
-        assert p["gen"] in ver.read_text(encoding="utf-8")
-        assert "__GLQ_VERSION__" in ver.read_text(encoding="utf-8")
+        vtext = ver.read_text(encoding="utf-8")
+        assert "__GLQ_VERSION__" in vtext and "__GLQ_BOARD_VERSION__" in vtext
+        assert oe._fingerprint(p, drop_board=True) in vtext, "content stamp missing"
+        assert oe._fingerprint(p, drop_board=False) in vtext, "board stamp missing"
         first = bat.read_bytes()
         oe.write_explorer(p, out)                        # idempotent second write
         assert bat.read_bytes() == first
@@ -479,7 +482,27 @@ def test_content_fingerprint_ignores_volatile_columns():
     assert left["jobs"]["421966"].get("q") == 1, "queued job should carry q=1"
     del left["jobs"]["421966"]["q"]
     assert fp(left) != baseline
-    print("  content fingerprint ignores gen/board churn OK")
+
+    # The board fingerprint (drop_board=False) DOES react to a board change, so
+    # the Live Queue tab can be told to reload for it.
+    board_base = oe._fingerprint(base, drop_board=False)
+    board_moved = json.loads(json.dumps(base))
+    board_moved["jobs"]["421966"]["bd"] = {"st": "SHIPPED", "ps": 99}
+    assert oe._fingerprint(board_moved, drop_board=False) != board_base
+    # ...while the content fingerprint stays put (no all-tab reload for it).
+    assert oe._content_fingerprint(board_moved) == baseline
+    print("  content vs board fingerprint split OK")
+
+
+def test_board_signature_tracks_column_changes():
+    q1 = {"421966": {"job": "421966", "status": "IN PROCESS", "_cbc_pos": 3}}
+    q2 = {"421966": {"job": "421966", "status": "SHIPPED", "_cbc_pos": 3}}
+    q3 = {"421966": {"job": "421966", "status": "IN PROCESS", "_cbc_pos": 4}}
+    assert oe._board_signature(q1) == oe._board_signature(dict(q1))
+    assert oe._board_signature(q1) != oe._board_signature(q2), "status change missed"
+    assert oe._board_signature(q1) != oe._board_signature(q3), "position change missed"
+    assert oe._board_signature({}) == oe._board_signature({})
+    print("  board signature tracks status/position OK")
 
 
 def test_maybe_write_only_publishes_on_new_data():
@@ -516,7 +539,7 @@ def test_maybe_write_only_publishes_on_new_data():
                 Path(o).write_text("page", encoding="utf-8")
                 return Path(o)
             oe.write_explorer = _fake_write
-            oe._CACHE = {"touch": None, "content": None, "at": 0.0}
+            oe._CACHE = {"touch": None, "full": None, "at": 0.0}
 
             # First poll — nothing published yet, so it writes.
             assert oe.maybe_write(None, []) == out
@@ -538,6 +561,15 @@ def test_maybe_write_only_publishes_on_new_data():
             _bump_store(200)
             assert oe.maybe_write(None, []) == out
             assert len(writes) == 2
+
+            # A board-only change (bd) still republishes, so the Live Queue tab
+            # can pull the current board — even though it's not "new data".
+            payload_box["p"] = {"gen": "t2",
+                                "jobs": {"9": {"it": [1], "bd": {"st": "SHIPPED"}}},
+                                "n_items": 1}
+            _bump_store(300)
+            assert oe.maybe_write(None, []) == out
+            assert len(writes) == 3
         finally:
             for name, fn in saved.items():
                 setattr(oe, name, fn)
@@ -565,6 +597,7 @@ def main() -> int:
     test_default_output_path_is_coworker_share()
     test_write_explorer_files()
     test_content_fingerprint_ignores_volatile_columns()
+    test_board_signature_tracks_column_changes()
     test_maybe_write_only_publishes_on_new_data()
     print("All order_explorer tests passed.")
     return 0

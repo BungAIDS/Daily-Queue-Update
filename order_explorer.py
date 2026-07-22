@@ -38,11 +38,13 @@ stop auto-refreshing; nothing breaks.
 
 build_payload / render_html are pure and unit-tested (test_order_explorer.py);
 store loads live only in maybe_write() and the CLI. The watcher calls
-maybe_write() each poll — it republishes only when the data the page renders
-actually changed (new orders, line items, tags, events, or queue membership),
-never merely because the watcher ran or an hour passed; churn confined to the
-volatile board columns is ignored. Opening the Explorer (the CLI / launcher
-Open button) always rebuilds unconditionally, so it shows everything current.
+maybe_write() each poll — it republishes only when something it shows changed
+(new orders, line items, tags, events, queue membership, or the live board
+columns), never merely because the watcher ran or an hour passed. The page
+carries two stamps: a data change reloads every open page, while a board-only
+change reloads a page only while its Live Queue tab is showing, so viewers on
+other tabs are left undisturbed. Opening the Explorer (the CLI / launcher Open
+button) always rebuilds unconditionally, so it shows everything current.
 `order_similarity.js` is both the browser's embedded scorer and
 the directly-tested Node module, so its weight table has one source of truth.
 """
@@ -445,8 +447,13 @@ def render_html(payload: Dict[str, Any]) -> str:
 
 
 def version_js(payload: Dict[str, Any]) -> str:
-    """The tiny sibling stamp open pages poll to notice a rewrite."""
-    return f'window.__GLQ_VERSION__ = "{payload.get("gen", "")}";\n'
+    """The tiny sibling stamp open pages poll to notice a rewrite. Two values:
+    the data fingerprint drives the every-tab auto-reload, the board fingerprint
+    the Live-Queue-only reload. Falls back to `gen` if the stamps are absent."""
+    data = payload.get("cv") or payload.get("gen", "")
+    board = payload.get("bv") or payload.get("gen", "")
+    return (f'window.__GLQ_VERSION__ = "{data}";\n'
+            f'window.__GLQ_BOARD_VERSION__ = "{board}";\n')
 
 
 def vbs_text() -> str:
@@ -624,6 +631,13 @@ def write_explorer(payload: Dict[str, Any], out: Path | None = None) -> Path:
     the page, so a page that notices the new stamp always reloads new data."""
     out = out or default_output_path()
     out.parent.mkdir(parents=True, exist_ok=True)
+    # Stamp the page with its own data/board fingerprints so an open page can
+    # tell a real data change (reload on any tab) from a board-only change
+    # (reload only while the Live Queue tab is showing). Computed here, on a
+    # copy, so the embedded page and the sibling version file always agree.
+    payload = dict(payload)
+    payload["cv"] = _fingerprint(payload, drop_board=True)
+    payload["bv"] = _fingerprint(payload, drop_board=False)
     html = render_html(payload)
     tmp = out.with_suffix(out.suffix + ".tmp")
     tmp.write_text(html, encoding="utf-8")
@@ -764,28 +778,43 @@ def open_in_app_window(page: Path) -> bool:
 # --------------------------------------------------------------------------- #
 # Watcher hook: regenerate only when something it shows could have changed     #
 # --------------------------------------------------------------------------- #
-_CACHE: Dict[str, Any] = {"touch": None, "content": None, "at": 0.0}
+_CACHE: Dict[str, Any] = {"touch": None, "full": None, "at": 0.0}
 
 
-def _content_fingerprint(payload: Dict[str, Any]) -> str:
-    """A stable hash of only the data the page renders, so the page is
-    republished exactly when there is genuinely new data to show — new orders,
-    line items, tags, events, removed rows, the new-today set, or queue
-    membership. Two things are deliberately excluded: the build timestamp
-    (`gen`, which changes every build) and each order's churny board columns
-    (`bd`: status, assignee, live queue position, ...), which wiggle on almost
-    every poll and which the watcher has never rebuilt the page for. Opening the
-    Explorer rebuilds unconditionally, so those columns still refresh on
-    demand."""
+def _fingerprint(payload: Dict[str, Any], *, drop_board: bool) -> str:
+    """A stable hash of the data the page renders. Always excludes the build
+    timestamp (`gen`) and the page's own stamps (`cv`/`bv`). With `drop_board`
+    it also excludes each order's churny board columns (`bd`: status, assignee,
+    live queue position, ...). The two flavours let an open page tell a real
+    data change (reload on any tab) from a board-only change (reload only while
+    the Live Queue tab is showing)."""
     jobs = {
-        jid: {k: v for k, v in (entry or {}).items() if k != "bd"}
+        jid: {k: v for k, v in (entry or {}).items()
+              if not (drop_board and k == "bd")}
         for jid, entry in (payload.get("jobs") or {}).items()
     }
-    stable = {k: v for k, v in payload.items() if k != "gen"}
+    stable = {k: v for k, v in payload.items() if k not in ("gen", "cv", "bv")}
     stable["jobs"] = jobs
     raw = json.dumps(stable, separators=(",", ":"), ensure_ascii=False,
                      sort_keys=True)
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def _content_fingerprint(payload: Dict[str, Any]) -> str:
+    """The data-change fingerprint (board columns excluded) — the stamp that
+    drives the every-open-page auto-refresh."""
+    return _fingerprint(payload, drop_board=True)
+
+
+def _board_signature(queue: Dict[str, Any]) -> tuple:
+    """A cheap, hashable snapshot of the live board columns for the on-board
+    orders. Board data arrives in memory (the live scrape), not via a file, so
+    maybe_write folds this into its pre-check to notice a status/position change
+    without loading and rebuilding the whole payload every idle poll."""
+    return tuple(sorted(
+        (jid, tuple(sorted(_board_fields(j).items())))
+        for jid, j in (queue or {}).items()
+    ))
 
 
 def maybe_write(master: Dict[str, Any] | None,
@@ -796,16 +825,20 @@ def maybe_write(master: Dict[str, Any] | None,
     the Explorer rebuilds unconditionally; see main).
 
     Two stages keep it both cheap and quiet:
-      1. A cheap pre-check over the source-file mtimes, the date, the board
-         membership and the new-today set. When none of those moved, nothing
-         could have added data, so the poll returns immediately without loading
-         or building anything.
+      1. A cheap pre-check over the source-file mtimes, the date, the new-today
+         set and a snapshot of the live board columns. When none of those moved,
+         nothing it shows could have changed, so the poll returns immediately
+         without loading or building anything.
       2. When something did move, the page is built in memory and rewritten to
          disk ONLY if its content fingerprint changed. A store re-save that
-         carried no new line items, or churn confined to the volatile board
-         columns, therefore leaves the published page — and every open browser —
-         untouched. There is no time-based floor: the page is never rewritten
-         just because the watcher ran or an hour passed.
+         carried no new data leaves the published page untouched, and there is
+         no time-based floor — the page is never rewritten just because the
+         watcher ran or an hour passed.
+
+    A live board-column change (status/assignee/position) does republish, so the
+    Live Queue tab can pull the current board; but the page embeds two stamps,
+    and an open page only auto-reloads for a board-only change while its Live
+    Queue tab is showing (see pollVersion) — viewers on other tabs are undisturbed.
 
     Returns the path written, or None when nothing new needed publishing."""
     import autocad_scan
@@ -821,32 +854,33 @@ def maybe_write(master: Dict[str, Any] | None,
             return 0.0
     today = date.today()
     queue = {str(j.get("job")): j for j in lq_jobs or [] if j.get("job")}
-    # Stage 1 — cheap pre-check. If no input file's mtime, the date, the board
-    # membership or the new-today set moved since the last poll, nothing could
-    # have added data; skip without loading the stores or building the page.
+    # Stage 1 — cheap pre-check. If no input file's mtime, the date, the
+    # new-today set or the live board columns moved since the last poll, nothing
+    # it shows could have changed; skip without loading or building the page.
     touch = (_mtime(li.store_path()), _mtime(autocad_scan.PROGRESS_PATH),
              _mtime(change_log.log_path(today)), _mtime(solidworks_scan.PROGRESS_PATH),
              _mtime(Path(__file__)),
              _mtime(Path(__file__).with_name(SIMILARITY_JS_NAME)),
              _mtime(so_review.REVIEW_STORE_PATH),
              today.isoformat(),
-             tuple(sorted(queue)), tuple(sorted(str(x) for x in new_ids or ())))
+             _board_signature(queue), tuple(sorted(str(x) for x in new_ids or ())))
     if not force and out.exists() and _CACHE["touch"] == touch:
         return None
 
     # Stage 2 — a source touched (or first run / forced). Build the page and
-    # publish it only when the data it renders actually changed.
+    # publish it only when the content it renders — including the live board
+    # columns — actually changed.
     payload = build_payload(li.load_store(), autocad_scan.load_progress(),
                             master_orders=(master or {}).get("orders"),
                             queue_jobs=queue, events=change_log.load(today),
                             today=today, new_ids=new_ids,
                             sw=solidworks_scan.load_progress(),
                             review_store=so_review.load_store())
-    fingerprint = _content_fingerprint(payload)
-    if not force and out.exists() and _CACHE["content"] == fingerprint:
+    fingerprint = _fingerprint(payload, drop_board=False)
+    if not force and out.exists() and _CACHE["full"] == fingerprint:
         # Something was re-saved but nothing the page shows changed. Record the
-        # fresh mtimes so the next polls skip cheaply instead of rebuilding this
-        # same unchanged payload every time.
+        # fresh pre-check so the next polls skip cheaply instead of rebuilding
+        # this same unchanged payload every time.
         _CACHE.update(touch=touch, at=time.time())
         return None
 
@@ -856,7 +890,7 @@ def maybe_write(master: Dict[str, Any] | None,
     # to close the Explorer and reopen it through the launcher first.
     _ensure_transmittal_link_handler()
     _ensure_note_link_handler()
-    _CACHE.update(touch=touch, content=fingerprint, at=time.time())
+    _CACHE.update(touch=touch, full=fingerprint, at=time.time())
     return path
 
 
@@ -1601,18 +1635,26 @@ async function boot() {
   setInterval(pollVersion, 60000);
 }
 
-/* ---- auto-refresh: poll the sibling stamp; reload when the watcher wrote --- */
+/* ---- auto-refresh: poll the sibling stamp; reload when the watcher wrote ----
+   Two stamps: __GLQ_VERSION__ moves on a real data change (reload on any tab),
+   __GLQ_BOARD_VERSION__ also moves on a live board-column change (reload only
+   while the Live Queue tab is showing, so the board stays current there without
+   yanking a page open on another tab). setTab() calls this on arrival at the
+   Live Queue so a board change shows immediately, not up to a poll later. */
 function pollVersion() {
   const s = document.createElement("script");
   s.src = VERSION_FILE + "?t=" + Date.now();   // query defeats any file cache
   s.onload = () => { s.remove();
-    if (window.__GLQ_VERSION__ && DB && window.__GLQ_VERSION__ !== DB.gen) {
-      if (hasNoteDrafts(state.job)) {
-        state.heldVersion = window.__GLQ_VERSION__;
-        toast("Update ready — refresh paused while note editing is active");
-      } else {
-        reloadFresh();
-      }
+    if (!DB) return;
+    const dataChanged = window.__GLQ_VERSION__ && window.__GLQ_VERSION__ !== DB.cv;
+    const boardChanged = window.__GLQ_BOARD_VERSION__
+      && window.__GLQ_BOARD_VERSION__ !== DB.bv;
+    if (!dataChanged && !(boardChanged && state.tab === "board")) return;
+    if (hasNoteDrafts(state.job)) {
+      state.heldVersion = window.__GLQ_VERSION__;
+      toast("Update ready — refresh paused while note editing is active");
+    } else {
+      reloadFresh();
     }
   };
   s.onerror = () => s.remove();                // stamp missing -> feature off
@@ -1882,6 +1924,10 @@ function setTab(t) {
   if (t !== "job") state.previewJob = null;
   if (t !== state.tab) { state.tab = t; pushNav(); }
   savePrefs(); render(); window.scrollTo(0, 0);
+  // The Live Queue is the live board — on arrival, check the version stamp
+  // right away so a newer publish (including a board-column change) shows now
+  // instead of up to a poll interval later.
+  if (t === "board") pollVersion();
 }
 function selectJob(j) {
   /* Opening an order lands on its whole-order matches (the Similar Orders
