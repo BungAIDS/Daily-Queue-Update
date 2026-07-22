@@ -59,6 +59,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Tuple
@@ -68,7 +69,7 @@ from process_lock import data_file_lock
 
 log = logging.getLogger(__name__)
 PARSER_VERSION = "2026-07-20-so-review-v2"
-NORMALIZER_VERSION = "2026-07-20-component-facts-v2"
+NORMALIZER_VERSION = "2026-07-22-accent-fold-evase-v1"
 ORDER_CONTEXT_FIELDS = (
     "so_design_desc", "so_size", "so_arrangement", "so_motor_pos", "so_class",
     "so_rotation", "so_discharge", "so_pct_width", "so_wheel_type",
@@ -204,6 +205,10 @@ DEFAULT_RULES: Dict[str, Any] = {
         "OUTLET": [r"\boutlet\s+(open|slip|flanged|punched|pressure\s*tap|volume\s*control)",
                    r"\bslip\s+outlet\b",
                    r"\bdischarge\s+elbow"],
+        # Evasé: the flared discharge stack/cone on the fan outlet. Accents are
+        # folded away by normalize_text, so "Evasé"/"Évasé"/"evasee" all reach
+        # this as EVASE / EVASEE.
+        "EVASE": [r"\bevas[eé]e?\b"],
         "WHEEL": [r"\bwheel\b", r"\bpercent\s+width\b", r"%\s*width\b",
                   r"effective\s*diameter", r"cast\s*hub",
                   r"taper\s*lock\s*bushing", r"taperlock\s*bushing"],
@@ -437,7 +442,11 @@ def normalize_text(raw: str, rules: Dict[str, Any] | None = None, *,
     Spelling variants of the same option converge here — this is what search
     and tagging run against."""
     rules = rules or load_rules()
-    s = raw.strip().upper()
+    # Fold accents so accented spellings converge on their ASCII form
+    # ("Evasé"/"Évasé" -> "EVASE"); otherwise the trailing filter below would
+    # drop the accented letters and mangle the word into a broken token.
+    s = unicodedata.normalize("NFD", raw.strip())
+    s = "".join(ch for ch in s if not unicodedata.combining(ch)).upper()
     if strip_columns:
         s, _ = split_lead(s)
         s, _ = split_price_tail(s)
@@ -2299,6 +2308,38 @@ def _shaft_cooler_attributes(primary: str, norm_blob: str, tags: set[str]) -> Di
         attrs["shaft_cooler_type"] = "HEAT SLINGER"
     if "CAST" in norm_blob:
         attrs["shaft_cooler_construction"] = "CAST"
+    return attrs
+
+
+# An evasé is the sold item on its line ("Aluminum Evasé", "Discharge Evasé w/
+# Drain") UNLESS it appears as the object of a preposition — "<part> for/on/to
+# the evasé" — where the evasé is only the mounting target of another component.
+_EVASE_AS_TARGET = re.compile(
+    r"\b(?:FOR|ON|TO|OF)\s+(?:THE\s+)?(?:(?:FAN|DISCHARGE|OUTLET)\s+)*EVASEE?\b")
+
+
+def _evase_owns_line(primary: str, tags: set[str]) -> bool:
+    return "EVASE" in tags and not _EVASE_AS_TARGET.search(primary)
+
+
+def _evase_attributes(primary: str, norm_blob: str, tags: set[str]) -> Dict[str, str]:
+    """An evasé — the flared discharge stack/cone sold on the fan outlet."""
+    if not _evase_owns_line(primary, tags):
+        return {}
+    attrs: Dict[str, str] = {"component": "EVASE"}
+    features: List[str] = []
+    if re.search(r"\bDRAIN\b", norm_blob):
+        _add_unique(features, "DRAIN")
+    if re.search(r"\bBOLTED\b", norm_blob):
+        _add_unique(features, "BOLTED")
+    if re.search(r"\bWELDED\b", norm_blob):
+        _add_unique(features, "WELDED")
+    if re.search(r"\bREMOVABLE\b", norm_blob):
+        _add_unique(features, "REMOVABLE")
+    if re.search(r"\bFLANGED?\b", norm_blob):
+        _add_unique(features, "FLANGED")
+    if features:
+        attrs["evase_feature"] = ", ".join(features)
     return attrs
 
 
@@ -4301,6 +4342,7 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     attrs.update(_lifting_lug_attributes(tags))
     attrs.update(_screen_attributes(primary, norm_blob, tags))
     attrs.update(_weather_cover_attributes(primary, norm_blob, tags))
+    attrs.update(_evase_attributes(primary, norm_blob, tags))
     attrs.update(_shaft_cooler_attributes(primary, norm_blob, tags))
     attrs.update(_shaft_seal_attributes(norm_blob, tags))
     attrs.update(_shaft_sleeve_attributes(norm_blob, tags))
@@ -4379,6 +4421,12 @@ def component_attributes(item: Dict[str, Any], rules: Dict[str, Any] | None = No
     if bearing_attrs:
         attrs.setdefault("component", "BEARINGS")
         attrs.update(bearing_attrs)
+
+    # An evasé is a named sold component; when it owns the line it keeps the
+    # component slot even if the line also mentions a drain, flange, or material
+    # (captured as its sub-features) that a later builder would otherwise claim.
+    if _evase_owns_line(primary, tags):
+        attrs["component"] = "EVASE"
 
     used_on = "" if _is_ship_via_note(primary, norm_blob) else _used_on_value(norm_blob)
     parent_damper = str(attrs.get("component") or "").upper() in {
