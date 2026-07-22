@@ -1054,14 +1054,21 @@ _TEMPLATE = r"""<!DOCTYPE html>
     border-bottom: 1px solid var(--line); }
   .sd-item:last-child { border-bottom: none; }
   .sd-item:hover { background: var(--accent-soft); }
-  .sd-item .l1 { display: flex; gap: 10px; align-items: baseline; }
+  .sd-item .l1 { display: flex; gap: 10px; align-items: baseline; min-width: 0; }
   .sd-item .job { font-family: var(--mono); font-weight: 700; }
   .sd-item .cust { color: var(--muted); font-size: 12.5px; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; }
-  .sd-item .onq { margin-left: auto; }
+  .sd-item .sd-meta { margin-left: auto; display: inline-flex; align-items: center;
+    justify-content: flex-end; gap: 8px; flex: 0 0 auto; }
+  .sd-item .sd-meta .onq { margin-left: 0; }
+  .sd-item .s-score { font-family: var(--mono); font-size: 11.5px;
+    font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
+  .sd-item .s-score strong { color: var(--accent); }
   .sd-item .why { font-family: var(--mono); font-size: 11.5px; color: var(--muted);
     margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sd-item .why mark { background: var(--hit); color: inherit; padding: 0 1px; }
+  .sd-item .missing { margin-top: 3px; font-family: var(--mono); font-size: 11.5px;
+    color: var(--bad); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   .view { display: none; }
   .view.on { display: block; }
@@ -1343,7 +1350,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <div class="searchbox">
       <span class="glass">&#8981;</span>
       <input id="q" type="search" autocomplete="off" spellcheck="false"
-             placeholder="Job # (or last digits) &mdash; or a feature: teflon, low leak&hellip;"
+             placeholder="Job #, or multiple features: D16, S245, access door&hellip;"
              aria-label="Search jobs or features">
       <div class="search-drop" id="drop"></div>
     </div>
@@ -2827,6 +2834,84 @@ function renderMatches() {
 /* ------------------------------- search ------------------------------------ */
 const q = $("q"), drop = $("drop");
 let searchTimer = null;
+function searchParts(value) {
+  return value.split(/[,;]+|\s+\b(?:AND|OR)\b\s+/i)
+    .map(part => GLQSimilarity.norm(part).replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+function searchPartAliases(part) {
+  const aliases = new Set([part]);
+  const compact = part.replace(/[^A-Z0-9]/g, "");
+  if (compact) aliases.add(compact);
+  const addSpecAlias = (label, prefix) => {
+    const match = part.match(new RegExp("^" + label + "\\s*([A-Z0-9./-]+)$"));
+    if (match) aliases.add(prefix + match[1].replace(/[^A-Z0-9]/g, ""));
+  };
+  addSpecAlias("DESIGN", "D");
+  addSpecAlias("SIZE", "S");
+  addSpecAlias("ARRANGEMENT|ARR", "A");
+  return [...aliases].filter(Boolean);
+}
+function searchHaystacks(entry) {
+  const out = [];
+  for (const [label, value] of entry.sp || []) {
+    const normValue = GLQSimilarity.norm(value);
+    if (!normValue) continue;
+    out.push({ text: GLQSimilarity.norm(label + " " + value), kind: "spec" });
+    if (label === "Design") out.push({ text: "D" + normValue.replace(/[^A-Z0-9]/g, ""), kind: "spec" });
+    if (label === "Size") out.push({ text: "S" + normValue.replace(/[^A-Z0-9]/g, ""), kind: "spec" });
+    if (label === "Arrangement") out.push({ text: "A" + normValue.replace(/[^A-Z0-9]/g, ""), kind: "spec" });
+  }
+  for (const row of entry.it || []) {
+    out.push({ text: GLQSimilarity.norm(row[IT.NORM]), kind: "line" });
+    for (const tag of row[IT.TAGS] || []) out.push({ text: GLQSimilarity.norm(tag), kind: "tag" });
+  }
+  for (const c of GLQSimilarity.flattenComponents(entry)) {
+    out.push({ text: GLQSimilarity.norm(c.n), kind: "component" });
+    for (const value of Object.values(c.a || {})) out.push({ text: GLQSimilarity.norm(value), kind: "attribute" });
+  }
+  return out.filter(h => h.text);
+}
+function scoreSearchPart(part, haystacks) {
+  let best = { score: 0, why: "" };
+  for (const alias of searchPartAliases(part)) {
+    const words = alias.split(" ").filter(Boolean);
+    for (const h of haystacks) {
+      let score = 0;
+      if (h.text === alias) score = 1;
+      else if (h.text.includes(alias)) score = 0.92;
+      else if (words.length > 1) {
+        const matched = words.filter(w => h.text.includes(w)).length;
+        if (matched) score = 0.55 * (matched / words.length);
+      }
+      if (score > best.score) {
+        const at = h.text.indexOf(alias);
+        const why = at >= 0
+          ? esc(h.text.slice(0, at)) + "<mark>" + esc(h.text.slice(at, at + alias.length))
+            + "</mark>" + esc(h.text.slice(at + alias.length))
+          : esc(h.kind + ": " + h.text);
+        best = { score, why };
+      }
+    }
+  }
+  return best;
+}
+function scoreSearchEntry(entry, parts) {
+  const haystacks = searchHaystacks(entry);
+  const partScores = parts.map(part => scoreSearchPart(part, haystacks));
+  const matched = partScores.filter(p => p.score >= 0.90).length;
+  const partial = partScores.filter(p => p.score > 0).length;
+  if (!partial) return null;
+  const avg = partScores.reduce((sum, p) => sum + p.score, 0) / parts.length;
+  return {
+    score: Math.min(1, avg),
+    all: matched === parts.length,
+    matched,
+    partial,
+    missing: parts.filter((part, index) => partScores[index].score < 0.90),
+    why: partScores.filter(p => p.why).slice(0, 3).map(p => p.why).join(" · "),
+  };
+}
 function doSearch() {
   const v = q.value.trim();
   if (!v || !DB) { drop.classList.remove("open"); return; }
@@ -2837,48 +2922,41 @@ function doSearch() {
     for (const j of all) {
       if (j.endsWith(v) || j.startsWith(v)) {
         total++;
-        if (hits.length < 10) hits.push({ j, why: "" });
+        if (hits.length < 10) hits.push({ j, why: "", score: 1, all: true });
       }
     }
   } else {
-    const needle = v.toUpperCase().replace(/[^A-Z0-9 ]/g, " ")
-      .replace(/\s+/g, " ").trim();
-    if (!needle) { drop.classList.remove("open"); return; }
-    const all = Object.keys(DB.jobs).sort((a, b) => jobNum(b) - jobNum(a));
+    const parts = searchParts(v);
+    if (!parts.length) { drop.classList.remove("open"); return; }
+    const all = Object.keys(DB.jobs);
     for (const j of all) {
-      const e = DB.jobs[j];
-      let why = "";
-      for (const row of e.it) {
-        const at = row[IT.NORM].indexOf(needle);
-        if (at >= 0) {
-          why = esc(row[IT.NORM].slice(0, at)) + "<mark>"
-            + esc(row[IT.NORM].slice(at, at + needle.length)) + "</mark>"
-            + esc(row[IT.NORM].slice(at + needle.length));
-          break;
-        }
-        if (row[IT.TAGS].some(t => t.includes(needle))) {
-          why = "tag: " + esc(row[IT.TAGS].find(t => t.includes(needle)));
-          break;
-        }
-      }
-      if (why) {
-        total++;
-        if (hits.length < 10) hits.push({ j, why });
-      }
+      const scored = scoreSearchEntry(DB.jobs[j], parts);
+      if (!scored) continue;
+      total++;
+      hits.push({ j, why: scored.why, score: scored.score, all: scored.all,
+        matched: scored.matched, missing: scored.missing });
     }
+    hits.sort((a, b) => (b.all - a.all) || b.score - a.score
+      || (b.matched || 0) - (a.matched || 0) || jobNum(b.j) - jobNum(a.j));
+    hits.length = Math.min(hits.length, 10);
   }
   const note = /^\d+$/.test(v)
     ? "Job-number match — full number or just the last few digits"
-    : total + " order(s) with a Sales-Order line matching “" + esc(v)
-      + "”" + (total > 10 ? " — first 10 shown" : "");
+    : total + " order(s) scored against all requested search parts in “" + esc(v)
+      + "”" + (total > 10 ? " — best 10 shown, complete matches first" : "");
   drop.innerHTML = '<div class="sd-note">' + note + "</div>"
     + (hits.length ? hits.map(h => {
         const e = DB.jobs[h.j];
         return '<button class="sd-item" data-job="' + esc(h.j) + '">'
           + '<span class="l1"><span class="job">' + esc(h.j) + "</span>"
           + '<span class="cust">' + esc(e.c) + "</span>"
-          + queueBadge(h.j, e) + "</span>"
+          + '<span class="sd-meta">' + queueBadge(h.j, e)
+          + (h.score !== undefined ? '<span class="s-score">score <strong>'
+            + h.score.toFixed(2) + '</strong>' + (h.all ? " · all" : "") + "</span>" : "")
+          + "</span></span>"
           + (h.why ? '<span class="why">= ' + h.why + "</span>" : "")
+          + (h.missing && h.missing.length ? '<div class="missing">missing: '
+            + h.missing.map(esc).join(", ") + "</div>" : "")
           + "</button>";
       }).join("")
       : '<div class="sd-note">No order matches — try another spelling, '
