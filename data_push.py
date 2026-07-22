@@ -58,6 +58,9 @@ def data_files() -> List[Path]:
         BACKLOG_DIR / "autocad_scan_progress.json",
         BACKLOG_DIR / "solidworks_scan.json",        # which jobs have 3D data
         BACKLOG_DIR / "so_review_notes.json",
+        # The user's answered clarification file, published so Claude can read
+        # the answers (see so_review.py clarify-send / apply-so-review-notes).
+        BACKLOG_DIR / "so_review_clarifications.md",
         BACKLOG_DIR / "so_review_parser_metrics.json",
         BACKLOG_DIR / "so_corpus_health.json",
         BACKLOG_DIR / "quote_run_review_notes.json",

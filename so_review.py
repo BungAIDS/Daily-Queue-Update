@@ -59,6 +59,18 @@ PARSER_METRICS_PATH = BACKLOG_DIR / "so_review_parser_metrics.json"
 # Append-only {handled: [{id, resolution, handled_at}]} so it cannot conflict.
 HANDLED_MARKS_PATH = Path(__file__).resolve().parent / "so_review_handled.json"
 
+# Clarification round-trip. When Claude can't confidently apply a note it leaves
+# it open and writes a question into a TRACKED request file at the repo root; it
+# rides down on Git Update like the handled ledger. "Answer Clarifications"
+# copies that request into a working file next to the workbook (untracked, so
+# editing it never fights a later pull), opens it for the user, and "Send
+# Clarifications" publishes the answered working file up the order-data branch
+# with the rest of the order data. See .claude/skills/apply-so-review-notes.
+CLARIFY_REQUEST_PATH = Path(__file__).resolve().parent / "so_review_clarifications.md"
+CLARIFY_WORKING_PATH = BACKLOG_DIR / "so_review_clarifications.md"
+_CLARIFY_NOTE = re.compile(r"(?m)^\s*NOTE\s+#\d+\b")
+_CLARIFY_GEN = re.compile(r"(?m)^#\s*Generated:\s*(.+?)\s*$")
+
 STATUS_OPEN = "open"
 STATUS_HANDLED = "handled"
 NOTE_SEPARATOR = "\n\n---\n\n"
@@ -967,6 +979,75 @@ def _cmd_handle(args) -> int:
     return 0
 
 
+def _read_text(p: Path) -> str:
+    try:
+        return p.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _clarify_count(text: str) -> int:
+    return len(_CLARIFY_NOTE.findall(text or ""))
+
+
+def _clarify_generation(text: str) -> str:
+    """The '# Generated:' stamp identifying a clarification batch, or ''.
+
+    Used to tell a fresh request from Claude apart from the copy the user is
+    mid-answer on: same stamp means keep the user's edits, a new stamp means a
+    new batch to refresh from."""
+    m = _CLARIFY_GEN.search(text or "")
+    return m.group(1).strip() if m else ""
+
+
+def _open_in_editor(p: Path) -> None:
+    import os
+    try:
+        if os.name == "nt":
+            os.startfile(str(p))  # type: ignore[attr-defined]
+        else:
+            print(f"Open this file to answer: {p}")
+    except OSError as e:
+        print(f"Could not open {p} automatically ({e}); open it by hand.")
+
+
+def _cmd_clarify_open(args) -> int:
+    """'Answer Clarifications': materialize Claude's pending questions into the
+    editable working file (unless the user is mid-answer on the same batch) and
+    open it. Nothing to do when no request is pending."""
+    request = _read_text(CLARIFY_REQUEST_PATH)
+    if not _CLARIFY_NOTE.search(request):
+        print("No clarifications are pending — nothing to answer right now.")
+        return 0
+    working = _read_text(CLARIFY_WORKING_PATH)
+    fresh_batch = _clarify_generation(working) != _clarify_generation(request)
+    if not _CLARIFY_NOTE.search(working) or fresh_batch:
+        CLARIFY_WORKING_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CLARIFY_WORKING_PATH.write_text(request, encoding="utf-8")
+        working = request
+    print(f"{_clarify_count(working)} clarification(s) to answer in "
+          f"{CLARIFY_WORKING_PATH}. Type inside each >>>>> box, save and close, "
+          f"then click 'Send Clarifications'.")
+    _open_in_editor(CLARIFY_WORKING_PATH)
+    return 0
+
+
+def _cmd_clarify_send(args) -> int:
+    """'Send Clarifications': publish the answered working file (with the rest of
+    the order data) up the order-data branch so Claude can read the answers."""
+    if not _CLARIFY_NOTE.search(_read_text(CLARIFY_WORKING_PATH)):
+        print(f"No clarification answers to send — expected {CLARIFY_WORKING_PATH}. "
+              "Click 'Answer Clarifications' first.", file=sys.stderr)
+        return 1
+    import data_push
+    if data_push.push_data():
+        print("Answers published to the order-data branch (with the current order "
+              "data). Claude picks them up on its next run.")
+        return 0
+    print("Publish failed — see the log above.", file=sys.stderr)
+    return 1
+
+
 def _run(func, args) -> int:
     """Run a subcommand, turning an expected error (e.g. the workbook is open in
     Excel) into a clear one-line message rather than a traceback in the log."""
@@ -1009,6 +1090,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     h.add_argument("id", type=int)
     h.add_argument("resolution", nargs="+")
     h.set_defaults(func=_cmd_handle)
+
+    co = sub.add_parser("clarify-open",
+                        help="open Claude's pending clarification questions to answer")
+    co.set_defaults(func=_cmd_clarify_open)
+
+    cs = sub.add_parser("clarify-send",
+                        help="publish your answered clarifications to the order-data branch")
+    cs.set_defaults(func=_cmd_clarify_send)
 
     args = ap.parse_args(argv)
     return _run(args.func, args)
