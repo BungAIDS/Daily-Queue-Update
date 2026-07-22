@@ -264,11 +264,10 @@ def test_render_roundtrip_and_safety():
     assert html.count("Prepare Transmittal") == 2
     assert 'class="prepare-transmittal"' in html
     assert "const transmittalUrl" in html and "glqtransmittal:" in html
-    assert 'id="notes"' in html and "notes-host" in html
-    assert "renderNotesPane" in html and "alignNotesToTargets" in html
+    assert "noteTargetHtml" in html and "wireInlineNotes" in html
     assert "data-note-target" in html and "data-note-id" in html
-    assert "state.heldVersion" in html and "Refresh paused while you write" in html
-    assert "noteDraftKey" in html and "notesWrite" in html
+    assert "state.heldVersion" in html and "refresh paused while note editing" in html
+    assert "noteDraftKey" in html and "hasNoteDrafts" in html
     assert "note-del" in html and "action: \"delete\"" in html
     # In both order headers the action is immediately after that order's customer.
     assert re.search(r"esc\(e\.c\).*?prepare-transmittal.*?transmittalUrl\(j\)",

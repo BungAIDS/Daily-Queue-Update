@@ -1072,14 +1072,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   /* The Order view is a grid ONLY while active — a bare `main.cols`
      display rule would outrank `.view`'s hide and bleed under other tabs. */
-  main.cols { grid-template-columns: 28px minmax(0, 11fr) minmax(0, 9fr);
+  main.cols { grid-template-columns: minmax(0, 11fr) minmax(0, 9fr);
     gap: 18px; align-items: start; }
-  main.cols.notes-open { grid-template-columns: minmax(210px, 280px) minmax(0, 11fr) minmax(0, 9fr); }
   main.cols.view.on { display: grid; }
-  @media (max-width: 920px) {
-    main.cols, main.cols.notes-open { grid-template-columns: 1fr; }
-    .notes-host { order: 2; }
-  }
+  @media (max-width: 920px) { main.cols { grid-template-columns: 1fr; } }
 
   .backlink { font-size: 12.5px; color: var(--accent); font-weight: 600; }
   .ohead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; flex: 1; }
@@ -1128,25 +1124,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
     margin-left: auto; }
   .wholebtn:hover, .wholebtn.active { background: var(--accent);
     color: var(--accent-ink); }
-  .notes-host { min-height: 1px; align-self: stretch; }
-  .notes-host.empty { display: none; }
-  main.cols:has(.notes-host.empty) { grid-template-columns: minmax(0, 11fr) minmax(0, 9fr); }
-  .notes-rail { border: 1px solid var(--line); border-radius: 9px;
-    background: var(--panel-2); overflow: hidden; position: sticky; top: 10px; }
-  .notes-toggle { width: 100%; min-height: 280px; color: var(--accent);
-    font-weight: 800; border-right: 4px solid var(--accent); }
-  .notes-panel { display: none; padding: 8px; }
-  main.notes-open .notes-toggle { min-height: 0; border-right: none;
-    border-bottom: 1px solid var(--line); padding: 6px; }
-  main.notes-open .notes-panel { display: block; }
-  .notes-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
-  .notes-head .title { font-weight: 800; font-size: 12px; letter-spacing: .06em;
-    text-transform: uppercase; color: var(--muted); }
-  .notes-mode { margin-left: auto; border: 1px solid var(--accent);
-    border-radius: 999px; color: var(--accent); font-weight: 700; padding: 2px 8px; }
-  .notes-mode.write { background: var(--accent); color: var(--accent-ink); }
-  .note-list-wrap { position: relative; }
-  .note-cell { border-top: 1px solid var(--line); padding: 3px 0 5px; }
+  .note-cell { margin: 4px 0 8px 18px; border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 8px; background: var(--panel-2); }
   .note-target { font-family: var(--mono); font-size: 10.5px; color: var(--faint);
     overflow-wrap: anywhere; }
   .note-list { font-size: 12px; margin: 2px 0; display: flex; flex-direction: column; gap: 3px; }
@@ -1154,12 +1133,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .note-entry-text { flex: 1; overflow-wrap: anywhere; }
   .note-del { color: var(--bad); font-size: 10.5px; font-family: var(--mono); }
   .note-list .empty-note { color: var(--faint); font-style: italic; }
-  .note-input { width: 100%; min-height: 30px; resize: vertical; margin-top: 2px;
+  .note-input { width: 100%; min-height: 42px; resize: vertical; margin-top: 4px;
     border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
     color: var(--ink); padding: 4px 6px; font: 12px/1.35 var(--sans); }
   .note-add { margin-top: 4px; border: 1px solid var(--good); border-radius: 6px;
     color: var(--good); font-size: 11px; font-weight: 700; padding: 2px 8px; }
-  .note-paused { color: var(--bad); font-size: 11px; margin: 4px 0; }
 
   .tree { display: flex; flex-direction: column; gap: 6px; }
   .comp { border: 1px solid var(--line); border-radius: 9px; overflow: hidden;
@@ -1303,7 +1281,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <section class="view panel" id="view-changes"></section>
   <section class="view panel" id="view-hist"></section>
   <main class="cols view" id="view-job">
-    <aside class="notes-host" id="notes"></aside>
     <section class="panel" id="left"></section>
     <section class="panel" id="right"></section>
   </main>
@@ -1332,7 +1309,7 @@ let NWSET = null;              // the watcher's exact new-today set (null = deri
 const state = { tab: "board", job: null, whole: false, previewJob: null,
                 selections: new Map(), histQ: "", histN: 500,
                 boardQ: "", boardSort: null, histSort: null, only3d: false,
-                notesOpen: false, notesWrite: false, heldVersion: null };
+                heldVersion: null };
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c =>
@@ -1487,7 +1464,7 @@ function noteTargetHtml(job, target) {
           + ' data-delete-id="' + esc(n.id || "") + '"';
         return '<div class="note-entry"><span class="note-entry-text">' + esc(n.note)
           + (n.local ? ' <span class="hint">(pending)</span>' : "") + '</span>'
-          + (state.notesWrite ? '<button class="note-del"' + deleteAttrs + '>delete</button>' : "")
+          + '<button class="note-del"' + deleteAttrs + '>delete</button>'
           + '</div>';
       }).join("")
     : '<div class="empty-note">No notes</div>';
@@ -1498,36 +1475,16 @@ function noteTargetHtml(job, target) {
     + '" data-note-text="' + esc(target.item_text) + '">'
     + '<div class="note-target">' + esc(target.label) + '</div>'
     + '<div class="note-list">' + body + '</div>'
-    + (state.notesWrite ? '<textarea class="note-input" placeholder="Add note">'
-      + esc(draft) + '</textarea><button class="note-add">Add to list</button>' : "")
+    + '<textarea class="note-input" placeholder="Add note">'
+    + esc(draft) + '</textarea><button class="note-add">Add to list</button>'
     + '</div>';
 }
-function renderNotesPane(job, targets) {
-  const host = $("notes"), main = $("view-job");
-  main.classList.toggle("notes-open", !!state.notesOpen && !!job);
-  if (!job) { host.className = "notes-host empty"; host.innerHTML = ""; return; }
-  host.className = "notes-host";
-  host.innerHTML = '<div class="notes-rail"><button class="notes-toggle" id="notestoggle" '
-    + 'title="Expand order notes">' + (state.notesOpen ? "◂ Notes" : "▸") + '</button>'
-    + '<div class="notes-panel"><div class="notes-head"><span class="title">SO Review Notes</span>'
-    + '<button class="notes-mode' + (state.notesWrite ? " write" : "") + '" id="notesmode">'
-    + (state.notesWrite ? "Write" : "Read") + '</button></div>'
-    + '<div class="hint">Notes attach to Sales Order components and attributes, not Quote Run facts.</div>'
-    + (state.heldVersion ? '<div class="note-paused">Refresh paused while you write. Click Write to return to Read and update.</div>' : "")
-    + '<div class="note-list-wrap">' + targets.map(t => noteTargetHtml(job, t)).join("")
-    + '</div></div></div>';
-  $("notestoggle").onclick = () => { state.notesOpen = !state.notesOpen; render(); };
-  const notesMode = $("notesmode");
-  if (notesMode) notesMode.onclick = () => {
-    state.notesWrite = !state.notesWrite;
-    if (!state.notesWrite && state.heldVersion && !hasNoteDrafts(job)) reloadFresh();
-    else render();
-  };
-  host.querySelectorAll(".note-input").forEach(input => input.oninput = () => {
+function wireInlineNotes(job, root) {
+  root.querySelectorAll(".note-input").forEach(input => input.oninput = () => {
     const cell = input.closest(".note-cell");
     writeNoteDraft(job, cell.dataset.noteKey, input.value);
   });
-  host.querySelectorAll(".note-add").forEach(b => b.onclick = () => {
+  root.querySelectorAll(".note-add").forEach(b => b.onclick = () => {
     const cell = b.closest(".note-cell"), input = cell.querySelector(".note-input");
     const text = (input.value || "").trim();
     if (!text) { toast("Type a note first"); return; }
@@ -1540,7 +1497,7 @@ function renderNotesPane(job, targets) {
     toast("Note added to local list and sent to SO review queue");
     render();
   });
-  host.querySelectorAll(".note-del").forEach(b => b.onclick = () => {
+  root.querySelectorAll(".note-del").forEach(b => b.onclick = () => {
     const noteId = b.dataset.deleteId || "";
     const key = b.dataset.deleteKey || "";
     if (noteId) {
@@ -1553,31 +1510,6 @@ function renderNotesPane(job, targets) {
       toast("Pending note deleted");
     }
     render();
-  });
-  requestAnimationFrame(alignNotesToTargets);
-}
-function alignNotesToTargets() {
-  const rail = document.querySelector("#notes .notes-rail");
-  const anchor = $("leftcomponents");
-  const main = $("view-job");
-  if (rail && anchor && main) {
-    const delta = anchor.getBoundingClientRect().top - main.getBoundingClientRect().top;
-    rail.style.marginTop = Math.max(0, delta) + "px";
-  }
-  if (!state.notesOpen) return;
-  const wrap = document.querySelector("#notes .note-list-wrap");
-  if (!wrap) return;
-  const base = wrap.getBoundingClientRect().top;
-  let cursor = 0;
-  wrap.querySelectorAll(".note-cell").forEach(cell => {
-    const target = document.querySelector('[data-note-target="' + cell.dataset.noteId + '"]');
-    if (!target) return;
-    const rect = target.getBoundingClientRect();
-    const desired = Math.max(0, rect.top - base);
-    const gap = Math.max(0, desired - cursor);
-    cell.style.marginTop = gap + "px";
-    cell.style.minHeight = Math.max(24, rect.height) + "px";
-    cursor = desired + Math.max(cell.getBoundingClientRect().height, rect.height);
   });
 }
 /* The IN QUEUE badge, filled with the job's current row color on the queue. */
@@ -1639,10 +1571,9 @@ function pollVersion() {
   s.src = VERSION_FILE + "?t=" + Date.now();   // query defeats any file cache
   s.onload = () => { s.remove();
     if (window.__GLQ_VERSION__ && DB && window.__GLQ_VERSION__ !== DB.gen) {
-      if (state.notesWrite || hasNoteDrafts(state.job)) {
+      if (hasNoteDrafts(state.job)) {
         state.heldVersion = window.__GLQ_VERSION__;
         toast("Update ready — refresh paused while note editing is active");
-        renderNotesPane(state.job, window.__noteTargets || []);
       } else {
         reloadFresh();
       }
@@ -1656,7 +1587,6 @@ function reloadFresh() {
     sessionStorage.setItem(STATE_KEY, JSON.stringify({
       tab: state.tab, job: state.job, selections: encodeSelections(),
       whole: state.whole, histQ: state.histQ, y: window.scrollY,
-      notesOpen: state.notesOpen, notesWrite: state.notesWrite,
       refreshed: 1 }));
   } catch (e) {}
   location.reload();
@@ -1677,8 +1607,6 @@ function restoreState() {
     ? saved.tab : "board";
   if (state.tab === "job" && !state.job) state.tab = "board";
   state.histQ = saved.histQ || "";
-  state.notesOpen = !!saved.notesOpen;
-  state.notesWrite = !!saved.notesWrite || hasNoteDrafts(state.job);
   if (saved.y) setTimeout(() => window.scrollTo(0, saved.y), 60);
   if (saved.refreshed) toast("Refreshed — new data as of " + DB.gen);
 }
@@ -1870,7 +1798,7 @@ function wireComponentAlignment() {
   alignComponentStarts();
   document.querySelectorAll("#left details.hist, #right details.hist")
     .forEach(details => details.ontoggle = alignComponentStarts);
-  requestAnimationFrame(() => { alignComponentStarts(); alignNotesToTargets(); });
+  requestAnimationFrame(alignComponentStarts);
 }
 
 /* ---- real browser history: every tab switch and order open is an entry, so
@@ -2269,7 +2197,6 @@ function renderHist() {
 function renderJobPane() {
   const el = $("left");
   if (!state.job) {
-    renderNotesPane(null, []);
     el.innerHTML = '<div class="panel-head"><span class="eyebrow">Order</span></div>'
       + '<div class="empty"><div class="big">No order open yet</div>'
       + "Click any job # on the Changes, Live Queue, or Order History tab — "
@@ -2299,14 +2226,16 @@ function renderJobPane() {
     const itemNo = items.length === 1 ? String(items[0][IT.NO]) : "";
     const compRowKey = itemNo ? "item:" + itemNo : "component|" + path + "|" + c.n;
     const compNoteId = "c" + noteTargets.length;
-    noteTargets.push({ id: compNoteId, row_key: compRowKey, item_no: itemNo, item_text: c.n,
-      label: (c.k ? "[" + c.n + "]" : c.n) });
+    const compTarget = { id: compNoteId, row_key: compRowKey, item_no: itemNo, item_text: c.n,
+      label: (c.k ? "[" + c.n + "]" : c.n) };
+    noteTargets.push(compTarget);
     const attrs = Object.entries(c.a).map(([k, v]) => {
       const key = k + "=" + v;
       const attrNoteId = "a" + noteTargets.length;
-      noteTargets.push({ id: attrNoteId, row_key: "attr|" + path + "|" + key, item_no: itemNo,
+      const attrTarget = { id: attrNoteId, row_key: "attr|" + path + "|" + key, item_no: itemNo,
         item_text: c.n + " · " + k.replace(/_/g, " ") + ": " + v,
-        label: c.n + " · " + k.replace(/_/g, " ") });
+        label: c.n + " · " + k.replace(/_/g, " ") };
+      noteTargets.push(attrTarget);
       const pin = active && selectedPins.has(key);
       return '<button class="attr-row' + (pin ? " pinned" : "")
         + '" data-note-target="' + esc(attrNoteId)
@@ -2317,7 +2246,8 @@ function renderJobPane() {
         + '<span class="k">' + esc(k.replace(/_/g, " ")) + ':</span>'
         + '<span class="v">' + esc(v) + '</span>'
         + '<span class="pin">' + (pin ? "✕ selected" : "add to search")
-        + "</span></button>";
+        + "</span></button>"
+        + (pin ? noteTargetHtml(j, attrTarget) : "");
     }).join("");
     const revs = (c.r || []).map(x => '<div class="rev-row">' + esc(x) + "</div>").join("");
     const srcs = (!c.hs && items.length > 1) ? items.map((row, i) =>
@@ -2336,6 +2266,7 @@ function renderJobPane() {
       + '<span class="go">' + (active
         ? (selectedPins.size ? selectedPins.size + " attrs selected" : "✕ selected")
         : "add to search ▸") + '</span></button>'
+      + (active ? noteTargetHtml(j, compTarget) : "")
       + '<div class="comp-kids">' + attrs + revs + subs + srcs + "</div></div>";
   };
   const tree = e.cp.length
@@ -2370,8 +2301,7 @@ function renderJobPane() {
     + '<div class="tree" id="leftcomponenttree">' + tree + "</div></div>";
 
   $("back").onclick = () => history.length > 1 ? history.back() : setTab("board");
-  window.__noteTargets = noteTargets;
-  renderNotesPane(j, noteTargets);
+  wireInlineNotes(j, el);
   $("whole").onclick = () => { const hadPreview = !!state.previewJob;
     state.previewJob = null;
     if (hadPreview && state.whole) { render(); return; }
@@ -2863,7 +2793,7 @@ document.addEventListener("click", ev => {
 document.querySelectorAll(".tabbtn").forEach(b =>
   b.onclick = () => setTab(b.dataset.tab));
 window.addEventListener("resize", () => {
-  if (DB && state.tab === "job") { alignComponentStarts(); alignNotesToTargets(); }
+  if (DB && state.tab === "job") alignComponentStarts();
 });
 
 boot().catch(err => {
