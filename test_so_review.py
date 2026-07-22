@@ -865,6 +865,52 @@ def test_parser_review_metrics_are_recorded_as_history(tmp: Path):
     assert history["runs"][0]["after"] == after
 
 
+def _clarify_request(generation: str, ids=(124,)) -> str:
+    head = ("# SALES-ORDER REVIEW — CLARIFICATIONS NEEDED\n"
+            f"# Generated: {generation}\n\n")
+    blocks = []
+    for i in ids:
+        blocks.append(
+            "==============================================================\n"
+            f" NOTE #{i}   ·   order 421967   ·   row: [SHIP TO]\n"
+            "==============================================================\n"
+            " Your note : all these\n My question:\n   drop from capture?\n\n"
+            ">>>>>>>>>>  TYPE YOUR ANSWER ON THE BLANK LINES BELOW  >>>>>>>>>>\n\n\n"
+            f"<<<<<<<<<<  (end of answer for note #{i})  <<<<<<<<<<\n")
+    return head + "\n".join(blocks)
+
+
+def test_clarify_open_materializes_and_preserves_answers(tmp: Path):
+    request, working = tmp / "request.md", tmp / "working.md"
+    old_req, old_work = sr.CLARIFY_REQUEST_PATH, sr.CLARIFY_WORKING_PATH
+    sr.CLARIFY_REQUEST_PATH, sr.CLARIFY_WORKING_PATH = request, working
+    try:
+        # Nothing pending -> no working file is created.
+        assert sr._cmd_clarify_open(None) == 0
+        assert not working.exists()
+
+        # A pending batch is materialized into the editable working file.
+        request.write_text(_clarify_request("2026-07-22T10:00:00"), encoding="utf-8")
+        sr._cmd_clarify_open(None)
+        assert working.exists() and sr._clarify_count(working.read_text()) == 1
+
+        # The user types an answer; re-opening the SAME batch must not clobber it.
+        answered = working.read_text().replace(
+            "BELOW  >>>>>>>>>>\n", "BELOW  >>>>>>>>>>\nyes, drop them\n")
+        working.write_text(answered, encoding="utf-8")
+        sr._cmd_clarify_open(None)
+        assert "yes, drop them" in working.read_text()
+
+        # A NEW batch (new generation stamp) refreshes the working file.
+        request.write_text(_clarify_request("2026-07-23T09:00:00", ids=(200,)),
+                           encoding="utf-8")
+        sr._cmd_clarify_open(None)
+        text = working.read_text()
+        assert "yes, drop them" not in text and "NOTE #200" in text
+    finally:
+        sr.CLARIFY_REQUEST_PATH, sr.CLARIFY_WORKING_PATH = old_req, old_work
+
+
 def main() -> int:
     passed = 0
     for name, fn in sorted(globals().items()):
