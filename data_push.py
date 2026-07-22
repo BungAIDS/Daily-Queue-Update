@@ -58,6 +58,9 @@ def data_files() -> List[Path]:
         BACKLOG_DIR / "autocad_scan_progress.json",
         BACKLOG_DIR / "solidworks_scan.json",        # which jobs have 3D data
         BACKLOG_DIR / "so_review_notes.json",
+        # The user's answered clarification file, published so Claude can read
+        # the answers (see so_review.py clarify-send / apply-so-review-notes).
+        BACKLOG_DIR / "so_review_clarifications.md",
         BACKLOG_DIR / "so_review_parser_metrics.json",
         BACKLOG_DIR / "so_corpus_health.json",
         BACKLOG_DIR / "quote_run_review_notes.json",
@@ -90,13 +93,13 @@ def data_files() -> List[Path]:
 
 
 def _git(args: List[str]) -> subprocess.CompletedProcess:
-    env = {**os.environ, **_IDENTITY}
+    env = {**os.environ, **_IDENTITY, "GIT_TERMINAL_PROMPT": "0"}
     return subprocess.run(["git", *args], cwd=_REPO, env=env,
                           capture_output=True, text=True, timeout=120)
 
 
 def _git_stdin(args: List[str], data: bytes) -> subprocess.CompletedProcess:
-    env = {**os.environ, **_IDENTITY}
+    env = {**os.environ, **_IDENTITY, "GIT_TERMINAL_PROMPT": "0"}
     return subprocess.run(["git", *args], cwd=_REPO, env=env, input=data,
                           capture_output=True, timeout=120)
 

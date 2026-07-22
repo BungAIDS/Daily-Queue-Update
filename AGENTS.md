@@ -92,4 +92,25 @@ Launcher (`launcher.py`, Tkinter):
 
 Add project-specific notes here. This section is never auto-modified.
 
+### Skill: applying Sales-Order review notes
+
+When asked to work through the user's Sales-Order **review notes** — "apply my
+review notes", "go through the review queue", "turn my comments into parser
+changes" — follow `.claude/skills/apply-so-review-notes/SKILL.md`. It's a
+Claude-Code skill, but the instructions are plain markdown and its tools are
+plain Python, so any agent (Codex, etc.) can use it directly:
+
+- Read `.claude/skills/apply-so-review-notes/SKILL.md` for the full workflow.
+- Run its scripts from the repo root, e.g.
+  `python .claude/skills/apply-so-review-notes/scripts/list_open_notes.py`
+  (open notes), `show_order.py <order>` (how an order parses today),
+  `write_clarifications.py` / `read_clarifications.py` (the defer-and-ask
+  round-trip).
+
+The gist: read the open notes off the `order-data` branch, ground each one in
+how the order currently parses, apply only the notes you're confident about to
+`line_items.py`, resolve them with `python so_review.py handle <id> "..."`, and
+for anything ambiguous defer it and ask via the clarification file instead of
+guessing.
+
 <!-- END MANUAL -->

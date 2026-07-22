@@ -61,7 +61,8 @@ from live_sheets import added_label
 from log_push import push_logs
 from runstate import load_diff
 from sales_orders import (enrich_with_sales_orders, repair_missing_sales_order_summaries,
-                          refresh_autocad_folders, refresh_sales_orders)
+                          refresh_autocad_folders, refresh_sales_orders,
+                          rescan_departed_autocad)
 from scraper import scrape_queue
 
 log = logging.getLogger("queue-watch")
@@ -565,6 +566,20 @@ def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce
              now.strftime("%H:%M:%S"), len(board),
              len(deltas["new"]), len(deltas["returning"]), len(deltas["removed"]))
 
+    # A job that just left the engineering queue is (almost certainly) finished, so
+    # all of its drawings are on disk now — capture its final custom-DWG set into
+    # the corpus matrix (autocad_scan_progress.json) the moment it departs. The
+    # everyday enrichment only scans on-board jobs, so without this the full-corpus
+    # DWG store goes stale for completed work until the next manual sweep. Runs on
+    # every poll, baseline included, so overnight departures (jobs on the board at
+    # the last session's end but gone by this morning's first poll) are caught too.
+    captured_departed = 0
+    if deltas["removed"]:
+        captured_departed = rescan_departed_autocad(deltas["removed"])
+        if captured_departed:
+            log.info("Captured the final drawing set for %d departed order(s) "
+                     "into the DWG matrix.", captured_departed)
+
     # Re-fetch the Sales Order for any on-board order whose price just changed: a
     # likely change order, whose new CO sales order needs downloading so the CO#,
     # line items and the Job# link all follow the newest revision. Clearing
@@ -644,9 +659,10 @@ def poll_once(state: dict, master: dict, now: datetime, baseline: bool, announce
 
     live_state.save_state(state, now.date())
     live_master.save_master(master)
-    # New orders (or field changes) this poll -> refresh the published snapshot so
-    # a remote reader tracks them. No-ops unless auto-publish is enabled.
-    if deltas["new"] or events:
+    # New orders, field changes, or a departed job's captured drawings this poll ->
+    # refresh the published snapshot so a remote reader tracks them. No-ops unless
+    # auto-publish is enabled.
+    if deltas["new"] or events or captured_departed:
         _publish_data()
     return deltas
 

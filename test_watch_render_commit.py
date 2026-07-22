@@ -45,6 +45,7 @@ def _render(master: dict, rendered: set) -> None:
     """Run _render_master with the Excel write mocked to report `rendered` as the
     tabs that succeeded, and disk/IO side effects stubbed."""
     with mock.patch.object(watch, "update_master_workbook", return_value=rendered), \
+            mock.patch.object(watch.order_explorer, "maybe_write", return_value=None), \
             mock.patch.object(watch.line_items, "load_store", return_value={"jobs": {}}):
         watch._render_master(master, NOW, board_order=["420734"])
 
