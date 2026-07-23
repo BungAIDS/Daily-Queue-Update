@@ -326,6 +326,38 @@ def test_vbs_folder_opener():
     print("  vbs folder opener OK")
 
 
+def test_taskbar_identity_helpers():
+    """The taskbar icon can only come from the RUNNING window's own
+    AppUserModelID + Relaunch* properties — a favicon, manifest, or .lnk icon
+    never changes the button of a live Edge --app window. The published
+    stamper sets exactly those, and every open path invokes it."""
+    ps = oe.taskbar_ps1_text()
+    ps.encode("ascii")                                   # powershell-safe
+    assert "\r\n" in ps and ps.endswith("\r\n")
+    assert "SHGetPropertyStoreForWindow" in ps and "EnumWindows" in ps
+    # The System.AppUserModel property set: ID(5), RelaunchCommand(2),
+    # RelaunchDisplayNameResource(4), RelaunchIconResource(3).
+    assert "9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3" in ps
+    for pid in ("Set(store, 5,", "Set(store, 2,", "Set(store, 4,", "Set(store, 3,"):
+        assert pid in ps, pid
+    assert oe.APP_USER_MODEL_ID in ps
+    assert oe.ICON_ICO_NAME in ps and oe.LAUNCH_VBS_NAME in ps
+    # Only the app window is stamped: exact title on a Chromium frame window;
+    # a browser tab carries a " - Microsoft Edge" suffix and never matches.
+    assert "Chrome_WidgetWin" in ps and '$title = "GL Queue Explorer"' in ps
+
+    launch = oe.launch_vbs_text("My Page.html")
+    launch.encode("ascii")                               # wscript-safe
+    assert '"My Page.html"' in launch and "--app=" in launch
+    assert oe.TASKBAR_PS1_NAME in launch and "-WindowStyle Hidden" in launch
+
+    assert oe.TASKBAR_PS1_NAME in oe.bat_text()
+    shortcut = oe.shortcut_vbs_text()
+    assert "wscript.exe" in shortcut and oe.LAUNCH_VBS_NAME in shortcut
+    assert "msedge" not in shortcut, "the .lnk must not target the browser directly"
+    print("  taskbar identity helpers OK")
+
+
 def test_dwg_links_render_as_links():
     p = oe.build_payload(_store(), _dwg())
     html = oe.render_html(p)
@@ -469,6 +501,8 @@ def test_write_explorer_files():
         assert shortcut.exists(), "custom-icon shortcut helper not written"
         shortcut_text = shortcut.read_text(encoding="ascii")
         assert oe.ICON_ICO_NAME in shortcut_text and "CreateShortcut" in shortcut_text
+        assert (Path(td) / oe.LAUNCH_VBS_NAME).exists(), "silent opener not written"
+        assert (Path(td) / oe.TASKBAR_PS1_NAME).exists(), "taskbar stamper not written"
         # The auto-refresh stamp open pages poll: the data fingerprint drives
         # the all-tab reload, the board fingerprint the Live-Queue-only reload.
         ver = Path(td) / oe.VERSION_NAME
@@ -634,6 +668,7 @@ def main() -> int:
     test_explorer_search_supports_multi_part_scored_queries()
     test_bat_launcher()
     test_vbs_folder_opener()
+    test_taskbar_identity_helpers()
     test_dwg_links_render_as_links()
     test_transmittal_protocol_accepts_only_a_numeric_order()
     test_note_protocol_records_review_note(Path(tempfile.mkdtemp()))
