@@ -82,6 +82,7 @@ VBS_NAME = "glq_open.vbs"
 ICON_PNG_NAME = "GL Queue Explorer.png"
 ICON_ICO_NAME = "GL Queue Explorer.ico"
 SHORTCUT_VBS_NAME = "Create GL Queue Explorer Shortcut.vbs"
+MANIFEST_NAME = "GL Queue Explorer.webmanifest"
 ENABLE_NAME = "Enable Folder Links.bat"
 SIMILARITY_JS_NAME = "order_similarity.js"
 TRANSMITTAL_SCHEME = "glqtransmittal"
@@ -596,6 +597,20 @@ def _write_bytes_if_changed(dst: Path, data: bytes) -> None:
     tmp.replace(dst)
 
 
+def manifest_text() -> str:
+    return json.dumps({
+        "name": "GL Queue Explorer",
+        "short_name": "GL Queue",
+        "start_url": HTML_NAME,
+        "display": "standalone",
+        "background_color": "#F4F6F5",
+        "theme_color": "#1B242D",
+        "icons": [
+            {"src": ICON_PNG_NAME, "sizes": "256x256", "type": "image/png"},
+        ],
+    }, indent=2) + "\n"
+
+
 def shortcut_vbs_text(html_name: str = HTML_NAME, ico_name: str = ICON_ICO_NAME) -> str:
     """Create a Desktop .lnk that opens the Explorer as an Edge/Chrome app
     window and uses the custom wheel icon. The .bat stays as a no-surprises
@@ -715,6 +730,14 @@ def write_explorer(payload: Dict[str, Any], out: Path | None = None) -> Path:
             _write_bytes_if_changed(out.parent / target_name, data)
         except OSError as e:
             log.warning("Could not write %s (%s)", out.parent / target_name, e)
+
+    manifest = out.parent / MANIFEST_NAME
+    mtext = manifest_text()
+    try:
+        if not manifest.exists() or manifest.read_text(encoding="utf-8") != mtext:
+            manifest.write_text(mtext, encoding="utf-8")
+    except OSError as e:
+        log.warning("Could not write %s (%s)", manifest, e)
 
     shortcut_vbs = out.parent / SHORTCUT_VBS_NAME
     shortcut_text = shortcut_vbs_text(out.name)
@@ -1060,6 +1083,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GL Queue Explorer</title>
 <link rel="icon" type="image/png" href="GL Queue Explorer.png">
+<link rel="apple-touch-icon" href="GL Queue Explorer.png">
+<link rel="manifest" href="GL Queue Explorer.webmanifest">
 <style>
   :root {
     --bg: #F4F6F5; --panel: #FFFFFF; --panel-2: #FAFBFB;

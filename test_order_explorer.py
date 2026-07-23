@@ -250,6 +250,7 @@ def test_render_roundtrip_and_safety():
     assert "previewJob" in html
     assert "Back to List" in html
     assert 'rel="icon" type="image/png" href="GL Queue Explorer.png"' in html
+    assert 'rel="manifest" href="GL Queue Explorer.webmanifest"' in html
     assert "click order # again to move it to the left" in html
     assert "red = scored construction difference" in html
     assert "preview-relevant" in html
@@ -446,6 +447,9 @@ def test_write_explorer_files():
         assert (Path(td) / oe.VBS_NAME).exists(), "glq_open.vbs not written"
         assert (Path(td) / oe.ICON_PNG_NAME).exists(), "Explorer PNG icon not written"
         assert (Path(td) / oe.ICON_ICO_NAME).exists(), "Explorer ICO icon not written"
+        manifest = Path(td) / oe.MANIFEST_NAME
+        assert manifest.exists(), "Explorer web app manifest not written"
+        assert oe.ICON_PNG_NAME in manifest.read_text(encoding="utf-8")
         shortcut = Path(td) / oe.SHORTCUT_VBS_NAME
         assert shortcut.exists(), "custom-icon shortcut helper not written"
         shortcut_text = shortcut.read_text(encoding="ascii")
