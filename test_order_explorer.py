@@ -249,6 +249,8 @@ def test_render_roundtrip_and_safety():
     assert "renderOrderPreview" in html
     assert "previewJob" in html
     assert "Back to List" in html
+    assert 'rel="icon" type="image/png" sizes="256x256" href="GL Queue Explorer Fan.png"' in html
+    assert 'rel="shortcut icon" type="image/x-icon" href="GL Queue Explorer Fan.ico"' in html
     assert 'rel="icon" type="image/png" href="GL Queue Explorer.png"' in html
     assert 'rel="manifest" href="GL Queue Explorer.webmanifest"' in html
     assert "click order # again to move it to the left" in html
@@ -262,6 +264,9 @@ def test_render_roundtrip_and_safety():
     assert "state.selections" in html
     assert "Searching for (closest first)" in html
     assert "pinHits" in html          # soft-selection miss chips are wired in
+    assert "baseFanChips" in html
+    assert "match-actions" in html
+    assert "Match Base Fan" in html and "Green ✓ = same, red ✗" in html
     assert "selected components" in html
     assert "alignComponentStarts" in html
     assert 'class="co-tip"' in html

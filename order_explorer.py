@@ -79,6 +79,8 @@ HTML_NAME = "GL Queue Explorer.html"
 BAT_NAME = "Open GL Queue Explorer.bat"
 VERSION_NAME = "gl_queue_explorer_version.js"
 VBS_NAME = "glq_open.vbs"
+ICON_PNG_NAME = "GL Queue Explorer Fan.png"
+ICON_ICO_NAME = "GL Queue Explorer Fan.ico"
 ICON_PNG_NAME = "GL Queue Explorer.png"
 ICON_ICO_NAME = "GL Queue Explorer.ico"
 SHORTCUT_VBS_NAME = "Create GL Queue Explorer Shortcut.vbs"
@@ -1082,6 +1084,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GL Queue Explorer</title>
+<link rel="icon" type="image/png" sizes="256x256" href="GL Queue Explorer Fan.png">
+<link rel="shortcut icon" type="image/x-icon" href="GL Queue Explorer Fan.ico">
+<link rel="apple-touch-icon" href="GL Queue Explorer Fan.png">
 <link rel="icon" type="image/png" href="GL Queue Explorer.png">
 <link rel="apple-touch-icon" href="GL Queue Explorer.png">
 <link rel="manifest" href="GL Queue Explorer.webmanifest">
@@ -1301,7 +1306,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .sectionbar .hint { font-size: 11.5px; color: var(--muted); }
   .wholebtn { font-size: 12px; font-weight: 600; color: var(--accent);
     border: 1px solid var(--accent); border-radius: 999px; padding: 3px 12px;
-    margin-left: auto; }
+    margin-left: 0; }
+  .sectionbar .match-actions { margin-left: auto; display: inline-flex;
+    align-items: center; gap: 8px; }
+  .sectionbar .match-actions .wholebtn { margin-left: 0; }
+  .panel-head .wholebtn { margin-left: auto; }
   .wholebtn:hover, .wholebtn.active { background: var(--accent);
     color: var(--accent-ink); }
   .note-cell { margin: 4px 0 8px 18px; border: 1px solid var(--line);
@@ -2540,10 +2549,12 @@ function renderJobPane() {
     + '<span class="hint">select any combination of components and attributes (AND)</span>'
     + (state.selections.size ? '<span class="hint">' + state.selections.size
         + " component" + (state.selections.size === 1 ? "" : "s") + " selected</span>" : "")
+    + '<span class="match-actions"><button class="wholebtn' + (state.baseFan ? " active" : "")
+    + '" id="basefan">Match Base Fan</button>'
     + '<button class="wholebtn' + (state.baseFan ? " active" : "")
     + '" id="basefan">match base fan</button>'
     + '<button class="wholebtn' + (state.whole ? " active" : "")
-    + '" id="whole">match whole order</button></div>'
+    + '" id="whole">Match Whole Order</button></span></div>'
     + '<div class="tree" id="leftcomponenttree">' + tree + "</div></div>";
 
   $("back").onclick = () => history.length > 1 ? history.back() : setTab("board");
@@ -2817,6 +2828,7 @@ function renderMatches() {
   const items = (state.whole || state.baseFan) ? e.it : selectedItems(e, requirements);
   const attrCount = requirements.reduce((sum, requirement) =>
     sum + requirement.pins.size, 0);
+  const target = state.baseFan ? "Base Fan" : state.whole ? "Whole Order" : requirements.length === 1
   const target = state.baseFan ? "base fan" : state.whole ? "whole order" : requirements.length === 1
     ? (requirements[0].component.k ? "[" + requirements[0].component.n + "]"
       : requirements[0].component.n)
@@ -2843,6 +2855,28 @@ function renderMatches() {
     });
     return [componentChip, ...attrChips];
   }).join("");
+
+  const baseFanChips = (match, source, candidate) => {
+    if (!match) return [];
+    const chips = [];
+    for (const label of GLQSimilarity.BASE_FAN_FIELDS) {
+      const wanted = spv(source, label);
+      const have = spv(candidate, label);
+      const nw = GLQSimilarity.norm(wanted), nh = GLQSimilarity.norm(have);
+      const display = esc(label) + (wanted ? ": " + esc(wanted) : "");
+      if (nw && nh && nw === nh) {
+        chips.push('<span class="chip same">✓ ' + display + "</span>");
+      } else if (!nw || !nh) {
+        chips.push('<span class="chip diff">✗ ' + esc(label)
+          + (!nw ? ": not tracked on source" : ": " + esc(wanted) + " — not tracked")
+          + "</span>");
+      } else {
+        chips.push('<span class="chip diff">✗ ' + display
+          + " — theirs " + esc(have) + "</span>");
+      }
+    }
+    return chips;
+  };
 
   const cards = shown.map((r, i) => {
     const o = DB.jobs[r.j];
@@ -2885,8 +2919,10 @@ function renderMatches() {
         });
       return [componentChip, ...attrs, ...free];
     });
-    const chipsHtml = selectedChips.length
-      ? '<div class="m-chips">' + selectedChips.join("") + "</div>" : "";
+    const baseChips = state.baseFan ? baseFanChips(r.baseFan, e, o) : [];
+    const allChips = state.baseFan ? baseChips : selectedChips;
+    const chipsHtml = allChips.length
+      ? '<div class="m-chips">' + allChips.join("") + "</div>" : "";
     const foot = [o.d ? dwgListHtml(r.j, o)
       : '<span class="nodwg">no custom DWGs</span>'];
     if (o.f) foot.push('<a href="' + esc(folderUrl(o.f)) + '" title="'
@@ -2903,6 +2939,7 @@ function renderMatches() {
     const spec = fanSpec(o);
     const g = r.groups;
     const scoreLabel = state.baseFan
+      ? "Base Fan " + (r.baseFan && r.baseFan.designOnlyMissing ? "Design Missing · " : "") + r.score.toFixed(3)
       ? "base fan " + (r.baseFan && r.baseFan.designOnlyMissing ? "design missing · " : "") + r.score.toFixed(3)
       : requirements.length
         ? (r.pinTotal ? r.pinMatched + "/" + r.pinTotal + " selected · " : "")
@@ -2943,11 +2980,13 @@ function renderMatches() {
     + (res.length === 1 ? "" : "es")
     + (state.only3d && resAll.length !== res.length
         ? " (of " + resAll.length + ")" : "")
+    + (state.baseFan ? " · Exact Base Fan Fields" : requirements.length ? " · bounded combination score" : " · bounded construction score")
     + (state.baseFan ? " · exact base fan fields" : requirements.length ? " · bounded combination score" : " · bounded construction score")
     + "</span></div>"
     + (requirements.length
         ? '<div class="filterbar"><span class="fl">Searching for (closest first):</span>'
           + chips + "</div>" : state.baseFan
+        ? '<div class="filterbar"><span class="fl">Exact Base Fan Match: Design, Size, Arrangement, Class, Motor Pos, Wheel, Rotation, Discharge. Green ✓ = same, red ✗ = missing/different.</span></div>' : "")
         ? '<div class="filterbar"><span class="fl">Exact base fan match: Design, Size, Arrangement, Class, Motor Pos, Wheel, Rotation, Discharge. Design may be missing on one order; other missing fields are only shown when no complete matches exist.</span></div>' : "")
     + (res.length ? cards : '<div class="empty"><div class="big">No orders match</div>'
         + (state.only3d && resAll.length
