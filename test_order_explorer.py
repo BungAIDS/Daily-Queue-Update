@@ -263,9 +263,13 @@ def test_render_roundtrip_and_safety():
     assert "state.selections" in html
     assert "Searching for (closest first)" in html
     assert "pinHits" in html          # soft-selection miss chips are wired in
-    assert "baseFanChips" in html
+    assert "specHits" in html and "specCardChips" in html
     assert "match-actions" in html
-    assert "Match Base Fan" in html and "Green ✓ = same, red ✗" in html
+    # Fan stats are selectable search pins; Match Base Fan presses them all.
+    assert "Match Base Fan" in html and "spec-btn" in html
+    assert 'data-spec="' in html and 'data-kind="spec"' in html
+    assert "specAssessment" in html and "combinedSearchSimilarity" in html
+    assert "baseFanLabels" in html and "state.specSel" in html
     assert "selected components" in html
     assert "alignComponentStarts" in html
     assert 'class="co-tip"' in html

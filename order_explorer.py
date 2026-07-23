@@ -1292,6 +1292,18 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .spec .k { font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
     color: var(--faint); font-family: var(--mono); }
   .spec .v { font-size: 12.5px; font-weight: 600; }
+  .spec-btn { display: block; text-align: left; font: inherit; color: inherit;
+    background: transparent; border: 0; padding: 3px 6px 4px; margin: -3px -6px -4px;
+    border-radius: 8px; cursor: pointer; }
+  .spec-btn:hover { background: var(--accent-soft); }
+  .spec-btn .pin { font-size: 10px; font-family: var(--mono); color: transparent;
+    margin-top: 1px; }
+  .spec-btn:hover .pin { color: var(--muted); }
+  .spec-btn.pinned { background: var(--accent-soft); }
+  .spec-btn.pinned .pin, .spec-btn.pinned:hover .pin { color: var(--accent);
+    font-weight: 700; }
+  .spec.preview-relevant .k { color: var(--good); }
+  .spec.preview-relevant .v { color: var(--good); }
   details.hist { margin: 10px 0 0; font-size: 12px; }
   details.hist summary { cursor: pointer; color: var(--muted); font-weight: 600; }
   details.hist div { margin: 6px 0 0 14px; color: var(--muted);
@@ -1492,7 +1504,7 @@ let DB = null;                 // {gen, today, n_jobs, n_items, jobs, ev, rm, nw
 let IDX = null;                // explanatory line/tag sets, built once per page
 let COSET = new Set();         // jobs a CO# landed on today (red text)
 let NWSET = null;              // the watcher's exact new-today set (null = derive)
-const state = { tab: "board", job: null, whole: false, baseFan: false, previewJob: null,
+const state = { tab: "board", job: null, whole: false, specSel: new Set(), previewJob: null,
                 selections: new Map(), noteSelections: new Set(), histQ: "", histN: 500,
                 boardQ: "", boardSort: null, histSort: null, only3d: false,
                 heldVersion: null };
@@ -1787,7 +1799,7 @@ function reloadFresh() {
   try {
     sessionStorage.setItem(STATE_KEY, JSON.stringify({
       tab: state.tab, job: state.job, selections: encodeSelections(),
-      whole: state.whole, baseFan: state.baseFan, boardQ: state.boardQ, histQ: state.histQ,
+      whole: state.whole, specs: [...state.specSel], boardQ: state.boardQ, histQ: state.histQ,
       y: window.scrollY, refreshed: 1 }));
   } catch (e) {}
   location.reload();
@@ -1798,11 +1810,12 @@ function restoreState() {
         sessionStorage.removeItem(STATE_KEY); } catch (e) {}
   if (!saved) return;
   if (saved.job && DB.jobs[saved.job]) {
-    state.job = saved.job; state.whole = !!saved.whole; state.baseFan = !!saved.baseFan;
+    state.job = saved.job; state.whole = !!saved.whole;
     state.selections = decodeSelections(saved.selections, saved.path, saved.pinned);
     for (const path of state.selections.keys())
       if (!compAt(DB.jobs[saved.job], path)) state.selections.delete(path);
-    if (state.selections.size) { state.whole = false; state.baseFan = false; }
+    state.specSel = decodeSpecs(saved.specs, saved.baseFan, DB.jobs[saved.job]);
+    if (state.selections.size || state.specSel.size) state.whole = false;
   }
   state.tab = ["board", "changes", "hist", "job"].includes(saved.tab)
     ? saved.tab : "board";
@@ -1845,7 +1858,7 @@ function deepLinkJob() {
 function applyDeepLink() {
   const j = deepLinkJob();
   if (!j || !DB.jobs[j]) return;
-  state.job = j; state.whole = true; state.baseFan = false; state.selections.clear();
+  state.job = j; state.whole = true; state.specSel.clear(); state.selections.clear();
   state.noteSelections.clear(); state.previewJob = null; state.tab = "job";
 }
 function navUrl() {
@@ -1921,6 +1934,26 @@ function selectedRequirements(entry) {
   }
   return requirements;
 }
+/* Fan stats are selectable exactly like line items: any scored core field
+   with a real value on this order can join the search as an order-level pin.
+   "Match Base Fan" is a shortcut that selects the base-fan stat buttons. */
+const SELECTABLE_SPECS = new Set(GLQSimilarity.CORE_FIELDS.map(f => f.label));
+function selectableSpec(entry, label) {
+  return SELECTABLE_SPECS.has(label) && !!GLQSimilarity.norm(spv(entry, label));
+}
+function baseFanLabels(entry) {
+  return GLQSimilarity.BASE_FAN_FIELDS.filter(l => selectableSpec(entry, l));
+}
+function selectedSpecLabels(entry) {
+  return [...state.specSel].filter(l => selectableSpec(entry, l));
+}
+function decodeSpecs(raw, legacyBaseFan, entry) {
+  const out = new Set(Array.isArray(raw) ? raw.map(String) : []);
+  if (legacyBaseFan && entry)                 // pre-stat-buttons saved state
+    for (const l of baseFanLabels(entry)) out.add(l);
+  if (entry) for (const l of [...out]) if (!selectableSpec(entry, l)) out.delete(l);
+  return out;
+}
 function selectedItems(entry, requirements) {
   const seen = new Set(), rows = [];
   for (const requirement of requirements) {
@@ -1934,10 +1967,10 @@ function selectedItems(entry, requirements) {
 }
 /* ---- bounded construction matching.  GLQSimilarity is the exact standalone
    module embedded above and directly exercised by test_order_similarity.js. */
-function rankMatches(srcJob, items, requirements, baseFanOnly) {
+function rankMatches(srcJob, items, requirements, specLabels) {
   const { sets } = ensureIndex();
   const source = DB.jobs[srcJob];
-  const hasFocus = !!requirements.length;
+  const hasFocus = !!(requirements.length || (specLabels && specLabels.length));
   const tTags = new Set(), tNorms = new Set();
   for (const row of items) {
     for (const tg of row[IT.TAGS]) tTags.add(tg);
@@ -1947,12 +1980,11 @@ function rankMatches(srcJob, items, requirements, baseFanOnly) {
   for (const j in DB.jobs) {
     if (j === srcJob) continue;
     const candidate = DB.jobs[j];
-    const baseFan = baseFanOnly ? GLQSimilarity.baseFanMatch(source, candidate) : null;
-    if (baseFanOnly && !baseFan.eligible) continue;
     const whole = GLQSimilarity.orderSimilarity(source, candidate);
-    if (!baseFanOnly && !hasFocus && !whole.sharedEvidence) continue;
+    if (!hasFocus && !whole.sharedEvidence) continue;
     const focused = hasFocus
-      ? GLQSimilarity.combinedFocusedSimilarity(whole, requirements, candidate)
+      ? GLQSimilarity.combinedSearchSimilarity(whole, source, candidate,
+          requirements, specLabels)
       : null;
     if (hasFocus && !focused) continue;
     const s = sets[j];
@@ -1968,26 +2000,19 @@ function rankMatches(srcJob, items, requirements, baseFanOnly) {
       pinMatched: focused ? focused.pinMatched : 0,
       pinTotal: focused ? focused.pinTotal : 0,
       selectionMatches: focused ? focused.matches : [],
+      specHits: focused ? focused.specHits : [],
       groups: whole.groups,
-      baseFan,
-      differences: baseFanOnly ? baseFan.missing.map(label => label + " unavailable on one order") : [...new Set([
+      differences: [...new Set([
         ...(focused ? focused.differences : []), ...whole.differences,
       ])].slice(0, 4),
       sharedNorms: new Set(sharedNorms),
       tTags: sharedTags,
     });
   }
-  if (baseFanOnly) {
-    const hasComplete = out.some(r => r.baseFan && (r.baseFan.complete || r.baseFan.designOnlyMissing));
-    const visible = hasComplete
-      ? out.filter(r => r.baseFan && (r.baseFan.complete || r.baseFan.designOnlyMissing))
-      : out;
-    visible.sort((a, b) => b.baseFan.score - a.baseFan.score || b.score - a.score
-      || b.coverage - a.coverage || jobNum(b.j) - jobNum(a.j));
-    return visible;
-  }
-  out.sort((a, b) => b.score - a.score || b.coverage - a.coverage
-    || jobNum(b.j) - jobNum(a.j));
+  /* Confirmed selected matches break score ties, so an order that actually
+     shares stats always sits above one that merely recorded nothing. */
+  out.sort((a, b) => b.score - a.score || b.pinMatched - a.pinMatched
+    || b.coverage - a.coverage || jobNum(b.j) - jobNum(a.j));
   return out;
 }
 
@@ -2036,7 +2061,7 @@ function wireComponentAlignment() {
 let NAV_POS = 0, POPPING = false;
 function navSnapshot() {
   return { tab: state.tab, job: state.job, selections: encodeSelections(),
-           whole: state.whole, baseFan: state.baseFan, i: NAV_POS };
+           whole: state.whole, specs: [...state.specSel], i: NAV_POS };
 }
 function pushNav() {
   NAV_POS++;
@@ -2059,13 +2084,14 @@ window.addEventListener("popstate", ev => {
   state.job = s.job && DB.jobs[s.job] ? s.job : null;
   if (state.tab === "job" && !state.job) state.tab = "board";
   state.whole = !!s.whole;
-  state.baseFan = !!s.baseFan;
   state.selections = decodeSelections(s.selections, s.path, s.pinned);
   if (state.job) {
     for (const path of state.selections.keys())
       if (!compAt(DB.jobs[state.job], path)) state.selections.delete(path);
   }
-  if (state.selections.size) { state.whole = false; state.baseFan = false; }
+  state.specSel = state.job
+    ? decodeSpecs(s.specs, s.baseFan, DB.jobs[state.job]) : new Set();
+  if (state.selections.size || state.specSel.size) state.whole = false;
   state.previewJob = null;
   render();
   POPPING = false;
@@ -2086,7 +2112,7 @@ function selectJob(j) {
      view) — a component/attribute click narrows from there. */
   state.previewJob = null;
   if (state.tab === "job" && state.job === j) { render(); return; }
-  state.job = j; state.whole = true; state.baseFan = false; state.selections.clear(); state.noteSelections.clear();
+  state.job = j; state.whole = true; state.specSel.clear(); state.selections.clear(); state.noteSelections.clear();
   state.tab = "job";
   pushNav();
   savePrefs(); render(); window.scrollTo(0, 0);
@@ -2456,9 +2482,22 @@ function renderJobPane() {
     return;
   }
   const j = state.job, e = DB.jobs[j];
-  const specs = (e.sp || []).map(kv =>
-    '<div class="spec"><div class="k">' + esc(kv[0]) + '</div><div class="v">'
-    + esc(kv[1]) + '</div></div>').join("");
+  /* Scored fan stats are buttons, selectable into the search exactly like
+     line items; commercial fields (price, rep, …) stay plain text. */
+  const specs = (e.sp || []).map(kv => {
+    const label = kv[0];
+    if (!selectableSpec(e, label))
+      return '<div class="spec"><div class="k">' + esc(label) + '</div><div class="v">'
+        + esc(kv[1]) + '</div></div>';
+    const on = state.specSel.has(label);
+    return '<button class="spec spec-btn' + (on ? " pinned" : "")
+      + '" data-spec="' + esc(label)
+      + '" title="Add this fan stat to the search — matches that share it rank '
+      + 'first, near-misses stay listed with the difference shown">'
+      + '<div class="k">' + esc(label) + '</div><div class="v">' + esc(kv[1])
+      + '</div><div class="pin">' + (on ? "✕ selected" : "add to search")
+      + "</div></button>";
+  }).join("");
   const meta = [];
   if (e.t) meta.push('<span class="path">' + esc(e.t) + '</span>');
   if (e.d) meta.push(dwgListHtml(j, e));
@@ -2473,7 +2512,7 @@ function renderJobPane() {
   const noteTargets = [];
   const compCard = (c, path) => {
     const selectedPins = state.selections.get(path);
-    const active = !state.whole && !state.baseFan && !!selectedPins;
+    const active = !state.whole && !!selectedPins;
     const items = c.i.map(no => itemByNo(e, no)).filter(Boolean);
     const itemNo = items.length === 1 ? String(items[0][IT.NO]) : "";
     const compRowKey = itemNo ? "item:" + itemNo : "component|" + path + "|" + c.n;
@@ -2536,6 +2575,9 @@ function renderJobPane() {
     ? e.cp.map((c, ix) => compCard(c, String(ix))).join("")
     : '<div class="empty">No line items captured for this order yet.</div>';
 
+  const bf = baseFanLabels(e);
+  const bfActive = !!bf.length && bf.every(l => state.specSel.has(l));
+  const specCount = selectedSpecLabels(e).length;
 
   el.innerHTML = '<div class="panel-head">'
     + '<button class="backlink" id="back">← back</button>'
@@ -2556,11 +2598,17 @@ function renderJobPane() {
     + (meta.length ? '<div class="metaline">' + meta.join(" ") + "</div>" : "")
     + hist
     + '<div class="sectionbar" id="leftcomponents"><span class="eyebrow">Components</span>'
-    + '<span class="hint">select any combination of components and attributes (AND)</span>'
+    + '<span class="hint">select any combination of fan stats, components and attributes (AND)</span>'
     + (state.selections.size ? '<span class="hint">' + state.selections.size
         + " component" + (state.selections.size === 1 ? "" : "s") + " selected</span>" : "")
-    + '<span class="match-actions"><button class="wholebtn' + (state.baseFan ? " active" : "")
-    + '" id="basefan">Match Base Fan</button>'
+    + (specCount ? '<span class="hint">' + specCount + " stat"
+        + (specCount === 1 ? "" : "s") + " selected</span>" : "")
+    + '<span class="match-actions"><button class="wholebtn' + (bfActive ? " active" : "")
+    + '" id="basefan"' + (bf.length ? "" : " disabled")
+    + ' title="' + (bf.length
+      ? "Select the base fan stats above (" + esc(bf.join(", "))
+        + ") — one click, same search as picking them by hand"
+      : "No base fan stats recorded on this order") + '">Match Base Fan</button>'
     + '<button class="wholebtn' + (state.whole ? " active" : "")
     + '" id="whole">Match Whole Order</button></span></div>'
     + '<div class="tree" id="leftcomponenttree">' + tree + "</div></div>";
@@ -2571,16 +2619,28 @@ function renderJobPane() {
     state.previewJob = null;
     if (hadPreview && state.whole) { render(); return; }
     state.whole = !state.whole;
-    if (state.whole) { state.baseFan = false; state.selections.clear(); }
+    if (state.whole) { state.specSel.clear(); state.selections.clear(); }
     render(); };
+  /* Match Base Fan just presses the base-fan stat buttons: selecting them
+     all when any is unselected, clearing them when they are all on.  The
+     search mechanism is identical to hand-picking the stats. */
   $("basefan").onclick = () => { const hadPreview = !!state.previewJob;
     state.previewJob = null;
-    if (hadPreview && state.baseFan) { render(); return; }
-    state.baseFan = !state.baseFan;
-    if (state.baseFan) { state.whole = false; state.selections.clear(); }
+    if (!bf.length) { render(); return; }
+    const allOn = bf.every(l => state.specSel.has(l));
+    if (hadPreview && allOn) { render(); return; }
+    if (allOn) bf.forEach(l => state.specSel.delete(l));
+    else { state.whole = false; bf.forEach(l => state.specSel.add(l)); }
     render(); };
+  el.querySelectorAll(".spec-btn").forEach(b => b.onclick = () => {
+    const label = b.dataset.spec;
+    state.previewJob = null; state.whole = false;
+    state.specSel.has(label) ? state.specSel.delete(label)
+      : state.specSel.add(label);
+    render();
+  });
   el.querySelectorAll(".comp-row").forEach(b => b.onclick = () => {
-    state.previewJob = null; state.whole = false; state.baseFan = false;
+    state.previewJob = null; state.whole = false;
     state.selections.has(b.dataset.c)
       ? state.selections.delete(b.dataset.c)
       : state.selections.set(b.dataset.c, new Set());
@@ -2590,7 +2650,7 @@ function renderJobPane() {
      selections on other components stay active as one AND combination. */
   el.querySelectorAll(".attr-row").forEach(b => b.onclick = () => {
     const k = b.dataset.a, p = b.dataset.p;
-    state.previewJob = null; state.whole = false; state.baseFan = false;
+    state.previewJob = null; state.whole = false;
     if (!state.selections.has(p)) state.selections.set(p, new Set());
     const pins = state.selections.get(p);
     pins.has(k) ? pins.delete(k) : pins.add(k);
@@ -2655,12 +2715,16 @@ function renderOrderPreview(leftJob, rightJob) {
   const leftSpecs = GLQSimilarity.specMap(left);
   const rightSpecs = GLQSimilarity.specMap(right);
   const comparison = GLQSimilarity.orderSimilarity(left, right);
-  const requirements = (state.whole || state.baseFan) ? [] : selectedRequirements(left);
-  const focused = requirements.length
-    ? GLQSimilarity.combinedFocusedSimilarity(comparison, requirements, right)
+  const requirements = state.whole ? [] : selectedRequirements(left);
+  const specLabels = state.whole ? [] : selectedSpecLabels(left);
+  const focused = (requirements.length || specLabels.length)
+    ? GLQSimilarity.combinedSearchSimilarity(comparison, left, right,
+        requirements, specLabels)
     : null;
   const relevantMatches = new Map((focused ? focused.matches : [])
     .map(match => [match.candidateComponent, match]));
+  const specHitByLabel = new Map((focused ? focused.specHits : [])
+    .map(hit => [hit.label, hit]));
   const isRelevantAttr = (component, key) => {
     const match = relevantMatches.get(component);
     return !!match && [...match.pins].some(pin => {
@@ -2672,9 +2736,12 @@ function renderOrderPreview(leftJob, rightJob) {
   const shownSpecs = new Set();
   let specs = (right.sp || []).map(([label, value]) => {
     shownSpecs.add(label);
-    const differs = PREVIEW_CORE_FIELDS.has(label)
-      && previewSpecDiff(label, leftSpecs, rightSpecs);
-    return '<div class="spec' + (differs ? " preview-diff" : "") + '">'
+    const hit = specHitByLabel.get(label);
+    const relevant = !!(hit && hit.ok);
+    const differs = hit ? !hit.ok : (PREVIEW_CORE_FIELDS.has(label)
+      && previewSpecDiff(label, leftSpecs, rightSpecs));
+    return '<div class="spec' + (differs ? " preview-diff" : "")
+      + (relevant ? " preview-relevant" : "") + '">'
       + '<div class="k">' + esc(label) + '</div><div class="v">'
       + esc(value) + '</div></div>';
   }).join("");
@@ -2775,7 +2842,7 @@ function renderOrderPreview(leftJob, rightJob) {
   const tree = (right.cp || []).length
     ? right.cp.map(compCard).join("")
     : '<div class="empty">No line items captured for this order yet.</div>';
-  const comparisonHint = relevantMatches.size
+  const comparisonHint = focused
     ? "green = selected combination match · red = other scored difference from "
     : "red = scored construction difference from ";
   const previewScore = focused ? focused.score : comparison.score;
@@ -2815,12 +2882,13 @@ function renderOrderPreview(leftJob, rightJob) {
 function renderMatches() {
   const el = $("right");
   const j = state.job, e = j ? DB.jobs[j] : null;
-  const requirements = e && !state.whole && !state.baseFan ? selectedRequirements(e) : [];
-  const ready = e && (state.whole || state.baseFan || requirements.length);
+  const requirements = e && !state.whole ? selectedRequirements(e) : [];
+  const specLabels = e && !state.whole ? selectedSpecLabels(e) : [];
+  const ready = e && (state.whole || requirements.length || specLabels.length);
   if (!ready) {
     el.innerHTML = '<div class="panel-head"><span class="eyebrow">Matching orders</span></div>'
       + '<div class="empty"><div class="big">'
-      + (state.job ? "Click a component on the left" : "No order open yet")
+      + (state.job ? "Click a fan stat or component on the left" : "No order open yet")
       + "</div>Past orders sharing it appear here, most relevant first, each "
       + "with the line items that made it a match.</div>";
     return;
@@ -2833,20 +2901,33 @@ function renderMatches() {
     state.previewJob = null;
   }
   const srcDesign = spv(e, "Design");
-  const items = (state.whole || state.baseFan) ? e.it : selectedItems(e, requirements);
+  const items = (state.whole || !requirements.length) ? e.it
+    : selectedItems(e, requirements);
   const attrCount = requirements.reduce((sum, requirement) =>
     sum + requirement.pins.size, 0);
-  const target = state.baseFan ? "Base Fan" : state.whole ? "Whole Order" : requirements.length === 1
+  const bf = baseFanLabels(e);
+  const baseFanExact = !!specLabels.length && specLabels.length === bf.length
+    && bf.every(l => state.specSel.has(l));
+  const componentTarget = !requirements.length ? "" : requirements.length === 1
     ? (requirements[0].component.k ? "[" + requirements[0].component.n + "]"
       : requirements[0].component.n)
       + (attrCount ? " · " + attrCount + " selected attr"
         + (attrCount === 1 ? "" : "s") : "")
     : requirements.length + " selected components"
       + (attrCount ? " · " + attrCount + " selected attrs" : "");
-  const resAll = rankMatches(j, items, requirements, state.baseFan);
+  const specTarget = !specLabels.length ? "" : baseFanExact ? "Base Fan"
+    : specLabels.length <= 3 ? specLabels.join(" + ")
+    : specLabels.length + " selected stats";
+  const target = state.whole ? "Whole Order"
+    : [specTarget, componentTarget].filter(Boolean).join(" · ");
+  const resAll = rankMatches(j, items, requirements, specLabels);
   const res = state.only3d ? resAll.filter(r => DB.jobs[r.j].sw) : resAll;
   const shown = res.slice(0, 25);
-  const chips = requirements.flatMap(requirement => {
+  const specChipsBar = specLabels.map(label =>
+    '<button class="fchip" data-kind="spec" data-l="' + esc(label)
+    + '" title="Remove this fan stat from the search">' + esc(label) + ": "
+    + esc(spv(e, label)) + " <span>✕</span></button>").join("");
+  const chips = specChipsBar + requirements.flatMap(requirement => {
     const componentName = requirement.component.k
       ? "[" + requirement.component.n + "]" : requirement.component.n;
     const componentChip = '<button class="fchip" data-kind="component" data-p="'
@@ -2863,27 +2944,19 @@ function renderMatches() {
     return [componentChip, ...attrChips];
   }).join("");
 
-  const baseFanChips = (match, source, candidate) => {
-    if (!match) return [];
-    const chips = [];
-    for (const label of GLQSimilarity.BASE_FAN_FIELDS) {
-      const wanted = spv(source, label);
-      const have = spv(candidate, label);
-      const nw = GLQSimilarity.norm(wanted), nh = GLQSimilarity.norm(have);
-      const display = esc(label) + (wanted ? ": " + esc(wanted) : "");
-      if (nw && nh && nw === nh) {
-        chips.push('<span class="chip same">✓ ' + display + "</span>");
-      } else if (!nw || !nh) {
-        chips.push('<span class="chip diff">✗ ' + esc(label)
-          + (!nw ? ": not tracked on source" : ": " + esc(wanted) + " — not tracked")
-          + "</span>");
-      } else {
-        chips.push('<span class="chip diff">✗ ' + display
-          + " — theirs " + esc(have) + "</span>");
-      }
-    }
-    return chips;
-  };
+  /* Selected fan stats paint the same green ✓ / red ✗ chips as selected
+     attributes: hit, recorded-but-different (their value shown), or not
+     recorded on the candidate. */
+  const specCardChips = hits => (hits || []).map(hit => {
+    const display = esc(hit.label) + ": " + esc(hit.wanted);
+    if (hit.ok) return '<span class="chip same">✓ ' + display + "</span>";
+    if (!hit.have) return '<span class="chip diff">✗ ' + display
+      + " — not tracked</span>";
+    if (!hit.comparable) return '<span class="chip diff">✗ ' + display
+      + " — size not compared across designs</span>";
+    return '<span class="chip diff">✗ ' + display + " — theirs "
+      + esc(hit.have) + "</span>";
+  });
 
   const cards = shown.map((r, i) => {
     const o = DB.jobs[r.j];
@@ -2926,8 +2999,7 @@ function renderMatches() {
         });
       return [componentChip, ...attrs, ...free];
     });
-    const baseChips = state.baseFan ? baseFanChips(r.baseFan, e, o) : [];
-    const allChips = state.baseFan ? baseChips : selectedChips;
+    const allChips = [...specCardChips(r.specHits), ...selectedChips];
     const chipsHtml = allChips.length
       ? '<div class="m-chips">' + allChips.join("") + "</div>" : "";
     const foot = [o.d ? dwgListHtml(r.j, o)
@@ -2945,12 +3017,10 @@ function renderMatches() {
       ? '<span class="chip same">✓ design ' + esc(srcDesign) + "</span>" : "";
     const spec = fanSpec(o);
     const g = r.groups;
-    const scoreLabel = state.baseFan
-      ? "Base Fan " + (r.baseFan && r.baseFan.designOnlyMissing ? "Design Missing · " : "") + r.score.toFixed(3)
-      : requirements.length
-        ? (r.pinTotal ? r.pinMatched + "/" + r.pinTotal + " selected · " : "")
-          + "combo " + r.score.toFixed(3) + " · whole " + r.wholeScore.toFixed(3)
-        : "match " + r.score.toFixed(3);
+    const scoreLabel = (requirements.length || specLabels.length)
+      ? (r.pinTotal ? r.pinMatched + "/" + r.pinTotal + " selected · " : "")
+        + "combo " + r.score.toFixed(3) + " · whole " + r.wholeScore.toFixed(3)
+      : "match " + r.score.toFixed(3);
     const breakdown = "core " + g.core.toFixed(2)
       + " · construction " + g.construction.toFixed(2)
       + " · motor/drive " + g.motor.toFixed(2)
@@ -2986,12 +3056,12 @@ function renderMatches() {
     + (res.length === 1 ? "" : "es")
     + (state.only3d && resAll.length !== res.length
         ? " (of " + resAll.length + ")" : "")
-    + (state.baseFan ? " · Exact Base Fan Fields" : requirements.length ? " · bounded combination score" : " · bounded construction score")
+    + ((requirements.length || specLabels.length) ? " · bounded combination score"
+        : " · bounded construction score")
     + "</span></div>"
-    + (requirements.length
+    + ((requirements.length || specLabels.length)
         ? '<div class="filterbar"><span class="fl">Searching for (closest first):</span>'
-          + chips + "</div>" : state.baseFan
-        ? '<div class="filterbar"><span class="fl">Exact Base Fan Match: Design, Size, Arrangement, Class, Motor Pos, Wheel, Rotation, Discharge. Green ✓ = same, red ✗ = missing/different.</span></div>' : "")
+          + chips + "</div>" : "")
     + (res.length ? cards : '<div class="empty"><div class="big">No orders match</div>'
         + (state.only3d && resAll.length
             ? "None of the " + resAll.length + " matches has SolidWorks 3D data "
@@ -3004,7 +3074,8 @@ function renderMatches() {
     + (res.length > 25 ? '<div class="tailnote">…and ' + (res.length - 25)
         + " more — narrow it with another component or attribute</div>" : "");
   el.querySelectorAll(".fchip").forEach(b => b.onclick = () => {
-    if (b.dataset.kind === "component") state.selections.delete(b.dataset.p);
+    if (b.dataset.kind === "spec") state.specSel.delete(b.dataset.l);
+    else if (b.dataset.kind === "component") state.selections.delete(b.dataset.p);
     else {
       const pins = state.selections.get(b.dataset.p);
       if (pins) pins.delete(b.dataset.a);

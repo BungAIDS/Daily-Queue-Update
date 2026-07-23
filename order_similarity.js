@@ -264,34 +264,77 @@
       differences,
     };
   }
-  function baseFanMatch(source, candidate) {
+  /* Selected fan stats are order-level pins, graded exactly like component
+   * attribute pins: each selected label is a hit (same normalized value), a
+   * miss (recorded but different, 0), or unknown (not recorded on the
+   * candidate, UNKNOWN_SCORE).  A candidate with nothing recorded therefore
+   * sits below every candidate that actually shares stats — absence of
+   * evidence can never lead the ranking.  Labels the source itself has no
+   * value for are skipped: there is nothing to require. */
+  function specAssessment(source, candidate, labels) {
     const sourceSpecs = orderProfile(source).specs;
     const candidateSpecs = orderProfile(candidate).specs;
-    const missing = [], differences = [], matched = [];
-    for (const label of BASE_FAN_FIELDS) {
+    const sourceDesign = norm(sourceSpecs.Design);
+    const candidateDesign = norm(candidateSpecs.Design);
+    const hits = [];
+    let matched = 0, known = 0, points = 0;
+    for (const label of labels || []) {
       const wanted = norm(sourceSpecs[label]);
+      if (!wanted) continue;
       const have = norm(candidateSpecs[label]);
-      if (!wanted || !have) {
-        missing.push(label);
-        continue;
-      }
-      if (wanted === have) matched.push(label);
-      else differences.push(label + ": " + wanted + " vs " + have);
+      /* Raw Size codes are only comparable within the same Design. */
+      const comparable = !!have && (label !== "Size" || !sourceDesign
+        || !candidateDesign || sourceDesign === candidateDesign);
+      const ok = comparable && wanted === have;
+      if (ok) { matched++; known++; points += 1; }
+      else if (comparable) { known++; }
+      else { points += UNKNOWN_SCORE; }
+      hits.push({ label, ok, comparable,
+                  wanted: String(sourceSpecs[label]),
+                  have: have ? String(candidateSpecs[label]) : "" });
     }
-    const nonDesignMissing = missing.filter(label => label !== "Design");
-    const eligible = !differences.length;
-    const ok = eligible && !nonDesignMissing.length;
-    const complete = ok && missing.length === 0;
-    const designOnlyMissing = ok && missing.length === 1 && missing[0] === "Design";
     return {
-      eligible,
-      ok,
-      complete,
-      designOnlyMissing,
-      missing,
-      differences,
-      matched,
-      score: ok ? (complete ? 1 : 0.995) : eligible ? 0.5 : 0,
+      hits, matched, total: hits.length, known,
+      score: hits.length ? clamp01(points / hits.length) : 1,
+      coverage: hits.length ? known / hits.length : 1,
+    };
+  }
+  /* One search mechanism for everything selectable on an order: components
+   * (with their pinned attributes) AND fan stats rank together.  The stats
+   * block weighs like one additional selected component, so "Match Base Fan"
+   * is literally a selection of the base-fan stat buttons. */
+  function combinedSearchSimilarity(whole, source, candidate, requirements, specLabels) {
+    const componentCount = requirements ? requirements.length : 0;
+    const spec = specLabels && specLabels.length
+      ? specAssessment(source, candidate, specLabels) : null;
+    const specUnits = spec && spec.total ? 1 : 0;
+    if (!componentCount && !specUnits) return null;
+    const focused = componentCount
+      ? combinedFocusedSimilarity(whole, requirements, candidate) : null;
+    if (componentCount && !focused) return null;
+    const units = componentCount + specUnits;
+    const focusPart = ((focused ? focused.componentPart * componentCount : 0)
+      + (spec ? spec.score * specUnits : 0)) / units;
+    const focusCoverage = ((focused ? focused.componentCoverage * componentCount : 0)
+      + (spec ? spec.coverage * specUnits : 0)) / units;
+    const componentWeight = 1 - FOCUS_WHOLE_WEIGHT;
+    const specDifferences = (spec ? spec.hits : []).filter(hit => !hit.ok)
+      .map(hit => !hit.have
+        ? hit.label + " unavailable on one order"
+        : hit.comparable
+          ? hit.label + ": " + norm(hit.wanted) + " vs " + norm(hit.have)
+          : "Size not compared across different designs");
+    return {
+      score: clamp01(FOCUS_WHOLE_WEIGHT * whole.score + componentWeight * focusPart),
+      coverage: clamp01(FOCUS_WHOLE_WEIGHT * whole.coverage
+        + componentWeight * focusCoverage),
+      componentScore: focused ? focused.componentScore : null,
+      pinMatched: (focused ? focused.pinMatched : 0) + (spec ? spec.matched : 0),
+      pinTotal: (focused ? focused.pinTotal : 0) + (spec ? spec.total : 0),
+      matches: focused ? focused.matches : [],
+      specHits: spec ? spec.hits : [],
+      differences: [...new Set([
+        ...(focused ? focused.differences : []), ...specDifferences])],
     };
   }
 
@@ -498,6 +541,7 @@
         + componentWeight * componentCoverage),
       componentScore,
       componentCoverage,
+      componentPart,
       pinMatched,
       pinTotal,
       candidateComponents: matches.map(match => match.candidateComponent),
@@ -530,9 +574,10 @@
     valueSimilarity,
     componentSimilarity,
     componentHasRequired,
-    baseFanMatch,
+    specAssessment,
     orderSimilarity,
     combinedFocusedSimilarity,
+    combinedSearchSimilarity,
     focusedSimilarity,
   };
 }));
