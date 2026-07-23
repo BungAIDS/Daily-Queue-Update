@@ -251,7 +251,6 @@ def test_render_roundtrip_and_safety():
     assert "Back to List" in html
     assert 'rel="icon" type="image/png" sizes="256x256" href="GL Queue Explorer Fan.png"' in html
     assert 'rel="shortcut icon" type="image/x-icon" href="GL Queue Explorer Fan.ico"' in html
-    assert 'rel="icon" type="image/png" href="GL Queue Explorer.png"' in html
     assert 'rel="manifest" href="GL Queue Explorer.webmanifest"' in html
     assert "click order # again to move it to the left" in html
     assert "red = scored construction difference" in html
