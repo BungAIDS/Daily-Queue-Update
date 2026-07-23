@@ -342,18 +342,28 @@ def test_taskbar_identity_helpers():
         assert pid in ps, pid
     assert oe.APP_USER_MODEL_ID in ps
     assert oe.ICON_ICO_NAME in ps and oe.LAUNCH_VBS_NAME in ps
-    # The icon must be referenced from a per-user LOCAL copy: the shell
-    # loads relaunch icons lazily and a network path decays to a blank page.
+    # The icon and the opener must be referenced from per-user LOCAL copies:
+    # the shell loads relaunch icons lazily and a network path decays to a
+    # blank page, and share-hosted scripts are security-scanned per launch.
     assert "$env:LOCALAPPDATA" in ps and "Copy-Item -Force" in ps
     assert '$icon = $localIcon + ",0"' in ps
+    assert "$relaunch = 'wscript.exe \"' + $localVbs + '\"'" in ps
+    # The Start Menu .lnk carrying the AppUserModelID is the canonical icon
+    # source the taskbar checks first; pinning the window inherits it.
+    assert "WriteShortcut" in ps and "Start Menu" in ps
+    assert "00021401-0000-0000-C000-000000000046" in ps   # CLSID_ShellLink
+    # The C# helper is compiled once into a cached DLL, not on every open.
+    assert "-OutputAssembly $dll" in ps and "GLQTaskbar." in ps
     # Only the app window is stamped: exact title on a Chromium frame window;
     # a browser tab carries a " - Microsoft Edge" suffix and never matches.
     assert "Chrome_WidgetWin" in ps and '$title = "GL Queue Explorer"' in ps
 
-    launch = oe.launch_vbs_text("My Page.html")
+    launch = oe.launch_vbs_text("My Page.html", page_path=r"Z:\SHARE\My Page.html")
     launch.encode("ascii")                               # wscript-safe
+    assert r'page = "Z:\SHARE\My Page.html"' in launch   # works from local copy
     assert '"My Page.html"' in launch and "--app=" in launch
     assert oe.TASKBAR_PS1_NAME in launch and "-WindowStyle Hidden" in launch
+    assert "fso.GetParentFolderName(page)" in launch     # stamper found via page
 
     assert oe.TASKBAR_PS1_NAME in oe.bat_text()
     shortcut = oe.shortcut_vbs_text()
