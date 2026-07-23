@@ -198,14 +198,41 @@ come back. If the user is actively in the chat, `AskUserQuestion` is a fine fast
 path for an enumerable choice; the file is the durable, asynchronous channel and
 the one the launcher buttons are built around.
 
-### 8. Commit and report
+### 8. Quantify the impact
+
+Don't just say "done" — measure whether the change moved the parser closer to
+fully capturing the sales orders. Run the full corpus report:
+
+```
+python .claude/skills/apply-so-review-notes/scripts/impact_report.py
+```
+
+It re-derives the **whole** published corpus from stored `raw` text with your new
+rules (what the user's `--renorm` will do) and diffs it against how the corpus is
+stored today. This is the real measure — a change can ripple beyond the orders
+you touched — so let it run to completion. It takes a few minutes and **prints
+progress to stderr** (shards loaded, orders re-derived, percent done) so you and
+the user can see it's still alive; wait for it. It reports: how many **line items
+changed** (newly given a component, reclassified, or dropped by a skip rule), how
+many **fewer MARKED-FOR-REVIEW rows** remain (the workbook's red rows, via the
+same `parser_review_metrics` the sheet uses), and the shift in **component-capture
+coverage** — the share of line items the parser resolves instead of leaving for a
+human, plus which components were gained. Read the summary back to the user; that
+IS the efficacy statement they're after.
+
+On the user's machine, `--store <line_items.json>` runs the same full report
+against the local store (no shard download). `--jobs <order...>` is available for
+a ~1s spot-check of specific orders, but it only sees changes inside those
+orders — prefer the full run for the real number.
+
+### 9. Commit and report
 
 Commit `line_items.py`, `test_line_items.py`, `so_review_handled.json`, and
 (when there are deferrals) `so_review_clarifications.md` to the working branch and
 push (follow the session's branch rules). Then tell the user: what you
-implemented and resolved (id → change), that a clarification file is waiting if
-you deferred any (point them at "Answer Clarifications"), and anything you treated
-as noise.
+implemented and resolved (id → change), **the impact numbers from step 8**, that
+a clarification file is waiting if you deferred any (point them at "Answer
+Clarifications"), and anything you treated as noise.
 
 ## Worked example (the shape to aim for)
 
