@@ -1754,6 +1754,7 @@ async function boot() {
   } catch (e) {}
   loadPrefs();
   restoreState();
+  applyDeepLink();
   render();                       // also seeds the first history entry (syncNav)
   $("navback").onclick = () => history.back();
   updateBackBtn();
@@ -1840,6 +1841,19 @@ function loadPrefs() {
     state.histQ = p.histQ || "";
     state.only3d = !!p.only3d;
   } catch (e) {}
+}
+function deepLinkJob() {
+  const m = String(location.hash || "").match(/^#(?:order|job)=([A-Za-z0-9_-]+)$/i);
+  return m ? m[1] : null;
+}
+function applyDeepLink() {
+  const j = deepLinkJob();
+  if (!j || !DB.jobs[j]) return;
+  state.job = j; state.whole = true; state.baseFan = false; state.selections.clear();
+  state.noteSelections.clear(); state.previewJob = null; state.tab = "job";
+}
+function navUrl() {
+  return state.tab === "job" && state.job ? "#order=" + encodeURIComponent(state.job) : "#";
 }
 let toastTimer = null;
 function toast(msg) {
@@ -2030,12 +2044,12 @@ function navSnapshot() {
 }
 function pushNav() {
   NAV_POS++;
-  try { history.pushState(navSnapshot(), ""); } catch (e) {}
+  try { history.pushState(navSnapshot(), "", navUrl()); } catch (e) {}
   updateBackBtn();
 }
 function syncNav() {
   if (POPPING) return;
-  try { history.replaceState(navSnapshot(), ""); } catch (e) {}
+  try { history.replaceState(navSnapshot(), "", navUrl()); } catch (e) {}
 }
 function updateBackBtn() {
   $("navback").disabled = NAV_POS <= 0 && history.length <= 1;
