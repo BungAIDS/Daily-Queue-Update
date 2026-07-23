@@ -32,6 +32,11 @@
   /* Design, Size, and % Width are independently weighted CBC values.  Until
    * quote-run integration supplies a physical size, raw Size codes are only
    * comparable within the same Design. */
+  const BASE_FAN_FIELDS = [
+    "Design", "Size", "Arrangement", "Class", "Motor Pos", "Wheel",
+    "Rotation", "Discharge",
+  ];
+
   const CORE_FIELDS = [
     { label: "Design", weight: 0.10 },
     { label: "Size", weight: 0.10 },
@@ -259,6 +264,37 @@
       differences,
     };
   }
+  function baseFanMatch(source, candidate) {
+    const sourceSpecs = orderProfile(source).specs;
+    const candidateSpecs = orderProfile(candidate).specs;
+    const missing = [], differences = [], matched = [];
+    for (const label of BASE_FAN_FIELDS) {
+      const wanted = norm(sourceSpecs[label]);
+      const have = norm(candidateSpecs[label]);
+      if (!wanted || !have) {
+        missing.push(label);
+        continue;
+      }
+      if (wanted === have) matched.push(label);
+      else differences.push(label + ": " + wanted + " vs " + have);
+    }
+    const nonDesignMissing = missing.filter(label => label !== "Design");
+    const eligible = !differences.length;
+    const ok = eligible && !nonDesignMissing.length;
+    const complete = ok && missing.length === 0;
+    const designOnlyMissing = ok && missing.length === 1 && missing[0] === "Design";
+    return {
+      eligible,
+      ok,
+      complete,
+      designOnlyMissing,
+      missing,
+      differences,
+      matched,
+      score: ok ? (complete ? 1 : 0.995) : eligible ? 0.5 : 0,
+    };
+  }
+
   function orderSimilarity(a, b) {
     const points = { core: 0, construction: 0, motor: 0, accessories: 0 };
     const known = { core: 0, construction: 0, motor: 0, accessories: 0 };
@@ -477,6 +513,7 @@
   }
 
   return {
+    BASE_FAN_FIELDS,
     CORE_FIELDS,
     COMPONENT_SLOTS,
     GROUP_TOTALS,
@@ -493,6 +530,7 @@
     valueSimilarity,
     componentSimilarity,
     componentHasRequired,
+    baseFanMatch,
     orderSimilarity,
     combinedFocusedSimilarity,
     focusedSimilarity,

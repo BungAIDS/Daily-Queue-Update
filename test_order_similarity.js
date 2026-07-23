@@ -244,6 +244,39 @@ function testCombinedDuplicateSelectionsNeedDistinctCandidates() {
   "one candidate component cannot satisfy two selected component instances");
 }
 
+function testBaseFanMatchRequiresExactCoreFanFields() {
+  const source = order();
+  const exact = copy(source);
+  assert.deepStrictEqual(sim.baseFanMatch(source, exact), {
+    eligible: true,
+    ok: true,
+    complete: true,
+    designOnlyMissing: false,
+    missing: [],
+    differences: [],
+    matched: sim.BASE_FAN_FIELDS,
+    score: 1,
+  }, "all base fan fields should match exactly");
+
+  const missingDesign = copy(source);
+  missingDesign.sp = missingDesign.sp.filter(([label]) => label !== "Design");
+  const designPass = sim.baseFanMatch(source, missingDesign);
+  assert.ok(designPass.ok && !designPass.complete && designPass.designOnlyMissing,
+    "a missing Design alone should be accepted because parser coverage is incomplete");
+
+  const missingSize = copy(source);
+  missingSize.sp = missingSize.sp.filter(([label]) => label !== "Size");
+  const sizeMissing = sim.baseFanMatch(source, missingSize);
+  assert.ok(sizeMissing.eligible && !sizeMissing.ok && sizeMissing.missing.includes("Size"),
+    "missing non-design base fan fields may be fallback candidates, but are not identical");
+
+  const wrongRotation = copy(source);
+  wrongRotation.sp.find(([label]) => label === "Rotation")[1] = "CCW";
+  const mismatch = sim.baseFanMatch(source, wrongRotation);
+  assert.ok(!mismatch.eligible && !mismatch.ok && mismatch.differences.some(text => text.startsWith("Rotation:")),
+    "changed base fan fields should reject the candidate");
+}
+
 function testSparseEvidenceCannotLookIdentical() {
   const a = { sp: [["Design", "BC-220"]], it: [], cp: [] };
   const b = copy(a);
@@ -301,6 +334,7 @@ function main() {
   testCombinedAttributesStayTiedToTheirComponents();
   testCombinedDuplicateSelectionsNeedDistinctCandidates();
   testSelectionLeadsTheFocusedRanking();
+  testBaseFanMatchRequiresExactCoreFanFields();
   testSparseEvidenceCannotLookIdentical();
   testAlwaysBounded();
   console.log("All order similarity tests passed.");

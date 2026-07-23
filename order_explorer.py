@@ -1462,7 +1462,7 @@ let DB = null;                 // {gen, today, n_jobs, n_items, jobs, ev, rm, nw
 let IDX = null;                // explanatory line/tag sets, built once per page
 let COSET = new Set();         // jobs a CO# landed on today (red text)
 let NWSET = null;              // the watcher's exact new-today set (null = derive)
-const state = { tab: "board", job: null, whole: false, previewJob: null,
+const state = { tab: "board", job: null, whole: false, baseFan: false, previewJob: null,
                 selections: new Map(), noteSelections: new Set(), histQ: "", histN: 500,
                 boardQ: "", boardSort: null, histSort: null, only3d: false,
                 heldVersion: null };
@@ -1756,7 +1756,7 @@ function reloadFresh() {
   try {
     sessionStorage.setItem(STATE_KEY, JSON.stringify({
       tab: state.tab, job: state.job, selections: encodeSelections(),
-      whole: state.whole, boardQ: state.boardQ, histQ: state.histQ,
+      whole: state.whole, baseFan: state.baseFan, boardQ: state.boardQ, histQ: state.histQ,
       y: window.scrollY, refreshed: 1 }));
   } catch (e) {}
   location.reload();
@@ -1767,11 +1767,11 @@ function restoreState() {
         sessionStorage.removeItem(STATE_KEY); } catch (e) {}
   if (!saved) return;
   if (saved.job && DB.jobs[saved.job]) {
-    state.job = saved.job; state.whole = !!saved.whole;
+    state.job = saved.job; state.whole = !!saved.whole; state.baseFan = !!saved.baseFan;
     state.selections = decodeSelections(saved.selections, saved.path, saved.pinned);
     for (const path of state.selections.keys())
       if (!compAt(DB.jobs[saved.job], path)) state.selections.delete(path);
-    if (state.selections.size) state.whole = false;
+    if (state.selections.size) { state.whole = false; state.baseFan = false; }
   }
   state.tab = ["board", "changes", "hist", "job"].includes(saved.tab)
     ? saved.tab : "board";
@@ -1890,7 +1890,7 @@ function selectedItems(entry, requirements) {
 }
 /* ---- bounded construction matching.  GLQSimilarity is the exact standalone
    module embedded above and directly exercised by test_order_similarity.js. */
-function rankMatches(srcJob, items, requirements) {
+function rankMatches(srcJob, items, requirements, baseFanOnly) {
   const { sets } = ensureIndex();
   const source = DB.jobs[srcJob];
   const hasFocus = !!requirements.length;
@@ -1903,8 +1903,10 @@ function rankMatches(srcJob, items, requirements) {
   for (const j in DB.jobs) {
     if (j === srcJob) continue;
     const candidate = DB.jobs[j];
+    const baseFan = baseFanOnly ? GLQSimilarity.baseFanMatch(source, candidate) : null;
+    if (baseFanOnly && !baseFan.eligible) continue;
     const whole = GLQSimilarity.orderSimilarity(source, candidate);
-    if (!hasFocus && !whole.sharedEvidence) continue;
+    if (!baseFanOnly && !hasFocus && !whole.sharedEvidence) continue;
     const focused = hasFocus
       ? GLQSimilarity.combinedFocusedSimilarity(whole, requirements, candidate)
       : null;
@@ -1923,12 +1925,22 @@ function rankMatches(srcJob, items, requirements) {
       pinTotal: focused ? focused.pinTotal : 0,
       selectionMatches: focused ? focused.matches : [],
       groups: whole.groups,
-      differences: [...new Set([
+      baseFan,
+      differences: baseFanOnly ? baseFan.missing.map(label => label + " unavailable on one order") : [...new Set([
         ...(focused ? focused.differences : []), ...whole.differences,
       ])].slice(0, 4),
       sharedNorms: new Set(sharedNorms),
       tTags: sharedTags,
     });
+  }
+  if (baseFanOnly) {
+    const hasComplete = out.some(r => r.baseFan && (r.baseFan.complete || r.baseFan.designOnlyMissing));
+    const visible = hasComplete
+      ? out.filter(r => r.baseFan && (r.baseFan.complete || r.baseFan.designOnlyMissing))
+      : out;
+    visible.sort((a, b) => b.baseFan.score - a.baseFan.score || b.score - a.score
+      || b.coverage - a.coverage || jobNum(b.j) - jobNum(a.j));
+    return visible;
   }
   out.sort((a, b) => b.score - a.score || b.coverage - a.coverage
     || jobNum(b.j) - jobNum(a.j));
@@ -1980,7 +1992,7 @@ function wireComponentAlignment() {
 let NAV_POS = 0, POPPING = false;
 function navSnapshot() {
   return { tab: state.tab, job: state.job, selections: encodeSelections(),
-           whole: state.whole, i: NAV_POS };
+           whole: state.whole, baseFan: state.baseFan, i: NAV_POS };
 }
 function pushNav() {
   NAV_POS++;
@@ -2003,12 +2015,13 @@ window.addEventListener("popstate", ev => {
   state.job = s.job && DB.jobs[s.job] ? s.job : null;
   if (state.tab === "job" && !state.job) state.tab = "board";
   state.whole = !!s.whole;
+  state.baseFan = !!s.baseFan;
   state.selections = decodeSelections(s.selections, s.path, s.pinned);
   if (state.job) {
     for (const path of state.selections.keys())
       if (!compAt(DB.jobs[state.job], path)) state.selections.delete(path);
   }
-  if (state.selections.size) state.whole = false;
+  if (state.selections.size) { state.whole = false; state.baseFan = false; }
   state.previewJob = null;
   render();
   POPPING = false;
@@ -2029,7 +2042,7 @@ function selectJob(j) {
      view) — a component/attribute click narrows from there. */
   state.previewJob = null;
   if (state.tab === "job" && state.job === j) { render(); return; }
-  state.job = j; state.whole = true; state.selections.clear(); state.noteSelections.clear();
+  state.job = j; state.whole = true; state.baseFan = false; state.selections.clear(); state.noteSelections.clear();
   state.tab = "job";
   pushNav();
   savePrefs(); render(); window.scrollTo(0, 0);
@@ -2416,7 +2429,7 @@ function renderJobPane() {
   const noteTargets = [];
   const compCard = (c, path) => {
     const selectedPins = state.selections.get(path);
-    const active = !state.whole && !!selectedPins;
+    const active = !state.whole && !state.baseFan && !!selectedPins;
     const items = c.i.map(no => itemByNo(e, no)).filter(Boolean);
     const itemNo = items.length === 1 ? String(items[0][IT.NO]) : "";
     const compRowKey = itemNo ? "item:" + itemNo : "component|" + path + "|" + c.n;
@@ -2502,6 +2515,8 @@ function renderJobPane() {
     + '<span class="hint">select any combination of components and attributes (AND)</span>'
     + (state.selections.size ? '<span class="hint">' + state.selections.size
         + " component" + (state.selections.size === 1 ? "" : "s") + " selected</span>" : "")
+    + '<button class="wholebtn' + (state.baseFan ? " active" : "")
+    + '" id="basefan">match base fan</button>'
     + '<button class="wholebtn' + (state.whole ? " active" : "")
     + '" id="whole">match whole order</button></div>'
     + '<div class="tree" id="leftcomponenttree">' + tree + "</div></div>";
@@ -2512,10 +2527,16 @@ function renderJobPane() {
     state.previewJob = null;
     if (hadPreview && state.whole) { render(); return; }
     state.whole = !state.whole;
-    if (state.whole) state.selections.clear();
+    if (state.whole) { state.baseFan = false; state.selections.clear(); }
+    render(); };
+  $("basefan").onclick = () => { const hadPreview = !!state.previewJob;
+    state.previewJob = null;
+    if (hadPreview && state.baseFan) { render(); return; }
+    state.baseFan = !state.baseFan;
+    if (state.baseFan) { state.whole = false; state.selections.clear(); }
     render(); };
   el.querySelectorAll(".comp-row").forEach(b => b.onclick = () => {
-    state.previewJob = null; state.whole = false;
+    state.previewJob = null; state.whole = false; state.baseFan = false;
     state.selections.has(b.dataset.c)
       ? state.selections.delete(b.dataset.c)
       : state.selections.set(b.dataset.c, new Set());
@@ -2525,7 +2546,7 @@ function renderJobPane() {
      selections on other components stay active as one AND combination. */
   el.querySelectorAll(".attr-row").forEach(b => b.onclick = () => {
     const k = b.dataset.a, p = b.dataset.p;
-    state.previewJob = null; state.whole = false;
+    state.previewJob = null; state.whole = false; state.baseFan = false;
     if (!state.selections.has(p)) state.selections.set(p, new Set());
     const pins = state.selections.get(p);
     pins.has(k) ? pins.delete(k) : pins.add(k);
@@ -2590,7 +2611,7 @@ function renderOrderPreview(leftJob, rightJob) {
   const leftSpecs = GLQSimilarity.specMap(left);
   const rightSpecs = GLQSimilarity.specMap(right);
   const comparison = GLQSimilarity.orderSimilarity(left, right);
-  const requirements = state.whole ? [] : selectedRequirements(left);
+  const requirements = (state.whole || state.baseFan) ? [] : selectedRequirements(left);
   const focused = requirements.length
     ? GLQSimilarity.combinedFocusedSimilarity(comparison, requirements, right)
     : null;
@@ -2750,8 +2771,8 @@ function renderOrderPreview(leftJob, rightJob) {
 function renderMatches() {
   const el = $("right");
   const j = state.job, e = j ? DB.jobs[j] : null;
-  const requirements = e && !state.whole ? selectedRequirements(e) : [];
-  const ready = e && (state.whole || requirements.length);
+  const requirements = e && !state.whole && !state.baseFan ? selectedRequirements(e) : [];
+  const ready = e && (state.whole || state.baseFan || requirements.length);
   if (!ready) {
     el.innerHTML = '<div class="panel-head"><span class="eyebrow">Matching orders</span></div>'
       + '<div class="empty"><div class="big">'
@@ -2768,17 +2789,17 @@ function renderMatches() {
     state.previewJob = null;
   }
   const srcDesign = spv(e, "Design");
-  const items = state.whole ? e.it : selectedItems(e, requirements);
+  const items = (state.whole || state.baseFan) ? e.it : selectedItems(e, requirements);
   const attrCount = requirements.reduce((sum, requirement) =>
     sum + requirement.pins.size, 0);
-  const target = state.whole ? "whole order" : requirements.length === 1
+  const target = state.baseFan ? "base fan" : state.whole ? "whole order" : requirements.length === 1
     ? (requirements[0].component.k ? "[" + requirements[0].component.n + "]"
       : requirements[0].component.n)
       + (attrCount ? " · " + attrCount + " selected attr"
         + (attrCount === 1 ? "" : "s") : "")
     : requirements.length + " selected components"
       + (attrCount ? " · " + attrCount + " selected attrs" : "");
-  const resAll = rankMatches(j, items, requirements);
+  const resAll = rankMatches(j, items, requirements, state.baseFan);
   const res = state.only3d ? resAll.filter(r => DB.jobs[r.j].sw) : resAll;
   const shown = res.slice(0, 25);
   const chips = requirements.flatMap(requirement => {
@@ -2856,10 +2877,12 @@ function renderMatches() {
       ? '<span class="chip same">✓ design ' + esc(srcDesign) + "</span>" : "";
     const spec = fanSpec(o);
     const g = r.groups;
-    const scoreLabel = requirements.length
-      ? (r.pinTotal ? r.pinMatched + "/" + r.pinTotal + " selected · " : "")
-        + "combo " + r.score.toFixed(3) + " · whole " + r.wholeScore.toFixed(3)
-      : "match " + r.score.toFixed(3);
+    const scoreLabel = state.baseFan
+      ? "base fan " + (r.baseFan && r.baseFan.designOnlyMissing ? "design missing · " : "") + r.score.toFixed(3)
+      : requirements.length
+        ? (r.pinTotal ? r.pinMatched + "/" + r.pinTotal + " selected · " : "")
+          + "combo " + r.score.toFixed(3) + " · whole " + r.wholeScore.toFixed(3)
+        : "match " + r.score.toFixed(3);
     const breakdown = "core " + g.core.toFixed(2)
       + " · construction " + g.construction.toFixed(2)
       + " · motor/drive " + g.motor.toFixed(2)
@@ -2895,11 +2918,12 @@ function renderMatches() {
     + (res.length === 1 ? "" : "es")
     + (state.only3d && resAll.length !== res.length
         ? " (of " + resAll.length + ")" : "")
-    + (requirements.length ? " · bounded combination score" : " · bounded construction score")
+    + (state.baseFan ? " · exact base fan fields" : requirements.length ? " · bounded combination score" : " · bounded construction score")
     + "</span></div>"
     + (requirements.length
         ? '<div class="filterbar"><span class="fl">Searching for (closest first):</span>'
-          + chips + "</div>" : "")
+          + chips + "</div>" : state.baseFan
+        ? '<div class="filterbar"><span class="fl">Exact base fan match: Design, Size, Arrangement, Class, Motor Pos, Wheel, Rotation, Discharge. Design may be missing on one order; other missing fields are only shown when no complete matches exist.</span></div>' : "")
     + (res.length ? cards : '<div class="empty"><div class="big">No orders match</div>'
         + (state.only3d && resAll.length
             ? "None of the " + resAll.length + " matches has SolidWorks 3D data "
