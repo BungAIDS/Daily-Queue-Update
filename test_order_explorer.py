@@ -127,6 +127,10 @@ def test_events_and_removed():
          "field": "CO#", "old": "1", "new": "2"},
         {"time": "2026-07-17T09:00:00", "job": "421966", "customer": "Meridian",
          "field": "End Date", "old": "7/10/2026", "new": "7/20/2026"},
+        {"time": "2026-07-17T09:00:00", "job": "421966", "customer": "Meridian",
+         "field": "Features", "old": "ACCESS DOOR", "new": "ACCESS DOOR, EVASE"},
+        {"time": "2026-07-17T09:00:00", "job": "421966", "customer": "Meridian",
+         "field": "Line Items", "old": "old raw parser blob", "new": "new raw parser blob"},
     ]
     from datetime import date as _date
     p = oe.build_payload(_store(), master_orders=master_orders, events=events,
@@ -134,6 +138,7 @@ def test_events_and_removed():
     assert p["today"] == "2026-07-17"
     # Newest first; the CO event carries its co_history description.
     assert [e["f"] for e in p["ev"]] == ["End Date", "CO#"], p["ev"]
+    assert all(e["f"] not in ("Features", "Line Items") for e in p["ev"])
     co = p["ev"][1]
     assert co["d"] == "ADDED SHAFT COOLER", co
     # Only the departure dated today lands in the removed list.
@@ -244,10 +249,14 @@ def test_render_roundtrip_and_safety():
     assert "renderOrderPreview" in html
     assert "previewJob" in html
     assert "Back to List" in html
+    assert 'rel="icon" type="image/png" href="GL Queue Explorer.png"' in html
+    assert 'rel="manifest" href="GL Queue Explorer.webmanifest"' in html
     assert "click order # again to move it to the left" in html
     assert "red = scored construction difference" in html
     assert "preview-relevant" in html
     assert "preview-match" in html
+    assert "changeHeaders" in html and "Field #" in html
+    assert "chgfield" in html
     assert "green = selected combination match" in html
     assert "combinedFocusedSimilarity" in html
     assert "state.selections" in html
@@ -436,6 +445,15 @@ def test_write_explorer_files():
         bat = Path(td) / oe.BAT_NAME
         assert bat.exists(), "launcher .bat not written"
         assert (Path(td) / oe.VBS_NAME).exists(), "glq_open.vbs not written"
+        assert (Path(td) / oe.ICON_PNG_NAME).exists(), "Explorer PNG icon not written"
+        assert (Path(td) / oe.ICON_ICO_NAME).exists(), "Explorer ICO icon not written"
+        manifest = Path(td) / oe.MANIFEST_NAME
+        assert manifest.exists(), "Explorer web app manifest not written"
+        assert oe.ICON_PNG_NAME in manifest.read_text(encoding="utf-8")
+        shortcut = Path(td) / oe.SHORTCUT_VBS_NAME
+        assert shortcut.exists(), "custom-icon shortcut helper not written"
+        shortcut_text = shortcut.read_text(encoding="ascii")
+        assert oe.ICON_ICO_NAME in shortcut_text and "CreateShortcut" in shortcut_text
         # The auto-refresh stamp open pages poll: the data fingerprint drives
         # the all-tab reload, the board fingerprint the Live-Queue-only reload.
         ver = Path(td) / oe.VERSION_NAME
@@ -577,6 +595,18 @@ def test_maybe_write_only_publishes_on_new_data():
     print("  maybe_write publishes only on new data OK")
 
 
+def test_explorer_search_supports_multi_part_scored_queries():
+    html = oe.render_html({"gen": "now", "jobs": {}, "n_items": 0})
+    assert "function searchParts" in html
+    assert "function scoreSearchEntry" in html
+    assert "complete matches first" in html
+    assert "h.score.toFixed(2)" in html
+    assert "class=\"missing\">missing:" in html
+    assert "function searchPartAliases" in html
+    assert "multiple features: D16, S245, access door" in html
+    print("  multi-part scored Explorer search UI OK")
+
+
 def main() -> int:
     test_payload_components_merge()
     test_queue_jobs_take_master_items()
@@ -586,6 +616,7 @@ def main() -> int:
     test_wheel_component_from_quote_run()
     test_master_orders_fallback_queue()
     test_render_roundtrip_and_safety()
+    test_explorer_search_supports_multi_part_scored_queries()
     test_bat_launcher()
     test_vbs_folder_opener()
     test_dwg_links_render_as_links()
