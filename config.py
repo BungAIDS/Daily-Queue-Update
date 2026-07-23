@@ -150,7 +150,11 @@ DRIVE_RUN_TYPES = [
 # Everything that isn't an HDX files its quote run under a generic pid type
 # (usually CBC_Inquiry), so those are recognized by FILE NAME instead — e.g.
 # "421473_909-26-1604 Qt Run.txt", "420410 qt  run.txt",
-# "Cascades Wheel Construction REV 2.docx", "... D64 Wheel Construction ...".
+# "Cascades Wheel Construction REV 2.docx", "... D64 Wheel Construction ...",
+# and the spec-named design-36 SQB runs like
+# "SQB SIZE 12.25, CLASS 2S, ARR 9, 304L SS.txt" (421919) — caught by the
+# `sqb` token and by the SIZE..CLASS..ARR shape (regexes can't contain a
+# comma here, so that one matches the words in order instead).
 # Case-insensitive regexes, comma-separated; extend as new namings turn up.
 # The "wheel"/"construction" tokens are deliberately BROAD — better to grab a
 # construction doc and flag it (an over-grab that parses to nothing shows as a
@@ -160,7 +164,8 @@ DRIVE_RUN_TYPES = [
 DRIVE_RUN_NAME_PATTERNS = [
     p.strip() for p in
     (os.environ.get("DRIVE_RUN_NAME_PATTERNS")
-     or r"qt\s*run,quote\s*run,wheel,construction").split(",")
+     or r"qt\s*run,quote\s*run,wheel,construction,"
+        r"\bsqb\b,size\s*[\d.]+.*\bclass\b.*\barr\b").split(",")
     if p.strip()
 ]
 # How many order-detail modals to open in parallel when fetching sales orders.

@@ -452,7 +452,9 @@ Quote runs are recognized three ways, in order:
 2. **File name** — everything else files it under a generic type (usually
    `CBC_Inquiry`), so document names are matched against
    `DRIVE_RUN_NAME_PATTERNS` (default catches `... Qt Run.txt`,
-   `... Quote Run ...`, and the D64 `... D64 Wheel Construction ....xlsx`).
+   `... Quote Run ...`, the D64 `... D64 Wheel Construction ....xlsx`, and
+   the spec-named design-36 SQB runs like
+   `SQB SIZE 12.25, CLASS 2S, ARR 9, 304L SS.txt`).
 3. **AutoCAD folder** — some orders never get the run attached to their
    documents at all; the job's folder is searched recursively for the same
    name patterns (e.g. `ENG REF\420410 qt  run.txt`) and the report links the

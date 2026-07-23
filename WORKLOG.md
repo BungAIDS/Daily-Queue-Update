@@ -3,7 +3,31 @@
 Running notes so progress survives across sessions. Newest status at the top of
 each section. **If you're picking this up fresh, read this whole file first.**
 
-## 2026-07-16 — Fix: QR review workbook tripped Excel repair (leading-'=' text)
+## 2026-07-16 — Discover spec-named SQB runs (design 36) — per DG's 421919 find
+
+DG: 421919 has "SQB SIZE 12.25, CLASS 2S, ARR 9, 304L SS.txt" and "i believe
+we are missing a bunch of design 36 quote runs that are formatted like this."
+Confirmed the mechanism: the sweep found 421919's folder on 07-02 but recorded
+ZERO runs — the name matches none of DRIVE_RUN_NAME_PATTERNS (qt run / quote
+run / wheel / construction). Discovery is the only gap: template routing keys
+on CONTENT ("CHICAGO BLOWER"/"SN#"), so once found, these parse like 421959's
+design-36 run did (56 fields). Nothing in the published stores can even see
+the missed names — unmatched files were never recorded anywhere.
+
+- `DRIVE_RUN_NAME_PATTERNS` default gains `\bsqb\b` and the spec-triple shape
+  `size\s*[\d.]+.*\bclass\b.*\barr\b` (patterns are comma-split, so the shape
+  matches SIZE→CLASS→ARR in order rather than the literal commas). Benefits
+  all three recognition paths for free: online-doc match, folder sweep, and
+  archive_obsolete. .env.example + README updated.
+- `test_spec_named_run_patterns` (test_quote_runs, 17 now): the exact 421919
+  name, case variants, bare-SQB, triple-without-SQB; negatives for size-only /
+  no-size / SQBX word-boundary.
+- IMPORTANT for the pickup: already-scanned folders are SKIPPED by a plain
+  sweep, so the new patterns only find files via `--rescan` (launcher: Scan
+  Quote Runs + Rescan; ~20 min, vision carries forward, also backfills mtime
+  per P6) or an explicit job list (`python quote_run_scan.py 421919` re-scans
+  that one folder in seconds). Then publish so the corpus shows the real
+  design-36 count.
 
 DG's first open hit "We found a problem with some content" / "Removed
 Records: Formula from sheet1.xml". Cause: three MISSED corpus lines start

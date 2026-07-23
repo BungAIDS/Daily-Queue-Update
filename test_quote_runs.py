@@ -122,6 +122,19 @@ def test_name_patterns():
         assert not _is_run_name(s), s
 
 
+def test_spec_named_run_patterns():
+    # Design-36 SQB runs are named by their fan spec, not "qt run" (421919).
+    for s in ("SQB SIZE 12.25, CLASS 2S, ARR 9, 304L SS.txt",
+              "sqb size 30, class 1, arr 4, cs.txt",       # case-insensitive
+              "421919 SQB RUN.txt",                        # bare SQB token
+              "SIZE 30, CLASS 1, ARR 4, CS.txt"):          # spec triple, no SQB
+        assert _is_run_name(s), s
+    for s in ("MOTOR SIZE CHART.txt",                      # size without class/arr
+              "CLASS 2 ARR 9 NOTES.txt",                   # no size
+              "SQBX PLATE.txt"):                           # sqb needs word bounds
+        assert not _is_run_name(s), s
+
+
 def test_run_filename_keeps_name_and_extension():
     assert _run_filename("421473", {"fn": "421473_909-26-1604 Qt Run.txt"}) == \
         "421473_909-26-1604 Qt Run.txt"
