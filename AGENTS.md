@@ -92,6 +92,14 @@ Launcher (`launcher.py`, Tkinter):
 
 Add project-specific notes here. This section is never auto-modified.
 
+### Known issue: Explorer taskbar icon
+
+The GL Queue Explorer app window's taskbar button still shows a generic
+blank-file icon on the user's machine (the title-bar favicon works). The
+mechanism, the one confirmed-working run, the debugging checklist, and the
+do-not-regress list are in `taskbar_icon_status.md` — read it before touching
+`glq_taskbar.ps1`, `explorer_icon.py`, or the launcher/opener helpers.
+
 ### Skill: applying Sales-Order review notes
 
 When asked to work through the user's Sales-Order **review notes** — "apply my

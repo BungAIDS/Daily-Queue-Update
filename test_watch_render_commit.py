@@ -41,13 +41,14 @@ def _master_one_order() -> dict:
     }}}
 
 
-def _render(master: dict, rendered: set) -> None:
+def _render(master: dict, rendered: set, board_order: list | None = None) -> None:
     """Run _render_master with the Excel write mocked to report `rendered` as the
     tabs that succeeded, and disk/IO side effects stubbed."""
     with mock.patch.object(watch, "update_master_workbook", return_value=rendered), \
             mock.patch.object(watch.order_explorer, "maybe_write", return_value=None), \
             mock.patch.object(watch.line_items, "load_store", return_value={"jobs": {}}):
-        watch._render_master(master, NOW, board_order=["420734"])
+        watch._render_master(master, NOW,
+                             board_order=["420734"] if board_order is None else board_order)
 
 
 def test_failed_write_leaves_rows_uncommitted_then_redraws():
@@ -103,6 +104,28 @@ def test_successful_write_commits_then_skips_unchanged():
         _render(master, {"Live Queue", "Order History"})
     assert "lq_op_for_order" not in seen, \
         "an unchanged, already-committed row must not be rewritten"
+
+
+def test_board_position_persists_into_master_for_open_rebuilds():
+    """The Explorer's Open-button rebuild has no live scrape: it sees only the
+    master log. The render must therefore store each order's cbcinsider
+    position in the master's own job dict (on_queue hands out copies), and
+    clear it again once the order is no longer on the board."""
+    master = _master_one_order()
+    _render(master, {"Live Queue", "Order History"}, board_order=["420734"])
+    assert master["orders"]["420734"]["job"].get("_cbc_pos") == 1, \
+        "the board position must persist into the master log"
+
+    # Next poll: another order leads the board; ours moved to slot 2.
+    _render(master, {"Live Queue", "Order History"},
+            board_order=["999999", "420734"])
+    assert master["orders"]["420734"]["job"].get("_cbc_pos") == 2, \
+        "a moved order must persist its new position"
+
+    # Departed from the board: the stale position must not linger.
+    _render(master, {"Live Queue", "Order History"}, board_order=["999999"])
+    assert "_cbc_pos" not in master["orders"]["420734"]["job"], \
+        "an order no longer on the board must drop its stored position"
 
 
 def main() -> int:

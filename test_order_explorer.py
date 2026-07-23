@@ -228,6 +228,12 @@ def test_master_orders_fallback_queue():
     # The job dict has no live _added_iso stamp (snapshot build), so the
     # master entry's arrival timestamp — what the workbook shows — is used.
     assert p["jobs"]["421314"]["bd"]["ai"] == "2026-07-15T08:30:00"
+    # The watcher persists each order's board position into the master job
+    # dict, so an Open-button rebuild (no live scrape) keeps the "#" column
+    # and the cbcinsider row order.
+    master_orders["421314"]["job"]["_cbc_pos"] = 3
+    p = oe.build_payload(_store(), master_orders=master_orders)
+    assert p["jobs"]["421314"]["bd"]["ps"] == 3
     print("  master on_queue fallback / added timestamp OK")
 
 
@@ -251,7 +257,6 @@ def test_render_roundtrip_and_safety():
     assert "Back to List" in html
     assert 'rel="icon" type="image/png" sizes="256x256" href="GL Queue Explorer Fan.png"' in html
     assert 'rel="shortcut icon" type="image/x-icon" href="GL Queue Explorer Fan.ico"' in html
-    assert 'rel="icon" type="image/png" href="GL Queue Explorer.png"' in html
     assert 'rel="manifest" href="GL Queue Explorer.webmanifest"' in html
     assert "click order # again to move it to the left" in html
     assert "red = scored construction difference" in html
@@ -264,9 +269,13 @@ def test_render_roundtrip_and_safety():
     assert "state.selections" in html
     assert "Searching for (closest first)" in html
     assert "pinHits" in html          # soft-selection miss chips are wired in
-    assert "baseFanChips" in html
+    assert "specHits" in html and "specCardChips" in html
     assert "match-actions" in html
-    assert "Match Base Fan" in html and "Green ✓ = same, red ✗" in html
+    # Fan stats are selectable search pins; Match Base Fan presses them all.
+    assert "Match Base Fan" in html and "spec-btn" in html
+    assert 'data-spec="' in html and 'data-kind="spec"' in html
+    assert "specAssessment" in html and "combinedSearchSimilarity" in html
+    assert "baseFanLabels" in html and "state.specSel" in html
     assert "selected components" in html
     assert "alignComponentStarts" in html
     assert 'class="co-tip"' in html
@@ -315,6 +324,77 @@ def test_vbs_folder_opener():
     assert 'LCase(Left(u, 5)) = "find?"' in text
     assert "FindDrawing" in text and "QueryParam" in text
     print("  vbs folder opener OK")
+
+
+def test_taskbar_identity_helpers():
+    """The taskbar icon can only come from the RUNNING window's own
+    AppUserModelID + Relaunch* properties — a favicon, manifest, or .lnk icon
+    never changes the button of a live Edge --app window. The published
+    stamper sets exactly those, and every open path invokes it."""
+    ps = oe.taskbar_ps1_text()
+    ps.encode("ascii")                                   # powershell-safe
+    assert "\r\n" in ps and ps.endswith("\r\n")
+    assert "SHGetPropertyStoreForWindow" in ps and "EnumWindows" in ps
+    # The System.AppUserModel property set: ID(5), RelaunchCommand(2),
+    # RelaunchDisplayNameResource(4), RelaunchIconResource(3).
+    assert "9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3" in ps
+    for pid in ("Set(store, 5,", "Set(store, 2,", "Set(store, 4,", "Set(store, 3,"):
+        assert pid in ps, pid
+    assert oe.APP_USER_MODEL_ID in ps
+    assert oe.ICON_ICO_NAME in ps and oe.LAUNCH_VBS_NAME in ps
+    # The icon and the opener must be referenced from per-user LOCAL copies:
+    # the shell loads relaunch icons lazily and a network path decays to a
+    # blank page, and share-hosted scripts are security-scanned per launch.
+    assert "$env:LOCALAPPDATA" in ps and "Copy-Item -Force" in ps
+    assert '$icon = $localIcon + ",0"' in ps
+    assert "$relaunch = 'wscript.exe \"' + $localVbs + '\"'" in ps
+    # The Start Menu .lnk carrying the AppUserModelID is the canonical icon
+    # source the taskbar checks first; pinning the window inherits it.
+    assert "WriteShortcut" in ps and "Start Menu" in ps
+    assert "00021401-0000-0000-C000-000000000046" in ps   # CLSID_ShellLink
+    # The C# helper is compiled once into a cached DLL, not on every open.
+    assert "-OutputAssembly $dll" in ps and "GLQTaskbar." in ps
+    # Only the app window is stamped: exact title on a Chromium frame window;
+    # a browser tab carries a " - Microsoft Edge" suffix and never matches.
+    assert "Chrome_WidgetWin" in ps and '$title = "GL Queue Explorer"' in ps
+
+    launch = oe.launch_vbs_text("My Page.html", page_path=r"Z:\SHARE\My Page.html")
+    launch.encode("ascii")                               # wscript-safe
+    assert r'page = "Z:\SHARE\My Page.html"' in launch   # works from local copy
+    assert '"My Page.html"' in launch and "--app=" in launch
+    assert oe.TASKBAR_PS1_NAME in launch and "-WindowStyle Hidden" in launch
+    assert "fso.GetParentFolderName(page)" in launch     # stamper found via page
+
+    assert oe.TASKBAR_PS1_NAME in oe.bat_text()
+    shortcut = oe.shortcut_vbs_text()
+    assert "wscript.exe" in shortcut and oe.LAUNCH_VBS_NAME in shortcut
+    assert "msedge" not in shortcut, "the .lnk must not target the browser directly"
+    print("  taskbar identity helpers OK")
+
+
+def test_icon_assets_are_shell_loadable():
+    """The shell paths that load taskbar/relaunch icons cannot decode
+    PNG-only ICOs at small sizes — the button shows a blank page instead.
+    The published ICO must carry classic BMP frames at the sizes the shell
+    actually loads, plus the 256px PNG frame for high-DPI surfaces."""
+    import struct
+
+    import explorer_icon
+
+    ico = explorer_icon.ico_bytes()
+    assert ico[:4] == b"\x00\x00\x01\x00"
+    count = struct.unpack("<H", ico[4:6])[0]
+    kind_by_size = {}
+    for i in range(count):
+        off = 6 + 16 * i
+        _, frame_off = struct.unpack("<II", ico[off + 8:off + 16])
+        kind = "png" if ico[frame_off:frame_off + 4] == b"\x89PNG" else "bmp"
+        kind_by_size[ico[off] or 256] = kind
+    for need in (16, 24, 32, 48):
+        assert kind_by_size.get(need) == "bmp", (need, kind_by_size)
+    assert kind_by_size.get(256) == "png", kind_by_size
+    assert explorer_icon.png_bytes()[:4] == b"\x89PNG"
+    print("  icon assets shell-loadable OK")
 
 
 def test_dwg_links_render_as_links():
@@ -460,6 +540,8 @@ def test_write_explorer_files():
         assert shortcut.exists(), "custom-icon shortcut helper not written"
         shortcut_text = shortcut.read_text(encoding="ascii")
         assert oe.ICON_ICO_NAME in shortcut_text and "CreateShortcut" in shortcut_text
+        assert (Path(td) / oe.LAUNCH_VBS_NAME).exists(), "silent opener not written"
+        assert (Path(td) / oe.TASKBAR_PS1_NAME).exists(), "taskbar stamper not written"
         # The auto-refresh stamp open pages poll: the data fingerprint drives
         # the all-tab reload, the board fingerprint the Live-Queue-only reload.
         ver = Path(td) / oe.VERSION_NAME
@@ -625,6 +707,8 @@ def main() -> int:
     test_explorer_search_supports_multi_part_scored_queries()
     test_bat_launcher()
     test_vbs_folder_opener()
+    test_taskbar_identity_helpers()
+    test_icon_assets_are_shell_loadable()
     test_dwg_links_render_as_links()
     test_transmittal_protocol_accepts_only_a_numeric_order()
     test_note_protocol_records_review_note(Path(tempfile.mkdtemp()))

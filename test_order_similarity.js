@@ -244,37 +244,90 @@ function testCombinedDuplicateSelectionsNeedDistinctCandidates() {
   "one candidate component cannot satisfy two selected component instances");
 }
 
-function testBaseFanMatchRequiresExactCoreFanFields() {
+function testSpecSelectionGradesStatsLikePins() {
   const source = order();
+  const labels = sim.BASE_FAN_FIELDS;
+
   const exact = copy(source);
-  assert.deepStrictEqual(sim.baseFanMatch(source, exact), {
-    eligible: true,
-    ok: true,
-    complete: true,
-    designOnlyMissing: false,
-    missing: [],
-    differences: [],
-    matched: sim.BASE_FAN_FIELDS,
-    score: 1,
-  }, "all base fan fields should match exactly");
-
-  const missingDesign = copy(source);
-  missingDesign.sp = missingDesign.sp.filter(([label]) => label !== "Design");
-  const designPass = sim.baseFanMatch(source, missingDesign);
-  assert.ok(designPass.ok && !designPass.complete && designPass.designOnlyMissing,
-    "a missing Design alone should be accepted because parser coverage is incomplete");
-
-  const missingSize = copy(source);
-  missingSize.sp = missingSize.sp.filter(([label]) => label !== "Size");
-  const sizeMissing = sim.baseFanMatch(source, missingSize);
-  assert.ok(sizeMissing.eligible && !sizeMissing.ok && sizeMissing.missing.includes("Size"),
-    "missing non-design base fan fields may be fallback candidates, but are not identical");
+  const full = sim.specAssessment(source, exact, labels);
+  assert.strictEqual(full.total, labels.length);
+  assert.strictEqual(full.matched, labels.length);
+  close(full.score, 1, "all selected stats match");
 
   const wrongRotation = copy(source);
   wrongRotation.sp.find(([label]) => label === "Rotation")[1] = "CCW";
-  const mismatch = sim.baseFanMatch(source, wrongRotation);
-  assert.ok(!mismatch.eligible && !mismatch.ok && mismatch.differences.some(text => text.startsWith("Rotation:")),
-    "changed base fan fields should reject the candidate");
+  const near = sim.specAssessment(source, wrongRotation, labels);
+  assert.strictEqual(near.matched, labels.length - 1);
+  close(near.score, (labels.length - 1) / labels.length,
+    "a recorded-but-different stat scores 0");
+  const rotationHit = near.hits.find(hit => hit.label === "Rotation");
+  assert.ok(!rotationHit.ok && rotationHit.have === "CCW",
+    "the differing stat carries the candidate's own value for the UI");
+
+  const blank = copy(source);
+  blank.sp = [];
+  const none = sim.specAssessment(source, blank, labels);
+  assert.strictEqual(none.matched, 0);
+  close(none.score, 0.5, "unrecorded stats are unknown, not matches");
+  assert.ok(full.score > near.score && near.score > none.score,
+    "full match above near-miss above nothing-recorded");
+
+  const sparseSource = order();
+  sparseSource.sp = sparseSource.sp.filter(([label]) => label !== "Class");
+  const skipped = sim.specAssessment(sparseSource, copy(source), labels);
+  assert.strictEqual(skipped.total, labels.length - 1,
+    "a stat missing on the source order cannot be required");
+
+  const otherDesign = copy(source);
+  otherDesign.sp.find(([label]) => label === "Design")[1] = "BC-330";
+  otherDesign.sp.find(([label]) => label === "Size")[1] = "330";
+  const crossDesign = sim.specAssessment(source, otherDesign, ["Design", "Size"]);
+  const sizeHit = crossDesign.hits.find(hit => hit.label === "Size");
+  assert.ok(!sizeHit.ok && !sizeHit.comparable,
+    "size across different designs is unknown, not a hard difference");
+}
+
+function testBlankOrderCannotLeadTheStatSearch() {
+  /* Regression (421919 vs 420518): a candidate that recorded none of the
+   * base-fan stats used to rank first because "no stats" meant "no
+   * differences".  In the unified search the blank order must sit below
+   * anything that actually shares stats. */
+  const source = order();
+  const labels = sim.BASE_FAN_FIELDS;
+  const score = candidate => sim.combinedSearchSimilarity(
+    sim.orderSimilarity(source, candidate), source, candidate, [], labels).score;
+
+  const exact = copy(source);
+  const nearMiss = copy(source);
+  nearMiss.sp.find(([label]) => label === "Rotation")[1] = "CCW";
+  const blank = copy(source);
+  blank.sp = [];
+
+  assert.ok(score(exact) > score(nearMiss), "the full stat match leads");
+  assert.ok(score(nearMiss) > score(blank),
+    "an order sharing 7 of 8 stats must outrank one with none recorded");
+}
+
+function testCombinedSearchBlendsStatsAndComponents() {
+  const source = order();
+  const requirements = [{ component: source.cp[0], pins: new Set() }];
+  const withBoth = copy(source);
+  const search = sim.combinedSearchSimilarity(
+    sim.orderSimilarity(source, withBoth), source, withBoth,
+    requirements, ["Design", "Size"]);
+  assert.strictEqual(search.pinTotal, 2,
+    "selected stats count in the n/m selected tally");
+  assert.strictEqual(search.pinMatched, 2);
+  assert.strictEqual(search.matches.length, 1,
+    "the component match is still identified");
+  assert.strictEqual(search.specHits.length, 2);
+
+  const statsOnly = copy(source);
+  statsOnly.cp = []; statsOnly.it = [];
+  assert.strictEqual(sim.combinedSearchSimilarity(
+    sim.orderSimilarity(source, statsOnly), source, statsOnly,
+    requirements, ["Design", "Size"]), null,
+    "a selected component absent on the candidate still eliminates it");
 }
 
 function testSparseEvidenceCannotLookIdentical() {
@@ -334,7 +387,9 @@ function main() {
   testCombinedAttributesStayTiedToTheirComponents();
   testCombinedDuplicateSelectionsNeedDistinctCandidates();
   testSelectionLeadsTheFocusedRanking();
-  testBaseFanMatchRequiresExactCoreFanFields();
+  testSpecSelectionGradesStatsLikePins();
+  testBlankOrderCannotLeadTheStatSearch();
+  testCombinedSearchBlendsStatsAndComponents();
   testSparseEvidenceCannotLookIdentical();
   testAlwaysBounded();
   console.log("All order similarity tests passed.");
