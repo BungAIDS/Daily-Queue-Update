@@ -228,6 +228,12 @@ def test_master_orders_fallback_queue():
     # The job dict has no live _added_iso stamp (snapshot build), so the
     # master entry's arrival timestamp — what the workbook shows — is used.
     assert p["jobs"]["421314"]["bd"]["ai"] == "2026-07-15T08:30:00"
+    # The watcher persists each order's board position into the master job
+    # dict, so an Open-button rebuild (no live scrape) keeps the "#" column
+    # and the cbcinsider row order.
+    master_orders["421314"]["job"]["_cbc_pos"] = 3
+    p = oe.build_payload(_store(), master_orders=master_orders)
+    assert p["jobs"]["421314"]["bd"]["ps"] == 3
     print("  master on_queue fallback / added timestamp OK")
 
 

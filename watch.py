@@ -416,6 +416,20 @@ def _render_master(master: dict, now: datetime, board_order: list | None = None)
     for j in lq_jobs:
         j["_cbc_pos"] = pos.get(str(j.get("job")))
     lq_jobs.sort(key=lambda j: (j.get("_cbc_pos") is None, j.get("_cbc_pos") or 0))
+    # Persist the positions into the master log itself (on_queue hands out
+    # copies): an Explorer rebuild without a live scrape — the launcher's Open
+    # button — then still shows the "#" column and the cbcinsider row order
+    # from the last poll instead of falling back to job-number order.
+    if board_order:
+        for jn, ent in (master.get("orders") or {}).items():
+            job = ent.get("job")
+            if not isinstance(job, dict):
+                continue
+            p = pos.get(str(jn))
+            if p is None:
+                job.pop("_cbc_pos", None)
+            else:
+                job["_cbc_pos"] = p
 
     new_today = _new_today_ids(lq_jobs, today)   # for the Changes tab / notifications
     # Orders that had a change order (CO#) land today -> their text goes red.
