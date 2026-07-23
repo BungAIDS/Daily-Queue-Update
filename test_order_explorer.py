@@ -249,6 +249,7 @@ def test_render_roundtrip_and_safety():
     assert "renderOrderPreview" in html
     assert "previewJob" in html
     assert "Back to List" in html
+    assert 'rel="icon" type="image/png" href="GL Queue Explorer.png"' in html
     assert "click order # again to move it to the left" in html
     assert "red = scored construction difference" in html
     assert "preview-relevant" in html
@@ -443,6 +444,12 @@ def test_write_explorer_files():
         bat = Path(td) / oe.BAT_NAME
         assert bat.exists(), "launcher .bat not written"
         assert (Path(td) / oe.VBS_NAME).exists(), "glq_open.vbs not written"
+        assert (Path(td) / oe.ICON_PNG_NAME).exists(), "Explorer PNG icon not written"
+        assert (Path(td) / oe.ICON_ICO_NAME).exists(), "Explorer ICO icon not written"
+        shortcut = Path(td) / oe.SHORTCUT_VBS_NAME
+        assert shortcut.exists(), "custom-icon shortcut helper not written"
+        shortcut_text = shortcut.read_text(encoding="ascii")
+        assert oe.ICON_ICO_NAME in shortcut_text and "CreateShortcut" in shortcut_text
         # The auto-refresh stamp open pages poll: the data fingerprint drives
         # the all-tab reload, the board fingerprint the Live-Queue-only reload.
         ver = Path(td) / oe.VERSION_NAME
