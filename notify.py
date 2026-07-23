@@ -17,15 +17,42 @@ from __future__ import annotations
 
 import json
 import logging
+import html
+import urllib.parse
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List
 
-from config import TEAMS_WEBHOOK_URL, LIVE_TOAST_ENABLED
+from config import TEAMS_WEBHOOK_URL, LIVE_TOAST_ENABLED, EXPLORER_PATH, LIVE_WORKBOOK_PATH, OUTPUT_DIR
 
 log = logging.getLogger(__name__)
 
 _TEAMS_THEME = "0076D7"
+_EXPLORER_HTML_NAME = "GL Queue Explorer.html"
+
+
+def _explorer_path() -> str:
+    """Canonical Explorer page path, matching order_explorer.default_output_path().
+
+    Kept local to avoid importing the full Explorer generator just to send a
+    notification.
+    """
+    if EXPLORER_PATH:
+        return str(EXPLORER_PATH / _EXPLORER_HTML_NAME if EXPLORER_PATH.suffix.lower() != ".html"
+                   else EXPLORER_PATH)
+    base = LIVE_WORKBOOK_PATH.parent if LIVE_WORKBOOK_PATH else OUTPUT_DIR
+    return str(base / _EXPLORER_HTML_NAME)
+
+
+def _file_url(path: str) -> str:
+    p = str(path).replace("\\", "/")
+    if p.startswith("//"):
+        return "file:" + urllib.parse.quote(p, safe="/:")
+    return "file:///" + urllib.parse.quote(p, safe="/:")
+
+
+def _order_url(job: Any) -> str:
+    return _file_url(_explorer_path()) + "#order=" + urllib.parse.quote(str(job), safe="")
 
 
 def _toast_winotify(title: str, message: str) -> bool:
@@ -108,7 +135,12 @@ def _messagecard(title: str, summary: str, jobs: List[Dict[str, Any]]) -> Dict[s
     """Legacy MessageCard — the format the (retiring) Incoming Webhook accepts."""
     sections = [
         {"activityTitle": f"Order {j.get('job', '')}",
-         "facts": [{"name": n, "value": v} for n, v in _order_facts(j)]}
+         "facts": [{"name": n, "value": v} for n, v in _order_facts(j)],
+         "potentialAction": [{
+             "@type": "OpenUri",
+             "name": "Open order in Explorer",
+             "targets": [{"os": "default", "uri": _order_url(j.get("job", ""))}],
+         }]}
         for j in jobs
     ]
     return {
@@ -126,10 +158,12 @@ def _html_body(title: str, jobs: List[Dict[str, Any]]) -> str:
     then each order's fields. Sent as the message-level `text` so (a) Teams shows
     a real banner preview and (b) a 'Post message as User' flow renders it nicely
     (with your photo/name) instead of a preview-less card."""
-    blocks = [f"<b>{title}</b>"]
+    blocks = [f"<b>{html.escape(title)}</b>"]
     for j in jobs:
-        rows = [f"<b>Order {j.get('job', '')}</b>"]
-        rows += [f"{n}: {v}" for n, v in _order_facts(j) if n != "Order"]
+        job = str(j.get("job", ""))
+        rows = [f'<b><a href="{html.escape(_order_url(job), quote=True)}">Order {html.escape(job)}</a></b>']
+        rows += [f"{html.escape(n)}: {html.escape(str(v))}" for n, v in _order_facts(j) if n != "Order"]
+        rows.append(f'<a href="{html.escape(_order_url(job), quote=True)}">Open order in Explorer</a>')
         blocks.append("<br>".join(rows))
     return "<br><br>".join(blocks)
 
@@ -146,10 +180,15 @@ def _workflow_card(title: str, summary: str, jobs: List[Dict[str, Any]]) -> Dict
         {"type": "TextBlock", "text": title, "weight": "Bolder", "size": "Medium", "wrap": True}
     ]
     for j in jobs:
+        job = str(j.get("job", ""))
         body.append({"type": "TextBlock", "text": f"Order {j.get('job', '')}",
                      "weight": "Bolder", "wrap": True, "spacing": "Medium"})
         body.append({"type": "FactSet",
                      "facts": [{"title": n, "value": v} for n, v in _order_facts(j)]})
+        body.append({"type": "ActionSet",
+                     "actions": [{"type": "Action.OpenUrl",
+                                  "title": "Open order in Explorer",
+                                  "url": _order_url(job)}]})
     card = {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
         "type": "AdaptiveCard",

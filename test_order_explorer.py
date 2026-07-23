@@ -284,6 +284,9 @@ def test_render_roundtrip_and_safety():
     assert "noteDraftKey" in html and "hasNoteDrafts" in html
     assert "note-del" in html and "action: \"delete\"" in html
     assert "noteSelections" in html and "review|" in html and "data-r=" in html
+    assert "deepLinkJob" in html and "#order=" in html and "applyDeepLink" in html
+    assert html.count("const target = state.baseFan") == 1
+    assert html.count("const scoreLabel = state.baseFan") == 1
     # In both order headers the action is immediately after that order's customer.
     assert re.search(r"esc\(e\.c\).*?prepare-transmittal.*?transmittalUrl\(j\)",
                      html, re.DOTALL)

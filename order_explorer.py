@@ -1754,6 +1754,7 @@ async function boot() {
   } catch (e) {}
   loadPrefs();
   restoreState();
+  applyDeepLink();
   render();                       // also seeds the first history entry (syncNav)
   $("navback").onclick = () => history.back();
   updateBackBtn();
@@ -1840,6 +1841,19 @@ function loadPrefs() {
     state.histQ = p.histQ || "";
     state.only3d = !!p.only3d;
   } catch (e) {}
+}
+function deepLinkJob() {
+  const m = String(location.hash || "").match(/^#(?:order|job)=([A-Za-z0-9_-]+)$/i);
+  return m ? m[1] : null;
+}
+function applyDeepLink() {
+  const j = deepLinkJob();
+  if (!j || !DB.jobs[j]) return;
+  state.job = j; state.whole = true; state.baseFan = false; state.selections.clear();
+  state.noteSelections.clear(); state.previewJob = null; state.tab = "job";
+}
+function navUrl() {
+  return state.tab === "job" && state.job ? "#order=" + encodeURIComponent(state.job) : "#";
 }
 let toastTimer = null;
 function toast(msg) {
@@ -2030,12 +2044,12 @@ function navSnapshot() {
 }
 function pushNav() {
   NAV_POS++;
-  try { history.pushState(navSnapshot(), ""); } catch (e) {}
+  try { history.pushState(navSnapshot(), "", navUrl()); } catch (e) {}
   updateBackBtn();
 }
 function syncNav() {
   if (POPPING) return;
-  try { history.replaceState(navSnapshot(), ""); } catch (e) {}
+  try { history.replaceState(navSnapshot(), "", navUrl()); } catch (e) {}
 }
 function updateBackBtn() {
   $("navback").disabled = NAV_POS <= 0 && history.length <= 1;
@@ -2828,7 +2842,6 @@ function renderMatches() {
   const items = (state.whole || state.baseFan) ? e.it : selectedItems(e, requirements);
   const attrCount = requirements.reduce((sum, requirement) =>
     sum + requirement.pins.size, 0);
-  const target = state.baseFan ? "Base Fan" : state.whole ? "Whole Order" : requirements.length === 1
   const target = state.baseFan ? "base fan" : state.whole ? "whole order" : requirements.length === 1
     ? (requirements[0].component.k ? "[" + requirements[0].component.n + "]"
       : requirements[0].component.n)
@@ -2940,7 +2953,6 @@ function renderMatches() {
     const g = r.groups;
     const scoreLabel = state.baseFan
       ? "Base Fan " + (r.baseFan && r.baseFan.designOnlyMissing ? "Design Missing · " : "") + r.score.toFixed(3)
-      ? "base fan " + (r.baseFan && r.baseFan.designOnlyMissing ? "design missing · " : "") + r.score.toFixed(3)
       : requirements.length
         ? (r.pinTotal ? r.pinMatched + "/" + r.pinTotal + " selected · " : "")
           + "combo " + r.score.toFixed(3) + " · whole " + r.wholeScore.toFixed(3)
@@ -2981,13 +2993,11 @@ function renderMatches() {
     + (state.only3d && resAll.length !== res.length
         ? " (of " + resAll.length + ")" : "")
     + (state.baseFan ? " · Exact Base Fan Fields" : requirements.length ? " · bounded combination score" : " · bounded construction score")
-    + (state.baseFan ? " · exact base fan fields" : requirements.length ? " · bounded combination score" : " · bounded construction score")
     + "</span></div>"
     + (requirements.length
         ? '<div class="filterbar"><span class="fl">Searching for (closest first):</span>'
           + chips + "</div>" : state.baseFan
         ? '<div class="filterbar"><span class="fl">Exact Base Fan Match: Design, Size, Arrangement, Class, Motor Pos, Wheel, Rotation, Discharge. Green ✓ = same, red ✗ = missing/different.</span></div>' : "")
-        ? '<div class="filterbar"><span class="fl">Exact base fan match: Design, Size, Arrangement, Class, Motor Pos, Wheel, Rotation, Discharge. Design may be missing on one order; other missing fields are only shown when no complete matches exist.</span></div>' : "")
     + (res.length ? cards : '<div class="empty"><div class="big">No orders match</div>'
         + (state.only3d && resAll.length
             ? "None of the " + resAll.length + " matches has SolidWorks 3D data "
