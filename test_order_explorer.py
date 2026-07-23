@@ -589,7 +589,9 @@ def test_explorer_search_supports_multi_part_scored_queries():
     assert "function searchParts" in html
     assert "function scoreSearchEntry" in html
     assert "complete matches first" in html
-    assert "score ' + h.score.toFixed(2)" in html
+    assert "h.score.toFixed(2)" in html
+    assert "class=\"missing\">missing:" in html
+    assert "function searchPartAliases" in html
     assert "multiple features: D16, S245, access door" in html
     print("  multi-part scored Explorer search UI OK")
 
