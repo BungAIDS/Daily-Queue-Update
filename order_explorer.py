@@ -81,6 +81,8 @@ VERSION_NAME = "gl_queue_explorer_version.js"
 VBS_NAME = "glq_open.vbs"
 ICON_PNG_NAME = "GL Queue Explorer Fan.png"
 ICON_ICO_NAME = "GL Queue Explorer Fan.ico"
+ICON_PNG_NAME = "GL Queue Explorer.png"
+ICON_ICO_NAME = "GL Queue Explorer.ico"
 SHORTCUT_VBS_NAME = "Create GL Queue Explorer Shortcut.vbs"
 MANIFEST_NAME = "GL Queue Explorer.webmanifest"
 ENABLE_NAME = "Enable Folder Links.bat"
@@ -1085,6 +1087,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <link rel="icon" type="image/png" sizes="256x256" href="GL Queue Explorer Fan.png">
 <link rel="shortcut icon" type="image/x-icon" href="GL Queue Explorer Fan.ico">
 <link rel="apple-touch-icon" href="GL Queue Explorer Fan.png">
+<link rel="icon" type="image/png" href="GL Queue Explorer.png">
+<link rel="apple-touch-icon" href="GL Queue Explorer.png">
 <link rel="manifest" href="GL Queue Explorer.webmanifest">
 <style>
   :root {
@@ -2547,6 +2551,8 @@ function renderJobPane() {
         + " component" + (state.selections.size === 1 ? "" : "s") + " selected</span>" : "")
     + '<span class="match-actions"><button class="wholebtn' + (state.baseFan ? " active" : "")
     + '" id="basefan">Match Base Fan</button>'
+    + '<button class="wholebtn' + (state.baseFan ? " active" : "")
+    + '" id="basefan">match base fan</button>'
     + '<button class="wholebtn' + (state.whole ? " active" : "")
     + '" id="whole">Match Whole Order</button></span></div>'
     + '<div class="tree" id="leftcomponenttree">' + tree + "</div></div>";
@@ -2823,6 +2829,7 @@ function renderMatches() {
   const attrCount = requirements.reduce((sum, requirement) =>
     sum + requirement.pins.size, 0);
   const target = state.baseFan ? "Base Fan" : state.whole ? "Whole Order" : requirements.length === 1
+  const target = state.baseFan ? "base fan" : state.whole ? "whole order" : requirements.length === 1
     ? (requirements[0].component.k ? "[" + requirements[0].component.n + "]"
       : requirements[0].component.n)
       + (attrCount ? " · " + attrCount + " selected attr"
@@ -2933,6 +2940,7 @@ function renderMatches() {
     const g = r.groups;
     const scoreLabel = state.baseFan
       ? "Base Fan " + (r.baseFan && r.baseFan.designOnlyMissing ? "Design Missing · " : "") + r.score.toFixed(3)
+      ? "base fan " + (r.baseFan && r.baseFan.designOnlyMissing ? "design missing · " : "") + r.score.toFixed(3)
       : requirements.length
         ? (r.pinTotal ? r.pinMatched + "/" + r.pinTotal + " selected · " : "")
           + "combo " + r.score.toFixed(3) + " · whole " + r.wholeScore.toFixed(3)
@@ -2973,11 +2981,13 @@ function renderMatches() {
     + (state.only3d && resAll.length !== res.length
         ? " (of " + resAll.length + ")" : "")
     + (state.baseFan ? " · Exact Base Fan Fields" : requirements.length ? " · bounded combination score" : " · bounded construction score")
+    + (state.baseFan ? " · exact base fan fields" : requirements.length ? " · bounded combination score" : " · bounded construction score")
     + "</span></div>"
     + (requirements.length
         ? '<div class="filterbar"><span class="fl">Searching for (closest first):</span>'
           + chips + "</div>" : state.baseFan
         ? '<div class="filterbar"><span class="fl">Exact Base Fan Match: Design, Size, Arrangement, Class, Motor Pos, Wheel, Rotation, Discharge. Green ✓ = same, red ✗ = missing/different.</span></div>' : "")
+        ? '<div class="filterbar"><span class="fl">Exact base fan match: Design, Size, Arrangement, Class, Motor Pos, Wheel, Rotation, Discharge. Design may be missing on one order; other missing fields are only shown when no complete matches exist.</span></div>' : "")
     + (res.length ? cards : '<div class="empty"><div class="big">No orders match</div>'
         + (state.only3d && resAll.length
             ? "None of the " + resAll.length + " matches has SolidWorks 3D data "
