@@ -342,6 +342,10 @@ def test_taskbar_identity_helpers():
         assert pid in ps, pid
     assert oe.APP_USER_MODEL_ID in ps
     assert oe.ICON_ICO_NAME in ps and oe.LAUNCH_VBS_NAME in ps
+    # The icon must be referenced from a per-user LOCAL copy: the shell
+    # loads relaunch icons lazily and a network path decays to a blank page.
+    assert "$env:LOCALAPPDATA" in ps and "Copy-Item -Force" in ps
+    assert '$icon = $localIcon + ",0"' in ps
     # Only the app window is stamped: exact title on a Chromium frame window;
     # a browser tab carries a " - Microsoft Edge" suffix and never matches.
     assert "Chrome_WidgetWin" in ps and '$title = "GL Queue Explorer"' in ps
@@ -356,6 +360,31 @@ def test_taskbar_identity_helpers():
     assert "wscript.exe" in shortcut and oe.LAUNCH_VBS_NAME in shortcut
     assert "msedge" not in shortcut, "the .lnk must not target the browser directly"
     print("  taskbar identity helpers OK")
+
+
+def test_icon_assets_are_shell_loadable():
+    """The shell paths that load taskbar/relaunch icons cannot decode
+    PNG-only ICOs at small sizes — the button shows a blank page instead.
+    The published ICO must carry classic BMP frames at the sizes the shell
+    actually loads, plus the 256px PNG frame for high-DPI surfaces."""
+    import struct
+
+    import explorer_icon
+
+    ico = explorer_icon.ico_bytes()
+    assert ico[:4] == b"\x00\x00\x01\x00"
+    count = struct.unpack("<H", ico[4:6])[0]
+    kind_by_size = {}
+    for i in range(count):
+        off = 6 + 16 * i
+        _, frame_off = struct.unpack("<II", ico[off + 8:off + 16])
+        kind = "png" if ico[frame_off:frame_off + 4] == b"\x89PNG" else "bmp"
+        kind_by_size[ico[off] or 256] = kind
+    for need in (16, 24, 32, 48):
+        assert kind_by_size.get(need) == "bmp", (need, kind_by_size)
+    assert kind_by_size.get(256) == "png", kind_by_size
+    assert explorer_icon.png_bytes()[:4] == b"\x89PNG"
+    print("  icon assets shell-loadable OK")
 
 
 def test_dwg_links_render_as_links():
@@ -669,6 +698,7 @@ def main() -> int:
     test_bat_launcher()
     test_vbs_folder_opener()
     test_taskbar_identity_helpers()
+    test_icon_assets_are_shell_loadable()
     test_dwg_links_render_as_links()
     test_transmittal_protocol_accepts_only_a_numeric_order()
     test_note_protocol_records_review_note(Path(tempfile.mkdtemp()))
