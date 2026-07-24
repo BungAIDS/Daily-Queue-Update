@@ -1,0 +1,65 @@
+{
+  "jobs": {
+    "272155A": {
+      "customer": "OCCIDENTAL CHEMICAL",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\272155A\\272155A - Sales Order (original).pdf",
+      "scanned_at": "2026-07-10T07:52:49",
+      "items": [
+        {
+          "raw": "NPO Replacement Shaft, 316SS Construction (Qty: N 4,239.00 848.00",
+          "norm": "NPO REPLACEMENT SHAFT 316 STAINLESS STEEL CONSTRUCTION QTY",
+          "qty": "",
+          "price": "4,239.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "1), Inquiry Num: 295-26-1050RP"
+          ],
+          "tags": [
+            "MATERIALS",
+            "SPARE PARTS",
+            "STAINLESS STEEL"
+          ],
+          "attributes": {
+            "inquiry_num": "295-26-1050RP",
+            "component": "REPLACEMENT SHAFT",
+            "material": "STAINLESS STEEL",
+            "material_grade": "316 SS",
+            "material_scope": "SHAFT"
+          }
+        },
+        {
+          "raw": "NPO Replacement Wheel, Heavy Duty, 316SS N 8,992.00 1,798.00",
+          "norm": "NPO REPLACEMENT WHEEL HEAVY DUTY 316 STAINLESS STEEL",
+          "qty": "",
+          "price": "8,992.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Construction (With Passivation Welds) (Qty: 1),",
+            "Inquiry Num: 295-26-1050RP"
+          ],
+          "tags": [
+            "HEAVY DUTY",
+            "MATERIALS",
+            "SPARE PARTS",
+            "STAINLESS STEEL",
+            "WHEEL"
+          ],
+          "attributes": {
+            "inquiry_num": "295-26-1050RP",
+            "heavy_duty": "YES",
+            "component": "REPLACEMENT WHEEL",
+            "material": "STAINLESS STEEL",
+            "material_treatment": "PASSIVATION OF WELDS",
+            "material_grade": "316 SS",
+            "material_scope": "WHEEL, WELDS"
+          }
+        }
+      ],
+      "parts_only": true,
+      "normalizer_version": "2026-07-22-accent-fold-evase-v1"
+    }
+  }
+}

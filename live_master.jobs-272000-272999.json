@@ -1,0 +1,104 @@
+{
+  "orders": {
+    "272155A": {
+      "added": "2026-06-16T14:04:28",
+      "left": null,
+      "on_queue": false,
+      "job": {
+        "status": "AT WC",
+        "job": "272155A",
+        "oper": "20",
+        "item": "16-0-0000P",
+        "design": "16",
+        "assigned_to": "NONE",
+        "checker": "NONE",
+        "start_date": "6/10/2026",
+        "end_date": "6/12/2026",
+        "plan_hrs": "11.000",
+        "fannet_date": "8/13/2026",
+        "total_price": "$13,831.00",
+        "status_note": "NEEDS CHECKING",
+        "customer": "OCCIDENTAL CHEMICAL",
+        "primary_rep": "INDUSTRIAL AIR SOL.",
+        "ship_with": "",
+        "unapproved": false,
+        "credit_hold": false,
+        "has_notes": false,
+        "job_type": "",
+        "job_folder": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\272155A",
+        "dwg_extras": {},
+        "dwg_missing_std": false,
+        "_first_seen": "2026-06-16T14:04:28",
+        "_carried_over": true,
+        "co_number": 0,
+        "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\272155A\\272155A - Sales Order (original).pdf",
+        "so_design_desc": "SW",
+        "so_size": "23",
+        "so_arrangement": "A/9H",
+        "so_class": "4",
+        "so_rotation": "CCW",
+        "so_special_temp": "0",
+        "line_items": [
+          {
+            "raw": "NPO Replacement Shaft, 316SS Construction (Qty: N 4,239.00 848.00",
+            "norm": "NPO REPLACEMENT SHAFT 316 STAINLESS STEEL CONSTRUCTION QTY",
+            "qty": "",
+            "price": "4,239.00",
+            "ptype": "N",
+            "section": "",
+            "details": [
+              "1), Inquiry Num: 295-26-1050RP"
+            ],
+            "tags": [
+              "MATERIALS",
+              "SPARE PARTS",
+              "STAINLESS STEEL"
+            ],
+            "attributes": {
+              "inquiry_num": "295-26-1050RP",
+              "component": "REPLACEMENT SHAFT",
+              "material": "STAINLESS STEEL",
+              "material_grade": "316 SS",
+              "material_scope": "SHAFT"
+            }
+          },
+          {
+            "raw": "NPO Replacement Wheel, Heavy Duty, 316SS N 8,992.00 1,798.00",
+            "norm": "NPO REPLACEMENT WHEEL HEAVY DUTY 316 STAINLESS STEEL",
+            "qty": "",
+            "price": "8,992.00",
+            "ptype": "N",
+            "section": "",
+            "details": [
+              "Construction (With Passivation Welds) (Qty: 1),",
+              "Inquiry Num: 295-26-1050RP"
+            ],
+            "tags": [
+              "HEAVY DUTY",
+              "MATERIALS",
+              "SPARE PARTS",
+              "STAINLESS STEEL",
+              "WHEEL"
+            ],
+            "attributes": {
+              "inquiry_num": "295-26-1050RP",
+              "heavy_duty": "YES",
+              "component": "REPLACEMENT WHEEL",
+              "material": "STAINLESS STEEL",
+              "material_treatment": "PASSIVATION OF WELDS",
+              "material_grade": "316 SS",
+              "material_scope": "WHEEL, WELDS"
+            }
+          }
+        ],
+        "line_item_tags": "HEAVY DUTY, MATERIALS, SPARE PARTS, STAINLESS STEEL, WHEEL",
+        "so_validation": "MATCH",
+        "so_document_kind": "SALES_ORDER",
+        "so_internal_order": "272155A",
+        "so_validation_method": "header"
+      },
+      "lq_sig": "64ba9e06c131f22c6795a9d81db75902",
+      "oh_sig": "5074b02227e4f1b58879d88b1536debb"
+    }
+  }
+}

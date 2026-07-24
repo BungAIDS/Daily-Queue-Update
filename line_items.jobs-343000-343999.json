@@ -1,0 +1,36 @@
+{
+  "jobs": {
+    "343798C": {
+      "customer": "",
+      "co_number": 1,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\343798C\\343798C - Sales Order CO#1.pdf",
+      "scanned_at": "2026-07-10T07:52:49",
+      "items": [
+        {
+          "raw": "Repair Drive set (Ship Direct) (Qty: 1), Inquiry N 958.00 111.00",
+          "norm": "REPAIR DRIVE SET SHIP DIRECT QTY 1 INQUIRY",
+          "qty": "",
+          "price": "958.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Num: 344-18-2172"
+          ],
+          "tags": [
+            "DRIVE COMPONENTS",
+            "SHIPPING",
+            "SPARE PARTS"
+          ],
+          "attributes": {
+            "inquiry_num": "344-18-2172",
+            "component": "REPAIR DRIVE SET",
+            "shipping_method": "SHIP DIRECT",
+            "drive_subcategory": "DRIVE SET"
+          }
+        }
+      ],
+      "parts_only": true,
+      "normalizer_version": "2026-07-22-accent-fold-evase-v1"
+    }
+  }
+}

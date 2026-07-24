@@ -1,0 +1,293 @@
+{
+  "jobs": {
+    "352366A": {
+      "customer": "CLEAVER BROOKS",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\352366A\\352366A - Sales Order (original).pdf",
+      "scanned_at": "2026-07-10T07:52:49",
+      "items": [
+        {
+          "raw": "Motor C 3,733.82 302.00 1,389.00 5,425.00 417.00",
+          "norm": "MOTOR",
+          "qty": "",
+          "price": "3,733.82",
+          "ptype": "C",
+          "section": "",
+          "details": [
+            "Vendor: Baldor or equivalent",
+            "75 HP, 1800 RPM, Enclosure: TEFC Premium",
+            "365T, Cast Iron, Foot Mounted, 3/60/230/460,",
+            "F1, 1.15 SF",
+            "Model #EM4316T",
+            "MOD: Mod (M39B-1) adding INTERNAL - AEGIS",
+            "bearing protection ring",
+            "VFD Suitable, VFD Controlled",
+            "Ship Direct",
+            "VFD by others. Motor complete with Aegis"
+          ],
+          "tags": [
+            "MOTOR",
+            "SHIPPING",
+            "VFD"
+          ],
+          "attributes": {
+            "component": "MOTOR",
+            "motor_hp": "75",
+            "motor_rpm": "1800",
+            "motor_frame": "365T",
+            "motor_phase": "3",
+            "motor_frequency_hz": "60",
+            "motor_voltage": "230/460",
+            "motor_service_factor": "1.15",
+            "motor_conduit_box_location": "F1",
+            "motor_enclosure": "TEFC PREMIUM",
+            "motor_frame_material": "CAST IRON",
+            "motor_model": "EM4316T",
+            "vfd_context": "MOTOR",
+            "vfd_supplied_by": "OTHERS",
+            "motor_vfd_suitability": "VFD SUITABLE",
+            "motor_vfd_operation": "VFD CONTROLLED",
+            "motor_shaft_grounding": "AEGIS RING",
+            "motor_mounting": "FOOT MOUNTED",
+            "vendor": "Baldor or equivalent",
+            "shipping_method": "SHIP DIRECT"
+          }
+        },
+        {
+          "raw": "Half Coupling, Falk T10, SteelFlex Type, Size 1080T, N 545.00 109.00",
+          "norm": "HALF COUPLING FALK T10 STEELFLEX TYPE SIZE 1080T",
+          "qty": "",
+          "price": "545.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Set Screw, Interference Fit (Not Per Original) (Qty:",
+            "1), Inquiry Num: 311-24-486RP"
+          ],
+          "tags": [
+            "COUPLING",
+            "SPECIAL CONSTRUCTION"
+          ],
+          "attributes": {
+            "inquiry_num": "311-24-486RP",
+            "component": "COUPLING",
+            "coupling_subcategory": "FLEXIBLE COUPLING",
+            "manufacturer": "FALK",
+            "coupling_type": "HALF COUPLING",
+            "size": "1080T",
+            "fit": "INTERFERENCE",
+            "set_screws": "YES"
+          }
+        },
+        {
+          "raw": "Motor Base for 365T Frame (To be installed in field N 9,702.00 1,940.00",
+          "norm": "MOTOR BASE FOR 365T FRAME TO BE INSTALLED IN FIELD",
+          "qty": "",
+          "price": "9,702.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "by others- Not Per Original) (Qty: 1), Inquiry Num:"
+          ],
+          "tags": [
+            "MOTOR"
+          ],
+          "attributes": {
+            "component": "MOTOR",
+            "motor_frame": "365T"
+          },
+          "review_flags": [
+            "UNCLASSIFIED DETAIL: by others- Not Per Original) (Qty: 1), Inquiry Num:"
+          ]
+        },
+        {
+          "raw": "Shaft/Bearing/Coupling Guard, Painted Safety N 2,390.00 478.00",
+          "norm": "SHAFT BEARING COUPLING GUARD PAINTED SAFETY",
+          "qty": "",
+          "price": "2,390.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Yellow (Not Per Original) (Qty: 1), Inquiry Num:"
+          ],
+          "tags": [
+            "SHAFT/BEARING/COUPLING GUARD"
+          ],
+          "attributes": {
+            "component": "SHAFT/BEARING/COUPLING GUARD",
+            "coating": "PAINTED SAFETY YELLOW"
+          }
+        },
+        {
+          "raw": "VFD by others. Motor complete with Aegis Bearing Protection Ring",
+          "norm": "VFD BY OTHERS MOTOR COMPLETE WITH AEGIS BEARING PROTECTION RING",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "MOTOR",
+            "VFD"
+          ],
+          "attributes": {
+            "component": "MOTOR",
+            "vfd_context": "MOTOR",
+            "vfd_supplied_by": "OTHERS",
+            "motor_shaft_grounding": "AEGIS RING"
+          }
+        },
+        {
+          "raw": "NOT PER ORIGINAL",
+          "norm": "NOT PER ORIGINAL",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "NOT PER ORIGINAL"
+          }
+        },
+        {
+          "raw": "Customer assumes responsibility for fit-up and suitability of part(s) due to part(s) being not per original",
+          "norm": "CUSTOMER ASSUMES RESPONSIBILITY FOR FIT UP AND SUITABILITY OF PART S DUE TO PART S BEING NOT PER ORIGINAL",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "MISC NOTE"
+          ],
+          "attributes": {}
+        },
+        {
+          "raw": "All Chicago Blower wheels are precision balanced; however when a precision balanced wheel is installed in a fan, the wheel may have",
+          "norm": "ALL CHICAGO BLOWER WHEELS ARE PRECISION BALANCED HOWEVER WHEN A PRECISION BALANCED WHEEL IS INSTALLED IN A FAN THE WHEEL MAY HAVE",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "MISC NOTE"
+          ],
+          "attributes": {
+            "note_type": "MISC"
+          }
+        },
+        {
+          "raw": "to be phase balanced to compensate for any imbalance or eccentricity in other components in the drive train. If the motor and drives",
+          "norm": "TO BE PHASE BALANCED TO COMPENSATE FOR ANY IMBALANCE OR ECCENTRICITY IN OTHER COMPONENTS IN THE DRIVE TRAIN IF THE MOTOR AND DRIVES",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "MOTOR"
+          ],
+          "attributes": {
+            "component": "MOTOR"
+          }
+        },
+        {
+          "raw": "are not mounted by Chicago Blower, we cannot check the assembled rotating system for vibration, and phase balance by others may",
+          "norm": "ARE NOT MOUNTED BY CHICAGO BLOWER WE CANNOT CHECK THE ASSEMBLED ROTATING SYSTEM FOR VIBRATION AND PHASE BALANCE BY OTHERS MAY",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [],
+          "attributes": {},
+          "review_flags": [
+            "UNTAGGED"
+          ]
+        },
+        {
+          "raw": "- For packages weighting UNDER 100 lbs.: Ship UPS Ground on UPS Acct # 582139",
+          "norm": "FOR PACKAGES WEIGHTING UNDER 100 LBS SHIP UPS GROUND ON UPS ACCT # 582139",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "SHIPPING"
+          ],
+          "attributes": {
+            "shipping_method": "UPS GROUND"
+          }
+        },
+        {
+          "raw": "*** ALL DIRECT SHIP P.O.'S MUST SHIP COMPLETE. NO PARTIAL ALLOWED UNLESS APPROVED BY CLEAVER-BROOKS, INC. Shall",
+          "norm": "ALL DIRECT SHIP P O S MUST SHIP COMPLETE NO PARTIAL ALLOWED UNLESS APPROVED BY CLEAVER BROOKS INC SHALL",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "SHIPPING"
+          ],
+          "attributes": {
+            "shipping_method": "SHIP DIRECT",
+            "shipping_instruction": "SHIP COMPLETE"
+          }
+        },
+        {
+          "raw": "use the “Cleaver Brooks Delivery NOTE” (packing list) provided which contains NAV#/A#/Customer PO #. MUST use BOL provided by",
+          "norm": "USE THE CLEAVER BROOKS DELIVERY NOTE PACKING LIST PROVIDED WHICH CONTAINS NAV# A# CUSTOMER PO # MUST USE BOL PROVIDED BY",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "SHIPPING"
+          ],
+          "attributes": {
+            "shipping_instruction": "SHIPPING DOCUMENTS/MARKING"
+          }
+        },
+        {
+          "raw": "CH Robinson for all shipments.***",
+          "norm": "CH ROBINSON FOR ALL SHIPMENTS",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "SHIPPING"
+          ],
+          "attributes": {}
+        },
+        {
+          "raw": "**Collect Orders Customer is responsible for international paperwork**",
+          "norm": "COLLECT ORDERS CUSTOMER IS RESPONSIBLE FOR INTERNATIONAL PAPERWORK",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "**Collect Orders Customer is responsible for international paperwork**"
+          }
+        }
+      ],
+      "parts_only": false,
+      "normalizer_version": "2026-07-22-accent-fold-evase-v1"
+    }
+  }
+}

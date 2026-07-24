@@ -1,0 +1,49 @@
+{
+  "orders": {
+    "313050B": {
+      "added": "2026-06-17T15:12:32",
+      "left": null,
+      "on_queue": false,
+      "job": {
+        "job": "313050B",
+        "co_number": 0,
+        "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\313050B\\313050B - Sales Order (original).pdf",
+        "so_design_desc": "SQB SW Belt Drive",
+        "so_size": "18 1/4",
+        "so_arrangement": "A/2S (A/9S)",
+        "so_class": "HP(2S)",
+        "so_rotation": "CW",
+        "so_special_temp": "0",
+        "line_items": [
+          {
+            "raw": "Replacement Drive Set (Ship Direct) (Qty: 1), N 692.00 83.00",
+            "norm": "REPLACEMENT DRIVE SET SHIP DIRECT QTY 1",
+            "qty": "",
+            "price": "692.00",
+            "ptype": "N",
+            "section": "",
+            "details": [
+              "Inquiry Num: 364-26-1948RP"
+            ],
+            "tags": [
+              "DRIVE COMPONENTS",
+              "SHIPPING",
+              "SPARE PARTS"
+            ],
+            "attributes": {
+              "inquiry_num": "364-26-1948RP",
+              "component": "REPLACEMENT DRIVE SET",
+              "shipping_method": "SHIP DIRECT",
+              "drive_subcategory": "DRIVE SET"
+            }
+          }
+        ],
+        "line_item_tags": "DRIVE COMPONENTS, SHIPPING, SPARE PARTS",
+        "so_validation": "MATCH",
+        "so_document_kind": "SALES_ORDER",
+        "so_internal_order": "313050B",
+        "so_validation_method": "header"
+      }
+    }
+  }
+}

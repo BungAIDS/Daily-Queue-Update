@@ -1,0 +1,722 @@
+{
+  "jobs": {
+    "422017": {
+      "customer": "",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\422017\\422017 - Sales Order (original).pdf",
+      "scanned_at": "2026-07-13T22:06:11",
+      "items": [
+        {
+          "raw": "Base Fan (Base Fan, Suitable for 90L Frame, Inquiry L 3,773.00",
+          "norm": "BASE FAN BASE FAN SUITABLE FOR 90L FRAME INQUIRY",
+          "qty": "",
+          "price": "3,773.00",
+          "ptype": "L",
+          "section": "",
+          "details": [
+            "Num: 350-26-2105)"
+          ],
+          "tags": [
+            "BASE FAN"
+          ],
+          "attributes": {
+            "inquiry_num": "350-26-2105"
+          }
+        },
+        {
+          "raw": "Motor (Multimounting IE3 3 HP 2P 90S/L 3Ph C 390.10 12.00 96.00 498.00 29.00",
+          "norm": "MOTOR MULTIMOUNTING IE3 3 HP 2P 90S L 3PH",
+          "qty": "",
+          "price": "390.10",
+          "ptype": "C",
+          "section": "",
+          "details": [
+            "230/460//380-415 V 60 Hz IC411 - TEFC - B3L(E)",
+            "00236ET3EAL90L-W22 )",
+            "Vendor: Weg",
+            "3 HP, 3600 RPM, Enclosure: TEFC",
+            "90L, Cast Iron, Foot Mounted, 3/60/380, F1,",
+            "1.0 SF"
+          ],
+          "tags": [
+            "MOTOR"
+          ],
+          "attributes": {
+            "component": "MOTOR",
+            "motor_mounting": "FOOT MOUNTED, MULTIMOUNTING",
+            "vendor": "Weg"
+          }
+        },
+        {
+          "raw": "Housing Drain with Plug L 126.00",
+          "norm": "HOUSING DRAIN WITH PLUG",
+          "qty": "",
+          "price": "126.00",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "DRAIN"
+          ],
+          "attributes": {
+            "drain_type": "HOUSING DRAIN",
+            "drain_closure": "PLUG"
+          }
+        },
+        {
+          "raw": "Include 3D STEP Drawings L NC",
+          "norm": "INCLUDE 3D STEP DRAWINGS",
+          "qty": "",
+          "price": "NC",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "3D STEP DRAWINGS",
+            "DRAWINGS"
+          ],
+          "attributes": {
+            "drawing_type": "3D STEP DRAWINGS",
+            "drawing_scope": "3D FILE"
+          }
+        },
+        {
+          "raw": "Inlet Screen, Standard L 195.00",
+          "norm": "INLET SCREEN STANDARD",
+          "qty": "",
+          "price": "195.00",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "SCREEN"
+          ],
+          "attributes": {
+            "component": "SCREEN",
+            "screen_subcategory": "SCREEN",
+            "screen_feature": "STANDARD",
+            "used_on": "INLET"
+          }
+        },
+        {
+          "raw": "Inlet, Open L STD",
+          "norm": "INLET OPEN",
+          "qty": "",
+          "price": "STD",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "INLET"
+          ],
+          "attributes": {
+            "inlet_subcategory": "OPEN"
+          }
+        },
+        {
+          "raw": "Mechanical Run Test, Not Available L STD",
+          "norm": "MECHANICAL RUN TEST NOT AVAILABLE",
+          "qty": "",
+          "price": "STD",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "TESTING"
+          ],
+          "attributes": {
+            "testing_type": "MECHANICAL RUN TEST",
+            "testing_status": "NOT AVAILABLE"
+          }
+        },
+        {
+          "raw": "Non Standard Motor Frame L INC",
+          "norm": "NON STANDARD MOTOR FRAME",
+          "qty": "",
+          "price": "INC",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "MOTOR"
+          ],
+          "attributes": {}
+        },
+        {
+          "raw": "Outlet, Flanged, Punched L STD",
+          "norm": "OUTLET FLANGED PUNCHED",
+          "qty": "",
+          "price": "STD",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "FLANGE",
+            "OUTLET"
+          ],
+          "attributes": {
+            "flange_scope": "OUTLET",
+            "flange_type": "PUNCHED"
+          }
+        },
+        {
+          "raw": "Metric Hardware, Inquiry Num: 350-26-2105 L 503.00",
+          "norm": "METRIC HARDWARE INQUIRY NUM 350 26 2105",
+          "qty": "",
+          "price": "503.00",
+          "ptype": "L",
+          "section": "",
+          "details": [
+            "422017 PCS 10260667"
+          ],
+          "tags": [],
+          "attributes": {
+            "inquiry_num": "350-26-2105"
+          },
+          "review_flags": [
+            "UNTAGGED"
+          ]
+        },
+        {
+          "raw": "Run Test - N/A (Send to Sales for Run Test Availability Check if CBC is mounting the motor)",
+          "norm": "RUN TEST N A SEND TO SALES FOR RUN TEST AVAILABILITY CHECK IF CBC IS MOUNTING THE MOTOR",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "MOTOR",
+            "TESTING"
+          ],
+          "attributes": {
+            "testing_type": "RUN TEST",
+            "testing_status": "N/A"
+          }
+        }
+      ]
+    },
+    "422018": {
+      "customer": "",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\422018\\422018 - Sales Order (original).pdf",
+      "scanned_at": "2026-07-13T22:05:56",
+      "items": [
+        {
+          "raw": "Base Fan (Base Fan, Suitable for 90L Frame, Inquiry L 3,773.00",
+          "norm": "BASE FAN BASE FAN SUITABLE FOR 90L FRAME INQUIRY",
+          "qty": "",
+          "price": "3,773.00",
+          "ptype": "L",
+          "section": "",
+          "details": [
+            "Num: 350-26-2104)"
+          ],
+          "tags": [
+            "BASE FAN"
+          ],
+          "attributes": {
+            "inquiry_num": "350-26-2104"
+          }
+        },
+        {
+          "raw": "Motor (Multimounting IE3 3 HP 2P 90S/L 3Ph C 390.10 12.00 96.00 498.00 29.00",
+          "norm": "MOTOR MULTIMOUNTING IE3 3 HP 2P 90S L 3PH",
+          "qty": "",
+          "price": "390.10",
+          "ptype": "C",
+          "section": "",
+          "details": [
+            "230/460//380-415 V 60 Hz IC411 - TEFC - B3L(E)",
+            "Vendor: Weg",
+            "3 HP, 3600 RPM, Enclosure: TEFC",
+            "90L, Cast Iron, Foot Mounted, 3/60/380, F1,",
+            "1.0 SF",
+            "VFD Controlled"
+          ],
+          "tags": [
+            "MOTOR",
+            "VFD"
+          ],
+          "attributes": {
+            "component": "MOTOR",
+            "vfd_context": "MOTOR",
+            "motor_mounting": "FOOT MOUNTED, MULTIMOUNTING",
+            "vendor": "Weg"
+          }
+        },
+        {
+          "raw": "Include 3D STEP Drawings L NC",
+          "norm": "INCLUDE 3D STEP DRAWINGS",
+          "qty": "",
+          "price": "NC",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "3D STEP DRAWINGS",
+            "DRAWINGS"
+          ],
+          "attributes": {
+            "drawing_type": "3D STEP DRAWINGS",
+            "drawing_scope": "3D FILE"
+          }
+        },
+        {
+          "raw": "Inlet Screen, Standard L 195.00",
+          "norm": "INLET SCREEN STANDARD",
+          "qty": "",
+          "price": "195.00",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "SCREEN"
+          ],
+          "attributes": {
+            "component": "SCREEN",
+            "screen_subcategory": "SCREEN",
+            "screen_feature": "STANDARD",
+            "used_on": "INLET"
+          }
+        },
+        {
+          "raw": "Inlet, Open L STD",
+          "norm": "INLET OPEN",
+          "qty": "",
+          "price": "STD",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "INLET"
+          ],
+          "attributes": {
+            "inlet_subcategory": "OPEN"
+          }
+        },
+        {
+          "raw": "Mechanical Run Test, Not Available L STD",
+          "norm": "MECHANICAL RUN TEST NOT AVAILABLE",
+          "qty": "",
+          "price": "STD",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "TESTING"
+          ],
+          "attributes": {
+            "testing_type": "MECHANICAL RUN TEST",
+            "testing_status": "NOT AVAILABLE"
+          }
+        },
+        {
+          "raw": "Non Standard Motor Frame L INC",
+          "norm": "NON STANDARD MOTOR FRAME",
+          "qty": "",
+          "price": "INC",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "MOTOR"
+          ],
+          "attributes": {}
+        },
+        {
+          "raw": "Outlet, Flanged, Punched L STD",
+          "norm": "OUTLET FLANGED PUNCHED",
+          "qty": "",
+          "price": "STD",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "FLANGE",
+            "OUTLET"
+          ],
+          "attributes": {
+            "flange_scope": "OUTLET",
+            "flange_type": "PUNCHED"
+          }
+        },
+        {
+          "raw": "Metric Hardware, Inquiry Num: 350-26-2104 L 503.00",
+          "norm": "METRIC HARDWARE INQUIRY NUM 350 26 2104",
+          "qty": "",
+          "price": "503.00",
+          "ptype": "L",
+          "section": "",
+          "details": [
+            "422018 PCS 10260667"
+          ],
+          "tags": [],
+          "attributes": {
+            "inquiry_num": "350-26-2104"
+          },
+          "review_flags": [
+            "UNTAGGED"
+          ]
+        },
+        {
+          "raw": "Run Test - N/A (Send to Sales for Run Test Availability Check if CBC is mounting the motor)",
+          "norm": "RUN TEST N A SEND TO SALES FOR RUN TEST AVAILABILITY CHECK IF CBC IS MOUNTING THE MOTOR",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "MOTOR",
+            "TESTING"
+          ],
+          "attributes": {
+            "testing_type": "RUN TEST",
+            "testing_status": "N/A"
+          }
+        }
+      ]
+    },
+    "422019": {
+      "customer": "",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\422019\\422019 - Sales Order (original).pdf",
+      "scanned_at": "2026-07-13T22:05:42",
+      "items": [
+        {
+          "raw": "Base Fan (Base Fan, 13 x 3-1/4 RB Wheel, 8\" Inlet, N 2,050.00",
+          "norm": "BASE FAN BASE FAN 13 X 3 1 4 RB WHEEL 8 INLET",
+          "qty": "",
+          "price": "2,050.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Suitable for 90L Frame, Inquiry Num: 350-26-2111)"
+          ],
+          "tags": [
+            "BASE FAN",
+            "WHEEL"
+          ],
+          "attributes": {
+            "inquiry_num": "350-26-2111"
+          }
+        },
+        {
+          "raw": "Motor (Multimounting IE3 3 HP 2P 90S/L 3Ph C 390.10 12.00 42.00 444.00",
+          "norm": "MOTOR MULTIMOUNTING IE3 3 HP 2P 90S L 3PH",
+          "qty": "",
+          "price": "390.10",
+          "ptype": "C",
+          "section": "",
+          "details": [
+            "230/460//380-415 V 60 Hz IC411 - TEFC - B3L(E)",
+            "Vendor: Weg",
+            "3 HP, 3600 RPM, Enclosure: TEFC",
+            "90L, Cast Aluminum, Foot Mounted, 3/60/380,",
+            "F1, 1.0 SF",
+            "VFD Controlled"
+          ],
+          "tags": [
+            "MOTOR",
+            "VFD"
+          ],
+          "attributes": {
+            "component": "MOTOR",
+            "vfd_context": "MOTOR",
+            "motor_mounting": "FOOT MOUNTED, MULTIMOUNTING",
+            "vendor": "Weg",
+            "component_material": "ALUMINUM",
+            "component_material_scope": "MOTOR"
+          }
+        },
+        {
+          "raw": "Inlet Screen, (Inlet Dia 8\") N 49.00",
+          "norm": "INLET SCREEN INLET DIA 8",
+          "qty": "",
+          "price": "49.00",
+          "ptype": "N",
+          "section": "",
+          "details": [],
+          "tags": [
+            "SCREEN"
+          ],
+          "attributes": {
+            "screen_diameter": "8",
+            "component": "SCREEN",
+            "screen_subcategory": "SCREEN",
+            "used_on": "INLET"
+          }
+        },
+        {
+          "raw": "Inlet, Slip N STD",
+          "norm": "INLET SLIP",
+          "qty": "",
+          "price": "STD",
+          "ptype": "N",
+          "section": "",
+          "details": [],
+          "tags": [
+            "INLET"
+          ],
+          "attributes": {
+            "inlet_subcategory": "SLIP"
+          }
+        },
+        {
+          "raw": "Mechanical Run Test, Not Available N STD",
+          "norm": "MECHANICAL RUN TEST NOT AVAILABLE",
+          "qty": "",
+          "price": "STD",
+          "ptype": "N",
+          "section": "",
+          "details": [],
+          "tags": [
+            "TESTING"
+          ],
+          "attributes": {
+            "testing_type": "MECHANICAL RUN TEST",
+            "testing_status": "NOT AVAILABLE"
+          }
+        },
+        {
+          "raw": "Outlet, Slip N STD",
+          "norm": "OUTLET SLIP",
+          "qty": "",
+          "price": "STD",
+          "ptype": "N",
+          "section": "",
+          "details": [],
+          "tags": [
+            "OUTLET"
+          ],
+          "attributes": {}
+        },
+        {
+          "raw": "Metric Hardware, Inquiry Num: 350-26-2111 N 225.00",
+          "norm": "METRIC HARDWARE INQUIRY NUM 350 26 2111",
+          "qty": "",
+          "price": "225.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "422019 PCS 10260667"
+          ],
+          "tags": [],
+          "attributes": {
+            "inquiry_num": "350-26-2111"
+          },
+          "review_flags": [
+            "UNTAGGED"
+          ]
+        },
+        {
+          "raw": "Run Test - N/A (Send to Sales for Run Test Availability Check if CBC is mounting the motor)",
+          "norm": "RUN TEST N A SEND TO SALES FOR RUN TEST AVAILABILITY CHECK IF CBC IS MOUNTING THE MOTOR",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "MOTOR",
+            "TESTING"
+          ],
+          "attributes": {
+            "testing_type": "RUN TEST",
+            "testing_status": "N/A"
+          }
+        }
+      ]
+    },
+    "422025": {
+      "customer": "",
+      "co_number": 1,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\422025\\422025 - Sales Order CO1.pdf",
+      "scanned_at": "2026-07-13T22:05:30",
+      "items": [
+        {
+          "raw": "Base Fan L 6,052.00",
+          "norm": "BASE FAN",
+          "qty": "",
+          "price": "6,052.00",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "BASE FAN"
+          ],
+          "attributes": {}
+        },
+        {
+          "raw": "Motor C 423.53 8.00 103.00 535.00 31.00",
+          "norm": "MOTOR",
+          "qty": "",
+          "price": "423.53",
+          "ptype": "C",
+          "section": "",
+          "details": [
+            "Vendor: Toshiba or equivalent",
+            "7.5 HP, 3600 RPM, Enclosure: TEFC Premium",
+            "213T, Cast Iron, Foot Mounted, 3/60/575, F1,",
+            "1.15 SF",
+            "Model #Y752SDSC41A-P",
+            "VFD Suitable",
+            "CBC Mount"
+          ],
+          "tags": [
+            "MOTOR",
+            "VFD"
+          ],
+          "attributes": {
+            "component": "MOTOR",
+            "vfd_context": "MOTOR",
+            "motor_vfd_suitability": "VFD SUITABLE",
+            "motor_mounting": "FOOT MOUNTED",
+            "mounting": "CBC MOUNT",
+            "vendor": "Toshiba or equivalent"
+          }
+        },
+        {
+          "raw": "Access Door, Access Port with Plug L 885.00",
+          "norm": "ACCESS DOOR ACCESS PORT WITH PLUG",
+          "qty": "",
+          "price": "885.00",
+          "ptype": "L",
+          "section": "",
+          "details": [
+            "Door Location: @9:00"
+          ],
+          "tags": [
+            "ACCESS DOOR"
+          ],
+          "attributes": {}
+        },
+        {
+          "raw": "Housing Drain with Plug L 133.00",
+          "norm": "HOUSING DRAIN WITH PLUG",
+          "qty": "",
+          "price": "133.00",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "DRAIN"
+          ],
+          "attributes": {
+            "drain_type": "HOUSING DRAIN",
+            "drain_closure": "PLUG"
+          }
+        },
+        {
+          "raw": "Include 3D STEP Drawings L NC",
+          "norm": "INCLUDE 3D STEP DRAWINGS",
+          "qty": "",
+          "price": "NC",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "3D STEP DRAWINGS",
+            "DRAWINGS"
+          ],
+          "attributes": {
+            "drawing_type": "3D STEP DRAWINGS",
+            "drawing_scope": "3D FILE"
+          }
+        },
+        {
+          "raw": "Inlet, Flanged, Punched L 91.00",
+          "norm": "INLET FLANGED PUNCHED",
+          "qty": "",
+          "price": "91.00",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "FLANGE",
+            "INLET"
+          ],
+          "attributes": {
+            "flange_scope": "INLET",
+            "flange_type": "PUNCHED",
+            "inlet_subcategory": "FLANGED/PUNCHED",
+            "inlet_feature": "PUNCHED"
+          }
+        },
+        {
+          "raw": "Mechanical Run Test, Standard L STD",
+          "norm": "MECHANICAL RUN TEST STANDARD",
+          "qty": "",
+          "price": "STD",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "TESTING"
+          ],
+          "attributes": {
+            "testing_type": "MECHANICAL RUN TEST",
+            "testing_status": "STANDARD"
+          }
+        },
+        {
+          "raw": "Outlet, Flanged, Punched L STD",
+          "norm": "OUTLET FLANGED PUNCHED",
+          "qty": "",
+          "price": "STD",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "FLANGE",
+            "OUTLET"
+          ],
+          "attributes": {
+            "flange_scope": "OUTLET",
+            "flange_type": "PUNCHED"
+          }
+        },
+        {
+          "raw": "Wheel, Aluminium L STD",
+          "norm": "WHEEL ALUMINUM",
+          "qty": "",
+          "price": "STD",
+          "ptype": "L",
+          "section": "",
+          "details": [
+            "Price match 2026 (CBC order# 422025), Inquiry L -344.00",
+            "Num: 999-26-2458",
+            "422025 PO 7092 / PO 46835 PO 7092 / PO 46835"
+          ],
+          "tags": [
+            "ALUMINUM",
+            "MATERIALS",
+            "WHEEL"
+          ],
+          "attributes": {
+            "inquiry_num": "999-26-2458",
+            "material": "ALUMINUM",
+            "material_scope": "WHEEL"
+          }
+        },
+        {
+          "raw": "Run Test - Required",
+          "norm": "RUN TEST REQUIRED",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "TESTING"
+          ],
+          "attributes": {
+            "testing_type": "RUN TEST",
+            "testing_status": "REQUIRED"
+          }
+        }
+      ]
+    }
+  }
+}

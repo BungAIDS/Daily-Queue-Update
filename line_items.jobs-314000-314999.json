@@ -1,0 +1,275 @@
+{
+  "jobs": {
+    "314619B": {
+      "customer": "ENERGY TRANSFER",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\314619B\\314619B - Sales Order (original).pdf",
+      "arrangement": "A/7D2",
+      "job_number": "",
+      "parts_only": true,
+      "scanned_at": "2026-07-23T05:03:07",
+      "parser_version": "2026-07-20-so-review-v2",
+      "items": [
+        {
+          "raw": "Concrete Inertia Base (Painted: SSPC-SP6 Sandblast N 37,862.00 2,818.00",
+          "norm": "CONCRETE INERTIA BASE PAINTED SSPC SP6 SANDBLAST",
+          "qty": "",
+          "price": "37,862.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "w/ one coat Inorganic Zinc 3 mils DFT, One coat",
+            "Epoxy 3mils DFT, Color: RAL 7001 Grey) , Kinetics",
+            "Noise Control, Model CIB-H, Height Saver Brackets,",
+            "Sheet Metal Base Pan, Punched Flanges (for inlet",
+            "boxes connections) (Qty: 1), Inquiry Num: 302-26-",
+            "2513RP"
+          ],
+          "tags": [
+            "COATING",
+            "FLANGE"
+          ],
+          "attributes": {
+            "inquiry_num": "302-26-2513RP",
+            "flange_type": "PUNCHED",
+            "coating_type": "EPOXY",
+            "coating_category": "EPOXY/PRIMER",
+            "coating_color": "RAL 7001 GREY KINETICS",
+            "component": "INLET"
+          },
+          "source": {
+            "page": 1,
+            "row": 33,
+            "top": 418,
+            "source_type": "pdf-row",
+            "source_text": "Concrete Inertia Base (Painted: SSPC-SP6 Sandblast N 37,862.00 2,818.00",
+            "line": 33
+          },
+          "detail_sources": [
+            {
+              "page": 1,
+              "row": 34,
+              "top": 429,
+              "source_type": "pdf-row",
+              "source_text": "w/ one coat Inorganic Zinc 3 mils DFT, One coat",
+              "line": 34
+            },
+            {
+              "page": 1,
+              "row": 35,
+              "top": 440,
+              "source_type": "pdf-row",
+              "source_text": "Epoxy 3mils DFT, Color: RAL 7001 Grey) , Kinetics",
+              "line": 35
+            },
+            {
+              "page": 1,
+              "row": 36,
+              "top": 451,
+              "source_type": "pdf-row",
+              "source_text": "Noise Control, Model CIB-H, Height Saver Brackets,",
+              "line": 36
+            },
+            {
+              "page": 1,
+              "row": 37,
+              "top": 462,
+              "source_type": "pdf-row",
+              "source_text": "Sheet Metal Base Pan, Punched Flanges (for inlet",
+              "line": 37
+            },
+            {
+              "page": 1,
+              "row": 38,
+              "top": 472,
+              "source_type": "pdf-row",
+              "source_text": "boxes connections) (Qty: 1), Inquiry Num: 302-26-",
+              "line": 38
+            },
+            {
+              "page": 1,
+              "row": 39,
+              "top": 483,
+              "source_type": "pdf-row",
+              "source_text": "2513RP",
+              "line": 39
+            }
+          ],
+          "review_flags": [
+            "UNCLASSIFIED DETAIL: Noise Control, Model CIB-H, Height Saver Brackets,"
+          ]
+        },
+        {
+          "raw": "ENERGY TRANSFER",
+          "norm": "ENERGY TRANSFER",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "ENERGY TRANSFER"
+          },
+          "source": {
+            "page": 1,
+            "row": 49,
+            "top": 644,
+            "source_type": "pdf-row",
+            "source_text": "ENERGY TRANSFER",
+            "line": 49
+          }
+        },
+        {
+          "raw": "ATTN: Nick Lutter",
+          "norm": "ATTN NICK LUTTER",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "ATTN: Nick Lutter"
+          },
+          "source": {
+            "page": 1,
+            "row": 50,
+            "top": 655,
+            "source_type": "pdf-row",
+            "source_text": "ATTN: Nick Lutter",
+            "line": 50
+          }
+        },
+        {
+          "raw": "9850 FM 1942",
+          "norm": "9850 FM 1942",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "9850 FM 1942"
+          },
+          "source": {
+            "page": 1,
+            "row": 51,
+            "top": 666,
+            "source_type": "pdf-row",
+            "source_text": "9850 FM 1942",
+            "line": 51
+          }
+        },
+        {
+          "raw": "BAYTOWN, TX 77521",
+          "norm": "BAYTOWN TX 77521",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "BAYTOWN, TX 77521"
+          },
+          "source": {
+            "page": 1,
+            "row": 52,
+            "top": 677,
+            "source_type": "pdf-row",
+            "source_text": "BAYTOWN, TX 77521",
+            "line": 52
+          }
+        },
+        {
+          "raw": "Document Fact: MARK",
+          "norm": "DOCUMENT FACT MARK",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "DOCUMENT FACTS",
+          "details": [
+            "P.O. NL071326"
+          ],
+          "tags": [
+            "MARK"
+          ],
+          "attributes": {
+            "mark_text": "P.O. NL071326",
+            "component": "MARK"
+          },
+          "document_fact": "MARK",
+          "document_attributes": {
+            "mark_text": "P.O. NL071326"
+          },
+          "source": {
+            "page": 1,
+            "source_type": "pdf-table",
+            "source_text": "P.O. NL071326"
+          }
+        },
+        {
+          "raw": "Document Fact: SHIP TO",
+          "norm": "DOCUMENT FACT SHIP TO",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "DOCUMENT FACTS",
+          "details": [
+            "ENERGY TRANSFER",
+            "9850 FM 1942 RD",
+            "BAYTOWN, TX 77521",
+            "UNITED STATES OF AMERICA"
+          ],
+          "tags": [
+            "SHIP TO"
+          ],
+          "attributes": {
+            "ship_to_company": "ENERGY TRANSFER",
+            "ship_to_address": "9850 FM 1942 RD | BAYTOWN, TX 77521",
+            "ship_to_country": "UNITED STATES OF AMERICA",
+            "component": "SHIP TO"
+          },
+          "document_fact": "SHIP TO",
+          "document_attributes": {
+            "ship_to_company": "ENERGY TRANSFER",
+            "ship_to_address": "9850 FM 1942 RD | BAYTOWN, TX 77521",
+            "ship_to_country": "UNITED STATES OF AMERICA"
+          },
+          "source": {
+            "page": 1,
+            "source_type": "pdf-table",
+            "source_text": "ENERGY TRANSFER | 9850 FM 1942 RD | BAYTOWN, TX 77521 | UNITED STATES OF AMERICA"
+          }
+        }
+      ],
+      "so_design_desc": "DW",
+      "so_size": "5414",
+      "so_arrangement": "A/7D2",
+      "so_motor_pos": "",
+      "so_class": "N/A",
+      "so_rotation": "CW",
+      "so_discharge": "",
+      "so_pct_width": "",
+      "so_wheel_type": "",
+      "so_design_temp": "",
+      "so_max_temp": "",
+      "so_special_temp": "0",
+      "source_pdf_sha256": "80777480cd03ed452c6aeab0ac595960bb695916e298ce3c7585aaf9f1f2784b"
+    }
+  }
+}

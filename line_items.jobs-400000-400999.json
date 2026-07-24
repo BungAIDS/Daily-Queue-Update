@@ -1,0 +1,162 @@
+{
+  "jobs": {
+    "400683": {
+      "customer": "",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\400683\\400683 - Sales Order (original).pdf",
+      "scanned_at": "2026-07-10T07:52:49",
+      "items": [
+        {
+          "raw": "Base Fan L 6,233.00",
+          "norm": "BASE FAN",
+          "qty": "",
+          "price": "6,233.00",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "BASE FAN"
+          ],
+          "attributes": {
+            "component": "BASE FAN"
+          }
+        },
+        {
+          "raw": "Include 3D STEP Drawings L NC",
+          "norm": "INCLUDE 3D STEP DRAWINGS",
+          "qty": "",
+          "price": "NC",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "3D STEP DRAWINGS",
+            "DRAWINGS"
+          ],
+          "attributes": {
+            "component": "3D STEP DRAWINGS"
+          }
+        },
+        {
+          "raw": "Mechanical Run Test, Standard L STD",
+          "norm": "MECHANICAL RUN TEST STANDARD",
+          "qty": "",
+          "price": "STD",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "TESTING"
+          ],
+          "attributes": {
+            "component": "MECHANICAL RUN TEST"
+          }
+        },
+        {
+          "raw": "Motor Conduit Box Location L STD",
+          "norm": "MOTOR CONDUIT BOX LOCATION",
+          "qty": "",
+          "price": "STD",
+          "ptype": "L",
+          "section": "",
+          "details": [
+            "Viewed from Outlet: @12:00"
+          ],
+          "tags": [
+            "MOTOR"
+          ],
+          "attributes": {
+            "component": "MOTOR",
+            "motor_feature": "CONDUIT BOX LOCATION",
+            "motor_conduit_box_position": "12:00 VIEWED FROM OUTLET"
+          }
+        },
+        {
+          "raw": "Flush Mounted Conduit Box, Inquiry Num: 339-21- L 118.83",
+          "norm": "FLUSH MOUNTED CONDUIT BOX INQUIRY NUM 339 21",
+          "qty": "",
+          "price": "118.83",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [
+            "SPECIAL CONSTRUCTION"
+          ],
+          "attributes": {}
+        },
+        {
+          "raw": "Non Standard Vertical Mounting Lugs, Inquiry Num: L 770.83",
+          "norm": "NON STANDARD VERTICAL MOUNTING LUGS INQUIRY NUM",
+          "qty": "",
+          "price": "770.83",
+          "ptype": "L",
+          "section": "",
+          "details": [],
+          "tags": [],
+          "attributes": {
+            "component": "MOUNTING",
+            "mounting_type": "LUGS"
+          },
+          "review_flags": [
+            "UNTAGGED"
+          ]
+        },
+        {
+          "raw": "Motor (Dietz/Siemens w/ Sealed Bearings C 2,015.00 81.00 335.00 2,431.00 101.00",
+          "norm": "MOTOR DIETZ SIEMENS WITH SEALED BEARINGS",
+          "qty": "",
+          "price": "2,015.00",
+          "ptype": "C",
+          "section": "",
+          "details": [
+            "VFD Suitable",
+            "Vendor: Dietz",
+            "20 HP, 3600 RPM, Enclosure: TEAO Premium,",
+            "254TC, Cast Iron, C-Face, No Feet",
+            "3/60/230/460, F1, 1.15 SF",
+            "VFD Controlled"
+          ],
+          "tags": [
+            "MOTOR",
+            "VFD"
+          ],
+          "attributes": {
+            "component": "MOTOR",
+            "motor_hp": "20",
+            "motor_rpm": "3600",
+            "motor_frame": "254TC",
+            "motor_phase": "3",
+            "motor_frequency_hz": "60",
+            "motor_voltage": "230/460",
+            "motor_service_factor": "1.15",
+            "motor_conduit_box_location": "F1",
+            "motor_enclosure": "TEAO",
+            "motor_frame_material": "CAST IRON",
+            "vfd_context": "MOTOR",
+            "motor_vfd_suitability": "VFD SUITABLE",
+            "motor_vfd_operation": "VFD CONTROLLED",
+            "motor_mounting": "C-FLANGE, NO FEET",
+            "vendor": "Dietz"
+          }
+        },
+        {
+          "raw": "Run Test - Required",
+          "norm": "RUN TEST REQUIRED",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "TESTING"
+          ],
+          "attributes": {
+            "component": "MECHANICAL RUN TEST"
+          }
+        }
+      ],
+      "parts_only": false,
+      "normalizer_version": "2026-07-22-accent-fold-evase-v1"
+    }
+  }
+}

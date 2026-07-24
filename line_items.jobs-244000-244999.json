@@ -1,0 +1,154 @@
+{
+  "jobs": {
+    "244926A": {
+      "customer": "PEERLESS MANUFACTURING CO",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\244926A\\244926A - Sales Order (original).pdf",
+      "scanned_at": "2026-07-10T07:52:49",
+      "items": [
+        {
+          "raw": "Replacement Rotor Assembly (Qty: 1), Inquiry N 23,952.00 4,790.00",
+          "norm": "REPLACEMENT ROTOR ASSEMBLY QTY 1 INQUIRY",
+          "qty": "",
+          "price": "23,952.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Num: 352-26-2233RP"
+          ],
+          "tags": [
+            "SPARE PARTS"
+          ],
+          "attributes": {
+            "inquiry_num": "352-26-2233RP",
+            "component": "REPLACEMENT ROTOR ASSEMBLY"
+          }
+        },
+        {
+          "raw": "Resale No: 75-0724417",
+          "norm": "RESALE NO 75 0724417",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "Resale No: 75-0724417"
+          }
+        },
+        {
+          "raw": "IF UNABLE TO SHIP THIS WAY, PLEASE PROVIDE WEIGHT, DIMS AND COLLECTION ADDRESS & SHIPPING WILL BE",
+          "norm": "IF UNABLE TO SHIP THIS WAY PLEASE PROVIDE WEIGHT DIMS AND COLLECTION ADDRESS SHIPPING WILL BE",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "SHIPPING"
+          ],
+          "attributes": {
+            "shipping_instruction": "PROVIDE WEIGHT/DIMS"
+          }
+        },
+        {
+          "raw": "ARRANGED",
+          "norm": "ARRANGED",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "ARRANGED"
+          }
+        }
+      ],
+      "parts_only": true,
+      "normalizer_version": "2026-07-22-accent-fold-evase-v1"
+    },
+    "244926B": {
+      "customer": "PEERLESS MANUFACTURING CO",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\244926B\\244926B - Sales Order (original).pdf",
+      "scanned_at": "2026-07-10T07:52:49",
+      "items": [
+        {
+          "raw": "Replacement Rotor Assembly (Qty: 1), Inquiry N 23,952.00 4,790.00",
+          "norm": "REPLACEMENT ROTOR ASSEMBLY QTY 1 INQUIRY",
+          "qty": "",
+          "price": "23,952.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Num: 352-26-2233RP"
+          ],
+          "tags": [
+            "SPARE PARTS"
+          ],
+          "attributes": {
+            "inquiry_num": "352-26-2233RP",
+            "component": "REPLACEMENT ROTOR ASSEMBLY"
+          }
+        },
+        {
+          "raw": "Resale No: 75-0724417",
+          "norm": "RESALE NO 75 0724417",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "Resale No: 75-0724417"
+          }
+        },
+        {
+          "raw": "IF UNABLE TO SHIP THIS WAY, PLEASE PROVIDE WEIGHT, DIMS AND COLLECTION ADDRESS & SHIPPING WILL BE",
+          "norm": "IF UNABLE TO SHIP THIS WAY PLEASE PROVIDE WEIGHT DIMS AND COLLECTION ADDRESS SHIPPING WILL BE",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "SHIPPING"
+          ],
+          "attributes": {
+            "shipping_instruction": "PROVIDE WEIGHT/DIMS"
+          }
+        },
+        {
+          "raw": "ARRANGED",
+          "norm": "ARRANGED",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "ARRANGED"
+          }
+        }
+      ],
+      "parts_only": true,
+      "normalizer_version": "2026-07-22-accent-fold-evase-v1"
+    }
+  }
+}

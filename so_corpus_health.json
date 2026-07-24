@@ -1,0 +1,2566 @@
+{
+  "checked_at": "2026-07-17T07:49:03",
+  "progress_jobs": 13065,
+  "trusted_ok_jobs": 11769,
+  "stored_jobs": 11812,
+  "trusted_with_store": 11769,
+  "missing_store_jobs": [],
+  "missing_pdf_jobs": [],
+  "item_count_mismatches": [
+    {
+      "job": "401951",
+      "progress_count": 40,
+      "stored_count": 38,
+      "difference": -2
+    },
+    {
+      "job": "403129",
+      "progress_count": 9,
+      "stored_count": 7,
+      "difference": -2
+    },
+    {
+      "job": "403212",
+      "progress_count": 26,
+      "stored_count": 24,
+      "difference": -2
+    },
+    {
+      "job": "403387",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "403841",
+      "progress_count": 17,
+      "stored_count": 16,
+      "difference": -1
+    },
+    {
+      "job": "403867",
+      "progress_count": 14,
+      "stored_count": 12,
+      "difference": -2
+    },
+    {
+      "job": "403868",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "403869",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "403939",
+      "progress_count": 26,
+      "stored_count": 24,
+      "difference": -2
+    },
+    {
+      "job": "403941",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "404311",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "404413",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "404414",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "404457",
+      "progress_count": 34,
+      "stored_count": 32,
+      "difference": -2
+    },
+    {
+      "job": "404458",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "404503",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "404504",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "404795",
+      "progress_count": 27,
+      "stored_count": 25,
+      "difference": -2
+    },
+    {
+      "job": "405287",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "405332",
+      "progress_count": 17,
+      "stored_count": 15,
+      "difference": -2
+    },
+    {
+      "job": "405545",
+      "progress_count": 24,
+      "stored_count": 22,
+      "difference": -2
+    },
+    {
+      "job": "405629",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "406106",
+      "progress_count": 26,
+      "stored_count": 24,
+      "difference": -2
+    },
+    {
+      "job": "406711",
+      "progress_count": 16,
+      "stored_count": 14,
+      "difference": -2
+    },
+    {
+      "job": "407380",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "407551",
+      "progress_count": 35,
+      "stored_count": 34,
+      "difference": -1
+    },
+    {
+      "job": "407789",
+      "progress_count": 25,
+      "stored_count": 23,
+      "difference": -2
+    },
+    {
+      "job": "407911",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "407912",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "408089",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "408168",
+      "progress_count": 27,
+      "stored_count": 25,
+      "difference": -2
+    },
+    {
+      "job": "408656",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "408830",
+      "progress_count": 17,
+      "stored_count": 15,
+      "difference": -2
+    },
+    {
+      "job": "408831",
+      "progress_count": 29,
+      "stored_count": 28,
+      "difference": -1
+    },
+    {
+      "job": "408833",
+      "progress_count": 29,
+      "stored_count": 28,
+      "difference": -1
+    },
+    {
+      "job": "408888",
+      "progress_count": 29,
+      "stored_count": 27,
+      "difference": -2
+    },
+    {
+      "job": "408892",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "409195",
+      "progress_count": 24,
+      "stored_count": 22,
+      "difference": -2
+    },
+    {
+      "job": "409197",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "409243",
+      "progress_count": 16,
+      "stored_count": 15,
+      "difference": -1
+    },
+    {
+      "job": "409261",
+      "progress_count": 22,
+      "stored_count": 21,
+      "difference": -1
+    },
+    {
+      "job": "409278",
+      "progress_count": 26,
+      "stored_count": 24,
+      "difference": -2
+    },
+    {
+      "job": "409483",
+      "progress_count": 25,
+      "stored_count": 23,
+      "difference": -2
+    },
+    {
+      "job": "409646",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "409831",
+      "progress_count": 35,
+      "stored_count": 34,
+      "difference": -1
+    },
+    {
+      "job": "409949",
+      "progress_count": 25,
+      "stored_count": 23,
+      "difference": -2
+    },
+    {
+      "job": "410114",
+      "progress_count": 18,
+      "stored_count": 17,
+      "difference": -1
+    },
+    {
+      "job": "410193",
+      "progress_count": 44,
+      "stored_count": 45,
+      "difference": 1
+    },
+    {
+      "job": "410652",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "410666",
+      "progress_count": 17,
+      "stored_count": 15,
+      "difference": -2
+    },
+    {
+      "job": "410696",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "410800",
+      "progress_count": 30,
+      "stored_count": 28,
+      "difference": -2
+    },
+    {
+      "job": "410992",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "411046",
+      "progress_count": 27,
+      "stored_count": 25,
+      "difference": -2
+    },
+    {
+      "job": "411105",
+      "progress_count": 28,
+      "stored_count": 26,
+      "difference": -2
+    },
+    {
+      "job": "411106",
+      "progress_count": 29,
+      "stored_count": 27,
+      "difference": -2
+    },
+    {
+      "job": "411107",
+      "progress_count": 28,
+      "stored_count": 26,
+      "difference": -2
+    },
+    {
+      "job": "411108",
+      "progress_count": 29,
+      "stored_count": 27,
+      "difference": -2
+    },
+    {
+      "job": "411109",
+      "progress_count": 27,
+      "stored_count": 25,
+      "difference": -2
+    },
+    {
+      "job": "411110",
+      "progress_count": 28,
+      "stored_count": 26,
+      "difference": -2
+    },
+    {
+      "job": "411114",
+      "progress_count": 26,
+      "stored_count": 24,
+      "difference": -2
+    },
+    {
+      "job": "411115",
+      "progress_count": 27,
+      "stored_count": 25,
+      "difference": -2
+    },
+    {
+      "job": "411120",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "411219",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "411281",
+      "progress_count": 44,
+      "stored_count": 45,
+      "difference": 1
+    },
+    {
+      "job": "411458",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "411459",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "411460",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "411461",
+      "progress_count": 24,
+      "stored_count": 22,
+      "difference": -2
+    },
+    {
+      "job": "411462",
+      "progress_count": 24,
+      "stored_count": 22,
+      "difference": -2
+    },
+    {
+      "job": "411479",
+      "progress_count": 36,
+      "stored_count": 34,
+      "difference": -2
+    },
+    {
+      "job": "411480",
+      "progress_count": 32,
+      "stored_count": 30,
+      "difference": -2
+    },
+    {
+      "job": "411481",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "411491",
+      "progress_count": 25,
+      "stored_count": 23,
+      "difference": -2
+    },
+    {
+      "job": "411541",
+      "progress_count": 20,
+      "stored_count": 19,
+      "difference": -1
+    },
+    {
+      "job": "411542",
+      "progress_count": 21,
+      "stored_count": 20,
+      "difference": -1
+    },
+    {
+      "job": "411543",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "411544",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "411545",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "411641",
+      "progress_count": 29,
+      "stored_count": 27,
+      "difference": -2
+    },
+    {
+      "job": "411642",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "411670",
+      "progress_count": 24,
+      "stored_count": 22,
+      "difference": -2
+    },
+    {
+      "job": "411819",
+      "progress_count": 29,
+      "stored_count": 27,
+      "difference": -2
+    },
+    {
+      "job": "411833",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "411905",
+      "progress_count": 24,
+      "stored_count": 22,
+      "difference": -2
+    },
+    {
+      "job": "411946",
+      "progress_count": 25,
+      "stored_count": 23,
+      "difference": -2
+    },
+    {
+      "job": "411982",
+      "progress_count": 12,
+      "stored_count": 13,
+      "difference": 1
+    },
+    {
+      "job": "411993",
+      "progress_count": 12,
+      "stored_count": 13,
+      "difference": 1
+    },
+    {
+      "job": "411998",
+      "progress_count": 8,
+      "stored_count": 7,
+      "difference": -1
+    },
+    {
+      "job": "412015",
+      "progress_count": 26,
+      "stored_count": 24,
+      "difference": -2
+    },
+    {
+      "job": "412016",
+      "progress_count": 26,
+      "stored_count": 24,
+      "difference": -2
+    },
+    {
+      "job": "412018",
+      "progress_count": 11,
+      "stored_count": 12,
+      "difference": 1
+    },
+    {
+      "job": "412038",
+      "progress_count": 27,
+      "stored_count": 25,
+      "difference": -2
+    },
+    {
+      "job": "412039",
+      "progress_count": 25,
+      "stored_count": 24,
+      "difference": -1
+    },
+    {
+      "job": "412063",
+      "progress_count": 25,
+      "stored_count": 23,
+      "difference": -2
+    },
+    {
+      "job": "412064",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "412090",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "412142",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "412143",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "412191",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "412280",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "412415",
+      "progress_count": 17,
+      "stored_count": 16,
+      "difference": -1
+    },
+    {
+      "job": "412422",
+      "progress_count": 28,
+      "stored_count": 26,
+      "difference": -2
+    },
+    {
+      "job": "412543",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "412565",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "412584",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "412648",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "412708",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "412795",
+      "progress_count": 39,
+      "stored_count": 38,
+      "difference": -1
+    },
+    {
+      "job": "412796",
+      "progress_count": 49,
+      "stored_count": 48,
+      "difference": -1
+    },
+    {
+      "job": "412851",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "412852",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "412853",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "412854",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "412855",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "412856",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "412866",
+      "progress_count": 29,
+      "stored_count": 28,
+      "difference": -1
+    },
+    {
+      "job": "413013",
+      "progress_count": 16,
+      "stored_count": 14,
+      "difference": -2
+    },
+    {
+      "job": "413021",
+      "progress_count": 20,
+      "stored_count": 24,
+      "difference": 4
+    },
+    {
+      "job": "413097",
+      "progress_count": 25,
+      "stored_count": 23,
+      "difference": -2
+    },
+    {
+      "job": "413140",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "413141",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "413142",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "413143",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "413226",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "413252",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "413393",
+      "progress_count": 24,
+      "stored_count": 22,
+      "difference": -2
+    },
+    {
+      "job": "413401",
+      "progress_count": 25,
+      "stored_count": 23,
+      "difference": -2
+    },
+    {
+      "job": "413429",
+      "progress_count": 24,
+      "stored_count": 22,
+      "difference": -2
+    },
+    {
+      "job": "413430",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "413431",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "413450",
+      "progress_count": 28,
+      "stored_count": 26,
+      "difference": -2
+    },
+    {
+      "job": "413451",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "413515",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "413659",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "413698",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "413836",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "413881",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "413882",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "413883",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "413884",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "413885",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "413886",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "413887",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "413888",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "413919",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "413920",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "413922",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "413923",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "414161",
+      "progress_count": 42,
+      "stored_count": 43,
+      "difference": 1
+    },
+    {
+      "job": "414272",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "414280",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "414310",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "414463",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "414470",
+      "progress_count": 43,
+      "stored_count": 42,
+      "difference": -1
+    },
+    {
+      "job": "414471",
+      "progress_count": 44,
+      "stored_count": 43,
+      "difference": -1
+    },
+    {
+      "job": "414472",
+      "progress_count": 17,
+      "stored_count": 15,
+      "difference": -2
+    },
+    {
+      "job": "414536",
+      "progress_count": 17,
+      "stored_count": 15,
+      "difference": -2
+    },
+    {
+      "job": "414637",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "414641",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "414667",
+      "progress_count": 27,
+      "stored_count": 25,
+      "difference": -2
+    },
+    {
+      "job": "414668",
+      "progress_count": 26,
+      "stored_count": 24,
+      "difference": -2
+    },
+    {
+      "job": "414773",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "414913",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "414930",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "414934",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "414958",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "414968",
+      "progress_count": 28,
+      "stored_count": 26,
+      "difference": -2
+    },
+    {
+      "job": "415089",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "415106",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "415138",
+      "progress_count": 24,
+      "stored_count": 23,
+      "difference": -1
+    },
+    {
+      "job": "415139",
+      "progress_count": 18,
+      "stored_count": 17,
+      "difference": -1
+    },
+    {
+      "job": "415186",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "415187",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "415188",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "415189",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "415258",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "415266",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "415296",
+      "progress_count": 23,
+      "stored_count": 25,
+      "difference": 2
+    },
+    {
+      "job": "415307",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "415395",
+      "progress_count": 18,
+      "stored_count": 17,
+      "difference": -1
+    },
+    {
+      "job": "415445",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "415452",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "415476",
+      "progress_count": 24,
+      "stored_count": 22,
+      "difference": -2
+    },
+    {
+      "job": "415477",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "415478",
+      "progress_count": 24,
+      "stored_count": 22,
+      "difference": -2
+    },
+    {
+      "job": "415580",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "415581",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "415606",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "415607",
+      "progress_count": 24,
+      "stored_count": 22,
+      "difference": -2
+    },
+    {
+      "job": "415608",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "415609",
+      "progress_count": 24,
+      "stored_count": 22,
+      "difference": -2
+    },
+    {
+      "job": "415695",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "415696",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "415829",
+      "progress_count": 17,
+      "stored_count": 15,
+      "difference": -2
+    },
+    {
+      "job": "415858",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "415859",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "415875",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "415876",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "415906",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "415918",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "415953",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "415954",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "415956",
+      "progress_count": 28,
+      "stored_count": 26,
+      "difference": -2
+    },
+    {
+      "job": "416071",
+      "progress_count": 17,
+      "stored_count": 15,
+      "difference": -2
+    },
+    {
+      "job": "416104",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "416139",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "416214",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "416243",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "416244",
+      "progress_count": 17,
+      "stored_count": 15,
+      "difference": -2
+    },
+    {
+      "job": "416415",
+      "progress_count": 26,
+      "stored_count": 24,
+      "difference": -2
+    },
+    {
+      "job": "416417",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "416418",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "416466",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "416467",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "416468",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "416631",
+      "progress_count": 17,
+      "stored_count": 15,
+      "difference": -2
+    },
+    {
+      "job": "416632",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "416654",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "416707",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "416826",
+      "progress_count": 47,
+      "stored_count": 45,
+      "difference": -2
+    },
+    {
+      "job": "416836",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "416875",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "416879",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "416896",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "417004",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "417013",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "417082",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "417083",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "417084",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "417085",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "417097",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "417108",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "417129",
+      "progress_count": 43,
+      "stored_count": 41,
+      "difference": -2
+    },
+    {
+      "job": "417130",
+      "progress_count": 31,
+      "stored_count": 29,
+      "difference": -2
+    },
+    {
+      "job": "417185",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "417229",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "417273",
+      "progress_count": 17,
+      "stored_count": 15,
+      "difference": -2
+    },
+    {
+      "job": "417274",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "417300",
+      "progress_count": 24,
+      "stored_count": 22,
+      "difference": -2
+    },
+    {
+      "job": "417301",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "417302",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "417312",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "417363",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "417364",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "417368",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "417437",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "417469",
+      "progress_count": 16,
+      "stored_count": 14,
+      "difference": -2
+    },
+    {
+      "job": "417589",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "417750",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "417757",
+      "progress_count": 16,
+      "stored_count": 15,
+      "difference": -1
+    },
+    {
+      "job": "417758",
+      "progress_count": 16,
+      "stored_count": 15,
+      "difference": -1
+    },
+    {
+      "job": "417875",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "417876",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "417877",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "417878",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "417994",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "418116",
+      "progress_count": 24,
+      "stored_count": 22,
+      "difference": -2
+    },
+    {
+      "job": "418117",
+      "progress_count": 24,
+      "stored_count": 22,
+      "difference": -2
+    },
+    {
+      "job": "418160",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "418223",
+      "progress_count": 17,
+      "stored_count": 15,
+      "difference": -2
+    },
+    {
+      "job": "418224",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "418350",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "418440",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "418446",
+      "progress_count": 33,
+      "stored_count": 32,
+      "difference": -1
+    },
+    {
+      "job": "418453",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "418454",
+      "progress_count": 24,
+      "stored_count": 22,
+      "difference": -2
+    },
+    {
+      "job": "418583",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "418589",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "418595",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "418596",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "418658",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "418727",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "418737",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "418755",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "418756",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "418757",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "418759",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "418760",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "418810",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "418912",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "418923",
+      "progress_count": 29,
+      "stored_count": 30,
+      "difference": 1
+    },
+    {
+      "job": "418928",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "418969",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "419050",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "419207",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "419255",
+      "progress_count": 16,
+      "stored_count": 15,
+      "difference": -1
+    },
+    {
+      "job": "419376",
+      "progress_count": 16,
+      "stored_count": 14,
+      "difference": -2
+    },
+    {
+      "job": "419395",
+      "progress_count": 38,
+      "stored_count": 37,
+      "difference": -1
+    },
+    {
+      "job": "419435",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "419436",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "419621",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "419653",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "419672",
+      "progress_count": 27,
+      "stored_count": 26,
+      "difference": -1
+    },
+    {
+      "job": "419673",
+      "progress_count": 29,
+      "stored_count": 28,
+      "difference": -1
+    },
+    {
+      "job": "419849",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "419871",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "419898",
+      "progress_count": 15,
+      "stored_count": 13,
+      "difference": -2
+    },
+    {
+      "job": "419910",
+      "progress_count": 16,
+      "stored_count": 14,
+      "difference": -2
+    },
+    {
+      "job": "419929",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "420087",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "420128",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "420141",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "420146",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "420149",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "420173",
+      "progress_count": 42,
+      "stored_count": 40,
+      "difference": -2
+    },
+    {
+      "job": "420208",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "420209",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "420242",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "420257",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "420287",
+      "progress_count": 25,
+      "stored_count": 24,
+      "difference": -1
+    },
+    {
+      "job": "420450",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "420451",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "420470",
+      "progress_count": 20,
+      "stored_count": 19,
+      "difference": -1
+    },
+    {
+      "job": "420499",
+      "progress_count": 30,
+      "stored_count": 32,
+      "difference": 2
+    },
+    {
+      "job": "420500",
+      "progress_count": 31,
+      "stored_count": 32,
+      "difference": 1
+    },
+    {
+      "job": "420572",
+      "progress_count": 16,
+      "stored_count": 14,
+      "difference": -2
+    },
+    {
+      "job": "420621",
+      "progress_count": 7,
+      "stored_count": 9,
+      "difference": 2
+    },
+    {
+      "job": "420635",
+      "progress_count": 38,
+      "stored_count": 36,
+      "difference": -2
+    },
+    {
+      "job": "420809",
+      "progress_count": 16,
+      "stored_count": 14,
+      "difference": -2
+    },
+    {
+      "job": "420823",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "420983",
+      "progress_count": 14,
+      "stored_count": 12,
+      "difference": -2
+    },
+    {
+      "job": "421002",
+      "progress_count": 16,
+      "stored_count": 18,
+      "difference": 2
+    },
+    {
+      "job": "421005",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "421014",
+      "progress_count": 24,
+      "stored_count": 22,
+      "difference": -2
+    },
+    {
+      "job": "421015",
+      "progress_count": 24,
+      "stored_count": 22,
+      "difference": -2
+    },
+    {
+      "job": "421025",
+      "progress_count": 17,
+      "stored_count": 19,
+      "difference": 2
+    },
+    {
+      "job": "421033",
+      "progress_count": 16,
+      "stored_count": 18,
+      "difference": 2
+    },
+    {
+      "job": "421034",
+      "progress_count": 22,
+      "stored_count": 20,
+      "difference": -2
+    },
+    {
+      "job": "421040",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "421052",
+      "progress_count": 17,
+      "stored_count": 15,
+      "difference": -2
+    },
+    {
+      "job": "421057",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "421080",
+      "progress_count": 23,
+      "stored_count": 22,
+      "difference": -1
+    },
+    {
+      "job": "421121",
+      "progress_count": 22,
+      "stored_count": 21,
+      "difference": -1
+    },
+    {
+      "job": "421123",
+      "progress_count": 18,
+      "stored_count": 16,
+      "difference": -2
+    },
+    {
+      "job": "421149",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "421150",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "421167",
+      "progress_count": 17,
+      "stored_count": 15,
+      "difference": -2
+    },
+    {
+      "job": "421181",
+      "progress_count": 16,
+      "stored_count": 14,
+      "difference": -2
+    },
+    {
+      "job": "421182",
+      "progress_count": 15,
+      "stored_count": 13,
+      "difference": -2
+    },
+    {
+      "job": "421190",
+      "progress_count": 16,
+      "stored_count": 14,
+      "difference": -2
+    },
+    {
+      "job": "421202",
+      "progress_count": 20,
+      "stored_count": 22,
+      "difference": 2
+    },
+    {
+      "job": "421237",
+      "progress_count": 14,
+      "stored_count": 16,
+      "difference": 2
+    },
+    {
+      "job": "421269",
+      "progress_count": 11,
+      "stored_count": 13,
+      "difference": 2
+    },
+    {
+      "job": "421270",
+      "progress_count": 11,
+      "stored_count": 13,
+      "difference": 2
+    },
+    {
+      "job": "421272",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "421273",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "421284",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "421285",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "421307",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "421308",
+      "progress_count": 21,
+      "stored_count": 19,
+      "difference": -2
+    },
+    {
+      "job": "421311",
+      "progress_count": 46,
+      "stored_count": 47,
+      "difference": 1
+    },
+    {
+      "job": "421330",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "421462",
+      "progress_count": 42,
+      "stored_count": 41,
+      "difference": -1
+    },
+    {
+      "job": "421463",
+      "progress_count": 39,
+      "stored_count": 40,
+      "difference": 1
+    },
+    {
+      "job": "421464",
+      "progress_count": 39,
+      "stored_count": 38,
+      "difference": -1
+    },
+    {
+      "job": "421488",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "421489",
+      "progress_count": 23,
+      "stored_count": 21,
+      "difference": -2
+    },
+    {
+      "job": "421515",
+      "progress_count": 20,
+      "stored_count": 18,
+      "difference": -2
+    },
+    {
+      "job": "421519",
+      "progress_count": 17,
+      "stored_count": 15,
+      "difference": -2
+    },
+    {
+      "job": "421550",
+      "progress_count": 9,
+      "stored_count": 10,
+      "difference": 1
+    },
+    {
+      "job": "421572",
+      "progress_count": 17,
+      "stored_count": 19,
+      "difference": 2
+    },
+    {
+      "job": "421618",
+      "progress_count": 21,
+      "stored_count": 24,
+      "difference": 3
+    },
+    {
+      "job": "421619",
+      "progress_count": 20,
+      "stored_count": 22,
+      "difference": 2
+    },
+    {
+      "job": "421631",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "421636",
+      "progress_count": 8,
+      "stored_count": 10,
+      "difference": 2
+    },
+    {
+      "job": "421693",
+      "progress_count": 24,
+      "stored_count": 22,
+      "difference": -2
+    },
+    {
+      "job": "421756",
+      "progress_count": 23,
+      "stored_count": 25,
+      "difference": 2
+    },
+    {
+      "job": "421824",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "421861",
+      "progress_count": 19,
+      "stored_count": 17,
+      "difference": -2
+    },
+    {
+      "job": "421876",
+      "progress_count": 16,
+      "stored_count": 18,
+      "difference": 2
+    },
+    {
+      "job": "421884",
+      "progress_count": 14,
+      "stored_count": 16,
+      "difference": 2
+    },
+    {
+      "job": "421885",
+      "progress_count": 15,
+      "stored_count": 16,
+      "difference": 1
+    },
+    {
+      "job": "421886",
+      "progress_count": 14,
+      "stored_count": 16,
+      "difference": 2
+    },
+    {
+      "job": "421887",
+      "progress_count": 14,
+      "stored_count": 16,
+      "difference": 2
+    },
+    {
+      "job": "421888",
+      "progress_count": 14,
+      "stored_count": 16,
+      "difference": 2
+    },
+    {
+      "job": "421906",
+      "progress_count": 15,
+      "stored_count": 17,
+      "difference": 2
+    },
+    {
+      "job": "421912",
+      "progress_count": 18,
+      "stored_count": 20,
+      "difference": 2
+    },
+    {
+      "job": "421913",
+      "progress_count": 24,
+      "stored_count": 26,
+      "difference": 2
+    },
+    {
+      "job": "421919",
+      "progress_count": 8,
+      "stored_count": 10,
+      "difference": 2
+    },
+    {
+      "job": "421931",
+      "progress_count": 8,
+      "stored_count": 10,
+      "difference": 2
+    },
+    {
+      "job": "421944",
+      "progress_count": 15,
+      "stored_count": 17,
+      "difference": 2
+    },
+    {
+      "job": "421946",
+      "progress_count": 15,
+      "stored_count": 17,
+      "difference": 2
+    },
+    {
+      "job": "421947",
+      "progress_count": 7,
+      "stored_count": 9,
+      "difference": 2
+    },
+    {
+      "job": "421948",
+      "progress_count": 7,
+      "stored_count": 9,
+      "difference": 2
+    },
+    {
+      "job": "421949",
+      "progress_count": 20,
+      "stored_count": 22,
+      "difference": 2
+    },
+    {
+      "job": "421950",
+      "progress_count": 9,
+      "stored_count": 11,
+      "difference": 2
+    },
+    {
+      "job": "421958",
+      "progress_count": 13,
+      "stored_count": 15,
+      "difference": 2
+    },
+    {
+      "job": "421959",
+      "progress_count": 5,
+      "stored_count": 7,
+      "difference": 2
+    },
+    {
+      "job": "421962",
+      "progress_count": 8,
+      "stored_count": 10,
+      "difference": 2
+    },
+    {
+      "job": "421966",
+      "progress_count": 17,
+      "stored_count": 19,
+      "difference": 2
+    },
+    {
+      "job": "421967",
+      "progress_count": 18,
+      "stored_count": 19,
+      "difference": 1
+    },
+    {
+      "job": "421968",
+      "progress_count": 16,
+      "stored_count": 18,
+      "difference": 2
+    },
+    {
+      "job": "421970",
+      "progress_count": 7,
+      "stored_count": 9,
+      "difference": 2
+    },
+    {
+      "job": "421978",
+      "progress_count": 22,
+      "stored_count": 23,
+      "difference": 1
+    },
+    {
+      "job": "421979",
+      "progress_count": 14,
+      "stored_count": 16,
+      "difference": 2
+    },
+    {
+      "job": "421980",
+      "progress_count": 7,
+      "stored_count": 11,
+      "difference": 4
+    },
+    {
+      "job": "421990",
+      "progress_count": 2,
+      "stored_count": 4,
+      "difference": 2
+    },
+    {
+      "job": "421991",
+      "progress_count": 35,
+      "stored_count": 37,
+      "difference": 2
+    },
+    {
+      "job": "422001",
+      "progress_count": 11,
+      "stored_count": 13,
+      "difference": 2
+    },
+    {
+      "job": "422003",
+      "progress_count": 23,
+      "stored_count": 22,
+      "difference": -1
+    },
+    {
+      "job": "422004",
+      "progress_count": 19,
+      "stored_count": 20,
+      "difference": 1
+    },
+    {
+      "job": "422016",
+      "progress_count": 11,
+      "stored_count": 13,
+      "difference": 2
+    },
+    {
+      "job": "422017",
+      "progress_count": 11,
+      "stored_count": 13,
+      "difference": 2
+    },
+    {
+      "job": "422019",
+      "progress_count": 8,
+      "stored_count": 10,
+      "difference": 2
+    },
+    {
+      "job": "422023",
+      "progress_count": 10,
+      "stored_count": 11,
+      "difference": 1
+    },
+    {
+      "job": "422029",
+      "progress_count": 15,
+      "stored_count": 17,
+      "difference": 2
+    },
+    {
+      "job": "422030",
+      "progress_count": 15,
+      "stored_count": 17,
+      "difference": 2
+    },
+    {
+      "job": "422031",
+      "progress_count": 14,
+      "stored_count": 16,
+      "difference": 2
+    }
+  ],
+  "missing_metadata": {
+    "arrangement": 11452,
+    "customer": 11482,
+    "job_number": 11568,
+    "so_pdf": 0
+  },
+  "quality": {
+    "jobs": 11812,
+    "jobs_without_items": 14,
+    "items": 144187,
+    "tagged_items": 140165,
+    "tagged_rate": 0.9721,
+    "component_items": 121839,
+    "component_rate": 0.845,
+    "structured_attribute_items": 104846,
+    "structured_attribute_rate": 0.7272,
+    "review_flagged_items": 13858,
+    "review_flagged_rate": 0.0961,
+    "jobs_with_review": 6570,
+    "sourced_items": 1408,
+    "source_rate": 0.0098,
+    "jobs_with_source": 87,
+    "nan_artifact_items": 303,
+    "parser_versions": {
+      "legacy/unknown": 11725,
+      "2026-07-17-row-provenance-v1": 87
+    },
+    "top_components": {
+      "MECHANICAL RUN TEST": 18753,
+      "MOTOR": 15698,
+      "ADDITIONAL FEATURES / NOTES": 10381,
+      "BASE FAN": 10187,
+      "INLET": 8909,
+      "OUTLET": 8656,
+      "DRIVE COMPONENTS": 6217,
+      "SHIP TO": 5897,
+      "MARK": 5824,
+      "3D STEP DRAWINGS": 3883,
+      "PERCENT WIDTH": 2844,
+      "SCREEN": 2721,
+      "HOUSING DRAIN": 2646,
+      "SHAFT SEAL": 2548,
+      "ACCESS DOOR": 2083,
+      "BELT GUARD": 1855,
+      "SHAFT/BEARING/COUPLING GUARD": 1695,
+      "NAMEPLATE": 1635,
+      "SHIP WITH": 951,
+      "WHEEL": 761
+    },
+    "top_review_flags": {
+      "UNTAGGED": 4022,
+      "COMPONENT REVIEW: UNCLEAR GREASE TARGET - VERIFY MOTOR/BEARINGS/ARRANGEMENT": 1613,
+      "UNCLASSIFIED DETAIL: Notes:": 497,
+      "UNCLASSIFIED DETAIL: Length units are inches unless otherwise noted.": 497,
+      "UNCLASSIFIED DETAIL: (information printed on reverse side of standard": 460,
+      "UNCLASSIFIED DETAIL: Center Distance range assumes adjustable base per drawing 7-2-94.": 450,
+      "UNCLASSIFIED DETAIL: Motor conduit box in F1 position.": 398,
+      "UNCLASSIFIED DETAIL: Mounted by Others": 247,
+      "UNCLASSIFIED DETAIL: Motor (Customer Provided) N NA": 215,
+      "UNCLASSIFIED DETAIL: Handle Location (viewed from inlet side):": 159,
+      "UNCLASSIFIED DETAIL: Bearings": 144,
+      "UNCLASSIFIED DETAIL: CBC, DuPont Corlar 2.1ST Satin High Solids": 125,
+      "USED ON REVIEW: INCONCLUSIVE - INLET/OUTLET/PRESPIN/IVC": 119,
+      "UNCLASSIFIED DETAIL: F1, 1.15 SF": 93,
+      "UNCLASSIFIED DETAIL: D37/D38 Run Test, Grey, Sticker provided in N NaN": 86,
+      "UNCLASSIFIED DETAIL: separate bag separate of fan. Sticker to be cut to": 86,
+      "UNCLASSIFIED DETAIL: Inlet, Special (Inlet, Special (Slip), Inquiry Num: N NaN": 85,
+      "UNCLASSIFIED DETAIL: Add weep holes to the drive side stiffeners that N NaN": 82,
+      "UNCLASSIFIED DETAIL: Stretch Wrap Cover Over Conduit Box Before": 81,
+      "UNCLASSIFIED DETAIL: Construction": 81
+    },
+    "top_unclassified_wordings": {
+      "ARE NOT MOUNTED BY CHICAGO BLOWER WE CANNOT CHECK THE ASSEMBLED ROTATING SYSTEM FOR VIBRATION AND PHASE BALANCE BY OTHERS MAY": 348,
+      "T RAILS": 213,
+      "PANEL MOUNTING HOLES": 206,
+      "INLET VENTURI": 137,
+      "PACKING LIST INQUIRY NUM 253 15 1865": 130,
+      "MOUNTING LUGS FLARE": 99,
+      "MOUNTING FEET STANDARD": 81,
+      "OFFSET BASE": 61,
+      "ADDITIONAL SUPPORT ON PALLET SO FORK TINES DO NOT": 48,
+      "BLADE SIDE GUARD": 43,
+      "NEW OEM STATUS 311 22 1133": 34,
+      "SHEAVE TYPE CONSTANT SPEED": 28,
+      "CHANGE ORDER CHARGES INQUIRY NUM": 27,
+      "MOUNTING LUGS HORIZONTAL": 27,
+      "INLET AND OUTLET TO MATCH CINCINNATI BLOWER INQUIRY": 22,
+      "CBC TO MOUNT VAW INLET FILTER AND TRANSITION": 22,
+      "HEIGHT SAVING BRACKETS FRAME UP TO 284": 20,
+      "INLET FILTER WIRE INLET DIA 5": 20,
+      "NEW OEM STATUS 317 22 2182": 20,
+      "SPECIAL MOUNTING PANEL HOLES INQUIRY NUM 6 5": 19
+    }
+  },
+  "healthy": true,
+  "recommended_actions": [
+    "Incrementally reparse records containing literal NaN cell artifacts.",
+    "Incrementally reparse legacy records to add PDF page/row provenance.",
+    "Review the highest-frequency unresolved wording templates in batches.",
+    "Backfill order context so arrangement participates in similar-order ranking."
+  ]
+}

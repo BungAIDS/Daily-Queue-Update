@@ -1,0 +1,184 @@
+{
+  "jobs": {
+    "320183A": {
+      "customer": "JSW STEEL INC.",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\320183A\\320183A - Sales Order (original).pdf",
+      "scanned_at": "2026-07-10T07:52:49",
+      "items": [
+        {
+          "raw": "Bearings, Type \"MH\" Fixed N 2,636.00 527.00",
+          "norm": "BEARINGS TYPE MH FIXED",
+          "qty": "",
+          "price": "2,636.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Qty: 2",
+            "Size: 3-3/16",
+            "Mount: Pillow Block"
+          ],
+          "tags": [],
+          "attributes": {},
+          "review_flags": [
+            "UNTAGGED",
+            "UNCLASSIFIED DETAIL: Qty: 2",
+            "UNCLASSIFIED DETAIL: Size: 3-3/16",
+            "UNCLASSIFIED DETAIL: Mount: Pillow Block"
+          ]
+        },
+        {
+          "raw": "Cooling Wheel N 557.00 111.00",
+          "norm": "COOLING WHEEL",
+          "qty": "",
+          "price": "557.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Qty: 1"
+          ],
+          "tags": [
+            "WHEEL"
+          ],
+          "attributes": {},
+          "review_flags": [
+            "UNCLASSIFIED DETAIL: Qty: 1"
+          ]
+        },
+        {
+          "raw": "Inlet Cone N 1,380.00 276.00",
+          "norm": "INLET CONE",
+          "qty": "",
+          "price": "1,380.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Qty: 1"
+          ],
+          "tags": [
+            "INLET"
+          ],
+          "attributes": {
+            "inlet_subcategory": "INLET CONE"
+          },
+          "review_flags": [
+            "UNCLASSIFIED DETAIL: Qty: 1"
+          ]
+        },
+        {
+          "raw": "Shaft N 1,856.00 371.00",
+          "norm": "SHAFT",
+          "qty": "",
+          "price": "1,856.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Qty: 1"
+          ],
+          "tags": [],
+          "attributes": {},
+          "review_flags": [
+            "UNTAGGED",
+            "UNCLASSIFIED DETAIL: Qty: 1"
+          ]
+        },
+        {
+          "raw": "Wheel N 5,788.00 1,158.00",
+          "norm": "WHEEL",
+          "qty": "",
+          "price": "5,788.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Qty: 1",
+            "Price match 2026 (CBC order# 320183A) (Qty: 1), N -458.00 -92.00",
+            "Inquiry Num: 999-26-2458"
+          ],
+          "tags": [
+            "WHEEL"
+          ],
+          "attributes": {
+            "inquiry_num": "999-26-2458"
+          },
+          "review_flags": [
+            "UNCLASSIFIED DETAIL: Qty: 1",
+            "UNCLASSIFIED DETAIL: Price match 2026 (CBC order# 320183A) (Qty: 1), N -458.00 -92.00"
+          ]
+        },
+        {
+          "raw": "Line: 001 C 1,328.00 438.00 1,766.00 131.00",
+          "norm": "LINE 001",
+          "qty": "",
+          "price": "1,328.00",
+          "ptype": "C",
+          "section": "",
+          "details": [
+            "Part: URD540749.2-6-2",
+            "ChemShield 5407 Fabric U-Belt Expansion Joint, 49-",
+            "3/16\" ID, 6\" F/F, 2\" Flange,",
+            "1/4\" Thk. A36 CS Backing Rings (Primed). Holes",
+            "Punched per Customer Bolt",
+            "Pattern.",
+            "Same as DWG FC-15649A",
+            "Customer Item #: Inlet (Qty: 1)",
+            "Vendor: FlexibleCompensators",
+            "Ship Direct"
+          ],
+          "tags": [
+            "FLEX CONNECTOR",
+            "SHIPPING"
+          ],
+          "attributes": {
+            "component": "INLET EXPANSION JOINT",
+            "face_to_face": "6\"",
+            "vendor": "FlexibleCompensators",
+            "shipping_method": "SHIP DIRECT"
+          },
+          "review_flags": [
+            "UNCLASSIFIED DETAIL: Part: URD540749.2-6-2",
+            "UNCLASSIFIED DETAIL: 1/4\" Thk. A36 CS Backing Rings (Primed). Holes",
+            "UNCLASSIFIED DETAIL: Punched per Customer Bolt",
+            "UNCLASSIFIED DETAIL: Pattern."
+          ]
+        },
+        {
+          "raw": "Line: 002 C 869.00 353.00 1,222.00 106.00",
+          "norm": "LINE 002",
+          "qty": "",
+          "price": "869.00",
+          "ptype": "C",
+          "section": "",
+          "details": [
+            "Part: URT540751.1X38.8-6-2",
+            "ChemShield 5407 Fabric U-Belt Expansion Joint, 51-",
+            "1/8\" x 38-3/4\" Ins. Dim., 6\" F/F,",
+            "2\" Flange, 1/4\" Thk. A36 CS Backing Bars (Primed).",
+            "Holes Punched per Customer",
+            "Bolt Pattern.",
+            "Same as DWG FC-15649B",
+            "Customer Item #: Outlet (Qty: 1)",
+            "Vendor: FlexibleCompensators",
+            "Ship Direct"
+          ],
+          "tags": [
+            "FLEX CONNECTOR",
+            "SHIPPING"
+          ],
+          "attributes": {
+            "component": "OUTLET EXPANSION JOINT",
+            "face_to_face": "6\"",
+            "vendor": "FlexibleCompensators",
+            "shipping_method": "SHIP DIRECT"
+          },
+          "review_flags": [
+            "UNCLASSIFIED DETAIL: Part: URT540751.1X38.8-6-2",
+            "UNCLASSIFIED DETAIL: Holes Punched per Customer",
+            "UNCLASSIFIED DETAIL: Bolt Pattern."
+          ]
+        }
+      ],
+      "parts_only": false,
+      "normalizer_version": "2026-07-22-accent-fold-evase-v1"
+    }
+  }
+}

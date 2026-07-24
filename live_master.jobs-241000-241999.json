@@ -1,0 +1,137 @@
+{
+  "orders": {
+    "241976A": {
+      "added": "2026-07-09T08:14:09",
+      "added_known": true,
+      "last_in": "2026-07-09T08:14:09",
+      "last_out": "2026-07-09T10:20:10",
+      "left": "2026-07-09T10:20:10",
+      "on_queue": false,
+      "seen_on_queue": true,
+      "history": [
+        {
+          "event": "in",
+          "time": "2026-07-09T08:14:09"
+        },
+        {
+          "event": "out",
+          "time": "2026-07-09T10:20:10"
+        }
+      ],
+      "job": {
+        "status": "AT WC",
+        "job": "241976A",
+        "oper": "21",
+        "item": "53-0-0000.2",
+        "design": "53",
+        "assigned_to": "NONE",
+        "checker": "NONE",
+        "start_date": "7/7/2026",
+        "end_date": "7/7/2026",
+        "plan_hrs": "0.250",
+        "fannet_date": "",
+        "total_price": "$0.00",
+        "status_note": "",
+        "customer": "",
+        "primary_rep": "",
+        "ship_with": "",
+        "unapproved": false,
+        "credit_hold": false,
+        "has_notes": false,
+        "job_type": "",
+        "job_folder": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\241976A",
+        "dwg_extras": {},
+        "dwg_missing_std": false,
+        "_first_seen": "2026-07-09T08:14:09",
+        "_carried_over": false,
+        "engineers": [],
+        "co_number": 0,
+        "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\241976A\\241976A - Sales Order (original).pdf",
+        "so_design_desc": "Pressure Blower",
+        "so_size": "F2",
+        "so_arrangement": "A/4V C-Face Flange mount (no motor base)",
+        "so_motor_pos": "N/A",
+        "so_class": "N/A",
+        "so_rotation": "CW",
+        "so_discharge": "UB",
+        "so_pct_width": "100",
+        "so_wheel_type": "BI",
+        "so_design_temp": "70",
+        "so_max_temp": "70",
+        "so_special_temp": "0",
+        "line_items": [
+          {
+            "raw": "CIB - Circular Discharge silencer C 1,855.00 297.00 2,152.00 89.00",
+            "norm": "CIB CIRCULAR DISCHARGE SILENCER",
+            "qty": "",
+            "price": "1,855.00",
+            "ptype": "C",
+            "section": "",
+            "details": [
+              "Model: 14VCIB-V99-SN4175",
+              "Unit Wt: 119 lbs",
+              "Vendor: VAW Systems",
+              "Ship Direct",
+              "Product: Outlet Silencer",
+              "Model: 14VCIB-V99-SN4175",
+              "Unit Wt: 119 lbs: 6 Weeks"
+            ],
+            "tags": [
+              "SHIPPING",
+              "SILENCER"
+            ],
+            "attributes": {
+              "component": "OUTLET SILENCER",
+              "silencer_type": "CIRCULAR DISCHARGE SILENCER",
+              "brand": "VAW",
+              "model": "14VCIB-V99-SN4175",
+              "vendor": "VAW Systems",
+              "shipping_method": "SHIP DIRECT"
+            },
+            "review_flags": [
+              "UNCLASSIFIED DETAIL: Unit Wt: 119 lbs",
+              "UNCLASSIFIED DETAIL: Unit Wt: 119 lbs: 6 Weeks"
+            ]
+          },
+          {
+            "raw": "Inlet Direction: Vertical Inlet Down",
+            "norm": "INLET DIRECTION VERTICAL INLET DOWN",
+            "qty": "",
+            "price": "",
+            "ptype": "",
+            "section": "Additional Features / Notes:",
+            "details": [],
+            "tags": [
+              "INLET"
+            ],
+            "attributes": {
+              "inlet_direction": "VERTICAL INLET DOWN",
+              "inlet_subcategory": "DIRECTION"
+            }
+          },
+          {
+            "raw": "241976A 421976 1383",
+            "norm": "241976A 421976 1383",
+            "qty": "",
+            "price": "",
+            "ptype": "",
+            "section": "Additional Features / Notes:",
+            "details": [],
+            "tags": [
+              "ADDITIONAL FEATURES / NOTES"
+            ],
+            "attributes": {
+              "component": "ADDITIONAL FEATURES / NOTES",
+              "note": "241976A 421976 1383"
+            }
+          }
+        ],
+        "line_item_tags": "ADDITIONAL FEATURES / NOTES, INLET, SHIPPING, SILENCER",
+        "so_validation": "MATCH",
+        "so_document_kind": "SALES_ORDER",
+        "so_internal_order": "241976A",
+        "so_validation_method": "header"
+      }
+    }
+  }
+}

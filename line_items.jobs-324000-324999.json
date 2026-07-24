@@ -1,0 +1,99 @@
+{
+  "jobs": {
+    "324014K": {
+      "customer": "",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\324014K\\324014K - Sales Order (original).pdf",
+      "scanned_at": "2026-07-10T07:52:49",
+      "items": [
+        {
+          "raw": "Oil Rite Oilers, Pair (Ship Direct) (Qty: 2), Inquiry N 1,748.00 210.00",
+          "norm": "OIL RITE OILERS PAIR SHIP DIRECT QTY 2 INQUIRY",
+          "qty": "",
+          "price": "1,748.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Num: 253-17-1048RP"
+          ],
+          "tags": [
+            "SHIPPING"
+          ],
+          "attributes": {
+            "inquiry_num": "253-17-1048RP",
+            "shipping_method": "SHIP DIRECT"
+          }
+        }
+      ],
+      "parts_only": false,
+      "normalizer_version": "2026-07-22-accent-fold-evase-v1"
+    },
+    "324917A": {
+      "customer": "",
+      "co_number": 1,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\324917A\\324917A - Sales Order CO#1.pdf",
+      "scanned_at": "2026-07-10T07:52:49",
+      "items": [
+        {
+          "raw": "Aeroacoustic \"Silentflow\" Model 40-TB-7A inlet C 16,671.00 5,501.00 22,172.00 1,650.00",
+          "norm": "AEROACOUSTIC SILENTFLOW MODEL 40 TB 7A INLET",
+          "qty": "",
+          "price": "16,671.00",
+          "ptype": "C",
+          "section": "",
+          "details": [
+            "silencer as per submittal. Silencer duplicate of",
+            "CBC PO# KP16522, CBC Job# 324917, and Aero",
+            "Job# 140258T.",
+            "All T304 Stainless Steel Construction",
+            "- Model 40-TB-7A inlet silencer",
+            "- Flanged outlet",
+            "- 1\"x1\" galvanized inlet screen",
+            "- Mounting lugs",
+            "Aero to provide drawing in AutoCAD, PDF and 3D.",
+            "Ship direct per the JZ Routing Guide. (Qty: 1)",
+            "silencer as per submittal. Silencer duplicate of",
+            "CBC PO# KP16522, CBC Job# 324917, and Aero",
+            "Job# 140258T.",
+            "All T304 Stainless Steel Construction",
+            "- Model 40-TB-7A inlet silencer",
+            "- Flanged outlet",
+            "- 1\"x1\" galvanized inlet screen",
+            "- Mounting lugs",
+            "Aero to provide drawing in AutoCAD, PDF and 3D.",
+            "Ship direct per the JZ Routing Guide. (Qty: 1)"
+          ],
+          "tags": [
+            "DRAWINGS",
+            "FLANGE",
+            "MATERIALS",
+            "SCREEN",
+            "SHIPPING",
+            "SILENCER",
+            "STAINLESS STEEL"
+          ],
+          "attributes": {
+            "component": "INLET SILENCER",
+            "mounting_type": "LUGS",
+            "screen_subcategory": "SCREEN",
+            "brand": "AEROACOUSTIC",
+            "model": "40-TB-7A",
+            "mounting_lugs": "YES",
+            "drawing_requirement": "PDF, AUTOCAD, 3D",
+            "shipping_method": "SHIP DIRECT",
+            "coating": "GALVANIZED",
+            "material": "STAINLESS STEEL",
+            "material_grade": "304 SS",
+            "material_scope": "INLET, OUTLET, SCREEN, SILENCER"
+          },
+          "review_flags": [
+            "UNCLASSIFIED DETAIL: CBC PO# KP16522, CBC Job# 324917, and Aero",
+            "UNCLASSIFIED DETAIL: Job# 140258T."
+          ]
+        }
+      ],
+      "parts_only": false,
+      "normalizer_version": "2026-07-22-accent-fold-evase-v1"
+    }
+  }
+}

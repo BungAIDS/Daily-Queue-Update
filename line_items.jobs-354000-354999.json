@@ -1,0 +1,128 @@
+{
+  "jobs": {
+    "354721D": {
+      "customer": "PCS PHOSPHATE",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\354721D\\354721D - Sales Order (original).pdf",
+      "scanned_at": "2026-07-10T07:52:49",
+      "items": [
+        {
+          "raw": "Isolators, Spring 1\" Deflection (0 - 326 Frame), Ship N 871.00 81.00",
+          "norm": "ISOLATORS SPRING 1 DEFLECTION 0 326 FRAME SHIP",
+          "qty": "",
+          "price": "871.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Direct (Qty: 1), Inquiry Num: 362-22-2211RP",
+            "Direct (Qty: 1), Inquiry Num: 362-22-2211RP",
+            "PCS PHOSPHATE COMPANY INC.",
+            "AURORA DIVISION",
+            "PO Box 696003",
+            "San Antonio, TX 78249",
+            "United States"
+          ],
+          "tags": [
+            "SHIPPING",
+            "VIBRATION ISOLATION"
+          ],
+          "attributes": {
+            "inquiry_num": "362-22-2211RP",
+            "component": "VIBRATION ISOLATION",
+            "isolation_deflection": "1\"",
+            "isolation_frame": "0 - 326",
+            "vibration_isolation_type": "SPRING ISOLATOR",
+            "shipping_method": "SHIP DIRECT",
+            "shipping_scope": "VIBRATION ISOLATION"
+          },
+          "review_flags": [
+            "UNCLASSIFIED DETAIL: PCS PHOSPHATE COMPANY INC.",
+            "UNCLASSIFIED DETAIL: AURORA DIVISION",
+            "UNCLASSIFIED DETAIL: PO Box 696003",
+            "UNCLASSIFIED DETAIL: San Antonio, TX 78249",
+            "UNCLASSIFIED DETAIL: United States"
+          ]
+        }
+      ],
+      "parts_only": false,
+      "normalizer_version": "2026-07-22-accent-fold-evase-v1"
+    },
+    "354722E": {
+      "customer": "PCS PHOSPHATE",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\354722E\\354722E - Sales Order (original).pdf",
+      "scanned_at": "2026-07-10T07:52:49",
+      "items": [
+        {
+          "raw": "Isolator, Spring 1\" Deflection (0 - 326 Frame), Ship N 1,742.00 162.00",
+          "norm": "ISOLATOR SPRING 1 DEFLECTION 0 326 FRAME SHIP",
+          "qty": "",
+          "price": "1,742.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Direct (Qty: 2), Inquiry Num: 362-22-2209RP",
+            "PCS PHOSPHATE COMPANY INC.",
+            "AURORA DIVISION",
+            "PO Box 696003",
+            "San Antonio, TX 78249",
+            "United States"
+          ],
+          "tags": [
+            "SHIPPING",
+            "VIBRATION ISOLATION"
+          ],
+          "attributes": {
+            "inquiry_num": "362-22-2209RP",
+            "component": "VIBRATION ISOLATION",
+            "isolation_deflection": "1\"",
+            "isolation_frame": "0 - 326",
+            "vibration_isolation_type": "SPRING ISOLATOR",
+            "shipping_method": "SHIP DIRECT",
+            "shipping_scope": "VIBRATION ISOLATION"
+          },
+          "review_flags": [
+            "UNCLASSIFIED DETAIL: PCS PHOSPHATE COMPANY INC.",
+            "UNCLASSIFIED DETAIL: AURORA DIVISION",
+            "UNCLASSIFIED DETAIL: PO Box 696003",
+            "UNCLASSIFIED DETAIL: San Antonio, TX 78249",
+            "UNCLASSIFIED DETAIL: United States"
+          ]
+        }
+      ],
+      "parts_only": false,
+      "normalizer_version": "2026-07-22-accent-fold-evase-v1"
+    },
+    "354816A": {
+      "customer": "CSM WORLDWIDE",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\354816A\\354816A - Sales Order (original).pdf",
+      "scanned_at": "2026-07-10T07:52:49",
+      "items": [
+        {
+          "raw": "Replacement Thermocouple, Type J, (Pair) (Qty: 1), N 2,659.00 188.00",
+          "norm": "REPLACEMENT THERMOCOUPLE TYPE J PAIR QTY 1",
+          "qty": "",
+          "price": "2,659.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Inquiry Num: 340-26-1846RP"
+          ],
+          "tags": [
+            "SPARE PARTS"
+          ],
+          "attributes": {
+            "inquiry_num": "340-26-1846RP",
+            "spare_part_review": "UNCATEGORIZED REPAIR/SPARE PART - DEFINE COMPONENT"
+          },
+          "review_flags": [
+            "SPARE PART REVIEW: UNCATEGORIZED REPAIR/SPARE PART - DEFINE COMPONENT"
+          ]
+        }
+      ],
+      "parts_only": true,
+      "normalizer_version": "2026-07-22-accent-fold-evase-v1"
+    }
+  }
+}

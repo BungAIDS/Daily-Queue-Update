@@ -1,0 +1,265 @@
+{
+  "orders": {
+    "354721D": {
+      "added": "2026-06-16T14:04:28",
+      "left": "2026-06-23T12:35:49",
+      "on_queue": false,
+      "job": {
+        "status": "AT WC",
+        "job": "354721D",
+        "oper": "19",
+        "item": "53-0-0000.2P",
+        "design": "53",
+        "assigned_to": "NONE",
+        "checker": "NONE",
+        "start_date": "6/22/2026",
+        "end_date": "6/23/2026",
+        "plan_hrs": "4.000",
+        "fannet_date": "7/15/2026",
+        "total_price": "$2,218.00",
+        "status_note": "",
+        "customer": "PCS PHOSPHATE",
+        "primary_rep": "JACKSON-HALE ENVIRONMENTA",
+        "ship_with": "",
+        "unapproved": false,
+        "credit_hold": false,
+        "has_notes": true,
+        "job_type": "",
+        "job_folder": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\354721D",
+        "dwg_extras": {},
+        "dwg_missing_std": false,
+        "_first_seen": "2026-06-23T05:00:01",
+        "_carried_over": true,
+        "engineers": [],
+        "co_number": 0,
+        "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\354721D\\354721D - Sales Order (original).pdf",
+        "so_design_desc": "Pressure Blower",
+        "so_size": "F1",
+        "so_arrangement": "A/4",
+        "so_class": "N/A",
+        "so_rotation": "CCW",
+        "so_special_temp": "0",
+        "line_items": [
+          {
+            "raw": "Isolators, Spring 1\" Deflection (0 - 326 Frame), Ship N 871.00 81.00",
+            "norm": "ISOLATORS SPRING 1 DEFLECTION 0 326 FRAME SHIP",
+            "qty": "",
+            "price": "871.00",
+            "ptype": "N",
+            "section": "",
+            "details": [
+              "Direct (Qty: 1), Inquiry Num: 362-22-2211RP",
+              "Direct (Qty: 1), Inquiry Num: 362-22-2211RP",
+              "PCS PHOSPHATE COMPANY INC.",
+              "AURORA DIVISION",
+              "PO Box 696003",
+              "San Antonio, TX 78249",
+              "United States"
+            ],
+            "tags": [
+              "SHIPPING",
+              "VIBRATION ISOLATION"
+            ],
+            "attributes": {
+              "inquiry_num": "362-22-2211RP",
+              "component": "VIBRATION ISOLATION",
+              "isolation_deflection": "1\"",
+              "isolation_frame": "0 - 326",
+              "vibration_isolation_type": "SPRING ISOLATOR",
+              "shipping_method": "SHIP DIRECT",
+              "shipping_scope": "VIBRATION ISOLATION"
+            },
+            "review_flags": [
+              "UNCLASSIFIED DETAIL: PCS PHOSPHATE COMPANY INC.",
+              "UNCLASSIFIED DETAIL: AURORA DIVISION",
+              "UNCLASSIFIED DETAIL: PO Box 696003",
+              "UNCLASSIFIED DETAIL: San Antonio, TX 78249",
+              "UNCLASSIFIED DETAIL: United States"
+            ]
+          }
+        ],
+        "line_item_tags": "SHIPPING, VIBRATION ISOLATION",
+        "so_validation": "MATCH",
+        "so_document_kind": "SALES_ORDER",
+        "so_internal_order": "354721D",
+        "so_validation_method": "header"
+      },
+      "lq_sig": "2e864a0a665a8b26a067c0c59dc073dc",
+      "oh_sig": "3c059b6a75dd51277bc0aa400c0e7b03",
+      "seen_on_queue": true,
+      "last_in": "2026-06-22T08:31:10",
+      "last_out": "2026-06-23T12:35:49",
+      "added_known": false
+    },
+    "354722E": {
+      "added": "2026-06-19T08:24:04",
+      "added_known": true,
+      "last_in": "2026-06-19T08:24:04",
+      "last_out": "2026-06-23T12:06:40",
+      "left": "2026-06-23T12:06:40",
+      "on_queue": false,
+      "seen_on_queue": true,
+      "job": {
+        "status": "AT WC",
+        "job": "354722E",
+        "oper": "21",
+        "item": "53-0-0000.2P",
+        "design": "53",
+        "assigned_to": "NONE",
+        "checker": "NONE",
+        "start_date": "6/19/2026",
+        "end_date": "6/23/2026",
+        "plan_hrs": "8.000",
+        "fannet_date": "7/13/2026",
+        "total_price": "$2,218.00",
+        "status_note": "",
+        "customer": "PCS PHOSPHATE",
+        "primary_rep": "JACKSON-HALE ENVIRONMENTA",
+        "ship_with": "",
+        "unapproved": false,
+        "credit_hold": false,
+        "has_notes": false,
+        "job_type": "",
+        "job_folder": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\354722E",
+        "dwg_extras": {},
+        "dwg_missing_std": false,
+        "_first_seen": "2026-06-23T05:00:03",
+        "_carried_over": true,
+        "co_number": 0,
+        "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\354722E\\354722E - Sales Order (original).pdf",
+        "so_design_desc": "Pressure Blower",
+        "so_size": "H3",
+        "so_arrangement": "A/8",
+        "so_class": "N/A",
+        "so_rotation": "CW",
+        "so_special_temp": "0",
+        "line_items": [
+          {
+            "raw": "Isolator, Spring 1\" Deflection (0 - 326 Frame), Ship N 1,742.00 162.00",
+            "norm": "ISOLATOR SPRING 1 DEFLECTION 0 326 FRAME SHIP",
+            "qty": "",
+            "price": "1,742.00",
+            "ptype": "N",
+            "section": "",
+            "details": [
+              "Direct (Qty: 2), Inquiry Num: 362-22-2209RP",
+              "PCS PHOSPHATE COMPANY INC.",
+              "AURORA DIVISION",
+              "PO Box 696003",
+              "San Antonio, TX 78249",
+              "United States"
+            ],
+            "tags": [
+              "SHIPPING",
+              "VIBRATION ISOLATION"
+            ],
+            "attributes": {
+              "inquiry_num": "362-22-2209RP",
+              "component": "VIBRATION ISOLATION",
+              "isolation_deflection": "1\"",
+              "isolation_frame": "0 - 326",
+              "vibration_isolation_type": "SPRING ISOLATOR",
+              "shipping_method": "SHIP DIRECT",
+              "shipping_scope": "VIBRATION ISOLATION"
+            },
+            "review_flags": [
+              "UNCLASSIFIED DETAIL: PCS PHOSPHATE COMPANY INC.",
+              "UNCLASSIFIED DETAIL: AURORA DIVISION",
+              "UNCLASSIFIED DETAIL: PO Box 696003",
+              "UNCLASSIFIED DETAIL: San Antonio, TX 78249",
+              "UNCLASSIFIED DETAIL: United States"
+            ]
+          }
+        ],
+        "line_item_tags": "SHIPPING, VIBRATION ISOLATION",
+        "so_validation": "MATCH",
+        "so_document_kind": "SALES_ORDER",
+        "so_internal_order": "354722E",
+        "so_validation_method": "header"
+      }
+    },
+    "354816A": {
+      "added": "2026-07-06T07:04:05",
+      "added_known": true,
+      "last_in": "2026-07-06T07:04:05",
+      "last_out": "2026-07-06T07:46:06",
+      "left": "2026-07-06T07:46:06",
+      "on_queue": false,
+      "seen_on_queue": true,
+      "history": [
+        {
+          "event": "in",
+          "time": "2026-07-06T07:04:05"
+        },
+        {
+          "event": "out",
+          "time": "2026-07-06T07:46:06"
+        }
+      ],
+      "job": {
+        "status": "AT WC",
+        "job": "354816A",
+        "oper": "19",
+        "item": "16-0-0000P",
+        "design": "16",
+        "assigned_to": "NONE",
+        "checker": "NONE",
+        "start_date": "7/1/2026",
+        "end_date": "7/2/2026",
+        "plan_hrs": "8.000",
+        "fannet_date": "8/10/2026",
+        "total_price": "$2,659.00",
+        "status_note": "",
+        "customer": "CSM WORLDWIDE",
+        "primary_rep": "AIR PURIFIERS INC.",
+        "ship_with": "",
+        "unapproved": false,
+        "credit_hold": false,
+        "has_notes": true,
+        "job_type": "",
+        "job_folder": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\354816A",
+        "dwg_extras": {},
+        "dwg_missing_std": false,
+        "_first_seen": "2026-07-06T07:04:05",
+        "_carried_over": false,
+        "engineers": [],
+        "co_number": 0,
+        "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\354816A\\354816A - Sales Order (original).pdf",
+        "so_design_desc": "SW",
+        "so_size": "17",
+        "so_arrangement": "A/9H",
+        "so_class": "4",
+        "so_rotation": "CW",
+        "so_special_temp": "0",
+        "line_items": [
+          {
+            "raw": "Replacement Thermocouple, Type J, (Pair) (Qty: 1), N 2,659.00 188.00",
+            "norm": "REPLACEMENT THERMOCOUPLE TYPE J PAIR QTY 1",
+            "qty": "",
+            "price": "2,659.00",
+            "ptype": "N",
+            "section": "",
+            "details": [
+              "Inquiry Num: 340-26-1846RP"
+            ],
+            "tags": [
+              "SPARE PARTS"
+            ],
+            "attributes": {
+              "inquiry_num": "340-26-1846RP",
+              "spare_part_review": "UNCATEGORIZED REPAIR/SPARE PART - DEFINE COMPONENT"
+            },
+            "review_flags": [
+              "SPARE PART REVIEW: UNCATEGORIZED REPAIR/SPARE PART - DEFINE COMPONENT"
+            ]
+          }
+        ],
+        "line_item_tags": "SPARE PARTS",
+        "so_validation": "MATCH",
+        "so_document_kind": "SALES_ORDER",
+        "so_internal_order": "354816A",
+        "so_validation_method": "header"
+      }
+    }
+  }
+}

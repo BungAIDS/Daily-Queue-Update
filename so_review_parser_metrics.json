@@ -1,0 +1,22 @@
+{
+  "runs": [
+    {
+      "recorded_at": "2026-07-16T15:31:21",
+      "items": 139827,
+      "jobs": 11473,
+      "before": {
+        "review_rows": 38070,
+        "jobs_with_review": 8377,
+        "flagged_items": 23847,
+        "parser_flags": 31669
+      },
+      "after": {
+        "review_rows": 26408,
+        "jobs_with_review": 6502,
+        "flagged_items": 13589,
+        "parser_flags": 20256
+      },
+      "review_rows_reduced": 11662
+    }
+  ]
+}

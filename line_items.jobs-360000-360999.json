@@ -1,0 +1,206 @@
+{
+  "jobs": {
+    "360048A": {
+      "customer": "CANADA BLOWER",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\360048A\\360048A - Sales Order (original).pdf",
+      "arrangement": "A/4 With Base for foot mounted motor",
+      "job_number": "",
+      "parts_only": true,
+      "scanned_at": "2026-07-17T09:37:49",
+      "items": [
+        {
+          "raw": "Replacement filter element, Paper, Ship direct (Qty: N 1,722.00 207.00",
+          "norm": "REPLACEMENT FILTER ELEMENT PAPER SHIP DIRECT QTY",
+          "qty": "",
+          "price": "1,722.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "3), Inquiry Num: 346-26-1959RP"
+          ],
+          "tags": [
+            "FILTER",
+            "SHIPPING",
+            "SPARE PARTS"
+          ],
+          "attributes": {
+            "inquiry_num": "346-26-1959RP",
+            "component": "FILTER",
+            "filter_type": "FILTER",
+            "spare_part_review": "UNCATEGORIZED REPAIR/SPARE PART - DEFINE COMPONENT",
+            "shipping_method": "SHIP DIRECT"
+          },
+          "review_flags": [
+            "SPARE PART REVIEW: UNCATEGORIZED REPAIR/SPARE PART - DEFINE COMPONENT"
+          ]
+        },
+        {
+          "raw": "Document Fact: MARK",
+          "norm": "DOCUMENT FACT MARK",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "DOCUMENT FACTS",
+          "details": [
+            "P.O. 4375"
+          ],
+          "tags": [
+            "MARK"
+          ],
+          "attributes": {
+            "mark_text": "P.O. 4375",
+            "component": "MARK"
+          },
+          "document_fact": "MARK",
+          "document_attributes": {
+            "mark_text": "P.O. 4375"
+          }
+        },
+        {
+          "raw": "Document Fact: SHIP TO",
+          "norm": "DOCUMENT FACT SHIP TO",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "DOCUMENT FACTS",
+          "details": [
+            "ABCO INDUSTRIES INC.",
+            "81 TANNERY ROAD",
+            "LUNENBURG, NS B0J 2C0",
+            "CANADA"
+          ],
+          "tags": [
+            "SHIP TO"
+          ],
+          "attributes": {
+            "ship_to_company": "ABCO INDUSTRIES INC.",
+            "ship_to_address": "81 TANNERY ROAD | LUNENBURG, NS B0J 2C0",
+            "ship_to_country": "CANADA",
+            "component": "SHIP TO"
+          },
+          "document_fact": "SHIP TO",
+          "document_attributes": {
+            "ship_to_company": "ABCO INDUSTRIES INC.",
+            "ship_to_address": "81 TANNERY ROAD | LUNENBURG, NS B0J 2C0",
+            "ship_to_country": "CANADA"
+          }
+        }
+      ],
+      "normalizer_version": "2026-07-22-accent-fold-evase-v1"
+    },
+    "360655B": {
+      "customer": "ABTEC FILTERS",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\360655B\\360655B - Sales Order (original).pdf",
+      "arrangement": "A/1",
+      "job_number": "",
+      "parts_only": true,
+      "scanned_at": "2026-07-20T05:01:39",
+      "items": [
+        {
+          "raw": "Not Per Original Inlet Cone, Painted CBC Black (Qty: N 4,768.00 954.00",
+          "norm": "NOT PER ORIGINAL INLET CONE PAINTED CBC BLACK QTY",
+          "qty": "",
+          "price": "4,768.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "1), Inquiry Num: 275-26-2425RP"
+          ],
+          "tags": [
+            "COATING",
+            "INLET"
+          ],
+          "attributes": {
+            "inquiry_num": "275-26-2425RP",
+            "inlet_subcategory": "INLET CONE",
+            "coating_scope": "INLET",
+            "coating_type": "PAINT",
+            "coating_category": "PAINT",
+            "coating_color": "BLACK"
+          }
+        },
+        {
+          "raw": "Not Per Original, Extended Inlet Ring, Painted CBC N 1,578.00 316.00",
+          "norm": "NOT PER ORIGINAL EXTENDED INLET RING PAINTED CBC",
+          "qty": "",
+          "price": "1,578.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Black (Qty: 1), Inquiry Num: 275-26-2425RP"
+          ],
+          "tags": [
+            "COATING"
+          ],
+          "attributes": {
+            "inquiry_num": "275-26-2425RP",
+            "coating_type": "PAINT",
+            "coating_category": "PAINT",
+            "coating_color": "BLACK"
+          }
+        },
+        {
+          "raw": "NOT PER ORIGINAL",
+          "norm": "NOT PER ORIGINAL",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "NOT PER ORIGINAL"
+          }
+        },
+        {
+          "raw": "Customer assumes responsibility for fit-up and suitability of part(s) due to part(s) being not per original",
+          "norm": "CUSTOMER ASSUMES RESPONSIBILITY FOR FIT UP AND SUITABILITY OF PART S DUE TO PART S BEING NOT PER ORIGINAL",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "MISC NOTE"
+          ],
+          "attributes": {}
+        },
+        {
+          "raw": "Document Fact: SHIP TO",
+          "norm": "DOCUMENT FACT SHIP TO",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "DOCUMENT FACTS",
+          "details": [
+            "ABTEC FILTERS",
+            "8128 MCINTYRE RD N.W.",
+            "EDMONTON, AB T6E5C4",
+            "CANADA"
+          ],
+          "tags": [
+            "SHIP TO"
+          ],
+          "attributes": {
+            "ship_to_company": "ABTEC FILTERS",
+            "ship_to_address": "8128 MCINTYRE RD N.W. | EDMONTON, AB T6E5C4",
+            "ship_to_country": "CANADA",
+            "component": "SHIP TO"
+          },
+          "document_fact": "SHIP TO",
+          "document_attributes": {
+            "ship_to_company": "ABTEC FILTERS",
+            "ship_to_address": "8128 MCINTYRE RD N.W. | EDMONTON, AB T6E5C4",
+            "ship_to_country": "CANADA"
+          }
+        }
+      ],
+      "normalizer_version": "2026-07-22-accent-fold-evase-v1"
+    }
+  }
+}

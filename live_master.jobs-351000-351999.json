@@ -1,0 +1,315 @@
+{
+  "orders": {
+    "351569N": {
+      "added": "2026-06-25T07:16:58",
+      "added_known": true,
+      "last_in": "2026-06-25T07:16:58",
+      "last_out": "2026-06-25T09:52:52",
+      "left": "2026-06-25T09:52:52",
+      "on_queue": false,
+      "seen_on_queue": true,
+      "history": [
+        {
+          "event": "in",
+          "time": "2026-06-25T07:16:58"
+        },
+        {
+          "event": "out",
+          "time": "2026-06-25T09:52:52"
+        }
+      ],
+      "job": {
+        "status": "AT WC",
+        "job": "351569N",
+        "oper": "21",
+        "item": "37-1-0064P",
+        "design": "37",
+        "assigned_to": "NONE",
+        "checker": "NONE",
+        "start_date": "6/25/2026",
+        "end_date": "6/25/2026",
+        "plan_hrs": "0.250",
+        "fannet_date": "8/3/2026",
+        "total_price": "$1,467.00",
+        "status_note": "",
+        "customer": "JOY GLOBAL SURFACE MINING",
+        "primary_rep": "CBS-WISCONSIN",
+        "ship_with": "",
+        "unapproved": false,
+        "credit_hold": false,
+        "has_notes": false,
+        "job_type": "",
+        "job_folder": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\351569N",
+        "dwg_extras": {},
+        "dwg_missing_std": false,
+        "_first_seen": "2026-06-25T07:16:58",
+        "_carried_over": false,
+        "engineers": [],
+        "co_number": 0,
+        "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\351569N\\351569N - Sales Order (original).pdf",
+        "so_design_desc": "DCT Tubeaxial Direct Drive",
+        "so_arrangement": "A/4 OMTB",
+        "so_wheel_type": "12Blade",
+        "so_special_temp": "0",
+        "line_items": [
+          {
+            "raw": "Motor (Model # 00218ET3E145T-W22, 2HP, 1800 C 862.35 357.00 1,219.00 108.00",
+            "norm": "MOTOR MODEL # 00218ET3E145T W22 2HP 1800",
+            "qty": "",
+            "price": "862.35",
+            "ptype": "C",
+            "section": "",
+            "details": [
+              "RPM, 3-60-230/460V Motor with MOD N20",
+              "additionall nameplated for 1 HP 1500 RPM",
+              "3/50/380/415. (Qty: 3))",
+              "Vendor: Weg",
+              "2 HP, 1800 RPM, Enclosure: TEFC",
+              "145T, Cast Iron, Foot Mounted, 3/60/460, F1,",
+              "1.15 SF",
+              "used on 351569M",
+              "Ship Direct"
+            ],
+            "tags": [
+              "MOTOR",
+              "NAMEPLATE",
+              "SHIPPING"
+            ],
+            "attributes": {
+              "component": "MOTOR",
+              "motor_hp": "2, 1",
+              "motor_rpm": "00, 1500, 1800",
+              "motor_frame": "145T",
+              "motor_phase": "3",
+              "motor_frequency_hz": "50",
+              "motor_voltage": "380/415",
+              "motor_service_factor": "1.15",
+              "motor_conduit_box_location": "F1",
+              "motor_enclosure": "TEFC",
+              "motor_frame_material": "CAST IRON",
+              "motor_model": "00218ET3E145T-W22",
+              "motor_mounting": "FOOT MOUNTED",
+              "motor_nameplate": "YES",
+              "vendor": "Weg",
+              "shipping_method": "SHIP DIRECT"
+            },
+            "review_flags": [
+              "UNCLASSIFIED DETAIL: used on 351569M"
+            ]
+          },
+          {
+            "raw": "NB4 Date to be listed on Requistion to Vendor. L",
+            "norm": "NB4 DATE TO BE LISTED ON REQUISTION TO VENDOR",
+            "qty": "",
+            "price": "",
+            "ptype": "L",
+            "section": "",
+            "details": [
+              "(Qty: 3), Inquiry Num: 311-18-922RP",
+              "RPM, 3-60-230/460V Motor with MOD N20 additionall",
+              "nameplated for 1 HP 1500 RPM 3/50/380/415.: 15 Working",
+              "Days"
+            ],
+            "tags": [
+              "MOTOR",
+              "NAMEPLATE"
+            ],
+            "attributes": {
+              "inquiry_num": "311-18-922RP",
+              "component": "MOTOR",
+              "motor_hp": "1",
+              "motor_rpm": "1500",
+              "motor_phase": "3",
+              "motor_frequency_hz": "50",
+              "motor_voltage": "380/415",
+              "motor_nameplate": "YES"
+            },
+            "review_flags": [
+              "UNCLASSIFIED DETAIL: Days"
+            ]
+          },
+          {
+            "raw": "PURCHASING NOTE: Motor vendor must show customer P/N on shipping papers! Also ensure the banding on Motor is NOT metal. If",
+            "norm": "PURCHASING NOTE MOTOR VENDOR MUST SHOW CUSTOMER P N ON SHIPPING PAPERS ALSO ENSURE THE BANDING ON MOTOR IS NOT METAL IF",
+            "qty": "",
+            "price": "",
+            "ptype": "",
+            "section": "Additional Features / Notes:",
+            "details": [],
+            "tags": [
+              "MOTOR",
+              "SHIPPING"
+            ],
+            "attributes": {
+              "component": "MOTOR",
+              "motor_part_number": "ON",
+              "shipping_instruction": "SHIPPING DOCUMENTS/MARKING, MARK SHIPPING PAPERS"
+            }
+          },
+          {
+            "raw": "metal is used the motor will be rejected and returned for repackaging at vendors costs. As well please ensure along with the NO",
+            "norm": "METAL IS USED THE MOTOR WILL BE REJECTED AND RETURNED FOR REPACKAGING AT VENDORS COSTS AS WELL PLEASE ENSURE ALONG WITH THE NO",
+            "qty": "",
+            "price": "",
+            "ptype": "",
+            "section": "Additional Features / Notes:",
+            "details": [],
+            "tags": [
+              "MOTOR"
+            ],
+            "attributes": {
+              "component": "MOTOR"
+            }
+          },
+          {
+            "raw": "METAL BANDING, the motor NB4 date must be listed on the PO to the motor vendor.",
+            "norm": "METAL BANDING THE MOTOR NB4 DATE MUST BE LISTED ON THE PO TO THE MOTOR VENDOR",
+            "qty": "",
+            "price": "",
+            "ptype": "",
+            "section": "Additional Features / Notes:",
+            "details": [],
+            "tags": [
+              "MOTOR",
+              "PACKAGING"
+            ],
+            "attributes": {
+              "component": "MOTOR"
+            }
+          },
+          {
+            "raw": "OE please ensure on motor requisition the NB4 shipment date is listed so that the motor does not ship early. ALso we have 3 units",
+            "norm": "OE PLEASE ENSURE ON MOTOR REQUISITION THE NB4 SHIPMENT DATE IS LISTED SO THAT THE MOTOR DOES NOT SHIP EARLY ALSO WE HAVE 3 UNITS",
+            "qty": "",
+            "price": "",
+            "ptype": "",
+            "section": "Additional Features / Notes:",
+            "details": [],
+            "tags": [
+              "MOTOR",
+              "SHIPPING"
+            ],
+            "attributes": {
+              "component": "MOTOR",
+              "shipping_instruction": "DO NOT SHIP EARLY"
+            }
+          },
+          {
+            "raw": "needed for this order.",
+            "norm": "NEEDED FOR THIS ORDER",
+            "qty": "",
+            "price": "",
+            "ptype": "",
+            "section": "Additional Features / Notes:",
+            "details": [],
+            "tags": [
+              "ADDITIONAL FEATURES / NOTES"
+            ],
+            "attributes": {
+              "component": "ADDITIONAL FEATURES / NOTES",
+              "note": "needed for this order."
+            }
+          },
+          {
+            "raw": "Effective Diameter: 0",
+            "norm": "EFFECTIVE DIAMETER 0",
+            "qty": "",
+            "price": "",
+            "ptype": "",
+            "section": "Additional Features / Notes:",
+            "details": [],
+            "tags": [
+              "SPECIAL CONSTRUCTION",
+              "WHEEL"
+            ],
+            "attributes": {
+              "special_construction_type": "EFFECTIVE DIAMETER",
+              "component": "WHEEL",
+              "wheel_feature": "EFFECTIVE DIAMETER"
+            }
+          },
+          {
+            "raw": "All Chicago Blower wheels are precision balanced; however when a precision balanced wheel is installed in a fan, the wheel may have",
+            "norm": "ALL CHICAGO BLOWER WHEELS ARE PRECISION BALANCED HOWEVER WHEN A PRECISION BALANCED WHEEL IS INSTALLED IN A FAN THE WHEEL MAY HAVE",
+            "qty": "",
+            "price": "",
+            "ptype": "",
+            "section": "Additional Features / Notes:",
+            "details": [],
+            "tags": [
+              "MISC NOTE"
+            ],
+            "attributes": {
+              "note_type": "MISC"
+            }
+          },
+          {
+            "raw": "to be phase balanced to compensate for any imbalance or eccentricity in other components in the drive train. If the motor and drives",
+            "norm": "TO BE PHASE BALANCED TO COMPENSATE FOR ANY IMBALANCE OR ECCENTRICITY IN OTHER COMPONENTS IN THE DRIVE TRAIN IF THE MOTOR AND DRIVES",
+            "qty": "",
+            "price": "",
+            "ptype": "",
+            "section": "Additional Features / Notes:",
+            "details": [],
+            "tags": [
+              "MOTOR"
+            ],
+            "attributes": {
+              "component": "MOTOR"
+            }
+          },
+          {
+            "raw": "are not mounted by Chicago Blower, we cannot check the assembled rotating system for vibration, and phase balance by others may",
+            "norm": "ARE NOT MOUNTED BY CHICAGO BLOWER WE CANNOT CHECK THE ASSEMBLED ROTATING SYSTEM FOR VIBRATION AND PHASE BALANCE BY OTHERS MAY",
+            "qty": "",
+            "price": "",
+            "ptype": "",
+            "section": "Additional Features / Notes:",
+            "details": [],
+            "tags": [],
+            "attributes": {},
+            "review_flags": [
+              "UNTAGGED"
+            ]
+          },
+          {
+            "raw": "Parcel Ground. Identify the destination and utilize the KMC FedEx Account Number, ACCT# 585604607.",
+            "norm": "PARCEL GROUND IDENTIFY THE DESTINATION AND UTILIZE THE KMC FEDEX ACCOUNT NUMBER ACCT# 585604607",
+            "qty": "",
+            "price": "",
+            "ptype": "",
+            "section": "Additional Features / Notes:",
+            "details": [],
+            "tags": [
+              "ADDITIONAL FEATURES / NOTES"
+            ],
+            "attributes": {
+              "component": "ADDITIONAL FEATURES / NOTES",
+              "note": "Parcel Ground. Identify the destination and utilize the KMC FedEx Account Number, ACCT# 585604607."
+            }
+          },
+          {
+            "raw": "2. Domestic shipments (within North America) weighing more than 150 pounds, enter shipment online (www.mytmc.com). If",
+            "norm": "DOMESTIC SHIPMENTS WITHIN NORTH AMERICA WEIGHING MORE THAN 150 POUNDS ENTER SHIPMENT ONLINE WWW MYTMC COM IF",
+            "qty": "2",
+            "price": "",
+            "ptype": "",
+            "section": "Additional Features / Notes:",
+            "details": [],
+            "tags": [
+              "SHIPPING"
+            ],
+            "attributes": {
+              "shipping_instruction": "ENTER SHIPMENT ONLINE"
+            }
+          }
+        ],
+        "line_item_tags": "ADDITIONAL FEATURES / NOTES, MISC NOTE, MOTOR, NAMEPLATE, PACKAGING, SHIPPING, SPECIAL CONSTRUCTION, WHEEL",
+        "so_validation": "MATCH",
+        "so_document_kind": "SALES_ORDER",
+        "so_internal_order": "351569N",
+        "so_validation_method": "header"
+      }
+    }
+  }
+}

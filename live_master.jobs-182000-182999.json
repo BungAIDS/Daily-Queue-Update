@@ -1,0 +1,115 @@
+{
+  "orders": {
+    "182605A": {
+      "added": "2026-07-09T10:10:10",
+      "added_known": true,
+      "last_in": "2026-07-09T10:10:10",
+      "last_out": "2026-07-10T08:43:13",
+      "left": "2026-07-10T08:43:13",
+      "on_queue": false,
+      "seen_on_queue": true,
+      "history": [
+        {
+          "event": "in",
+          "time": "2026-07-09T10:10:10"
+        },
+        {
+          "event": "out",
+          "time": "2026-07-10T08:43:13"
+        }
+      ],
+      "job": {
+        "status": "AT WC",
+        "job": "182605A",
+        "oper": "21",
+        "item": "DESIGN 36P",
+        "design": "36P",
+        "assigned_to": "NONE",
+        "checker": "NONE",
+        "start_date": "7/9/2026",
+        "end_date": "7/10/2026",
+        "plan_hrs": "8.000",
+        "fannet_date": "7/21/2026",
+        "total_price": "$2,582.00",
+        "status_note": "",
+        "customer": "CARPENTER INDUSTRIAL",
+        "primary_rep": "INDUSTRIAL AIR SOL.",
+        "ship_with": "",
+        "unapproved": false,
+        "credit_hold": false,
+        "has_notes": false,
+        "job_type": "",
+        "job_folder": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\182605A",
+        "dwg_extras": {},
+        "dwg_missing_std": false,
+        "_first_seen": "2026-07-10T05:00:05",
+        "_carried_over": true,
+        "engineers": [],
+        "co_number": 0,
+        "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\182605A\\182605A - Sales Order (original).pdf",
+        "so_design_desc": "SQB SW Belt Drive",
+        "so_size": "30",
+        "so_arrangement": "A/9H",
+        "so_class": "3",
+        "so_rotation": "CW",
+        "so_special_temp": "0",
+        "line_items": [
+          {
+            "raw": "Replacement Bearings, 2 7/16\" Bore (Pair) (Qty: 1), N 1,166.00 233.00",
+            "norm": "REPLACEMENT BEARINGS 2 7 16 BORE PAIR QTY 1",
+            "qty": "",
+            "price": "1,166.00",
+            "ptype": "N",
+            "section": "",
+            "details": [
+              "Inquiry Num: 295-26-2225RP"
+            ],
+            "tags": [
+              "SPARE PARTS"
+            ],
+            "attributes": {
+              "inquiry_num": "295-26-2225RP",
+              "component": "REPLACEMENT BEARINGS",
+              "bearing_bore": "2-7/16\""
+            }
+          },
+          {
+            "raw": "Replacement Drive set (Ship Direct) (Qty: 1), N 1,038.00 111.00",
+            "norm": "REPLACEMENT DRIVE SET SHIP DIRECT QTY 1",
+            "qty": "",
+            "price": "1,038.00",
+            "ptype": "N",
+            "section": "",
+            "details": [
+              "Inquiry Num: 295-26-1599RP",
+              "Pair of Bearing...$ 1356",
+              "Replacement Drive Set....$ 1226",
+              "Please supply a tax exempt certificate with the purchase order if this order should not be taxable."
+            ],
+            "tags": [
+              "DRIVE COMPONENTS",
+              "SHIPPING",
+              "SPARE PARTS"
+            ],
+            "attributes": {
+              "inquiry_num": "295-26-1599RP",
+              "component": "REPLACEMENT DRIVE SET",
+              "shipping_method": "SHIP DIRECT",
+              "drive_subcategory": "DRIVE SET"
+            },
+            "review_flags": [
+              "UNCLASSIFIED DETAIL: Pair of Bearing...$ 1356",
+              "UNCLASSIFIED DETAIL: Replacement Drive Set....$ 1226",
+              "UNCLASSIFIED DETAIL: Please supply a tax exempt certificate with the purchase order if this order should not be taxable."
+            ]
+          }
+        ],
+        "line_item_tags": "DRIVE COMPONENTS, SHIPPING, SPARE PARTS",
+        "so_validation": "MATCH",
+        "so_document_kind": "SALES_ORDER",
+        "so_internal_order": "182605A",
+        "so_validation_method": "header"
+      }
+    }
+  }
+}

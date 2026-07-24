@@ -1,0 +1,160 @@
+{
+  "jobs": {
+    "169979C": {
+      "customer": "",
+      "co_number": 1,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\169979C\\169979C - Sales Order CO#1.pdf",
+      "scanned_at": "2026-07-10T07:52:49",
+      "items": [
+        {
+          "raw": "Set of (4) T54-30 Isolators (Qty: 512), Inquiry N 267,776.00 32,256.00",
+          "norm": "SET OF 4 T54 30 ISOLATORS QTY 512 INQUIRY",
+          "qty": "",
+          "price": "267,776.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Num: 357-25-977RP"
+          ],
+          "tags": [
+            "VIBRATION ISOLATION"
+          ],
+          "attributes": {
+            "inquiry_num": "357-25-977RP",
+            "component": "VIBRATION ISOLATION"
+          }
+        },
+        {
+          "raw": "26 6/18/2026",
+          "norm": "6 18 2026",
+          "qty": "26",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "6/18/2026"
+          }
+        },
+        {
+          "raw": "48 10/08/2026",
+          "norm": "10 08 2026",
+          "qty": "48",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "10/08/2026"
+          }
+        },
+        {
+          "raw": "96 4/15/2027",
+          "norm": "4 15 2027",
+          "qty": "96",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "4/15/2027"
+          }
+        },
+        {
+          "raw": "96 10/07/2027",
+          "norm": "10 07 2027",
+          "qty": "96",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "10/07/2027"
+          }
+        },
+        {
+          "raw": "96 2/17/2028",
+          "norm": "2 17 2028",
+          "qty": "96",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "2/17/2028"
+          }
+        },
+        {
+          "raw": "96 6/08/2028",
+          "norm": "6 08 2028",
+          "qty": "96",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "6/08/2028"
+          }
+        },
+        {
+          "raw": "54 11/16/2028",
+          "norm": "11 16 2028",
+          "qty": "54",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "11/16/2028"
+          }
+        },
+        {
+          "raw": "169979C 169979 322117",
+          "norm": "169979C 169979 322117",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "169979C 169979 322117"
+          }
+        }
+      ],
+      "parts_only": false,
+      "normalizer_version": "2026-07-22-accent-fold-evase-v1"
+    }
+  }
+}

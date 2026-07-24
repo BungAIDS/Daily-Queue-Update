@@ -1,0 +1,36 @@
+{
+  "jobs": {
+    "313050B": {
+      "customer": "",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\313050B\\313050B - Sales Order (original).pdf",
+      "scanned_at": "2026-07-10T07:52:49",
+      "items": [
+        {
+          "raw": "Replacement Drive Set (Ship Direct) (Qty: 1), N 692.00 83.00",
+          "norm": "REPLACEMENT DRIVE SET SHIP DIRECT QTY 1",
+          "qty": "",
+          "price": "692.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Inquiry Num: 364-26-1948RP"
+          ],
+          "tags": [
+            "DRIVE COMPONENTS",
+            "SHIPPING",
+            "SPARE PARTS"
+          ],
+          "attributes": {
+            "inquiry_num": "364-26-1948RP",
+            "component": "REPLACEMENT DRIVE SET",
+            "shipping_method": "SHIP DIRECT",
+            "drive_subcategory": "DRIVE SET"
+          }
+        }
+      ],
+      "parts_only": true,
+      "normalizer_version": "2026-07-22-accent-fold-evase-v1"
+    }
+  }
+}

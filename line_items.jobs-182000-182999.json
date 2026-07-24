@@ -1,0 +1,63 @@
+{
+  "jobs": {
+    "182605A": {
+      "customer": "CARPENTER INDUSTRIAL",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\182605A\\182605A - Sales Order (original).pdf",
+      "scanned_at": "2026-07-10T07:52:49",
+      "items": [
+        {
+          "raw": "Replacement Bearings, 2 7/16\" Bore (Pair) (Qty: 1), N 1,166.00 233.00",
+          "norm": "REPLACEMENT BEARINGS 2 7 16 BORE PAIR QTY 1",
+          "qty": "",
+          "price": "1,166.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Inquiry Num: 295-26-2225RP"
+          ],
+          "tags": [
+            "SPARE PARTS"
+          ],
+          "attributes": {
+            "inquiry_num": "295-26-2225RP",
+            "component": "REPLACEMENT BEARINGS",
+            "bearing_bore": "2-7/16\""
+          }
+        },
+        {
+          "raw": "Replacement Drive set (Ship Direct) (Qty: 1), N 1,038.00 111.00",
+          "norm": "REPLACEMENT DRIVE SET SHIP DIRECT QTY 1",
+          "qty": "",
+          "price": "1,038.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Inquiry Num: 295-26-1599RP",
+            "Pair of Bearing...$ 1356",
+            "Replacement Drive Set....$ 1226",
+            "Please supply a tax exempt certificate with the purchase order if this order should not be taxable."
+          ],
+          "tags": [
+            "DRIVE COMPONENTS",
+            "SHIPPING",
+            "SPARE PARTS"
+          ],
+          "attributes": {
+            "inquiry_num": "295-26-1599RP",
+            "component": "REPLACEMENT DRIVE SET",
+            "shipping_method": "SHIP DIRECT",
+            "drive_subcategory": "DRIVE SET"
+          },
+          "review_flags": [
+            "UNCLASSIFIED DETAIL: Pair of Bearing...$ 1356",
+            "UNCLASSIFIED DETAIL: Replacement Drive Set....$ 1226",
+            "UNCLASSIFIED DETAIL: Please supply a tax exempt certificate with the purchase order if this order should not be taxable."
+          ]
+        }
+      ],
+      "parts_only": true,
+      "normalizer_version": "2026-07-22-accent-fold-evase-v1"
+    }
+  }
+}

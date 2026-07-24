@@ -1,0 +1,211 @@
+{
+  "format": "order-data-shards-v1",
+  "source": "backfill_line_items.json",
+  "wrapper": "jobs",
+  "metadata": {
+    "ai_tags": {}
+  },
+  "max_shard_bytes": 41943040,
+  "job_range_size": 1000,
+  "job_count": 11389,
+  "shards": [
+    {
+      "file": "backfill_line_items.jobs-401000-401999.json",
+      "range_start": 401000,
+      "range_end": 401999,
+      "first_job": 401078,
+      "last_job": 401988,
+      "jobs": 68,
+      "bytes": 535333
+    },
+    {
+      "file": "backfill_line_items.jobs-402000-402999.json",
+      "range_start": 402000,
+      "range_end": 402999,
+      "first_job": 402038,
+      "last_job": 402999,
+      "jobs": 294,
+      "bytes": 2014920
+    },
+    {
+      "file": "backfill_line_items.jobs-403000-403999.json",
+      "range_start": 403000,
+      "range_end": 403999,
+      "first_job": 403000,
+      "last_job": 403997,
+      "jobs": 523,
+      "bytes": 3711766
+    },
+    {
+      "file": "backfill_line_items.jobs-404000-404999.json",
+      "range_start": 404000,
+      "range_end": 404999,
+      "first_job": 404006,
+      "last_job": 404998,
+      "jobs": 596,
+      "bytes": 4269599
+    },
+    {
+      "file": "backfill_line_items.jobs-405000-405999.json",
+      "range_start": 405000,
+      "range_end": 405999,
+      "first_job": 405000,
+      "last_job": 405995,
+      "jobs": 617,
+      "bytes": 4649306
+    },
+    {
+      "file": "backfill_line_items.jobs-406000-406999.json",
+      "range_start": 406000,
+      "range_end": 406999,
+      "first_job": 406000,
+      "last_job": 406999,
+      "jobs": 605,
+      "bytes": 4470822
+    },
+    {
+      "file": "backfill_line_items.jobs-407000-407999.json",
+      "range_start": 407000,
+      "range_end": 407999,
+      "first_job": 407000,
+      "last_job": 407999,
+      "jobs": 677,
+      "bytes": 5461473
+    },
+    {
+      "file": "backfill_line_items.jobs-408000-408999.json",
+      "range_start": 408000,
+      "range_end": 408999,
+      "first_job": 408002,
+      "last_job": 408999,
+      "jobs": 644,
+      "bytes": 4935711
+    },
+    {
+      "file": "backfill_line_items.jobs-409000-409999.json",
+      "range_start": 409000,
+      "range_end": 409999,
+      "first_job": 409000,
+      "last_job": 409993,
+      "jobs": 624,
+      "bytes": 4744025
+    },
+    {
+      "file": "backfill_line_items.jobs-410000-410999.json",
+      "range_start": 410000,
+      "range_end": 410999,
+      "first_job": 410004,
+      "last_job": 410998,
+      "jobs": 576,
+      "bytes": 4443460
+    },
+    {
+      "file": "backfill_line_items.jobs-411000-411999.json",
+      "range_start": 411000,
+      "range_end": 411999,
+      "first_job": 411001,
+      "last_job": 411998,
+      "jobs": 514,
+      "bytes": 4256996
+    },
+    {
+      "file": "backfill_line_items.jobs-412000-412999.json",
+      "range_start": 412000,
+      "range_end": 412999,
+      "first_job": 412000,
+      "last_job": 412997,
+      "jobs": 606,
+      "bytes": 4853789
+    },
+    {
+      "file": "backfill_line_items.jobs-413000-413999.json",
+      "range_start": 413000,
+      "range_end": 413999,
+      "first_job": 413000,
+      "last_job": 413999,
+      "jobs": 571,
+      "bytes": 4451044
+    },
+    {
+      "file": "backfill_line_items.jobs-414000-414999.json",
+      "range_start": 414000,
+      "range_end": 414999,
+      "first_job": 414000,
+      "last_job": 414998,
+      "jobs": 605,
+      "bytes": 4123370
+    },
+    {
+      "file": "backfill_line_items.jobs-415000-415999.json",
+      "range_start": 415000,
+      "range_end": 415999,
+      "first_job": 415000,
+      "last_job": 415998,
+      "jobs": 610,
+      "bytes": 4377577
+    },
+    {
+      "file": "backfill_line_items.jobs-416000-416999.json",
+      "range_start": 416000,
+      "range_end": 416999,
+      "first_job": 416000,
+      "last_job": 416999,
+      "jobs": 594,
+      "bytes": 4079201
+    },
+    {
+      "file": "backfill_line_items.jobs-417000-417999.json",
+      "range_start": 417000,
+      "range_end": 417999,
+      "first_job": 417000,
+      "last_job": 417994,
+      "jobs": 589,
+      "bytes": 3914966
+    },
+    {
+      "file": "backfill_line_items.jobs-418000-418999.json",
+      "range_start": 418000,
+      "range_end": 418999,
+      "first_job": 418006,
+      "last_job": 418999,
+      "jobs": 632,
+      "bytes": 4045203
+    },
+    {
+      "file": "backfill_line_items.jobs-419000-419999.json",
+      "range_start": 419000,
+      "range_end": 419999,
+      "first_job": 419000,
+      "last_job": 419996,
+      "jobs": 567,
+      "bytes": 3586562
+    },
+    {
+      "file": "backfill_line_items.jobs-420000-420999.json",
+      "range_start": 420000,
+      "range_end": 420999,
+      "first_job": 420001,
+      "last_job": 420996,
+      "jobs": 543,
+      "bytes": 3462029
+    },
+    {
+      "file": "backfill_line_items.jobs-421000-421999.json",
+      "range_start": 421000,
+      "range_end": 421999,
+      "first_job": 421001,
+      "last_job": 421973,
+      "jobs": 330,
+      "bytes": 2113489
+    },
+    {
+      "file": "backfill_line_items.jobs-422000-422999.json",
+      "range_start": 422000,
+      "range_end": 422999,
+      "first_job": 422017,
+      "last_job": 422025,
+      "jobs": 4,
+      "bytes": 19977
+    }
+  ]
+}

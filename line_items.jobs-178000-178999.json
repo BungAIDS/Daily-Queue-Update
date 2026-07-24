@@ -1,0 +1,207 @@
+{
+  "jobs": {
+    "178258F": {
+      "customer": "",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\178258F\\178258F - Sales Order (original).pdf",
+      "scanned_at": "2026-07-10T07:52:49",
+      "items": [
+        {
+          "raw": "Motor (ECP4104T C 1,728.33 570.00 2,298.00 171.00",
+          "norm": "MOTOR ECP4104T",
+          "qty": "",
+          "price": "1,728.33",
+          "ptype": "C",
+          "section": "",
+          "details": [
+            "M21A Add Space Heaters - 120V (Qty: 1))",
+            "Vendor: Baldor/Reliance",
+            "30 HP, 1800 RPM, Enclosure: TEFC Premium",
+            "286T, Cast Iron, Foot Mounted, 3/60/230/460,",
+            "F2, 1.15 SF",
+            "Ship Direct"
+          ],
+          "tags": [
+            "MOTOR",
+            "SHIPPING"
+          ],
+          "attributes": {
+            "component": "MOTOR",
+            "motor_hp": "30",
+            "motor_rpm": "1800",
+            "motor_frame": "286T",
+            "motor_phase": "3",
+            "motor_frequency_hz": "60",
+            "motor_voltage": "230/460",
+            "motor_service_factor": "1.15",
+            "motor_conduit_box_location": "F2",
+            "motor_enclosure": "TEFC PREMIUM",
+            "motor_frame_material": "CAST IRON",
+            "motor_mounting": "FOOT MOUNTED",
+            "vendor": "Baldor/Reliance",
+            "shipping_method": "SHIP DIRECT"
+          }
+        },
+        {
+          "raw": "Repair Bearings (Pair), 2-3/16\" Bore (Qty: 1), N 552.00 110.00",
+          "norm": "REPAIR BEARINGS PAIR 2 3 16 BORE QTY 1",
+          "qty": "",
+          "price": "552.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Inquiry Num: 340-25-943RP"
+          ],
+          "tags": [
+            "BEARINGS",
+            "SPARE PARTS"
+          ],
+          "attributes": {
+            "inquiry_num": "340-25-943RP",
+            "component": "REPAIR BEARINGS",
+            "bearing_type": "REPAIR BEARINGS",
+            "bearing_bore": "2-3/16\""
+          }
+        },
+        {
+          "raw": "Repair Drive Set (Qty: 1), Inquiry Num: 340-25- N 861.00 104.00",
+          "norm": "REPAIR DRIVE SET QTY 1 INQUIRY NUM 340 25",
+          "qty": "",
+          "price": "861.00",
+          "ptype": "N",
+          "section": "",
+          "details": [],
+          "tags": [
+            "DRIVE COMPONENTS",
+            "SPARE PARTS"
+          ],
+          "attributes": {
+            "component": "REPAIR DRIVE SET",
+            "drive_subcategory": "DRIVE SET"
+          }
+        },
+        {
+          "raw": "Repair Inlet Cone with DuPont Corlar 2.1ST Satin N 583.00 117.00",
+          "norm": "REPAIR INLET CONE WITH DUPONT CORLAR 2.1ST SATIN",
+          "qty": "",
+          "price": "583.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "High Solids Epoxy Mastic - Black , Coats: 2 (Qty: 1),",
+            "Inquiry Num: 340-25-943RP"
+          ],
+          "tags": [
+            "COATING",
+            "INLET",
+            "SPARE PARTS"
+          ],
+          "attributes": {
+            "inquiry_num": "340-25-943RP",
+            "inlet_subcategory": "INLET CONE",
+            "component": "REPAIR INLET CONE",
+            "coating_scope": "INLET",
+            "coating_type": "EPOXY",
+            "coating_category": "EPOXY/PRIMER",
+            "coating_color": "BLACK",
+            "coats": "2"
+          }
+        },
+        {
+          "raw": "Repair Shaft (Qty: 1), Inquiry Num: 340-25-943RP N 768.00 154.00",
+          "norm": "REPAIR SHAFT QTY 1 INQUIRY NUM 340 25 943RP",
+          "qty": "",
+          "price": "768.00",
+          "ptype": "N",
+          "section": "",
+          "details": [],
+          "tags": [
+            "SPARE PARTS"
+          ],
+          "attributes": {
+            "inquiry_num": "340-25-943RP",
+            "component": "REPAIR SHAFT"
+          }
+        },
+        {
+          "raw": "Repair Wheel with DuPont Corlar 2.1ST Satin High N 2,660.00 532.00",
+          "norm": "REPAIR WHEEL WITH DUPONT CORLAR 2.1ST SATIN HIGH",
+          "qty": "",
+          "price": "2,660.00",
+          "ptype": "N",
+          "section": "",
+          "details": [
+            "Solids Epoxy Mastic - Black , Coats: 2 (Qty: 1),",
+            "Inquiry Num: 340-25-943RP",
+            "M21A Add Space Heaters - 120V: 3 Weeks",
+            "178258F serial # 1748258-1 Credit card"
+          ],
+          "tags": [
+            "COATING",
+            "SPARE PARTS",
+            "WHEEL"
+          ],
+          "attributes": {
+            "inquiry_num": "340-25-943RP",
+            "component": "REPAIR WHEEL",
+            "coating_scope": "WHEEL",
+            "coating_type": "EPOXY",
+            "coating_category": "EPOXY/PRIMER",
+            "coating_color": "BLACK",
+            "coats": "2"
+          },
+          "review_flags": [
+            "UNCLASSIFIED DETAIL: M21A Add Space Heaters - 120V: 3 Weeks",
+            "UNCLASSIFIED DETAIL: 178258F serial # 1748258-1 Credit card"
+          ]
+        },
+        {
+          "raw": "All Chicago Blower wheels are precision balanced; however when a precision balanced wheel is installed in a fan, the wheel may have",
+          "norm": "ALL CHICAGO BLOWER WHEELS ARE PRECISION BALANCED HOWEVER WHEN A PRECISION BALANCED WHEEL IS INSTALLED IN A FAN THE WHEEL MAY HAVE",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "MISC NOTE"
+          ],
+          "attributes": {
+            "note_type": "MISC"
+          }
+        },
+        {
+          "raw": "to be phase balanced to compensate for any imbalance or eccentricity in other components in the drive train. If the motor and drives",
+          "norm": "TO BE PHASE BALANCED TO COMPENSATE FOR ANY IMBALANCE OR ECCENTRICITY IN OTHER COMPONENTS IN THE DRIVE TRAIN IF THE MOTOR AND DRIVES",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "MOTOR"
+          ],
+          "attributes": {
+            "component": "MOTOR"
+          }
+        },
+        {
+          "raw": "are not mounted by Chicago Blower, we cannot check the assembled rotating system for vibration, and phase balance by others may",
+          "norm": "ARE NOT MOUNTED BY CHICAGO BLOWER WE CANNOT CHECK THE ASSEMBLED ROTATING SYSTEM FOR VIBRATION AND PHASE BALANCE BY OTHERS MAY",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [],
+          "attributes": {},
+          "review_flags": [
+            "UNTAGGED"
+          ]
+        }
+      ],
+      "parts_only": true,
+      "normalizer_version": "2026-07-22-accent-fold-evase-v1"
+    }
+  }
+}

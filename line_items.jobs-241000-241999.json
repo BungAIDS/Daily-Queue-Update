@@ -1,0 +1,79 @@
+{
+  "jobs": {
+    "241976A": {
+      "customer": "",
+      "co_number": 0,
+      "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\241976A\\241976A - Sales Order (original).pdf",
+      "scanned_at": "2026-07-10T07:52:49",
+      "items": [
+        {
+          "raw": "CIB - Circular Discharge silencer C 1,855.00 297.00 2,152.00 89.00",
+          "norm": "CIB CIRCULAR DISCHARGE SILENCER",
+          "qty": "",
+          "price": "1,855.00",
+          "ptype": "C",
+          "section": "",
+          "details": [
+            "Model: 14VCIB-V99-SN4175",
+            "Unit Wt: 119 lbs",
+            "Vendor: VAW Systems",
+            "Ship Direct",
+            "Product: Outlet Silencer",
+            "Model: 14VCIB-V99-SN4175",
+            "Unit Wt: 119 lbs: 6 Weeks"
+          ],
+          "tags": [
+            "SHIPPING",
+            "SILENCER"
+          ],
+          "attributes": {
+            "component": "OUTLET SILENCER",
+            "silencer_type": "CIRCULAR DISCHARGE SILENCER",
+            "brand": "VAW",
+            "model": "14VCIB-V99-SN4175",
+            "vendor": "VAW Systems",
+            "shipping_method": "SHIP DIRECT"
+          },
+          "review_flags": [
+            "UNCLASSIFIED DETAIL: Unit Wt: 119 lbs",
+            "UNCLASSIFIED DETAIL: Unit Wt: 119 lbs: 6 Weeks"
+          ]
+        },
+        {
+          "raw": "Inlet Direction: Vertical Inlet Down",
+          "norm": "INLET DIRECTION VERTICAL INLET DOWN",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "INLET"
+          ],
+          "attributes": {
+            "inlet_direction": "VERTICAL INLET DOWN",
+            "inlet_subcategory": "DIRECTION"
+          }
+        },
+        {
+          "raw": "241976A 421976 1383",
+          "norm": "241976A 421976 1383",
+          "qty": "",
+          "price": "",
+          "ptype": "",
+          "section": "Additional Features / Notes:",
+          "details": [],
+          "tags": [
+            "ADDITIONAL FEATURES / NOTES"
+          ],
+          "attributes": {
+            "component": "ADDITIONAL FEATURES / NOTES",
+            "note": "241976A 421976 1383"
+          }
+        }
+      ],
+      "parts_only": false,
+      "normalizer_version": "2026-07-22-accent-fold-evase-v1"
+    }
+  }
+}

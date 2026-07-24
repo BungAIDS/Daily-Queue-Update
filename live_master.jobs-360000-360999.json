@@ -1,0 +1,354 @@
+{
+  "orders": {
+    "360048A": {
+      "added": "2026-07-17T09:37:14",
+      "added_known": true,
+      "last_in": "2026-07-17T09:37:14",
+      "last_out": "2026-07-17T09:59:14",
+      "left": "2026-07-17T09:59:14",
+      "on_queue": false,
+      "seen_on_queue": true,
+      "history": [
+        {
+          "event": "in",
+          "time": "2026-07-17T09:37:14"
+        },
+        {
+          "event": "out",
+          "time": "2026-07-17T09:59:14"
+        }
+      ],
+      "job": {
+        "status": "AT WC",
+        "job": "360048A",
+        "oper": "21",
+        "item": "RP B/S, NEED PO",
+        "design": "RP B/S, NEED PO",
+        "assigned_to": "NONE",
+        "checker": "NONE",
+        "start_date": "7/16/2026",
+        "end_date": "7/17/2026",
+        "plan_hrs": "1.000",
+        "fannet_date": "7/20/2026",
+        "total_price": "$1,515.00",
+        "status_note": "",
+        "customer": "CANADA BLOWER",
+        "primary_rep": "CANADA BLOWER",
+        "ship_with": "",
+        "unapproved": false,
+        "credit_hold": false,
+        "has_notes": false,
+        "co_number": 0,
+        "so_validation": "MATCH",
+        "so_internal_order": "360048A",
+        "so_validation_method": "header",
+        "so_document_kind": "SALES_ORDER",
+        "so_source_type": "CBC_SalesOrder",
+        "so_quarantine": "",
+        "co_history": [],
+        "so_design_desc": "Cast Aluminum Pressure Blower",
+        "so_size": "1800",
+        "so_arrangement": "A/4 With Base for foot mounted motor",
+        "so_motor_pos": "",
+        "so_class": "",
+        "so_rotation": "CW",
+        "so_discharge": "",
+        "so_pct_width": "100",
+        "so_wheel_type": "RB",
+        "so_design_temp": "",
+        "so_max_temp": "",
+        "so_special_temp": "0",
+        "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\360048A\\360048A - Sales Order (original).pdf",
+        "so_emails": [],
+        "so_po": "",
+        "so_released": true,
+        "so_verified_at": "2026-07-17T09:37:49",
+        "line_items": [
+          {
+            "raw": "Replacement filter element, Paper, Ship direct (Qty: N 1,722.00 207.00",
+            "norm": "REPLACEMENT FILTER ELEMENT PAPER SHIP DIRECT QTY",
+            "qty": "",
+            "price": "1,722.00",
+            "ptype": "N",
+            "section": "",
+            "details": [
+              "3), Inquiry Num: 346-26-1959RP"
+            ],
+            "tags": [
+              "FILTER",
+              "SHIPPING",
+              "SPARE PARTS"
+            ],
+            "attributes": {
+              "inquiry_num": "346-26-1959RP",
+              "component": "FILTER",
+              "filter_type": "FILTER",
+              "spare_part_review": "UNCATEGORIZED REPAIR/SPARE PART - DEFINE COMPONENT",
+              "shipping_method": "SHIP DIRECT"
+            },
+            "review_flags": [
+              "SPARE PART REVIEW: UNCATEGORIZED REPAIR/SPARE PART - DEFINE COMPONENT"
+            ]
+          },
+          {
+            "raw": "Document Fact: MARK",
+            "norm": "DOCUMENT FACT MARK",
+            "qty": "",
+            "price": "",
+            "ptype": "",
+            "section": "DOCUMENT FACTS",
+            "details": [
+              "P.O. 4375"
+            ],
+            "tags": [
+              "MARK"
+            ],
+            "attributes": {
+              "mark_text": "P.O. 4375",
+              "component": "MARK"
+            },
+            "document_fact": "MARK",
+            "document_attributes": {
+              "mark_text": "P.O. 4375"
+            }
+          },
+          {
+            "raw": "Document Fact: SHIP TO",
+            "norm": "DOCUMENT FACT SHIP TO",
+            "qty": "",
+            "price": "",
+            "ptype": "",
+            "section": "DOCUMENT FACTS",
+            "details": [
+              "ABCO INDUSTRIES INC.",
+              "81 TANNERY ROAD",
+              "LUNENBURG, NS B0J 2C0",
+              "CANADA"
+            ],
+            "tags": [
+              "SHIP TO"
+            ],
+            "attributes": {
+              "ship_to_company": "ABCO INDUSTRIES INC.",
+              "ship_to_address": "81 TANNERY ROAD | LUNENBURG, NS B0J 2C0",
+              "ship_to_country": "CANADA",
+              "component": "SHIP TO"
+            },
+            "document_fact": "SHIP TO",
+            "document_attributes": {
+              "ship_to_company": "ABCO INDUSTRIES INC.",
+              "ship_to_address": "81 TANNERY ROAD | LUNENBURG, NS B0J 2C0",
+              "ship_to_country": "CANADA"
+            }
+          }
+        ],
+        "line_item_tags": "FILTER, MARK, SHIP TO, SHIPPING, SPARE PARTS",
+        "job_type": "",
+        "job_folder": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\360048A",
+        "dwg_extras": {},
+        "dwg_missing_std": false,
+        "so_imi": "",
+        "has_drive_run": false,
+        "drive_run_pdf": "",
+        "drive_run_count": 0,
+        "drive_run_rev": null,
+        "drive_run": {},
+        "drive_run_summary": "",
+        "drive_run_template": "",
+        "dwg_reuse": [],
+        "dwg_reuse_label": "",
+        "dwg_reuse_note": "",
+        "_first_seen": "2026-07-17T09:37:14",
+        "_carried_over": false,
+        "engineers": []
+      }
+    },
+    "360655B": {
+      "added": "2026-07-17T13:06:01",
+      "added_known": true,
+      "last_in": "2026-07-17T13:06:01",
+      "last_out": "2026-07-20T08:21:29",
+      "left": "2026-07-20T08:21:29",
+      "on_queue": false,
+      "seen_on_queue": true,
+      "history": [
+        {
+          "event": "in",
+          "time": "2026-07-17T13:06:01"
+        },
+        {
+          "event": "out",
+          "time": "2026-07-20T08:21:29"
+        }
+      ],
+      "job": {
+        "status": "In Process",
+        "job": "360655B",
+        "oper": "19",
+        "item": "EMSI",
+        "design": "EMSI",
+        "assigned_to": "NONE",
+        "checker": "NONE",
+        "start_date": "7/20/2026",
+        "end_date": "7/22/2026",
+        "plan_hrs": "4.000",
+        "fannet_date": "9/18/2026",
+        "total_price": "$6,346.00",
+        "status_note": "",
+        "customer": "ABTEC FILTERS",
+        "primary_rep": "ENERGY TECH-EDM",
+        "ship_with": "",
+        "unapproved": false,
+        "credit_hold": false,
+        "has_notes": false,
+        "co_number": 0,
+        "so_validation": "MATCH",
+        "so_internal_order": "360655B",
+        "so_validation_method": "header",
+        "so_document_kind": "SALES_ORDER",
+        "so_source_type": "CBC_SalesOrder",
+        "so_quarantine": "",
+        "co_history": [],
+        "so_design_desc": "IRT",
+        "so_size": "5414",
+        "so_arrangement": "A/1",
+        "so_motor_pos": "",
+        "so_class": "HD",
+        "so_rotation": "CW",
+        "so_discharge": "",
+        "so_pct_width": "",
+        "so_wheel_type": "",
+        "so_design_temp": "",
+        "so_max_temp": "",
+        "so_special_temp": "0",
+        "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\360655B\\360655B - Sales Order (original).pdf",
+        "so_emails": [],
+        "so_po": "",
+        "so_released": true,
+        "so_verified_at": "2026-07-20T05:01:37",
+        "line_items": [
+          {
+            "raw": "Not Per Original Inlet Cone, Painted CBC Black (Qty: N 4,768.00 954.00",
+            "norm": "NOT PER ORIGINAL INLET CONE PAINTED CBC BLACK QTY",
+            "qty": "",
+            "price": "4,768.00",
+            "ptype": "N",
+            "section": "",
+            "details": [
+              "1), Inquiry Num: 275-26-2425RP"
+            ],
+            "tags": [
+              "COATING",
+              "INLET"
+            ],
+            "attributes": {
+              "inquiry_num": "275-26-2425RP",
+              "inlet_subcategory": "INLET CONE",
+              "coating_scope": "INLET",
+              "coating_type": "PAINT",
+              "coating_category": "PAINT",
+              "coating_color": "BLACK"
+            }
+          },
+          {
+            "raw": "Not Per Original, Extended Inlet Ring, Painted CBC N 1,578.00 316.00",
+            "norm": "NOT PER ORIGINAL EXTENDED INLET RING PAINTED CBC",
+            "qty": "",
+            "price": "1,578.00",
+            "ptype": "N",
+            "section": "",
+            "details": [
+              "Black (Qty: 1), Inquiry Num: 275-26-2425RP"
+            ],
+            "tags": [
+              "COATING"
+            ],
+            "attributes": {
+              "inquiry_num": "275-26-2425RP",
+              "coating_type": "PAINT",
+              "coating_category": "PAINT",
+              "coating_color": "BLACK"
+            }
+          },
+          {
+            "raw": "NOT PER ORIGINAL",
+            "norm": "NOT PER ORIGINAL",
+            "qty": "",
+            "price": "",
+            "ptype": "",
+            "section": "Additional Features / Notes:",
+            "details": [],
+            "tags": [
+              "ADDITIONAL FEATURES / NOTES"
+            ],
+            "attributes": {
+              "component": "ADDITIONAL FEATURES / NOTES",
+              "note": "NOT PER ORIGINAL"
+            }
+          },
+          {
+            "raw": "Customer assumes responsibility for fit-up and suitability of part(s) due to part(s) being not per original",
+            "norm": "CUSTOMER ASSUMES RESPONSIBILITY FOR FIT UP AND SUITABILITY OF PART S DUE TO PART S BEING NOT PER ORIGINAL",
+            "qty": "",
+            "price": "",
+            "ptype": "",
+            "section": "Additional Features / Notes:",
+            "details": [],
+            "tags": [
+              "MISC NOTE"
+            ],
+            "attributes": {}
+          },
+          {
+            "raw": "Document Fact: SHIP TO",
+            "norm": "DOCUMENT FACT SHIP TO",
+            "qty": "",
+            "price": "",
+            "ptype": "",
+            "section": "DOCUMENT FACTS",
+            "details": [
+              "ABTEC FILTERS",
+              "8128 MCINTYRE RD N.W.",
+              "EDMONTON, AB T6E5C4",
+              "CANADA"
+            ],
+            "tags": [
+              "SHIP TO"
+            ],
+            "attributes": {
+              "ship_to_company": "ABTEC FILTERS",
+              "ship_to_address": "8128 MCINTYRE RD N.W. | EDMONTON, AB T6E5C4",
+              "ship_to_country": "CANADA",
+              "component": "SHIP TO"
+            },
+            "document_fact": "SHIP TO",
+            "document_attributes": {
+              "ship_to_company": "ABTEC FILTERS",
+              "ship_to_address": "8128 MCINTYRE RD N.W. | EDMONTON, AB T6E5C4",
+              "ship_to_country": "CANADA"
+            }
+          }
+        ],
+        "line_item_tags": "ADDITIONAL FEATURES / NOTES, COATING, INLET, MISC NOTE, SHIP TO",
+        "job_type": "",
+        "job_folder": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\360655B",
+        "dwg_extras": {},
+        "dwg_missing_std": false,
+        "so_imi": "",
+        "has_drive_run": false,
+        "drive_run_pdf": "",
+        "drive_run_count": 0,
+        "drive_run_rev": null,
+        "drive_run": {},
+        "drive_run_summary": "",
+        "drive_run_template": "",
+        "dwg_reuse": [],
+        "dwg_reuse_label": "",
+        "dwg_reuse_note": "",
+        "_first_seen": "2026-07-20T05:00:08",
+        "_carried_over": true,
+        "engineers": []
+      }
+    }
+  }
+}

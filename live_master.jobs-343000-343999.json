@@ -1,0 +1,48 @@
+{
+  "orders": {
+    "343798C": {
+      "added": "2026-06-17T15:12:32",
+      "left": null,
+      "on_queue": false,
+      "job": {
+        "job": "343798C",
+        "co_number": 1,
+        "so_pdf": "Z:\\DAG\\SALES ORDERS FOR DAILY QUEUE\\343798C\\343798C - Sales Order CO#1.pdf",
+        "so_design_desc": "SQB SW Belt Drive",
+        "so_size": "20",
+        "so_arrangement": "A/9",
+        "so_class": "3",
+        "so_special_temp": "0",
+        "line_items": [
+          {
+            "raw": "Repair Drive set (Ship Direct) (Qty: 1), Inquiry N 958.00 111.00",
+            "norm": "REPAIR DRIVE SET SHIP DIRECT QTY 1 INQUIRY",
+            "qty": "",
+            "price": "958.00",
+            "ptype": "N",
+            "section": "",
+            "details": [
+              "Num: 344-18-2172"
+            ],
+            "tags": [
+              "DRIVE COMPONENTS",
+              "SHIPPING",
+              "SPARE PARTS"
+            ],
+            "attributes": {
+              "inquiry_num": "344-18-2172",
+              "component": "REPAIR DRIVE SET",
+              "shipping_method": "SHIP DIRECT",
+              "drive_subcategory": "DRIVE SET"
+            }
+          }
+        ],
+        "line_item_tags": "DRIVE COMPONENTS, SHIPPING, SPARE PARTS",
+        "so_validation": "MATCH",
+        "so_document_kind": "SALES_ORDER",
+        "so_internal_order": "343798C",
+        "so_validation_method": "header"
+      }
+    }
+  }
+}
